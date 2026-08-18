@@ -2,7 +2,7 @@
 
 import type { SimState } from '../../../types';
 
-export interface GasStep {
+interface GasStep {
   op: string;
   cost: number;
   executed: boolean;

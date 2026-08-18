@@ -1,6 +1,6 @@
 // 本文件提供密码学仿真共享的展示数据辅助,只做语义数据转换,不包含具体密码学流程。
 
-import type { ChartSeries, GraphEdge, GraphNode, LaneMessage, MatrixCell, PipelineStep, TreeNode } from '../../types';
+import type { GraphEdge, GraphNode, LaneMessage, MatrixCell, PipelineStep, TreeNode } from '../../types';
 
 export interface CryptoActor {
   id: string;
@@ -63,17 +63,6 @@ export function pipelineSteps(phases: Array<{ id: string; label: string; detail:
  */
 export function matrixCells(rows: string[], columns: string[], read: (row: string, column: string) => MatrixCell): MatrixCell[][] {
   return rows.map((row) => columns.map((column) => read(row, column)));
-}
-
-/**
- * metricSeries 生成密码学流程常用的正确性、风险和成本曲线。
- */
-export function metricSeries(points: Array<{ x: number; correctness: number; risk: number; cost: number }>): ChartSeries[] {
-  return [
-    { label: '正确性', points: points.map((point) => ({ x: point.x, y: point.correctness })) },
-    { label: '风险', points: points.map((point) => ({ x: point.x, y: point.risk })) },
-    { label: '成本', points: points.map((point) => ({ x: point.x, y: point.cost })) },
-  ];
 }
 
 /**

@@ -59,11 +59,18 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 	}
 	for _, raw := range assertions {
 		assertion := jsonx.ObjectFromAny(raw)
-		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Target: strings.TrimSpace(jsonx.StringFromAny(assertion["target"]))})
+		parsedAssertion, err := chainassert.FromMap(assertion)
+		if err != nil {
+			return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
+		}
+		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Target: parsedAssertion.Target})
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 		}
-		result := chainassert.Check(chainassert.FromMap(assertion), actual)
+		result, err := chainassert.Check(parsedAssertion, actual)
+		if err != nil {
+			return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
+		}
 		if !result.Passed {
 			passed = false
 		}
@@ -135,7 +142,11 @@ func (s *Service) judgeFlag(ctx context.Context, task JudgeTask, sandboxID int64
 			}
 		}
 		if submittedHash == "" {
-			submittedHash, err = pkgcrypto.HMACSHA256Hex(s.hmacKey, chainassert.ShortJSON(actual))
+			actualSummary, summaryErr := chainassert.ShortJSON(actual)
+			if summaryErr != nil {
+				return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(summaryErr)
+			}
+			submittedHash, err = pkgcrypto.HMACSHA256Hex(s.hmacKey, actualSummary)
 			if err != nil {
 				return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
 			}
@@ -161,6 +172,10 @@ func (s *Service) judgeFlag(ctx context.Context, task JudgeTask, sandboxID int64
 func judgeSimCheckpoint(task JudgeTask) (JudgeExecutionResult, error) {
 	expected := task.InputSnapshot.Expectation["checkpoint"]
 	actual := task.InputSnapshot.ExtraInput["checkpoint"]
+	actualSummary, err := chainassert.ShortJSON(actual)
+	if err != nil {
+		return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
+	}
 	passed := reflect.DeepEqual(expected, actual)
 	score := int32(0)
 	if passed {
@@ -170,7 +185,7 @@ func judgeSimCheckpoint(task JudgeTask) (JudgeExecutionResult, error) {
 		Passed:   passed,
 		Score:    score,
 		MaxScore: task.InputSnapshot.MaxScore,
-		Details:  []JudgeResultDetail{{Case: "仿真检查点", Passed: passed, ExpectedLabel: strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.Expectation["expected_label"])), Actual: chainassert.ShortJSON(actual)}},
+		Details:  []JudgeResultDetail{{Case: "仿真检查点", Passed: passed, ExpectedLabel: strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.Expectation["expected_label"])), Actual: actualSummary}},
 	}, nil
 }
 
@@ -183,7 +198,7 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 	switch typ {
 	case JudgerTypeFlag:
 		hash := strings.TrimSpace(jsonx.StringFromAny(out["flag_hash"]))
-		if !isSHA256Hex(hash) {
+		if !pkgcrypto.ValidSHA256Hex(hash) {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
 		inputKey := strings.TrimSpace(jsonx.StringFromAny(out["flag_input_key"]))
@@ -213,7 +228,11 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 		}
 		return summarizeSimCheckpointExpectation(out), nil
 	default:
-		if containsSensitiveExpectationMaterial(out) {
+		containsSensitive, err := containsSensitiveExpectationMaterial(out)
+		if err != nil {
+			return nil, apperr.ErrJudgerConfigInvalid.WithCause(err)
+		}
+		if containsSensitive {
 			return nil, apperr.ErrJudgerConfigInvalid
 		}
 		if !hasDeterministicExpectation(out) {
@@ -342,9 +361,12 @@ func uniqueSortedStrings(values []string) []string {
 }
 
 // containsSensitiveExpectationMaterial 保守拒绝命令型判题期望中携带敏感明文。
-func containsSensitiveExpectationMaterial(v any) bool {
-	raw := strings.ToLower(chainassert.ShortJSON(v))
-	return privacy.ContainsResultSensitiveText(raw)
+func containsSensitiveExpectationMaterial(v any) (bool, error) {
+	raw, err := chainassert.ShortJSON(v)
+	if err != nil {
+		return false, err
+	}
+	return privacy.ContainsResultSensitiveText(strings.ToLower(raw)), nil
 }
 
 // flagActualText 返回用户向 flag 判题实际状态。

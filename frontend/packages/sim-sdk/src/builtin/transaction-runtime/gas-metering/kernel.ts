@@ -29,7 +29,7 @@ export function reduceGasEvent(state: GasState, event: SimEvent, _context: Reduc
 /**
  * finalizeGasState 刷新 gas 指标、检查点和代码追踪。
  */
-export function finalizeGasState(state: GasState): GasState {
+function finalizeGasState(state: GasState): GasState {
   const settled = state.steps.every((step) => step.executed) && !state.outOfGas;
   return { ...state, phase: gasPhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: state.outOfGas ? 'Gas 不足回滚' : settled ? '费用已结算' : '执行中', risk: state.outOfGas ? 72 : 8, gasUsed: state.gasUsed }, checkpointValues: { settled }, _trace: { triggeredLines: traceLinesForGas(state.lastTransition), variables: { gasUsed: state.gasUsed, gasLimit: state.gasLimit }, executionPath: `gas/${state.lastTransition}` } };
 }

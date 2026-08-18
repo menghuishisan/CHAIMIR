@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { feeMarketPhases } from './model';
 
-export const feeMarketSource = [
+const feeMarketSource = [
   'function buildBlock(mempool, baseFee) {',
   '  candidates = filter(tx.maxFeePerGas >= baseFee);',
   '  selected = sortByEffectiveTip(candidates);',

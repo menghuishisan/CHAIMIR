@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Bell, Megaphone } from 'lucide-react'
-import type { Announcement, Notification } from '@chaimir/api-client'
+import { ApiError, type Announcement, type Notification } from '@chaimir/api-client'
 import {
   Button,
   Empty,
@@ -100,8 +100,15 @@ function NotificationPanel({ allPath, onNavigate }: NotificationPanelProps) {
           await api.notify.markAsRead(item.id)
           // 未读数同时显示在角标与通知中心页:只经资源失效协议广播,不再另设回调双轨
           invalidateAppResource('notification-unread')
-        } catch {
-          // 标记已读失败不阻断阅读:用户仍可打开通知内容,未读数下次刷新自然纠正
+        } catch (error) {
+          // 标记已读失败不阻断阅读,但记录脱敏诊断字段供排查;未读数下次刷新自然纠正。
+          console.error('通知已读状态更新失败', {
+            notification_id: item.id,
+            error:
+              error instanceof ApiError
+                ? { code: error.code, trace_id: error.traceId }
+                : { kind: error instanceof Error ? error.name : typeof error },
+          })
         }
       }
       const safeLink = safeInternalNavigation(item.link)

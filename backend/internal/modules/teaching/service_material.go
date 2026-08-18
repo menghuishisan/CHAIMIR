@@ -11,17 +11,11 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 )
-
-// LessonMaterialUploadRequest 描述课时材料的已读取文件内容。
-type LessonMaterialUploadRequest struct {
-	FileName    string
-	ContentType string
-	Content     []byte
-}
 
 // UploadLessonMaterial 上传材料并只在 lesson.content_ref 中保存对象引用。
 func (s *Service) UploadLessonMaterial(ctx context.Context, lessonID int64, req LessonMaterialUploadRequest) (LessonDTO, error) {
@@ -181,7 +175,7 @@ func (s *Service) IssueLessonMaterialAccess(ctx context.Context, lessonID int64)
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, role, "teaching.lesson.material.access", auditTargetLesson, lessonID, map[string]any{"mode": mode}); err != nil {
 		return LessonMaterialAccessDTO{}, err
 	}
-	return LessonMaterialAccessDTO{Token: token, Mode: grant.Mode, FileName: fileName, Size: size, ContentType: contentType, ExpiresAt: grant.ExpiresAt.Format("2006-01-02T15:04:05Z07:00")}, nil
+	return LessonMaterialAccessDTO{Token: token, Mode: grant.Mode, FileName: fileName, Size: size, ContentType: contentType, ExpiresAt: timex.RFC3339OrEmpty(grant.ExpiresAt)}, nil
 }
 
 // normalizedContentType 去掉上传 MIME 的参数,保证 lesson.content_ref 只有一个可比较的类型值。

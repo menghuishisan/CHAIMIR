@@ -42,7 +42,7 @@ export function reduceEthPosFinalityEvent(state: EthPosFinalityState, event: Sim
 }
 
 /** finalizeEthPosFinalityState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
-export function finalizeEthPosFinalityState(state: EthPosFinalityState): EthPosFinalityState {
+function finalizeEthPosFinalityState(state: EthPosFinalityState): EthPosFinalityState {
   const total = totalWeight(state);
   const headWeight = blockWeight(state, state.head);
   const finalized = state.blocks.find((block) => block.id === state.finalized);

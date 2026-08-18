@@ -559,3 +559,25 @@ SELECT
     COALESCE((SELECT SUM(p.duration_sec)::bigint FROM lesson_progress p WHERE p.tenant_id = $1), 0)::bigint AS learning_duration_sec
 FROM course c
 WHERE c.tenant_id = $1 AND c.deleted_at IS NULL;
+
+-- name: CreateCourseGradeExportRequest :one
+INSERT INTO course_grade_export_request (transfer_task_id, tenant_id, account_id, course_id, next_check_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, now(), now(), now())
+RETURNING transfer_task_id, tenant_id, account_id, course_id, next_check_at, created_at, updated_at;
+
+-- name: ListDueCourseGradeExportRequests :many
+SELECT transfer_task_id, tenant_id, account_id, course_id, next_check_at, created_at, updated_at
+FROM course_grade_export_request
+WHERE next_check_at <= $1
+ORDER BY next_check_at ASC, created_at ASC
+LIMIT $2;
+
+-- name: SetCourseGradeExportRequestNextCheck :one
+UPDATE course_grade_export_request
+SET next_check_at = $3, updated_at = now()
+WHERE transfer_task_id = $1 AND tenant_id = $2
+RETURNING transfer_task_id, tenant_id, account_id, course_id, next_check_at, created_at, updated_at;
+
+-- name: DeleteCourseGradeExportRequest :exec
+DELETE FROM course_grade_export_request
+WHERE transfer_task_id = $1 AND tenant_id = $2;

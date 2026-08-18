@@ -33,7 +33,7 @@ export function reduceCallStackEvent(state: CallStackState, event: SimEvent, _co
 /**
  * advanceCallStack 按调用栈流程推进一个过程单元。
  */
-export function advanceCallStack(state: CallStackState, event: SimEvent): CallStackState {
+function advanceCallStack(state: CallStackState, event: SimEvent): CallStackState {
   if (state.phaseIndex === 2 && activeDepth(state) > 0) {
     return popRecover({ ...state, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: 'return' });
   }
@@ -52,7 +52,7 @@ export function advanceCallStack(state: CallStackState, event: SimEvent): CallSt
 /**
  * finalizeCallStackState 刷新调用栈指标、检查点和代码追踪。
  */
-export function finalizeCallStackState(state: CallStackState): CallStackState {
+function finalizeCallStackState(state: CallStackState): CallStackState {
   const depth = activeDepth(state);
   const safe = depth <= state.maxDepth && (!state.frames.some((frame) => frame.reverted) || state.handledRevert);
   return { ...state, phase: callStackPhases[state.phaseIndex].label, actors: state.actors.map((actor) => ({ ...actor, status: state.frames.some((frame) => frame.reverted && actor.label === frame.contract) ? 'danger' : actor.status })), explanation: explain(state.phaseIndex), metrics: { result: safe ? '调用栈可控' : '调用失败或过深', risk: safe ? 8 : 72, depth }, checkpointValues: { safe }, _trace: { triggeredLines: traceLinesForCallStack(state.lastTransition), variables: { depth }, executionPath: `call-stack/${state.lastTransition}` } };

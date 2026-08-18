@@ -2,7 +2,6 @@
 package intx
 
 import (
-	"encoding/binary"
 	"math"
 )
 
@@ -43,7 +42,5 @@ func Uint32(value int) (uint32, bool) {
 	if value < 0 || uint64(value) > math.MaxUint32 {
 		return 0, false
 	}
-	var encoded [8]byte
-	binary.BigEndian.PutUint64(encoded[:], uint64(value))
-	return binary.BigEndian.Uint32(encoded[4:]), true
+	return uint32(value), true
 }

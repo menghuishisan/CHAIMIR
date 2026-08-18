@@ -12,11 +12,9 @@ import {
   type Assignment,
   type AssignmentItemInput,
   type AssignmentRequest,
-  type ContentItem,
   type CourseOutline,
 } from '@chaimir/api-client'
 import {
-  Badge,
   Button,
   Callout,
   Empty,
@@ -38,20 +36,18 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { toDateTimeInputValue } from '../../../../utils/dateInput'
 import { ResourceState } from '../../../../components/ResourceState'
+import { ContentItemPicker } from '../../../content/components/ContentItemPicker'
 import { useAsyncResource } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
-import { contentTypeLabel } from '../../../../utils/labels/content'
 import {
-  LATE_POLICIES,
   assignmentStatusLabel,
   gradingModeLabel,
   latePolicyLabel,
 } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-
-/** 题库选题一次取回的条数:后端分页上限 100。 */
-const ITEM_PICKER_SIZE = 100
+import { LATE_POLICIES } from '../../options'
 
 export interface CourseAssignmentsProps {
   courseId: string
@@ -250,7 +246,7 @@ function AssignmentFormModal({
   const editing = assignment !== undefined
   const [title, setTitle] = useState(assignment?.title ?? '')
   const [chapterId, setChapterId] = useState(assignment?.chapter_id ?? '')
-  const [dueAt, setDueAt] = useState(toDateTimeInput(assignment?.due_at))
+  const [dueAt, setDueAt] = useState(toDateTimeInputValue(assignment?.due_at))
   const [maxAttempts, setMaxAttempts] = useState(String(assignment?.max_attempts ?? 1))
   const [latePolicy, setLatePolicy] = useState(String(assignment?.late_policy ?? LatePolicy.REJECT))
   const [items, setItems] = useState<AssignmentItemInput[]>([])
@@ -506,8 +502,9 @@ function AssignmentItemsEditor({ items, onChange }: AssignmentItemsEditorProps) 
       )}
 
       {pickerOpen ? (
-        <ItemPickerModal
+        <ContentItemPicker
           selectedCodes={new Set(items.map((item) => item.item_code))}
+          targetName="作业"
           onClose={() => setPickerOpen(false)}
           onPick={(picked) => {
             onChange([
@@ -527,115 +524,4 @@ function AssignmentItemsEditor({ items, onChange }: AssignmentItemsEditorProps) 
       ) : null}
     </div>
   )
-}
-
-interface ItemPickerModalProps {
-  selectedCodes: Set<string>
-  onClose: () => void
-  onPick: (items: ContentItem[]) => void
-}
-
-/**
- * ItemPickerModal 从题库选题。
- * 只列已发布题目:草稿题目的题面可能还在改,锁进作业会让学生看到半成品。
- */
-function ItemPickerModal({ selectedCodes, onClose, onPick }: ItemPickerModalProps) {
-  const [picked, setPicked] = useState<ContentItem[]>([])
-
-  const items = useAsyncResource(
-    () => api.content.getItems({ page: 1, size: ITEM_PICKER_SIZE }),
-    [],
-  )
-
-  const columns: TableColumn<ContentItem>[] = [
-    {
-      key: 'title',
-      header: '题目',
-      render: (item) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{item.title}</div>
-          <div className="truncate font-mono text-xs text-ink-sub">
-            {item.code} · {item.version}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'type',
-      header: '类型',
-      render: (item) => <Badge tone="neutral">{contentTypeLabel(item.type)}</Badge>,
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (item) => {
-        const alreadyIn = selectedCodes.has(item.code)
-        const isPicked = picked.some((one) => one.code === item.code)
-        return (
-          <Button
-            type="button"
-            variant={isPicked ? 'outline' : 'ghost'}
-            size="sm"
-            disabled={alreadyIn}
-            onClick={() =>
-              setPicked((current) =>
-                isPicked ? current.filter((one) => one.code !== item.code) : [...current, item],
-              )
-            }
-          >
-            {alreadyIn ? '已在作业中' : isPicked ? '取消选择' : '选择'}
-          </Button>
-        )
-      },
-    },
-  ]
-
-  return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="lg">
-        <ModalHeader>
-          <ModalTitle>从题库选题</ModalTitle>
-          <ModalDescription>选中的题目会按当前版本锁进作业,之后题库改动不影响已发布作业。</ModalDescription>
-        </ModalHeader>
-        <ModalBody>
-          <ResourceState
-            resource={items}
-            emptyIcon={ClipboardList}
-            emptyTitle="题库里还没有题目"
-            emptyDescription="先在题库内容里创建题目,再回来组卷。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-          >
-            {(page) => (
-              <div className="max-h-96 overflow-y-auto">
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-              </div>
-            )}
-          </ResourceState>
-        </ModalBody>
-        <ModalFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
-            取消
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            disabled={picked.length === 0}
-            onClick={() => onPick(picked)}
-          >
-            添加 {picked.length > 0 ? `${picked.length} 道` : ''}题目
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
-  )
-}
-
-/** toDateTimeInput 把后端时间转成 datetime-local 控件需要的格式;无法解析时回空串。 */
-function toDateTimeInput(value: string | undefined): string {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }

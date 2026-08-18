@@ -87,7 +87,7 @@ func criteriaFromJSON(raw []byte) (PaperCriteria, error) {
 		return PaperCriteria{}, nil
 	}
 	var out PaperCriteria
-	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return PaperCriteria{}, err
 	}
 	return out, nil

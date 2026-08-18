@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { replayPhases } from './model';
 
-export const replaySource = ['function executeCrossMessage(message) {', '  digest = hash(domain, message.nonce, payload);', '  require(!executed[domain][nonce]);', '  executed[domain][nonce] = true;', '  execute(payload);', '}'];
+const replaySource = ['function executeCrossMessage(message) {', '  digest = hash(domain, message.nonce, payload);', '  require(!executed[domain][nonce]);', '  executed[domain][nonce] = true;', '  execute(payload);', '}'];
 export const replayNarrative = phaseNarrative(replayPhases, 'replay-protected');
 export const replayCodeTrace = { sourceCode: replaySource.join('\n'), language: 'pseudocode' as const, lineMapping: replayPhases.map((phase, index) => ({ line: Math.min(index + 1, replaySource.length), triggerCondition: phase.id, annotation: phase.reason, highlightStyle: phase.id === 'replay' ? ('error' as const) : phase.id === 'execute' ? ('success' as const) : ('normal' as const) })), variableWatch: [{ name: 'nonce', extract: 'state.nonce', format: 'number' as const }] };
 

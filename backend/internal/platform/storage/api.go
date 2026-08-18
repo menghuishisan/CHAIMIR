@@ -41,17 +41,17 @@ type downloadAPI struct {
 const DownloadCookiePath = "/api/v1/storage"
 
 // RegisterDownloadRoutes 注册统一下载入口,业务模块不得再注册私有对象下载路由。
-func RegisterDownloadRoutes(r gin.IRouter, objects downloadStore, consumer grantConsumer, signingKey string, authn *auth.Manager) error {
+func RegisterDownloadRoutes(r gin.IRouter, objects downloadStore, consumer grantConsumer, files Service, authn *auth.Manager) error {
 	if r == nil {
 		return apperr.ErrHTTPRouterMissing
 	}
-	if objects == nil || consumer == nil || strings.TrimSpace(signingKey) == "" {
+	if objects == nil || consumer == nil || strings.TrimSpace(files.SigningKey) == "" {
 		return apperr.ErrHTTPServiceMissing
 	}
 	if authn == nil {
 		return apperr.ErrHTTPAuthMissing
 	}
-	api := downloadAPI{objects: objects, consumer: consumer, signingKey: signingKey}
+	api := downloadAPI{objects: objects, consumer: consumer, signingKey: files.SigningKey}
 	// 本入口接受 Bearer 头或路径受限 Cookie:`<video src>` 这类由浏览器自身发起的请求
 	// 发不出 Authorization 头,而 query 的 `token` 参数位已被投放授权占用,不能同名两义
 	// (见 docs/总-API接口总览.md §统一文件服务「鉴权载体」)。

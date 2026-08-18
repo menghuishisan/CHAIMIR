@@ -280,7 +280,7 @@ export class SimEngine {
 /**
  * describePackage 把含函数的 SimPackage 收窄成可序列化描述符。
  */
-export function describePackage(pkg: SimPackage): SimPackageDescriptor {
+function describePackage(pkg: SimPackage): SimPackageDescriptor {
   return {
     meta: pkg.meta,
     interactions: pkg.interactions.map(({ availableWhen: _availableWhen, ...interaction }) => interaction),

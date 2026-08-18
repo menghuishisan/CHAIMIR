@@ -35,6 +35,8 @@ coverage.*
 backend/**/*_test.go
 # 本地 .env(含 dev 密钥)绝不提交;仅提交 .env.example 模板。
 .env
+**/.env.local
+**/.env.*.local
 !**/.env.example
 
 # ---- Node/前端(目录4 frontend)----
@@ -70,6 +72,10 @@ images/**/build/
 
 # ---- 工具/IDE ----
 .DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
 *.log
 .tmp/
 # Local-only audit and test reports; never publish these artifacts.

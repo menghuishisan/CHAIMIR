@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { zkProofPhases } from './model';
 
-export const zkProofSource = [
+const zkProofSource = [
   'function verifyZk(commitment, challenge, response) {',
   '  require(commitment.isBound());',
   '  expected = relation(response, challenge);',

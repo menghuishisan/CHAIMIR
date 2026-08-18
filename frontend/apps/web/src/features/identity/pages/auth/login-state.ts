@@ -17,11 +17,11 @@ import {
   requiredError,
   useFieldErrors,
   useSmsCooldown,
-} from './auth-form'
+} from '../../authForm'
 import { clearPendingTenantLogin, setPendingTenantLogin } from './pendingLogin'
 
 /** LoginView 登录方式:手机号、校内账号、学校统一认证 */
-export type LoginView = 'phone' | 'account' | 'sso'
+type LoginView = 'phone' | 'account' | 'sso'
 
 /** PhoneLoginMethod 手机号登录的凭据类型 */
 export type PhoneLoginMethod = 'password' | 'sms'

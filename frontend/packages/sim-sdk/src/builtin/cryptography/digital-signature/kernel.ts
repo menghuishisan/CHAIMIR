@@ -63,7 +63,7 @@ export function reduceDigitalSignatureEvent(state: SignatureState, event: SimEve
 /**
  * advanceSignature 推进签名、发送和验签流程。
  */
-export function advanceSignature(state: SignatureState, event: SimEvent): SignatureState {
+function advanceSignature(state: SignatureState, event: SimEvent): SignatureState {
   const phaseIndex = Math.min(digitalSignaturePhases.length - 1, state.phaseIndex + 1);
   const transition = digitalSignaturePhases[phaseIndex].id;
   const next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: transition };
@@ -84,7 +84,7 @@ export function signatureValid(state: SignatureState): CheckpointResult {
 /**
  * finalizeDigitalSignatureState 刷新签名流程派生状态。
  */
-export function finalizeDigitalSignatureState(state: SignatureState): SignatureState {
+function finalizeDigitalSignatureState(state: SignatureState): SignatureState {
   const risk = state.replayDetected ? 80 : state.verified ? 6 : 24;
   return {
     ...state,

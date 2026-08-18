@@ -34,8 +34,9 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
-import { simReviewResultLabel, simReviewResultTone } from '../../../../utils/labels/sim'
-import { SimPreviewFrames } from '../../SimPreviewFrames'
+import { simReviewResultLabel } from '../../../../utils/labels/sim'
+import { SimPreviewFrames } from '../../components/SimPreviewFrames'
+import { simReviewResultTone } from '../../statusPresentation'
 
 /** 校验子项的用户向名称:后端只给字段名,界面文案在前端维护。 */
 const CHECK_LABELS = {

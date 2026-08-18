@@ -15,7 +15,7 @@ import {
   AuthSmsField,
   AuthSubmit,
   AuthTextField,
-} from './auth-ui'
+} from '../../components/AuthUI'
 import type { LoginController, PhoneLoginMethod } from './login-state'
 
 /** 手机号登录的两种凭据方式(页面级双态开关的选项) */

@@ -39,13 +39,17 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { usePagedResource, useAsyncResource } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
+import { CONTENT_TYPES } from '../../options'
 import {
-  CONTENT_TYPES,
   contentAuthorTypeLabel,
   contentDifficultyLabel,
   contentTypeLabel,
 } from '../../../../utils/labels/content'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import {
+  ContentItemClassificationCell,
+  ContentItemIdentityCell,
+} from '../../components/ContentItemCells'
 
 /** 类型筛选项:值为空串表示不过滤。 */
 const TYPE_FILTERS = [
@@ -82,24 +86,12 @@ export default function TeacherSharedLibraryPage() {
     {
       key: 'title',
       header: '题目',
-      render: (item) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{item.title}</div>
-          <div className="truncate font-mono text-xs text-ink-sub">
-            {item.code} · {item.version}
-          </div>
-        </div>
-      ),
+      render: (item) => <ContentItemIdentityCell item={item} />,
     },
     {
       key: 'type',
       header: '类型',
-      render: (item) => (
-        <div className="flex flex-wrap gap-1.5">
-          <Badge tone="neutral">{contentTypeLabel(item.type)}</Badge>
-          <Badge tone="jade">{contentDifficultyLabel(item.difficulty)}</Badge>
-        </div>
-      ),
+      render: (item) => <ContentItemClassificationCell item={item} />,
     },
     {
       key: 'knowledge_points',

@@ -260,7 +260,7 @@ func (s *Service) prepareSubmittedCode(ctx context.Context, req contracts.JudgeS
 		}
 		return "", nil, nil, nil
 	}
-	if strings.TrimSpace(req.CodeStorageKey) == "" || !isSHA256Hex(req.CodeHash) {
+	if strings.TrimSpace(req.CodeStorageKey) == "" || !pkgcrypto.ValidSHA256Hex(req.CodeHash) {
 		return "", nil, nil, apperr.ErrJudgeSubmitInvalid
 	}
 	codeName, codeData, err := s.readObjectRef(ctx, req.CodeStorageKey)
@@ -302,7 +302,7 @@ func (s *Service) findExistingTaskBySourceRef(ctx context.Context, tenantID int6
 
 // ExactFingerprints 查询完全相同提交。
 func (s *Service) ExactFingerprints(ctx context.Context, tenantID int64, problemRef, codeHash string) ([]contracts.FingerprintMatch, error) {
-	if tenantID <= 0 || strings.TrimSpace(problemRef) == "" || !isSHA256Hex(codeHash) {
+	if tenantID <= 0 || strings.TrimSpace(problemRef) == "" || !pkgcrypto.ValidSHA256Hex(codeHash) {
 		return nil, apperr.ErrFingerprintRequestInvalid
 	}
 	var items []SubmissionFingerprint
@@ -637,9 +637,4 @@ func safeFailureReason(err error) string {
 		return ""
 	}
 	return logging.SanitizeError(err.Error())
-}
-
-// encodeJSONBytes 序列化结构化输入。
-func encodeJSONBytes(v any) ([]byte, error) {
-	return jsonx.EncodeLineBytes(v)
 }

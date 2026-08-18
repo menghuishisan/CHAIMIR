@@ -26,8 +26,7 @@ type SimModuleDeps struct {
 	Database        *db.DB
 	IDs             snowflake.Generator
 	Upload          config.UploadConfig
-	MinIO           config.MinIOConfig
-	AuthConfig      config.AuthConfig
+	FileService     storage.Service
 	SimBackend      config.SimBackendConfig
 	Storage         *storage.Storage
 	Audit           audit.Writer
@@ -48,17 +47,13 @@ func RegisterSimModule(ctx context.Context, deps SimModuleDeps) (*sim.Service, e
 	if deps.Storage == nil {
 		return nil, fmt.Errorf("sim module 缺少统一对象存储")
 	}
-	fileService, err := storage.NewServiceFromConfig(deps.AuthConfig, deps.MinIO, deps.Upload)
-	if err != nil {
-		return nil, err
-	}
 	store := sim.NewStore(deps.Database)
 	svc, err := sim.NewService(sim.ServiceDeps{
 		Store:           store,
 		IDs:             deps.IDs,
 		Upload:          deps.Upload,
 		Storage:         deps.Storage,
-		FileService:     fileService,
+		FileService:     deps.FileService,
 		Audit:           deps.Audit,
 		Identity:        deps.Roles,
 		WSHub:           deps.WSHub,

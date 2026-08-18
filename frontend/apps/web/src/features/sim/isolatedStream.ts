@@ -135,7 +135,7 @@ function parseStreamMessage(raw: string): StreamMessage | undefined {
       event_count: typeof parsed.event_count === 'number' ? parsed.event_count : 0,
     }
   } catch (error) {
-    console.error('[sim] 隔离执行帧解析失败', error)
+    console.error('[sim] 隔离执行帧解析失败', { kind: error instanceof Error ? error.name : typeof error })
     return undefined
   }
 }

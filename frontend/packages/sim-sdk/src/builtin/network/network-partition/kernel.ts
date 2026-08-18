@@ -33,7 +33,7 @@ export function reducePartitionEvent(state: PartitionState, event: SimEvent, _co
 /**
  * advancePartition 推进分区处理流程。
  */
-export function advancePartition(state: PartitionState, event: SimEvent): PartitionState {
+function advancePartition(state: PartitionState, event: SimEvent): PartitionState {
   const phaseIndex = Math.min(partitionPhases.length - 1, state.phaseIndex + 1);
   const next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: partitionPhases[phaseIndex].id };
   if (phaseIndex === 1) return cutPartition(next);
@@ -54,7 +54,7 @@ export function partitionMerged(state: PartitionState): CheckpointResult {
 /**
  * finalizePartitionState 刷新分区指标、消息进度和追踪。
  */
-export function finalizePartitionState(state: PartitionState): PartitionState {
+function finalizePartitionState(state: PartitionState): PartitionState {
   const gap = versionGap(state);
   const risk = state.partitionActive ? 86 : gap > 0 ? 44 : 8;
   const reachable = state.nodes.filter((node) => node.reachable).length;

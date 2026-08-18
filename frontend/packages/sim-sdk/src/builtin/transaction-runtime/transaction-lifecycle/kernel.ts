@@ -35,7 +35,7 @@ export function reduceTxLifecycleEvent(state: TxLifecycleState, event: SimEvent,
 /**
  * advanceTxLifecycle 按交易生命周期推进一个过程单元。
  */
-export function advanceTxLifecycle(state: TxLifecycleState, event: SimEvent): TxLifecycleState {
+function advanceTxLifecycle(state: TxLifecycleState, event: SimEvent): TxLifecycleState {
   const phaseIndex = Math.min(txLifecyclePhases.length - 1, state.phaseIndex + 1);
   let next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: txLifecyclePhases[phaseIndex].id };
   if (phaseIndex === 1) next = { ...next, signed: true, messages: next.messages.concat(message('wallet', 'node', '提交签名交易', next.tick, '钱包签名后把交易广播给节点。')) };
@@ -48,7 +48,7 @@ export function advanceTxLifecycle(state: TxLifecycleState, event: SimEvent): Tx
 /**
  * finalizeTxLifecycleState 刷新指标、检查点和代码追踪。
  */
-export function finalizeTxLifecycleState(state: TxLifecycleState): TxLifecycleState {
+function finalizeTxLifecycleState(state: TxLifecycleState): TxLifecycleState {
   return { ...state, phase: txLifecyclePhases[state.phaseIndex].label, actors: state.actors.map((actor) => ({ ...actor, status: actor.id === 'node' && state.dropped ? 'danger' : actor.id === 'vm' && state.executed ? 'success' : actor.status })), explanation: explain(state.phaseIndex), metrics: { result: state.receipt || '等待确认', risk: state.dropped ? 65 : state.executed ? 8 : 20 }, checkpointValues: { receipt: state.executed && state.receipt === '成功' }, _trace: { triggeredLines: traceLinesForTxLifecycle(state.lastTransition), variables: { txHash: state.txHash, receipt: state.receipt }, executionPath: `tx-lifecycle/${state.lastTransition}` } };
 }
 

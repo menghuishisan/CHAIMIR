@@ -32,14 +32,6 @@ func Parse(v string) (int64, bool) {
 	return id, true
 }
 
-// FromInt64 把通过业务校验的内部 ID 转为公开边界类型。
-func FromInt64(value int64) (ID, error) {
-	if value <= 0 {
-		return 0, fmt.Errorf("雪花 ID 必须为正整数")
-	}
-	return ID(value), nil
-}
-
 // Int64 返回供模块 service 与数据库层使用的内部表示。
 func (id ID) Int64() int64 {
 	return int64(id)

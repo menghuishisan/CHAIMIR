@@ -1,6 +1,6 @@
 // Content API：题库与模板中心,对应后端 M5 模块。
 
-import { ApiClient } from '../client'
+import { ApiClient, encodePathSegment } from '../client'
 import type { ContentAuthorType, ContentDifficulty, ContentStatus, ContentType, ContentVisibility } from '../constants/content'
 import type { PaginatedResponse, SnowflakeID } from '../types/common'
 import type {
@@ -48,12 +48,12 @@ export class ContentApi {
 
   // getItemFace 查询题面视角内容。
   async getItemFace(code: string, version: string): Promise<ContentItemSnapshot> {
-    return this.client.get(`/content/items/${code}/${version}`)
+    return this.client.get(`/content/items/${encodePathSegment(code)}/${encodePathSegment(version)}`)
   }
 
   // getItemFull 查询全量内容。
   async getItemFull(code: string, version: string): Promise<ContentItemSnapshot> {
-    return this.client.get(`/content/items/${code}/${version}/full`)
+    return this.client.get(`/content/items/${encodePathSegment(code)}/${encodePathSegment(version)}/full`)
   }
 
   // createItem 创建内容草稿。
@@ -63,47 +63,47 @@ export class ContentApi {
 
   // updateItem 更新内容草稿。
   async updateItem(itemId: string, data: UpdateItemRequest): Promise<ContentItemSnapshot> {
-    return this.client.patch(`/content/items/${itemId}`, data)
+    return this.client.patch(`/content/items/${encodePathSegment(itemId)}`, data)
   }
 
   // publishItem 发布内容。
   async publishItem(itemId: string): Promise<ContentItem> {
-    return this.client.post(`/content/items/${itemId}/publish`)
+    return this.client.post(`/content/items/${encodePathSegment(itemId)}/publish`)
   }
 
   // deprecateItem 弃用已发布内容。
   async deprecateItem(itemId: string): Promise<ContentItem> {
-    return this.client.post(`/content/items/${itemId}/deprecate`)
+    return this.client.post(`/content/items/${encodePathSegment(itemId)}/deprecate`)
   }
 
   // deleteItem 删除草稿内容。
   async deleteItem(itemId: string): Promise<void> {
-    return this.client.delete(`/content/items/${itemId}`)
+    return this.client.delete(`/content/items/${encodePathSegment(itemId)}`)
   }
 
   // getVersions 查询版本列表。
   async getVersions(code: string): Promise<ContentItem[]> {
-    return this.client.get(`/content/items/${code}/versions`)
+    return this.client.get(`/content/items/${encodePathSegment(code)}/versions`)
   }
 
   // createNewVersion 基于现有版本创建新草稿。
   async createNewVersion(code: string, data: NewVersionRequest): Promise<ContentItemSnapshot> {
-    return this.client.post(`/content/items/${code}/new-version`, data)
+    return this.client.post(`/content/items/${encodePathSegment(code)}/new-version`, data)
   }
 
   // cloneItem 克隆内容为独立草稿。
   async cloneItem(code: string, version: string, data: CloneItemRequest): Promise<ContentItemSnapshot> {
-    return this.client.post(`/content/items/${code}/${version}/clone`, data)
+    return this.client.post(`/content/items/${encodePathSegment(code)}/${encodePathSegment(version)}/clone`, data)
   }
 
   // shareItem 设为共享库可见。
   async shareItem(itemId: string): Promise<ContentItem> {
-    return this.client.post(`/content/items/${itemId}/share`)
+    return this.client.post(`/content/items/${encodePathSegment(itemId)}/share`)
   }
 
   // unshareItem 取消共享库可见。
   async unshareItem(itemId: string): Promise<ContentItem> {
-    return this.client.post(`/content/items/${itemId}/unshare`)
+    return this.client.post(`/content/items/${encodePathSegment(itemId)}/unshare`)
   }
 
   // listShared 浏览共享库。
@@ -149,12 +149,12 @@ export class ContentApi {
 
   // updateCategory 更新分类。
   async updateCategory(id: string, data: ContentCategoryRequest): Promise<ContentCategory> {
-    return this.client.patch(`/content/categories/${id}`, data)
+    return this.client.patch(`/content/categories/${encodePathSegment(id)}`, data)
   }
 
   // deleteCategory 删除分类。
   async deleteCategory(id: string): Promise<ContentCategory> {
-    return this.client.delete(`/content/categories/${id}`)
+    return this.client.delete(`/content/categories/${encodePathSegment(id)}`)
   }
 
   // listPapers 查询试卷分页。
@@ -169,11 +169,11 @@ export class ContentApi {
 
   // getPaper 查询试卷详情。
   async getPaper(id: string): Promise<PaperDetail> {
-    return this.client.get(`/content/papers/${id}`)
+    return this.client.get(`/content/papers/${encodePathSegment(id)}`)
   }
 
   // regeneratePaper 重新随机组卷。
   async regeneratePaper(id: string): Promise<PaperDetail> {
-    return this.client.post(`/content/papers/${id}/regenerate`)
+    return this.client.post(`/content/papers/${encodePathSegment(id)}/regenerate`)
   }
 }

@@ -14,7 +14,7 @@ export interface PoolTx {
   reason: string;
 }
 
-export interface PoolNodeView {
+interface PoolNodeView {
   node: string;
   seen: string[];
 }

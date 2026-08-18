@@ -13,12 +13,12 @@ import { useCallback, useMemo, useState } from 'react'
 import { CircleCheck, ClipboardList, FileText, Lock, Send } from 'lucide-react'
 import {
   GradeReviewStatus,
+  PAGINATION_MAX_SIZE,
   type Course,
   type GradeReview,
   type Semester,
 } from '@chaimir/api-client'
 import {
-  Badge,
   Breadcrumb,
   Button,
   Callout,
@@ -37,7 +37,6 @@ import {
   SegmentedControl,
   Select,
   Stat,
-  StatusIndicator,
   Table,
   Textarea,
   toast,
@@ -46,13 +45,10 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
-import { CourseGrades } from '../../../teaching/pages/teacher/course-grades'
+import { CourseGrades } from '../../../teaching/components/CourseGrades'
 import { formatDateTime } from '../../../../utils/formatters'
-import { gradeReviewStatusLabel, gradeReviewStatusTone } from '../../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-
-/** 课程与学期选择器一次取回的条数:后端分页上限 100。 */
-const PICKER_SIZE = 100
+import { GradeReviewStatusCell } from '../../components/GradeReviewStatusCell'
 
 /** 状态筛选项:值为空串表示不过滤。 */
 const STATUS_FILTERS = [
@@ -70,7 +66,7 @@ export default function TeacherGradesPage() {
   const [statusFilter, setStatusFilter] = useState<string>('')
 
   const courses = useAsyncResource(
-    () => api.teaching.getCourses({ role: 'teacher', page: 1, size: PICKER_SIZE }),
+    () => api.teaching.getCourses({ role: 'teacher', page: 1, size: PAGINATION_MAX_SIZE }),
     [],
     () => false,
   )
@@ -151,15 +147,7 @@ export default function TeacherGradesPage() {
     {
       key: 'status',
       header: '状态',
-      render: (review) => (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <StatusIndicator
-            tone={gradeReviewStatusTone(review.status)}
-            label={gradeReviewStatusLabel(review.status)}
-          />
-          {review.is_locked ? <Badge tone="neutral">已锁定</Badge> : null}
-        </div>
-      ),
+      render: (review) => <GradeReviewStatusCell review={review} />,
     },
   ]
 

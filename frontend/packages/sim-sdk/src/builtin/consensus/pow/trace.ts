@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { powPhases } from './model';
 
-export const powSource = [
+const powSource = [
   'function mine(parent, txs, difficulty) {',
   '  block = assembleBlock(parent, txs);',
   '  target = prefixZeros(difficulty);',

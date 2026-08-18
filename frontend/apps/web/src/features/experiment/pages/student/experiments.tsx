@@ -17,7 +17,6 @@ import {
   PageScaffold,
   PageSection,
   Pagination,
-  StatusIndicator,
   Table,
   type TableColumn,
 } from '@chaimir/ui'
@@ -26,10 +25,9 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { usePagedResource } from '../../../../hooks'
 import {
   experimentCollabModeLabel,
-  experimentStatusLabel,
-  experimentStatusTone,
 } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { ExperimentIdentityCell, ExperimentStatusCell } from '../../components/ExperimentTableCells'
 
 /**
  * StudentExperimentsPage 列出可做实验并提供进入入口。
@@ -75,12 +73,7 @@ export default function StudentExperimentsPage() {
     {
       key: 'name',
       header: '实验',
-      render: (experiment) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{experiment.name}</div>
-          <div className="line-clamp-1 text-xs text-ink-sub">{experiment.description}</div>
-        </div>
-      ),
+      render: (experiment) => <ExperimentIdentityCell experiment={experiment} />,
     },
     {
       key: 'collab_mode',
@@ -111,12 +104,7 @@ export default function StudentExperimentsPage() {
     {
       key: 'status',
       header: '状态',
-      render: (experiment) => (
-        <StatusIndicator
-          tone={experimentStatusTone(experiment.status)}
-          label={experimentStatusLabel(experiment.status)}
-        />
-      ),
+      render: (experiment) => <ExperimentStatusCell experiment={experiment} />,
     },
     {
       key: 'actions',

@@ -264,10 +264,8 @@ func seedAcceptanceReplayObject(ctx context.Context, objects *storage.Storage, b
 
 // ensureAcceptanceSeedAllowed 防止验收夹具被误写入生产库。
 func ensureAcceptanceSeedAllowed(cfg *config.Config) error {
-	appEnv := strings.ToLower(strings.TrimSpace(cfg.Server.AppEnv))
-	mode := strings.ToLower(strings.TrimSpace(cfg.Deploy.Mode))
-	if appEnv != "local" && appEnv != "dev" && appEnv != "development" && mode != "local" && mode != "dev" {
-		return fmt.Errorf("seed-acceptance 仅允许 APP_ENV/DEPLOY_MODE 为 local/dev/development,当前 APP_ENV=%s DEPLOY_MODE=%s", cfg.Server.AppEnv, cfg.Deploy.Mode)
+	if !config.IsLocalLikeEnvironment(cfg.Server.AppEnv) {
+		return fmt.Errorf("seed-acceptance 仅允许 APP_ENV 为 local/dev/development/test,当前 APP_ENV=%s", cfg.Server.AppEnv)
 	}
 	if err := identity.ValidatePassword(cfg.Bootstrap.AdminPassword); err != nil {
 		return fmt.Errorf("BOOTSTRAP_ADMIN_PASSWORD 必须配置为符合本地密码强度的验收账号初始密码: %w", err)

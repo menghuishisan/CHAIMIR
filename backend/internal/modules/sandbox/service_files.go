@@ -15,6 +15,7 @@ import (
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
+	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
@@ -180,7 +181,7 @@ func (s *Service) ListSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 		return FileListResponse{}, sandboxExecFailure(apperr.ErrSandboxFileListFailed, err, stderr)
 	}
 	var entries []FileEntryResponse
-	if err := jsonx.DecodeStrict(stdout, &entries); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(stdout, &entries); err != nil {
 		return FileListResponse{}, apperr.ErrSandboxFileListDecodeFailed.WithCause(err)
 	}
 	for _, entry := range entries {
@@ -278,7 +279,7 @@ func (s *Service) SaveSandboxFilesForOwner(ctx context.Context, tenantID, accoun
 
 // ExecSandboxCommand 在沙箱内执行受限命令,供判题 worker 运行套件。
 func (s *Service) execSandboxCommandContract(ctx context.Context, req contracts.SandboxExecRequest) (contracts.SandboxExecResult, error) {
-	if req.TenantID <= 0 || req.SandboxID <= 0 || !safeNonShellCommand(req.Command) || !validSourceRef(req.SourceRef) {
+	if req.TenantID <= 0 || req.SandboxID <= 0 || !workload.ValidNonShellCommand(req.Command) || !validSourceRef(req.SourceRef) {
 		return contracts.SandboxExecResult{}, apperr.ErrSandboxContractRequestInvalid
 	}
 	sb, runtime, err := s.sandboxRuntimeForSource(ctx, req.TenantID, req.SandboxID, req.SourceRef)

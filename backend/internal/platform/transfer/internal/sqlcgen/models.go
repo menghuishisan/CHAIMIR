@@ -28,4 +28,6 @@ type TransferTask struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	CompletedAt         pgtype.Timestamptz `json:"completed_at"`
 	NextAttemptAfter    pgtype.Timestamptz `json:"next_attempt_after"`
+	LeaseToken          string             `json:"lease_token"`
+	LeaseUntil          pgtype.Timestamptz `json:"lease_until"`
 }

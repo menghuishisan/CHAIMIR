@@ -2,11 +2,11 @@
 package sim
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 )
 
@@ -70,7 +70,7 @@ func validationReportToResponse(report ValidationReport) (SimValidationReportRes
 	if len(report.PreviewFrames) == 0 {
 		return out, nil
 	}
-	if err := json.Unmarshal(report.PreviewFrames, &out.PreviewFrames); err != nil {
+	if err := jsonx.DecodeStrict(report.PreviewFrames, &out.PreviewFrames); err != nil {
 		return SimValidationReportResponse{}, apperr.ErrSimReviewDataCorrupt.WithCause(fmt.Errorf("审核样例教学帧数据异常: %w", err))
 	}
 	return out, nil

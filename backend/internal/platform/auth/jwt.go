@@ -210,7 +210,7 @@ func (m *Manager) verifyPathTicket(tokenString, requestPath string, tokenType To
 func (m *Manager) parseClaims(tokenString string) (*Claims, error) {
 	claims := &Claims{}
 	_, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		if token.Method != jwt.SigningMethodHS256 {
 			return nil, fmt.Errorf("非预期签名算法: %v", token.Header["alg"])
 		}
 		return m.signingKey, nil

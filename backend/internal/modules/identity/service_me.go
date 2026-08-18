@@ -3,7 +3,6 @@ package identity
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -13,8 +12,6 @@ import (
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // GetMe 读取当前登录账号信息,手机号只返回脱敏展示。
@@ -253,7 +250,7 @@ func (s *Service) listPlatformSessions(ctx context.Context, accountID int64) ([]
 // ensurePhoneAvailableInTx 确认新手机号未被同租户其他账号占用。
 func ensurePhoneAvailableInTx(ctx context.Context, tx TxStore, id tenant.Identity, phoneHash string) error {
 	account, err := tx.GetAccountByPhoneHash(ctx, id.TenantID, phoneHash)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if isNoRows(err) {
 		return nil
 	}
 	if err != nil {

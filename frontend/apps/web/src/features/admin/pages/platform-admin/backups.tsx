@@ -24,11 +24,8 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDateTime, formatDuration, formatFileSize } from '../../../../utils/formatters'
-import {
-  backupStatusLabel,
-  backupStatusTone,
-  backupTypeLabel,
-} from '../../../../utils/labels/admin'
+import { backupStatusLabel, backupTypeLabel } from '../../../../utils/labels/admin'
+import { backupStatusTone } from '../../statusPresentation'
 
 /**
  * PlatformBackupsPage 呈现备份任务的执行结果。

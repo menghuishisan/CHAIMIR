@@ -140,8 +140,12 @@ func reportFromListRow(row sqlcgen.ListExperimentReportsRow) ExperimentReport {
 }
 
 // experimentScoreOutbox 转换实验得分事件 outbox 行。
-func experimentScoreOutbox(row sqlcgen.ExperimentScoreOutbox) ExperimentScoreOutbox {
-	return ExperimentScoreOutbox{ID: row.ID, TenantID: row.TenantID, ExperimentID: row.ExperimentID, InstanceID: row.InstanceID, StudentID: row.StudentID, Score: pgtypex.NumericValue(row.Score), TraceID: row.TraceID, ScoredAt: timex.FromTimestamptz(row.ScoredAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
+func experimentScoreOutbox(row sqlcgen.ExperimentScoreOutbox) (ExperimentScoreOutbox, error) {
+	score, err := pgtypex.NumericValue(row.Score)
+	if err != nil {
+		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
+	}
+	return ExperimentScoreOutbox{ID: row.ID, TenantID: row.TenantID, ExperimentID: row.ExperimentID, InstanceID: row.InstanceID, StudentID: row.StudentID, Score: score, TraceID: row.TraceID, ScoredAt: timex.FromTimestamptz(row.ScoredAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}, nil
 }
 
 // decodeComponentConfig 解析组件 JSON,空值按空组件处理。
@@ -150,7 +154,7 @@ func decodeComponentConfig(raw []byte) (ComponentConfig, error) {
 		return ComponentConfig{Envs: []EnvComponent{}, Sims: []SimComponent{}, Checkpoints: []CheckpointComponent{}, Stages: []StageConfig{}}, nil
 	}
 	var out ComponentConfig
-	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return ComponentConfig{}, apperr.ErrExperimentInvalid.WithCause(err)
 	}
 	if out.Envs == nil {
@@ -174,7 +178,7 @@ func decodeGroupConfig(raw []byte) (GroupConfig, error) {
 		return GroupConfig{}, nil
 	}
 	var out GroupConfig
-	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return GroupConfig{}, apperr.ErrExperimentGroupInvalid.WithCause(err)
 	}
 	return out, nil
@@ -186,7 +190,7 @@ func decodeSandboxRefs(raw []byte) ([]SandboxRef, error) {
 	if len(raw) == 0 {
 		return []SandboxRef{}, nil
 	}
-	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return nil, apperr.ErrExperimentInstanceInvalid.WithCause(err)
 	}
 	return out, nil
@@ -198,19 +202,10 @@ func decodeSimRefs(raw []byte) ([]SimSessionRef, error) {
 	if len(raw) == 0 {
 		return []SimSessionRef{}, nil
 	}
-	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return nil, apperr.ErrExperimentInstanceInvalid.WithCause(err)
 	}
 	return out, nil
-}
-
-// encodeJSON 将结构化字段序列化为 JSONB 字节。
-func encodeJSON(v any, invalid *apperr.Error) ([]byte, error) {
-	raw, err := jsonx.AnyBytes(v, invalid)
-	if err != nil {
-		return nil, err
-	}
-	return raw, nil
 }
 
 // decodeOptionalMap 解析可选 JSON 对象,用于检查点参数绑定输出。

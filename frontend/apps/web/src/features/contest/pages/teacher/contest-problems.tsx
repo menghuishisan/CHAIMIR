@@ -13,11 +13,11 @@ import { Plus, Swords, Target } from 'lucide-react'
 import {
   ContestMode,
   ContentStatus,
+  PAGINATION_MAX_SIZE,
   type BattleRule,
   type Contest,
   type ContestProblem,
   type ContestProblemRequest,
-  type ContentItem,
 } from '@chaimir/api-client'
 import {
   Badge,
@@ -44,13 +44,12 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { toContentItemVersionOptions } from '../../../content/contentItemOptions'
+import { SandboxToolChecklist } from '../../../sandbox/components/SandboxToolChecklist'
 import { useOrchestrationCatalog } from '../../../sandbox/useOrchestrationCatalog'
-import { contentTypeLabel } from '../../../../utils/labels/content'
-import { BATTLE_RULES, battleRuleLabel } from '../../../../utils/labels/contest'
+import { battleRuleLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-
-/** 题目选择器一次取回的条数:后端分页上限 100。 */
-const ITEM_PICKER_SIZE = 100
+import { BATTLE_RULES } from '../../options'
 
 export interface ContestProblemsProps {
   contest: Contest
@@ -215,7 +214,12 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
 
   // 题目只列已发布的:草稿题目在学生答题时取不到题面
   const items = useAsyncResource(
-    () => api.content.getItems({ status: ContentStatus.PUBLISHED, page: 1, size: ITEM_PICKER_SIZE }),
+    () =>
+      api.content.getItems({
+        status: ContentStatus.PUBLISHED,
+        page: 1,
+        size: PAGINATION_MAX_SIZE,
+      }),
     [],
     () => false,
   )
@@ -224,14 +228,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
   const catalog = useOrchestrationCatalog(isBattle)
   const imageOptions = useMemo(() => catalog.imageOptions(runtimeCode), [catalog, runtimeCode])
 
-  const itemOptions = useMemo(
-    () =>
-      (items.data?.list ?? []).map((item: ContentItem) => ({
-        value: `${item.code}|${item.version}`,
-        label: `${item.title} · ${contentTypeLabel(item.type)} · ${item.version}`,
-      })),
-    [items.data],
-  )
+  const itemOptions = useMemo(() => toContentItemVersionOptions(items.data?.list ?? []), [items.data])
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -482,22 +479,11 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                         helper="对局执行时可用的命令工具,不选则只有运行时自带能力"
                       >
                         {catalog.tools.length > 0 ? (
-                          <div className="flex flex-col gap-2">
-                            {catalog.tools.map((tool) => (
-                              <Checkbox
-                                key={tool.code}
-                                checked={toolCodes.includes(tool.code)}
-                                label={tool.name}
-                                onCheckedChange={(checked) =>
-                                  setToolCodes((current) =>
-                                    checked === true
-                                      ? [...current, tool.code]
-                                      : current.filter((code) => code !== tool.code),
-                                  )
-                                }
-                              />
-                            ))}
-                          </div>
+                          <SandboxToolChecklist
+                            tools={catalog.tools}
+                            selectedCodes={toolCodes}
+                            onChange={setToolCodes}
+                          />
                         ) : (
                           <p className="text-sm text-ink-sub">
                             平台还没有可用工具,请联系平台管理员在沙箱工具里注册。

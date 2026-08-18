@@ -9,7 +9,7 @@
 
 import { Scale } from 'lucide-react'
 import { Breadcrumb, Callout, PageHeader, PageScaffold } from '@chaimir/ui'
-import { GradeAppeals } from '../teacher/grade-appeals'
+import { GradeAppeals } from '../../components/GradeAppeals'
 
 /**
  * SchoolAdminAppealsPage 承载全校成绩申诉处理。

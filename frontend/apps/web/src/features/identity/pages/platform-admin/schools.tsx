@@ -45,12 +45,12 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDate, formatDateTime } from '../../../../utils/formatters'
 import {
-  TENANT_STATUSES,
   deployModeLabel,
   tenantStatusLabel,
-  tenantStatusTone,
 } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { TENANT_STATUSES } from '../../options'
+import { tenantStatusTone } from '../../statusPresentation'
 
 /** 状态调整的后果说明:三档各不相同,确认框据此给出不同文案。 */
 const STATUS_COPY: Record<TenantStatus, { title: string; description: string; danger?: boolean }> = {

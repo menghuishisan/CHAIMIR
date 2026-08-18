@@ -135,7 +135,7 @@ func (s *Service) UpdateExperiment(ctx context.Context, experimentID int64, req 
 		if err != nil {
 			return err
 		}
-		if err := ensureTeacherCanManage(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), current); err != nil {
+		if err := s.ensureTeacherCanManage(ctx, id.AccountID, current); err != nil {
 			return err
 		}
 		current.CourseID = req.CourseID.Int64()
@@ -170,7 +170,7 @@ func (s *Service) ValidateExperiment(ctx context.Context, experimentID int64) (V
 	}); err != nil {
 		return ValidationResultDTO{}, err
 	}
-	if err := ensureTeacherCanManage(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), item); err != nil {
+	if err := s.ensureTeacherCanManage(ctx, id.AccountID, item); err != nil {
 		return ValidationResultDTO{}, err
 	}
 	return s.validateExperimentComponents(ctx, item), nil
@@ -188,7 +188,7 @@ func (s *Service) PublishExperiment(ctx context.Context, experimentID int64) (Ex
 		if err != nil {
 			return err
 		}
-		if err := ensureTeacherCanManage(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), current); err != nil {
+		if err := s.ensureTeacherCanManage(ctx, id.AccountID, current); err != nil {
 			return err
 		}
 		if current.Status != ExperimentStatusDraft && current.Status != ExperimentStatusUnpublished {
@@ -231,7 +231,7 @@ func (s *Service) UnpublishExperiment(ctx context.Context, experimentID int64) (
 		if err != nil {
 			return err
 		}
-		if err := ensureTeacherCanManage(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), current); err != nil {
+		if err := s.ensureTeacherCanManage(ctx, id.AccountID, current); err != nil {
 			return err
 		}
 		if current.Status != ExperimentStatusPublished {

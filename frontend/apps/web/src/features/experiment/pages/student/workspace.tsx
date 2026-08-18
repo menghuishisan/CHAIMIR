@@ -48,8 +48,9 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { errorDiagnostics } from '../../../../utils/userFacingError'
 import { AppStatusScreen } from '../../../../components/AppStatusScreen'
-import { SandboxIdeWorkspace } from '../../../sandbox/SandboxIdeWorkspace'
+import { SandboxIdeWorkspace } from '../../../sandbox/components/SandboxIdeWorkspace'
 import { useTicketedWebSocket } from '../../../../hooks'
 import { useImmersive } from '../../../../layouts/immersive/context'
 import { experimentInstanceStatusLabel } from '../../../../utils/labels/experiment'
@@ -227,7 +228,7 @@ function ExperimentWorkbench({
       })
       .catch((error: unknown) => {
         // 拿不到 topic 只影响自动刷新,不影响做实验:记日志,界面上用手动刷新兜住
-        console.error('[experiment] 读取进度订阅信息失败', error)
+        console.error('[experiment] 读取进度订阅信息失败', errorDiagnostics(error))
       })
     return () => {
       active = false

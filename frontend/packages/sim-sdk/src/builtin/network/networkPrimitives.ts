@@ -5,7 +5,7 @@ import { deterministicId, fnv1aHex } from '../../runtime/deterministic';
 /**
  * networkDigest 生成网络事件的稳定短摘要。
  */
-export function networkDigest(domain: string, fields: Record<string, string | number | boolean>, length = 12): string {
+function networkDigest(domain: string, fields: Record<string, string | number | boolean>, length = 12): string {
   const encoded = Object.keys(fields)
     .sort()
     .map((key) => `${key}=${String(fields[key])}`)

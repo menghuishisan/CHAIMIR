@@ -1,6 +1,5 @@
-// sim labels 文件维护 M4 仿真模块枚举的用户向文案与语义色。
+// sim labels 文件维护 M4 仿真模块枚举的用户向文案。
 
-import type { StatusTone } from '@chaimir/ui'
 import {
   SIM_COMPUTE,
   SIM_PACKAGE_STATUS,
@@ -28,22 +27,9 @@ const PACKAGE_STATUS_LABELS: Record<SimPackageStatus, string> = {
   [SIM_PACKAGE_STATUS.REJECTED]: '未通过审核',
 }
 
-const PACKAGE_STATUS_TONES: Record<SimPackageStatus, StatusTone> = {
-  [SIM_PACKAGE_STATUS.DRAFT]: 'neutral',
-  [SIM_PACKAGE_STATUS.REVIEWING]: 'warning',
-  [SIM_PACKAGE_STATUS.PUBLISHED]: 'primary',
-  [SIM_PACKAGE_STATUS.ARCHIVED]: 'neutral',
-  [SIM_PACKAGE_STATUS.REJECTED]: 'danger',
-}
-
 /** simPackageStatusLabel 返回仿真场景状态文案。 */
 export function simPackageStatusLabel(status: SimPackageStatus): string {
   return PACKAGE_STATUS_LABELS[status]
-}
-
-/** simPackageStatusTone 返回仿真场景状态语义色。 */
-export function simPackageStatusTone(status: SimPackageStatus): StatusTone {
-  return PACKAGE_STATUS_TONES[status]
 }
 
 const REVIEW_RESULT_LABELS: Record<SimReviewResult, string> = {
@@ -52,20 +38,9 @@ const REVIEW_RESULT_LABELS: Record<SimReviewResult, string> = {
   [SIM_REVIEW_RESULT.REJECTED]: '已退回',
 }
 
-const REVIEW_RESULT_TONES: Record<SimReviewResult, StatusTone> = {
-  [SIM_REVIEW_RESULT.PENDING]: 'warning',
-  [SIM_REVIEW_RESULT.APPROVED]: 'success',
-  [SIM_REVIEW_RESULT.REJECTED]: 'danger',
-}
-
 /** simReviewResultLabel 返回仿真包审核结论文案。 */
 export function simReviewResultLabel(result: SimReviewResult): string {
   return REVIEW_RESULT_LABELS[result]
-}
-
-/** simReviewResultTone 返回仿真包审核结论语义色。 */
-export function simReviewResultTone(result: SimReviewResult): StatusTone {
-  return REVIEW_RESULT_TONES[result]
 }
 
 /**

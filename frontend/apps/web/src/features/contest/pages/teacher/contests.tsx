@@ -40,14 +40,11 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
-import {
-  contestModeLabel,
-  contestStatusLabel,
-  contestStatusTone,
-  teamModeLabel,
-} from '../../../../utils/labels/contest'
+import { contestStatusLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { ContestFormModal } from './contest-form'
+import { ContestIdentityCell, ContestScheduleCell } from '../../components/ContestTableCells'
+import { ContestFormModal } from '../../components/ContestFormModal'
+import { contestStatusTone } from '../../statusPresentation'
 
 /** 状态筛选项:值为空串表示不过滤。 */
 const STATUS_FILTERS = [
@@ -159,14 +156,7 @@ export default function TeacherContestsPage() {
     {
       key: 'name',
       header: '赛事',
-      render: (contest) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{contest.name}</div>
-          <div className="truncate text-xs text-ink-sub">
-            {contestModeLabel(contest.mode)} · {teamModeLabel(contest.team_mode)}
-          </div>
-        </div>
-      ),
+      render: (contest) => <ContestIdentityCell contest={contest} />,
     },
     {
       key: 'signup',
@@ -180,11 +170,7 @@ export default function TeacherContestsPage() {
     {
       key: 'schedule',
       header: '比赛时间',
-      render: (contest) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDateTime(contest.start_at)} — {formatDateTime(contest.end_at)}
-        </span>
-      ),
+      render: (contest) => <ContestScheduleCell contest={contest} />,
     },
     {
       key: 'freeze_minutes',

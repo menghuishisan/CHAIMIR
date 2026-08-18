@@ -5,7 +5,7 @@ import { fnv1aHex } from '../../runtime/deterministic';
 /**
  * canonicalDataEncode 按字段名排序编码结构化数据,避免摘要受对象字段顺序影响。
  */
-export function canonicalDataEncode(fields: Record<string, string | number | boolean>): string {
+function canonicalDataEncode(fields: Record<string, string | number | boolean>): string {
   return Object.keys(fields)
     .sort()
     .map((key) => `${key}=${String(fields[key])}`)
@@ -64,7 +64,7 @@ export function trieRootHash(entries: Array<{ path: string; hash: string }>): st
 /**
  * accountLeafHash 绑定账户、余额和 nonce 生成状态叶子摘要。
  */
-export function accountLeafHash(accountId: string, balance: number, nonce: number): string {
+function accountLeafHash(accountId: string, balance: number, nonce: number): string {
   return dataDigest('account-state-leaf', { accountId, balance, nonce });
 }
 

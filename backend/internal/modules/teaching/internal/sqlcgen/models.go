@@ -59,6 +59,16 @@ type Chapter struct {
 	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
 }
 
+type CourseGradeExportRequest struct {
+	TransferTaskID int64              `json:"transfer_task_id"`
+	TenantID       int64              `json:"tenant_id"`
+	AccountID      int64              `json:"account_id"`
+	CourseID       int64              `json:"course_id"`
+	NextCheckAt    pgtype.Timestamptz `json:"next_check_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CourseMember struct {
 	ID        int64              `json:"id"`
 	TenantID  int64              `json:"tenant_id"`

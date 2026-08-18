@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { ethPosFinalityPhases } from './model';
 
-export const ethPosFinalitySource = [
+const ethPosFinalitySource = [
   'function onSlot(slot) {',
   '  block = propose(parent=head);',
   '  collectLatestAttestations(block);',

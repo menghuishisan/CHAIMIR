@@ -21,7 +21,6 @@ import {
   Breadcrumb,
   Button,
   Callout,
-  CoverImage,
   FilterBar,
   FilterField,
   FormField,
@@ -57,13 +56,13 @@ import { copyText } from '../../../../utils/clipboard'
 import { formatDate } from '../../../../utils/formatters'
 import {
   courseStatusLabel,
-  courseStatusTone,
-  courseTypeCover,
   courseTypeLabel,
   teachingDifficultyLabel,
 } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { CourseFormModal } from './course-form'
+import { CourseIdentityCell } from '../../components/CourseIdentityCell'
+import { courseStatusTone } from '../../statusPresentation'
+import { CourseFormModal } from '../../components/CourseFormModal'
 
 /** 状态筛选项:值为空串表示不过滤。 */
 const STATUS_FILTERS = [
@@ -189,29 +188,12 @@ export default function TeacherCoursesPage() {
     {
       key: 'name',
       header: '课程',
-      render: (course) => {
-        const cover = courseTypeCover(course.type)
-        return (
-          <div className="flex min-w-0 items-center gap-3">
-            {/* 与学生端同一个封面组件与同一套类型映射:同一门课两端看到同一张图。
-                列表同样只用纸材质,不逐行换封面授权(理由见学生端课程列表)。 */}
-            <CoverImage
-              id={course.id}
-              name={course.name}
-              glyph={cover.glyph}
-              accent={cover.accent}
-              className="w-28 shrink-0"
-            />
-            <div className="min-w-0">
-              <div className="truncate font-medium text-ink">{course.name}</div>
-              <div className="truncate text-xs text-ink-sub">
-                {course.semester} · {courseTypeLabel(course.type)} ·{' '}
-                {teachingDifficultyLabel(course.difficulty)}
-              </div>
-            </div>
-          </div>
-        )
-      },
+      render: (course) => (
+        <CourseIdentityCell
+          course={course}
+          details={`${course.semester} · ${courseTypeLabel(course.type)} · ${teachingDifficultyLabel(course.difficulty)}`}
+        />
+      ),
     },
     { key: 'credits', header: '学分', align: 'right', mono: true },
     {

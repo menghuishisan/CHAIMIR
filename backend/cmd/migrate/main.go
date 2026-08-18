@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -30,6 +31,29 @@ import (
 )
 
 const appRoleName = "chaimir_app"
+
+// grantMaintenanceRoleSQL 在数据库内安全引用动态标识符,避免部署命令拼接维护角色 DDL。
+const grantMaintenanceRoleSQL = `DO $$
+DECLARE
+  maintenance_role text := current_setting('chaimir.migration.maintenance_role');
+  table_name text;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = maintenance_role) THEN
+    EXECUTE format('CREATE ROLE %I NOLOGIN BYPASSRLS', maintenance_role);
+  ELSE
+    EXECUTE format('ALTER ROLE %I NOLOGIN BYPASSRLS', maintenance_role);
+  END IF;
+
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), maintenance_role);
+  EXECUTE format('GRANT USAGE ON SCHEMA public TO %I', maintenance_role);
+  EXECUTE format('REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %I', maintenance_role);
+  FOR table_name IN
+    SELECT jsonb_array_elements_text(current_setting('chaimir.migration.maintenance_tables')::jsonb)
+  LOOP
+    EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I TO %I', table_name, maintenance_role);
+  END LOOP;
+  EXECUTE format('GRANT %I TO %I', maintenance_role, session_user);
+END $$;`
 
 // main 分发数据库迁移、初始化和本地验收数据子命令。
 func main() {
@@ -84,8 +108,56 @@ func migrateAndGrant(ctx context.Context, cfg *config.Config) error {
 	if err := grantApplicationRole(ctx, cfg.Postgres); err != nil {
 		return err
 	}
+	if err := grantMaintenanceRoles(ctx, cfg.Postgres); err != nil {
+		return err
+	}
 	slog.Info("database migration and role grant completed")
 	return nil
+}
+
+// grantMaintenanceRoles 创建不可登录的模块维护角色,并把跨租户权限限制在各模块自有表。
+func grantMaintenanceRoles(ctx context.Context, pg config.PostgresConfig) (resultErr error) {
+	if pg.GrantTimeoutSeconds <= 0 {
+		return fmt.Errorf("PG_GRANT_TIMEOUT_SECONDS 必须大于 0")
+	}
+	privilegedRole := strings.TrimSpace(privilegedUser(pg))
+	if privilegedRole == "" {
+		return fmt.Errorf("模块维护角色授权缺少 PG_PRIV_USER")
+	}
+	sqlDB, err := sql.Open("pgx", postgresURL(pg, privilegedRole, privilegedPassword(pg)))
+	if err != nil {
+		return fmt.Errorf("打开模块维护角色授权连接失败: %w", err)
+	}
+	defer closeSQLDatabase(sqlDB, "关闭模块维护角色授权连接失败", &resultErr)
+	grantCtx, cancel := context.WithTimeout(ctx, time.Duration(pg.GrantTimeoutSeconds)*time.Second)
+	defer cancel()
+	tx, err := sqlDB.BeginTx(grantCtx, nil)
+	if err != nil {
+		return fmt.Errorf("开始模块维护角色授权事务失败: %w", err)
+	}
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			resultErr = errors.Join(resultErr, fmt.Errorf("回滚模块维护角色授权事务失败: %w", rollbackErr))
+		}
+	}()
+	for _, policy := range db.MaintenancePolicies() {
+		tablesJSON, err := json.Marshal(policy.Tables)
+		if err != nil {
+			return fmt.Errorf("编码模块维护角色 %s 表策略失败: %w", policy.Module, err)
+		}
+		if _, err := tx.ExecContext(grantCtx, `SELECT
+  set_config('chaimir.migration.maintenance_role', $1, true),
+  set_config('chaimir.migration.maintenance_tables', $2, true)`, policy.Role, string(tablesJSON)); err != nil {
+			return fmt.Errorf("设置模块维护角色 %s 授权参数失败: %w", policy.Module, err)
+		}
+		if _, err := tx.ExecContext(grantCtx, grantMaintenanceRoleSQL); err != nil {
+			return fmt.Errorf("授权模块维护角色 %s 失败: %w", policy.Module, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("提交模块维护角色授权事务失败: %w", err)
+	}
+	return resultErr
 }
 
 // closeSQLDatabase 关闭部署期数据库连接，并把关闭错误合并到原始返回错误中。
@@ -154,10 +226,8 @@ func resetLocalDatabase(ctx context.Context, cfg *config.Config) (resultErr erro
 
 // ensureLocalResetAllowed 防止 reset-local 被误用于生产或非本机数据库。
 func ensureLocalResetAllowed(cfg *config.Config) error {
-	appEnv := strings.ToLower(strings.TrimSpace(cfg.Server.AppEnv))
-	mode := strings.ToLower(strings.TrimSpace(cfg.Deploy.Mode))
-	if appEnv != "local" && appEnv != "dev" && appEnv != "development" && mode != "local" && mode != "dev" {
-		return fmt.Errorf("reset-local 仅允许 APP_ENV/DEPLOY_MODE 为 local/dev/development,当前 APP_ENV=%s DEPLOY_MODE=%s", cfg.Server.AppEnv, cfg.Deploy.Mode)
+	if !config.IsLocalLikeEnvironment(cfg.Server.AppEnv) {
+		return fmt.Errorf("reset-local 仅允许 APP_ENV 为 local/dev/development/test,当前 APP_ENV=%s", cfg.Server.AppEnv)
 	}
 	host := strings.ToLower(strings.TrimSpace(cfg.Postgres.Host))
 	if host != "127.0.0.1" && host != "localhost" && host != "::1" {

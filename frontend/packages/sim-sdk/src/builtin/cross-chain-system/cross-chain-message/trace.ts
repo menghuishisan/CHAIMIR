@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { crossMessagePhases } from './model';
 
-export const crossMessageSource = ['function receiveMessage(message, proof) {', '  require(verifySourceEvent(proof));', '  require(!executed[message.id]);', '  executePayload(message.payload);', '  executed[message.id] = true;', '}'];
+const crossMessageSource = ['function receiveMessage(message, proof) {', '  require(verifySourceEvent(proof));', '  require(!executed[message.id]);', '  executePayload(message.payload);', '  executed[message.id] = true;', '}'];
 export const crossMessageNarrative = phaseNarrative(crossMessagePhases, 'cross-message-executed');
 export const crossMessageCodeTrace = { sourceCode: crossMessageSource.join('\n'), language: 'pseudocode' as const, lineMapping: crossMessagePhases.map((phase, index) => ({ line: Math.min(index + 1, crossMessageSource.length), triggerCondition: phase.id, annotation: phase.reason, highlightStyle: phase.id === 'execute' ? ('success' as const) : ('normal' as const) })), variableWatch: [{ name: 'messageId', extract: 'state.messageId', format: 'hex' as const }] };
 

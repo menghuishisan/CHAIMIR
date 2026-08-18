@@ -4,9 +4,9 @@ package admin
 import (
 	"net/url"
 	"strings"
-	"time"
 
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
 
@@ -17,7 +17,7 @@ func ParseMonitoringPanels(raw string) ([]MonitoringPanel, error) {
 		return nil, apperr.ErrAdminMonitoringInvalid
 	}
 	var panels []MonitoringPanel
-	if err := jsonx.DecodeStrict([]byte(raw), &panels); err != nil {
+	if err := jsonx.DecodeStrictKnownFields([]byte(raw), &panels); err != nil {
 		return nil, apperr.ErrAdminMonitoringInvalid.WithCause(err)
 	}
 	for i := range panels {
@@ -60,8 +60,8 @@ func validateDateRange(fromDate, toDate string) error {
 	if fromDate == "" || toDate == "" {
 		return apperr.ErrAdminStatisticsInvalid
 	}
-	from, fromErr := time.Parse("2006-01-02", fromDate)
-	to, toErr := time.Parse("2006-01-02", toDate)
+	from, fromErr := timex.ParseDate(fromDate)
+	to, toErr := timex.ParseDate(toDate)
 	if fromErr != nil || toErr != nil || to.Before(from) {
 		return apperr.ErrAdminStatisticsInvalid
 	}

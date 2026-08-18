@@ -1,7 +1,7 @@
 // Sim API：仿真引擎
 // 对应后端 M4 模块
 
-import { ApiClient } from '../client'
+import { ApiClient, encodePathSegment } from '../client'
 import type { SimPackageStatus, SimReviewResult } from '../constants/sim'
 import type { PaginatedResponse } from '../types/common'
 import type {
@@ -51,7 +51,7 @@ export class SimApi {
    * 获取指定仿真包的所有版本
    */
   async getPackageVersions(code: string): Promise<SimPackageMeta[]> {
-    return this.client.get(`/sim/packages/${code}/versions`)
+    return this.client.get(`/sim/packages/${encodePathSegment(code)}/versions`)
   }
 
   /**
@@ -72,14 +72,14 @@ export class SimApi {
     data: SimPackageSubmit,
     onProgress?: (progress: number) => void
   ): Promise<SimPackageSubmissionResult> {
-    return this.client.patchFormData(`/sim/packages/${packageId}`, packageFormData(data), onProgress)
+    return this.client.patchFormData(`/sim/packages/${encodePathSegment(packageId)}`, packageFormData(data), onProgress)
   }
 
   /**
    * 获取审核前预览报告(仅包作者本人可读)。
    */
   async previewPackage(packageId: string): Promise<SimPackagePreview> {
-    return this.client.get(`/sim/packages/${packageId}/preview`)
+    return this.client.get(`/sim/packages/${encodePathSegment(packageId)}/preview`)
   }
 
   // ===== 仿真包审核 =====
@@ -99,28 +99,28 @@ export class SimApi {
    * 审核通过
    */
   async approveReview(reviewId: string): Promise<SimReviewDecision> {
-    return this.client.post(`/sim/reviews/${reviewId}/approve`)
+    return this.client.post(`/sim/reviews/${encodePathSegment(reviewId)}/approve`)
   }
 
   /**
    * 审核退回
    */
   async rejectReview(reviewId: string, comment: string): Promise<SimReviewDecision> {
-    return this.client.post(`/sim/reviews/${reviewId}/reject`, { comment })
+    return this.client.post(`/sim/reviews/${encodePathSegment(reviewId)}/reject`, { comment })
   }
 
   /**
    * 下架已发布仿真包
    */
   async archivePackage(packageId: string): Promise<SimPackageMeta> {
-    return this.client.post(`/sim/packages/${packageId}/archive`)
+    return this.client.post(`/sim/packages/${encodePathSegment(packageId)}/archive`)
   }
 
   /**
    * 重新上架已下架仿真包
    */
   async republishPackage(packageId: string): Promise<SimPackageMeta> {
-    return this.client.post(`/sim/packages/${packageId}/republish`)
+    return this.client.post(`/sim/packages/${encodePathSegment(packageId)}/republish`)
   }
 
   // ===== 仿真会话 =====
@@ -129,28 +129,28 @@ export class SimApi {
    * 上报用户操作序列
    */
   async reportAction(sessionId: string, action: SimActionLog): Promise<SimActionLog> {
-    return this.client.post(`/sim/sessions/${sessionId}/actions`, action)
+    return this.client.post(`/sim/sessions/${encodePathSegment(sessionId)}/actions`, action)
   }
 
   /**
    * 获取可复现回放数据
    */
   async getReplay(sessionId: string): Promise<SimReplay> {
-    return this.client.get(`/sim/sessions/${sessionId}/replay`)
+    return this.client.get(`/sim/sessions/${encodePathSegment(sessionId)}/replay`)
   }
 
   /**
    * 创建公开分享码
    */
   async shareSession(sessionId: string, data: SimShareCreate = {}): Promise<SimShareResult> {
-    return this.client.post(`/sim/sessions/${sessionId}/share`, data)
+    return this.client.post(`/sim/sessions/${encodePathSegment(sessionId)}/share`, data)
   }
 
   /**
    * 读取公开分享剧本
    */
   async getSharedReplay(code: string): Promise<SimReplay> {
-    return this.client.get(`/sim/shared/${code}`)
+    return this.client.get(`/sim/shared/${encodePathSegment(code)}`)
   }
 
   /**
@@ -158,7 +158,7 @@ export class SimApi {
    * 扩展包与重计算仿真经这条流运行:容器算出完整教学帧,浏览器只渲染。
    */
   getStreamWsUrl(sessionId: string): string {
-    return this.client.wsURL(`/sim/sessions/${sessionId}/stream`)
+    return this.client.wsURL(`/sim/sessions/${encodePathSegment(sessionId)}/stream`)
   }
 }
 

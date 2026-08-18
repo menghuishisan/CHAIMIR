@@ -15,7 +15,7 @@ import {
   passwordRequiredError,
   passwordRuleError,
   useFieldErrors,
-} from './auth-form'
+} from '../../authForm'
 import {
   AuthFormError,
   AuthHeading,
@@ -23,7 +23,7 @@ import {
   AuthQuietAction,
   AuthSubmit,
   AuthTextField,
-} from './auth-ui'
+} from '../../components/AuthUI'
 
 /**
  * newPasswordError 校验新密码:强度规则之外,还要求与当前密码不同 ——

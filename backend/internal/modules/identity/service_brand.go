@@ -30,13 +30,6 @@ import (
 	"chaimir/pkg/logging"
 )
 
-// TenantLogoUploadRequest 描述已读入内存的校徽文件。
-type TenantLogoUploadRequest struct {
-	FileName    string
-	ContentType string
-	Content     []byte
-}
-
 // UploadTenantLogo 校验校徽、写入对象并在同一请求内更新租户配置,返回更新后的租户视图。
 func (s *Service) UploadTenantLogo(ctx context.Context, req TenantLogoUploadRequest) (TenantDTO, error) {
 	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
@@ -106,7 +99,7 @@ func (s *Service) UploadTenantLogo(ctx context.Context, req TenantLogoUploadRequ
 	if err := s.auditTenantOperation(ctx, id, "tenant.logo.upload", "identity.tenant", id.TenantID, map[string]any{"file_name": plan.FileName, "size": plan.Size}); err != nil {
 		return TenantDTO{}, err
 	}
-	return s.tenantDTOWithLogo(ctx, id.TenantID, row), nil
+	return s.tenantDTOWithLogo(ctx, id.TenantID, row)
 }
 
 // ClearTenantLogo 移除校徽:清空引用并删除对象,让徽记位回落学校名首字。
@@ -143,19 +136,22 @@ func (s *Service) ClearTenantLogo(ctx context.Context) (TenantDTO, error) {
 	if err := s.auditTenantOperation(ctx, id, "tenant.logo.clear", "identity.tenant", id.TenantID, map[string]any{}); err != nil {
 		return TenantDTO{}, err
 	}
-	return ToTenantDTO(row), nil
+	return ToTenantDTO(row)
 }
 
 // tenantDTOWithLogo 把租户行转成配置视图并补上内联校徽,读不出校徽时只记日志不影响其余字段。
-func (s *Service) tenantDTOWithLogo(ctx context.Context, tenantID int64, row Tenant) TenantDTO {
-	out := ToTenantDTO(row)
+func (s *Service) tenantDTOWithLogo(ctx context.Context, tenantID int64, row Tenant) (TenantDTO, error) {
+	out, err := ToTenantDTO(row)
+	if err != nil {
+		return TenantDTO{}, err
+	}
 	image, err := s.readTenantLogoImage(ctx, tenantID, row.LogoRef)
 	if err != nil {
 		logging.ErrorContext(ctx, "读取学校校徽失败", err.Error())
-		return out
+		return out, nil
 	}
 	out.LogoImage = image
-	return out
+	return out, nil
 }
 
 // GetTenantBrand 供登录页免鉴权读取学校品牌,不接受任何租户标识参数。

@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { discoveryPhases } from './model';
 
-export const discoverySource = [
+const discoverySource = [
   'function discoverPeers(localNetwork, minVersion) {',
   '  seeds = connectBootnodes();',
   '  addrs = requestAddr(seeds);',

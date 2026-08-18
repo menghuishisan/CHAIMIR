@@ -73,7 +73,7 @@ func (a notifyAPI) markRead(c *gin.Context) {
 
 // markAllRead 标记当前用户全部通知已读。
 func (a notifyAPI) markAllRead(c *gin.Context) {
-	httpx.Write(c, gin.H{}, a.svc.MarkAllRead(c.Request.Context()))
+	httpx.Write(c, struct{}{}, a.svc.MarkAllRead(c.Request.Context()))
 }
 
 // deleteNotification 删除当前用户的一条通知。
@@ -125,7 +125,7 @@ func (a notifyAPI) listAnnouncements(c *gin.Context) {
 func (a notifyAPI) markAnnouncementRead(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if ok {
-		httpx.Write(c, gin.H{}, a.svc.MarkAnnouncementRead(c.Request.Context(), id))
+		httpx.Write(c, struct{}{}, a.svc.MarkAnnouncementRead(c.Request.Context(), id))
 	}
 }
 
@@ -138,7 +138,7 @@ func (a notifyAPI) send(c *gin.Context) {
 	if !serviceTenantMatches(c, req.TenantID.Int64()) {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.Send(c.Request.Context(), contracts.NotifySendRequest{TenantID: req.TenantID.Int64(), Type: req.Type, Receivers: req.Receivers, Params: req.Params, Link: req.Link}))
+	httpx.Write(c, struct{}{}, a.svc.Send(c.Request.Context(), contracts.NotifySendRequest{TenantID: req.TenantID.Int64(), Type: req.Type, Receivers: req.Receivers, Params: req.Params, Link: req.Link}))
 }
 
 // push 绑定内部服务实时推送请求。
@@ -150,14 +150,14 @@ func (a notifyAPI) push(c *gin.Context) {
 	if !serviceTenantMatches(c, req.TenantID.Int64()) {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.Push(c.Request.Context(), contracts.NotifyPushRequest{TenantID: req.TenantID.Int64(), Topic: req.Topic, Payload: req.Payload}))
+	httpx.Write(c, struct{}{}, a.svc.Push(c.Request.Context(), contracts.NotifyPushRequest{TenantID: req.TenantID.Int64(), Topic: req.Topic, Payload: req.Payload}))
 }
 
 // serviceTenantMatches 确保内部通知请求正文的租户与已验签服务租户一致。
 func serviceTenantMatches(c *gin.Context, bodyTenantID int64) bool {
 	id, ok := tenant.FromContext(c.Request.Context())
 	if !ok || !id.IsSystem || id.TenantID <= 0 || bodyTenantID != id.TenantID {
-		httpx.Write(c, gin.H{}, apperr.ErrServiceUnauthorized)
+		httpx.Write(c, struct{}{}, apperr.ErrServiceUnauthorized)
 		return false
 	}
 	return true
@@ -169,6 +169,6 @@ func (a notifyAPI) websocket(c *gin.Context) {
 		return a.svc.HandleSubscribe(c.Request.Context(), conn)
 	})
 	if err != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrNotifyChannelUnavailable.WithCause(err))
+		httpx.Write(c, struct{}{}, apperr.ErrNotifyChannelUnavailable.WithCause(err))
 	}
 }

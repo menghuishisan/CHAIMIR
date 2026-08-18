@@ -52,7 +52,7 @@ import { userRoleLabel } from '../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
 
 /** 发布方:决定可选的公告范围与页面文案。 */
-export type AnnouncementPublisher = 'platform' | 'school'
+type AnnouncementPublisher = 'platform' | 'school'
 
 /** 校管可发布的范围:平台范围属平台管理员,不在校管端出现。 */
 const SCHOOL_SCOPE_OPTIONS = [

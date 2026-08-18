@@ -172,3 +172,14 @@ type BackupRecordCreate struct {
 	SizeBytes  int64
 	Status     int16
 }
+
+// AuditExportRequest 是 M9 持久化的可重放审计导出请求。
+type AuditExportRequest struct {
+	TransferTaskID int64
+	TenantID       int64
+	AccountID      int64
+	QuerySnapshot  []byte
+	NextCheckAt    time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}

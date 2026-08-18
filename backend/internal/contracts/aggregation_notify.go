@@ -2,7 +2,6 @@
 package contracts
 
 import (
-	"context"
 	"encoding/json"
 )
 
@@ -24,12 +23,4 @@ type NotifyPushRequest struct {
 	// 不得回退到无租户前缀 topic,否则无法在 M10 边界独立校验租户隔离。
 	Topic   string          `json:"topic"`
 	Payload json.RawMessage `json:"payload"`
-}
-
-// NotifyService 是 M10 对全平台开放的通知与实时推送契约。
-type NotifyService interface {
-	// Send 渲染通知模板并写站内信,必要时同步推送红点。
-	Send(ctx context.Context, req NotifySendRequest) error
-	// Push 把业务实时负载投递到统一 WebSocket 主题。
-	Push(ctx context.Context, req NotifyPushRequest) error
 }

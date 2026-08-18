@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { noncePhases } from './model';
 
-export const nonceSource = ['function includeAccountTxs(txs) {', '  require(tx.nonce == account.nonce);', '  execute(tx);', '  account.nonce += 1;', '  replaceByHigherFee(sameNonceTx);', '}'];
+const nonceSource = ['function includeAccountTxs(txs) {', '  require(tx.nonce == account.nonce);', '  execute(tx);', '  account.nonce += 1;', '  replaceByHigherFee(sameNonceTx);', '}'];
 export const nonceNarrative = phaseNarrative(noncePhases, 'nonce-order-valid');
 export const nonceCodeTrace = { sourceCode: nonceSource.join('\n'), language: 'pseudocode' as const, lineMapping: noncePhases.map((phase, index) => ({ line: Math.min(index + 1, nonceSource.length), triggerCondition: phase.id, annotation: phase.reason, highlightStyle: phase.id === 'include' ? ('success' as const) : ('normal' as const) })), variableWatch: [{ name: 'accountNonce', extract: 'state.accountNonce', format: 'number' as const }] };
 

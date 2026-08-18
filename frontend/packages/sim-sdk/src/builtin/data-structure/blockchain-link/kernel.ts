@@ -4,7 +4,7 @@ import type { ChainBlock, CheckpointResult, ReducerContext, SimEvent, SimInitPar
 import { stringArrayParam } from '../../initParams';
 import { blockHeaderHash, dataDigest } from '../dataPrimitives';
 import { blockchainPhases, type BlockchainLinkState, type BlockLink } from './model';
-import { blockchainSource, traceLinesForBlockchainLink } from './trace';
+import { traceLinesForBlockchainLink } from './trace';
 
 /**
  * createInitialBlockchainLinkState 根据参数创建规范链。
@@ -30,7 +30,7 @@ export function reduceBlockchainLinkEvent(state: BlockchainLinkState, event: Sim
 /**
  * advanceBlockchainLink 按父哈希结构流程推进一个过程单元。
  */
-export function advanceBlockchainLink(state: BlockchainLinkState, event: SimEvent): BlockchainLinkState {
+function advanceBlockchainLink(state: BlockchainLinkState, event: SimEvent): BlockchainLinkState {
   const phaseIndex = Math.min(blockchainPhases.length - 1, state.phaseIndex + 1);
   return { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: blockchainPhases[phaseIndex].id };
 }
@@ -38,7 +38,7 @@ export function advanceBlockchainLink(state: BlockchainLinkState, event: SimEven
 /**
  * finalizeBlockchainLinkState 刷新指标、检查点和代码追踪。
  */
-export function finalizeBlockchainLinkState(state: BlockchainLinkState): BlockchainLinkState {
+function finalizeBlockchainLinkState(state: BlockchainLinkState): BlockchainLinkState {
   const valid = state.blocks.every((block, index) => index === 0 || block.parentHash === state.blocks[index - 1].hash);
   return { ...state, phase: blockchainPhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: valid ? '链接有效' : '链接异常', risk: state.fork.length > 0 && !state.reorganized ? 54 : 8, height: state.blocks.length - 1 }, checkpointValues: { valid, canonical: state.fork.length === 0 }, _trace: { triggeredLines: traceLinesForBlockchainLink(state.lastTransition), variables: { height: state.blocks.length - 1, valid }, executionPath: `blockchain/${state.lastTransition}` } };
 }
@@ -91,5 +91,3 @@ function explain(index: number) {
   const phase = blockchainPhases[index] ?? blockchainPhases[0];
   return { title: phase.label, effect: phase.effect, reason: phase.reason, defaultDurationMs: 1200 };
 }
-
-export { blockchainSource };

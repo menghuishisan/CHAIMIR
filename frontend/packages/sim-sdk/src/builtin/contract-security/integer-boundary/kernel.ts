@@ -29,7 +29,7 @@ export function reduceIntegerEvent(state: IntegerBoundaryState, event: SimEvent,
 /**
  * advanceInteger 按输入、范围、计算、checked 和边界测试推进。
  */
-export function advanceInteger(state: IntegerBoundaryState, event: SimEvent): IntegerBoundaryState {
+function advanceInteger(state: IntegerBoundaryState, event: SimEvent): IntegerBoundaryState {
   const phaseIndex = Math.min(integerPhases.length - 1, state.phaseIndex + 1);
   return { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: integerPhases[phaseIndex].id };
 }
@@ -37,7 +37,7 @@ export function advanceInteger(state: IntegerBoundaryState, event: SimEvent): In
 /**
  * finalizeIntegerState 刷新指标、检查点和代码追踪。
  */
-export function finalizeIntegerState(state: IntegerBoundaryState): IntegerBoundaryState {
+function finalizeIntegerState(state: IntegerBoundaryState): IntegerBoundaryState {
   const safe = state.checkedMath && state.cappedInput && state.cases.every((item) => item.input <= state.maxValue || item.checked);
   return { ...state, phase: integerPhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: safe ? '边界受控' : '存在边界风险', risk: safe ? 8 : 70, failedCases: state.cases.filter((item) => item.failed).length }, checkpointValues: { safe }, _trace: { triggeredLines: traceLinesForInteger(state.lastTransition), variables: { checkedMath: state.checkedMath, failedCases: state.cases.filter((item) => item.failed).length }, executionPath: `integer-boundary/${state.lastTransition}` } };
 }

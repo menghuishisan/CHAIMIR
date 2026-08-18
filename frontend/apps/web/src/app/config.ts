@@ -69,9 +69,12 @@ function parseWebSocketBaseURL(value: string | undefined, name: string): string 
   } catch {
     throw new Error(`${name} 必须配置为有效的站内地址`)
   }
+  const comparableOrigin = parsed.origin
+    .replace(/^ws:/, 'http:')
+    .replace(/^wss:/, 'https:')
   if (
     !['http:', 'https:', 'ws:', 'wss:'].includes(parsed.protocol) ||
-    parsed.origin !== window.location.origin ||
+    comparableOrigin !== window.location.origin ||
     parsed.username ||
     parsed.password ||
     parsed.search ||

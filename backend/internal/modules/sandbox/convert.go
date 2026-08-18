@@ -2,6 +2,7 @@
 package sandbox
 
 import (
+	"encoding/json"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -81,41 +82,50 @@ func sandboxCapabilitiesFromModel(runtime Runtime, tools []SandboxTool, register
 		return out
 	}
 	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin || len(runtime.AdapterSpec.CapabilityCommands.Deploy.Command) > 0 {
-		out.ChainOperations = append(out.ChainOperations, "deploy")
+		out.ChainOperations = append(out.ChainOperations, ChainOperationDeploy)
 	}
 	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin || len(runtime.AdapterSpec.CapabilityCommands.Tx.Command) > 0 {
-		out.ChainOperations = append(out.ChainOperations, "transaction")
+		out.ChainOperations = append(out.ChainOperations, ChainOperationTransaction)
 	}
 	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin || len(runtime.AdapterSpec.CapabilityCommands.Query.Command) > 0 {
-		out.ChainOperations = append(out.ChainOperations, "query")
+		out.ChainOperations = append(out.ChainOperations, ChainOperationQuery)
 	}
 	return out
 }
 
 // runtimeResponseFromModel 将运行时内部模型转换为 HTTP 稳定字段名。
-func runtimeResponseFromModel(item Runtime) RuntimeResponse {
+// adapter_spec 只在边界序列化为原始 JSON，避免把可执行 workload 模型泄露到公开 DTO。
+func runtimeResponseFromModel(item Runtime) (RuntimeResponse, error) {
+	adapterSpec, err := jsonx.AnyBytes(item.AdapterSpec, apperr.ErrInternal)
+	if err != nil {
+		return RuntimeResponse{}, err
+	}
 	return RuntimeResponse{
 		ID:             ids.ID(item.ID),
 		Code:           item.Code,
 		Name:           item.Name,
 		Eco:            item.Eco,
 		AdapterLevel:   item.AdapterLevel,
-		AdapterSpec:    item.AdapterSpec,
+		AdapterSpec:    json.RawMessage(adapterSpec),
 		CapabilityImpl: item.CapabilityImpl,
 		PluginRef:      item.PluginRef,
 		SelftestStatus: item.SelftestStatus,
 		SelftestDetail: item.SelftestDetail,
 		Status:         item.Status,
-	}
+	}, nil
 }
 
 // runtimeResponsesFromModels 批量转换运行时列表。
-func runtimeResponsesFromModels(items []Runtime) []RuntimeResponse {
+func runtimeResponsesFromModels(items []Runtime) ([]RuntimeResponse, error) {
 	out := make([]RuntimeResponse, 0, len(items))
 	for _, item := range items {
-		out = append(out, runtimeResponseFromModel(item))
+		response, err := runtimeResponseFromModel(item)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, response)
 	}
-	return out
+	return out, nil
 }
 
 // runtimeImageResponseFromModel 将运行时镜像内部模型转换为 HTTP 稳定字段名。
@@ -145,25 +155,34 @@ func runtimeImageResponsesFromModels(items []RuntimeImage) []RuntimeImageRespons
 }
 
 // toolResponseFromModel 将工具内部模型转换为 HTTP 稳定字段名。
-func toolResponseFromModel(item Tool) ToolResponse {
+// resource_spec 只在边界序列化为原始 JSON，避免把可执行 workload 模型泄露到公开 DTO。
+func toolResponseFromModel(item Tool) (ToolResponse, error) {
+	resourceSpec, err := jsonx.AnyBytes(item.ResourceSpec, apperr.ErrInternal)
+	if err != nil {
+		return ToolResponse{}, err
+	}
 	return ToolResponse{
 		ID:           ids.ID(item.ID),
 		Code:         item.Code,
 		Name:         item.Name,
 		Kind:         item.Kind,
 		EcoTags:      item.EcoTags,
-		ResourceSpec: item.ResourceSpec,
+		ResourceSpec: json.RawMessage(resourceSpec),
 		Status:       item.Status,
-	}
+	}, nil
 }
 
 // toolResponsesFromModels 批量转换沙箱工具列表。
-func toolResponsesFromModels(items []Tool) []ToolResponse {
+func toolResponsesFromModels(items []Tool) ([]ToolResponse, error) {
 	out := make([]ToolResponse, 0, len(items))
 	for _, item := range items {
-		out = append(out, toolResponseFromModel(item))
+		response, err := toolResponseFromModel(item)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, response)
 	}
-	return out
+	return out, nil
 }
 
 // orchestrationCatalogResponse 把编排目录投影转换为 HTTP 稳定字段名。

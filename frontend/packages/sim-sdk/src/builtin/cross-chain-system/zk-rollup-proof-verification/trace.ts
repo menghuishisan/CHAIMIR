@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { zkRollupPhases } from './model';
 
-export const zkRollupSource = [
+const zkRollupSource = [
   'function submitValidityBatch(batch) {',
   '  trace = execute(batch.transactions);',
   '  publicInputs = [oldRoot, newRoot];',

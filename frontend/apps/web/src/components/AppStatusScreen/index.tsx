@@ -7,7 +7,7 @@ import { Icon, cn } from '@chaimir/ui'
 import { traceHintText } from '../../utils/userFacingError'
 
 /** 状态语气:accent 用于进行中/中性状态,danger 用于失败(错误不用品牌色,规范 §6.7 D)。 */
-export type AppStatusTone = 'accent' | 'danger'
+type AppStatusTone = 'accent' | 'danger'
 
 export interface AppStatusScreenProps {
   icon: LucideIcon

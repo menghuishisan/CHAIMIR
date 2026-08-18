@@ -8,10 +8,15 @@ import (
 	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/privacy"
 )
 
-// ToTenantDTO 把租户领域快照转换为 HTTP 响应 DTO。
-func ToTenantDTO(t Tenant) TenantDTO {
+// ToTenantDTO 把租户领域快照转换为 HTTP 响应 DTO,并拒绝损坏的租户配置。
+func ToTenantDTO(t Tenant) (TenantDTO, error) {
+	featureFlags, err := jsonx.ObjectMapStrict(t.FeatureFlags)
+	if err != nil {
+		return TenantDTO{}, apperr.ErrIdentityTenantConfigInvalid.WithCause(err)
+	}
 	return TenantDTO{
 		ID:                   ids.ID(t.ID),
 		Code:                 t.Code,
@@ -22,12 +27,12 @@ func ToTenantDTO(t Tenant) TenantDTO {
 		ExpireAt:             t.ExpireAt,
 		LogoRef:              t.LogoRef,
 		DisplayName:          t.DisplayName,
-		FeatureFlags:         jsonx.ObjectMap(t.FeatureFlags),
+		FeatureFlags:         featureFlags,
 		AuthMode:             t.AuthMode,
 		EnableActivationCode: t.EnableActivationCode,
 		CreatedAt:            timex.RFC3339OrEmpty(t.CreatedAt),
 		UpdatedAt:            timex.RFC3339OrEmpty(t.UpdatedAt),
-	}
+	}, nil
 }
 
 // ToAccountDTO 把账号领域快照转换为 HTTP 响应 DTO。
@@ -42,11 +47,9 @@ func ToAccountDTO(a Account, phonePlain string) AccountDTO {
 		Status:       a.Status,
 		Title:        a.Title,
 	}
-	if !a.CreatedAt.IsZero() {
-		dto.CreatedAt = a.CreatedAt.Format("2006-01-02T15:04:05Z07:00")
-	}
+	dto.CreatedAt = timex.RFC3339OrEmpty(a.CreatedAt)
 	if phonePlain != "" {
-		dto.PhoneMasked = MaskPhone(phonePlain)
+		dto.PhoneMasked = privacy.MaskPhone(phonePlain)
 	}
 	return dto
 }
@@ -58,8 +61,8 @@ func ToSessionDTO(session AuthSession) SessionDTO {
 		DeviceInfo: session.DeviceInfo,
 		IP:         session.IP,
 		Status:     session.Status,
-		ExpireAt:   session.ExpireAt.Format("2006-01-02T15:04:05Z07:00"),
-		CreatedAt:  session.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ExpireAt:   timex.RFC3339OrEmpty(session.ExpireAt),
+		CreatedAt:  timex.RFC3339OrEmpty(session.CreatedAt),
 	}
 }
 
@@ -70,8 +73,8 @@ func ToPlatformSessionDTO(session PlatformAuthSession) SessionDTO {
 		DeviceInfo: session.DeviceInfo,
 		IP:         session.IP,
 		Status:     session.Status,
-		ExpireAt:   session.ExpireAt.Format("2006-01-02T15:04:05Z07:00"),
-		CreatedAt:  session.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		ExpireAt:   timex.RFC3339OrEmpty(session.ExpireAt),
+		CreatedAt:  timex.RFC3339OrEmpty(session.CreatedAt),
 	}
 }
 
@@ -116,7 +119,7 @@ func ToContractAccount(a Account, phonePlain string) contracts.AccountInfo {
 		AccountID:    a.ID,
 		TenantID:     a.TenantID,
 		Name:         a.Name,
-		PhoneMasked:  MaskPhone(phonePlain),
+		PhoneMasked:  privacy.MaskPhone(phonePlain),
 		No:           a.No,
 		BaseIdentity: a.BaseIdentity,
 		Roles:        roles,
@@ -167,6 +170,6 @@ func ToImportBatchDTO(batch ImportBatch) ImportBatchDTO {
 		Success:    batch.Success,
 		Failed:     batch.Failed,
 		Status:     batch.Status,
-		CreatedAt:  batch.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+		CreatedAt:  timex.RFC3339OrEmpty(batch.CreatedAt),
 	}
 }

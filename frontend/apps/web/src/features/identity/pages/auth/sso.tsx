@@ -13,14 +13,14 @@ import { api } from '../../../../app/api'
 import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
 import { safeExternalHttpsUrl } from '../../../../utils/safeNavigation'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { passwordRequiredError, requiredError, useFieldErrors } from './auth-form'
+import { passwordRequiredError, requiredError, useFieldErrors } from '../../authForm'
 import {
   AuthFormError,
   AuthHeading,
   AuthPanel,
   AuthQuietLink,
   AuthTextField,
-} from './auth-ui'
+} from '../../components/AuthUI'
 
 /** ssoServiceUrl 返回本页自身地址(不含票据参数),作为 CAS 的 service 回跳目标 */
 function ssoServiceUrl(tenantCode: string): string {

@@ -21,7 +21,15 @@ func Protect(cipher *crypto.Cipher, value map[string]any, label string) (map[str
 	for key, raw := range value {
 		if privacy.IsCredentialKey(key) {
 			text, ok := raw.(string)
-			if !ok || strings.TrimSpace(text) == "" {
+			if !ok {
+				protected, err := protectValue(cipher, raw, label)
+				if err != nil {
+					return nil, err
+				}
+				out[key] = protected
+				continue
+			}
+			if strings.TrimSpace(text) == "" {
 				out[key] = raw
 				continue
 			}

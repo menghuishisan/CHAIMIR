@@ -26,7 +26,7 @@ func (s *Service) ListCourses(ctx context.Context, filter CourseListFilter) ([]C
 	filter.Page, filter.Size = pagex.Normalize(filter.Page, filter.Size)
 	role := strings.TrimSpace(filter.Role)
 	if role == "" {
-		role = "student"
+		role = contracts.RoleStudent
 	}
 	var (
 		courses []Course
@@ -34,7 +34,7 @@ func (s *Service) ListCourses(ctx context.Context, filter CourseListFilter) ([]C
 	)
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		if role == "teacher" {
+		if role == contracts.RoleTeacher {
 			courses, total, err = tx.ListTeacherCourses(ctx, id.TenantID, id.AccountID, filter)
 			return err
 		}

@@ -1,7 +1,7 @@
 // Identity API：认证、授权、用户管理
 // 对应后端 M1 模块
 
-import { ApiClient } from '../client'
+import { ApiClient, encodePathSegment } from '../client'
 import type { AttachmentResponse } from '../client'
 import type { AccountStatus, ApplicationStatus, BaseIdentity, ImportTemplateFormat, TenantStatus } from '../constants/identity'
 import type { PaginatedResponse } from '../types/common'
@@ -11,6 +11,7 @@ import type {
   LoginNoRequest,
   LoginSMSRequest,
   SendSMSRequest,
+  PathTicketRequest,
   PathTicketResponse,
   PasswordResetRequest,
   ActivateRequest,
@@ -100,14 +101,16 @@ export class IdentityApi {
    * 为指定实时通道换取短时连接票据。
    */
   async issueWebSocketTicket(path: string): Promise<PathTicketResponse> {
-    return this.client.post('/auth/ws-ticket', { path })
+    const data: PathTicketRequest = { path }
+    return this.client.post('/auth/ws-ticket', data)
   }
 
   /**
    * 为浏览器 Web 工具路径前缀换取短时入口票据。
    */
   async issueBrowserAccessTicket(path: string): Promise<PathTicketResponse> {
-    return this.client.post('/auth/browser-ticket', { path })
+    const data: PathTicketRequest = { path }
+    return this.client.post('/auth/browser-ticket', data)
   }
 
   /**
@@ -135,21 +138,21 @@ export class IdentityApi {
    * 获取 CAS 登录跳转地址
    */
   async getCASLoginUrl(tenantCode: string, service: string): Promise<{ redirect_url: string }> {
-    return this.client.get(`/auth/sso/${tenantCode}/login`, { service })
+    return this.client.get(`/auth/sso/${encodePathSegment(tenantCode)}/login`, { service })
   }
 
   /**
    * 处理 CAS 回调并换取登录态
    */
   async casCallback(tenantCode: string, params: { ticket: string; service: string }): Promise<LoginResponse> {
-    return this.client.get(`/auth/sso/${tenantCode}/callback`, params)
+    return this.client.get(`/auth/sso/${encodePathSegment(tenantCode)}/callback`, params)
   }
 
   /**
    * LDAP 登录
    */
   async ldapLogin(tenantCode: string, data: LDAPLoginRequest): Promise<LoginResponse> {
-    return this.client.post(`/auth/sso/${tenantCode}/ldap`, data)
+    return this.client.post(`/auth/sso/${encodePathSegment(tenantCode)}/ldap`, data)
   }
 
   // ===== 当前用户 =====
@@ -210,70 +213,70 @@ export class IdentityApi {
    * 更新账号基础资料，字段范围与后端学校管理员接口一致。
    */
   async updateAccount(accountId: string, data: UpdateAccountRequest): Promise<Account> {
-    return this.client.patch(`/accounts/${accountId}`, data)
+    return this.client.patch(`/accounts/${encodePathSegment(accountId)}`, data)
   }
 
   /**
    * 停用账号并由后端吊销相关会话。
    */
   async disableAccount(accountId: string): Promise<void> {
-    return this.client.post(`/accounts/${accountId}/disable`)
+    return this.client.post(`/accounts/${encodePathSegment(accountId)}/disable`)
   }
 
   /**
    * 启用已停用账号。
    */
   async enableAccount(accountId: string): Promise<void> {
-    return this.client.post(`/accounts/${accountId}/enable`)
+    return this.client.post(`/accounts/${encodePathSegment(accountId)}/enable`)
   }
 
   /**
    * 归档账号，适用于毕业或离校等租户内生命周期流转。
    */
   async archiveAccount(accountId: string): Promise<void> {
-    return this.client.post(`/accounts/${accountId}/archive`)
+    return this.client.post(`/accounts/${encodePathSegment(accountId)}/archive`)
   }
 
   /**
    * 恢复已归档账号为可用状态。
    */
   async restoreAccount(accountId: string): Promise<void> {
-    return this.client.post(`/accounts/${accountId}/restore`)
+    return this.client.post(`/accounts/${encodePathSegment(accountId)}/restore`)
   }
 
   /**
    * 注销账号，交由后端执行软删除和状态流转。
    */
   async cancelAccount(accountId: string): Promise<void> {
-    return this.client.post(`/accounts/${accountId}/cancel`)
+    return this.client.post(`/accounts/${encodePathSegment(accountId)}/cancel`)
   }
 
   /**
    * 强制指定账号下线，吊销其所有服务端会话。
    */
   async forceLogoutAccount(accountId: string): Promise<void> {
-    return this.client.post(`/accounts/${accountId}/force-logout`)
+    return this.client.post(`/accounts/${encodePathSegment(accountId)}/force-logout`)
   }
 
   /**
    * 学校管理员重置指定账号密码，并可要求下次登录改密。
    */
   async resetAccountPassword(accountId: string, data: AdminResetPasswordRequest): Promise<void> {
-    return this.client.post(`/accounts/${accountId}/reset-password`, data)
+    return this.client.post(`/accounts/${encodePathSegment(accountId)}/reset-password`, data)
   }
 
   /**
    * 授予教师学校管理员角色。
    */
   async grantSchoolAdmin(accountId: string): Promise<void> {
-    return this.client.post(`/accounts/${accountId}/grant-admin`)
+    return this.client.post(`/accounts/${encodePathSegment(accountId)}/grant-admin`)
   }
 
   /**
    * 撤销账号的学校管理员角色。
    */
   async revokeSchoolAdmin(accountId: string): Promise<void> {
-    return this.client.post(`/accounts/${accountId}/revoke-admin`)
+    return this.client.post(`/accounts/${encodePathSegment(accountId)}/revoke-admin`)
   }
 
   /**
@@ -340,14 +343,14 @@ export class IdentityApi {
    * 更新院系名称或编码。
    */
   async updateDepartment(id: string, data: DepartmentRequest): Promise<Department> {
-    return this.client.patch(`/org/departments/${id}`, data)
+    return this.client.patch(`/org/departments/${encodePathSegment(id)}`, data)
   }
 
   /**
    * 删除院系，由后端校验是否仍被专业或账号引用。
    */
   async deleteDepartment(id: string): Promise<void> {
-    return this.client.delete(`/org/departments/${id}`)
+    return this.client.delete(`/org/departments/${encodePathSegment(id)}`)
   }
 
   /**
@@ -368,14 +371,14 @@ export class IdentityApi {
    * 更新专业信息。
    */
   async updateMajor(id: string, data: MajorRequest): Promise<Major> {
-    return this.client.patch(`/org/majors/${id}`, data)
+    return this.client.patch(`/org/majors/${encodePathSegment(id)}`, data)
   }
 
   /**
    * 删除专业，由后端校验班级依赖。
    */
   async deleteMajor(id: string): Promise<void> {
-    return this.client.delete(`/org/majors/${id}`)
+    return this.client.delete(`/org/majors/${encodePathSegment(id)}`)
   }
 
   /**
@@ -391,7 +394,7 @@ export class IdentityApi {
    * 会带手机号掩码、账号状态与角色，教师端不该经它取人。
    */
   async listClassStudents(classId: string): Promise<ClassStudent[]> {
-    return this.client.get(`/org/classes/${classId}/students`)
+    return this.client.get(`/org/classes/${encodePathSegment(classId)}/students`)
   }
 
   /**
@@ -405,14 +408,14 @@ export class IdentityApi {
    * 更新班级信息。
    */
   async updateClass(id: string, data: ClassRequest): Promise<Class> {
-    return this.client.patch(`/org/classes/${id}`, data)
+    return this.client.patch(`/org/classes/${encodePathSegment(id)}`, data)
   }
 
   /**
    * 删除班级，由后端校验账号依赖。
    */
   async deleteClass(id: string): Promise<void> {
-    return this.client.delete(`/org/classes/${id}`)
+    return this.client.delete(`/org/classes/${encodePathSegment(id)}`)
   }
 
   /**
@@ -531,14 +534,14 @@ export class IdentityApi {
    * 通过入驻申请
    */
   async approveApplication(applicationId: string, data: ReviewApplicationRequest): Promise<{ tenant: Tenant; activation_code?: string }> {
-    return this.client.post(`/platform/applications/${applicationId}/approve`, data)
+    return this.client.post(`/platform/applications/${encodePathSegment(applicationId)}/approve`, data)
   }
 
   /**
    * 驳回入驻申请
    */
   async rejectApplication(applicationId: string, data: ReviewApplicationRequest): Promise<void> {
-    return this.client.post(`/platform/applications/${applicationId}/reject`, data)
+    return this.client.post(`/platform/applications/${encodePathSegment(applicationId)}/reject`, data)
   }
 
   /**
@@ -558,13 +561,13 @@ export class IdentityApi {
    * 获取租户详情
    */
   async getTenant(tenantId: string): Promise<Tenant> {
-    return this.client.get(`/platform/tenants/${tenantId}`)
+    return this.client.get(`/platform/tenants/${encodePathSegment(tenantId)}`)
   }
 
   /**
    * 更新租户状态
    */
   async updateTenant(tenantId: string, data: UpdateTenantStatusRequest): Promise<Tenant> {
-    return this.client.patch(`/platform/tenants/${tenantId}`, data)
+    return this.client.patch(`/platform/tenants/${encodePathSegment(tenantId)}`, data)
   }
 }

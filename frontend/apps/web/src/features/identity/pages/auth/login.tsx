@@ -5,8 +5,8 @@
 //   输入与提交流程在 login-state(三种方式共用一套状态),各方式的表单在 login-forms。
 // 多学校账号经内存暂存凭证进入 /auth/tenant-select(凭证不进路由 state,防历史记录持久化)。
 
+import { AuthBrandMark, SchoolBrandLine } from '../../../../components/AuthBrand'
 import { useTenantBrand } from '../../useTenantBrand'
-import { AuthBrandMark, SchoolBrandLine } from './auth-ui'
 import { AccountLoginForm, PhoneLoginForm, SsoLoginForm } from './login-forms'
 import { useLoginController } from './login-state'
 

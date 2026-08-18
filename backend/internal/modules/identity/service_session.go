@@ -3,14 +3,11 @@ package identity
 
 import (
 	"context"
-	"errors"
 	"net/http"
 
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // ValidateAccessSession 校验 JWT 绑定的服务端会话仍有效,用于强制下线和单端登录即时生效。
@@ -47,7 +44,7 @@ func (s *Service) validateTenantAccessSession(ctx context.Context, id auth.Sessi
 		tenant = tenantRow
 		return nil
 	}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if isNoRows(err) {
 			return apperr.ErrIdentitySessionInvalid
 		}
 		return apperr.ErrInternal.WithCause(err)
@@ -90,7 +87,7 @@ func (s *Service) validatePlatformAccessSession(ctx context.Context, id auth.Ses
 		admin = adminRow
 		return nil
 	}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if isNoRows(err) {
 			return apperr.ErrIdentitySessionInvalid
 		}
 		return apperr.ErrInternal.WithCause(err)

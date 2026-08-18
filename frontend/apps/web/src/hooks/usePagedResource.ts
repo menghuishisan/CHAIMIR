@@ -5,11 +5,8 @@
 
 import { useCallback, useState } from 'react'
 import type { DependencyList } from 'react'
-import type { PaginatedResponse } from '@chaimir/api-client'
+import { PAGINATION_DEFAULT_SIZE, type PaginatedResponse } from '@chaimir/api-client'
 import { useAsyncResource, type AsyncResourceState } from './useAsyncResource'
-
-/** 列表页默认页大小,与后端 pagex.defaultSize 一致。 */
-export const DEFAULT_PAGE_SIZE = 20
 
 export interface PagedResourceState<T> extends AsyncResourceState<PaginatedResponse<T>> {
   page: number
@@ -27,7 +24,7 @@ export interface PagedResourceState<T> extends AsyncResourceState<PaginatedRespo
 export function usePagedResource<T>(
   loader: (params: { page: number; size: number }) => Promise<PaginatedResponse<T>>,
   deps: DependencyList,
-  pageSize: number = DEFAULT_PAGE_SIZE,
+  pageSize: number = PAGINATION_DEFAULT_SIZE,
 ): PagedResourceState<T> {
   const [page, setPageState] = useState(1)
 

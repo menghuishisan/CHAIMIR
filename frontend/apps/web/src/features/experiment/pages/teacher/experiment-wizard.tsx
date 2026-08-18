@@ -10,14 +10,13 @@ import { ArrowLeft, ArrowRight, CircleCheck, LayoutTemplate, Send } from 'lucide
 import {
   ExperimentCollabMode,
   ExperimentStatus,
-  EXPERIMENT_VALIDATION_LEVEL,
+  PAGINATION_MAX_SIZE,
   type Course,
   type Experiment,
   type ValidationResult,
 } from '@chaimir/api-client'
 import {
   Autosave,
-  Badge,
   Breadcrumb,
   Button,
   Callout,
@@ -38,8 +37,10 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
-import { experimentStatusLabel, experimentStatusTone } from '../../../../utils/labels/experiment'
+import { experimentStatusLabel } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { ExperimentValidationIssues } from '../../components/ExperimentValidationIssues'
+import { experimentStatusTone } from '../../statusPresentation'
 import { WizardBasicStep } from './wizard-basic'
 import { WizardCheckpointsStep } from './wizard-checkpoints'
 import { WizardComponentsStep } from './wizard-components'
@@ -52,12 +53,6 @@ import {
   useWizardPersistence,
   type ExperimentDraft,
 } from './wizard-state'
-
-/** 课程选择器一次取回的条数:后端分页上限 100。 */
-const COURSE_PICKER_SIZE = 100
-
-/** 定位单个实验时一次取回的条数:与后端分页上限一致。 */
-const EXPERIMENT_LOOKUP_SIZE = 100
 
 /** 新建时的初始草稿:名称留空由教师填,其余给可用的最小配置。 */
 function initialDraft(): ExperimentDraft {
@@ -145,9 +140,9 @@ function WizardLoader({ experimentId }: { experimentId: string }) {
     () =>
       Promise.all([
         api.experiment
-          .getExperiments({ page: 1, size: EXPERIMENT_LOOKUP_SIZE })
+          .getExperiments({ page: 1, size: PAGINATION_MAX_SIZE })
           .then((page) => page.list.find((item) => item.id === experimentId)),
-        api.teaching.getCourses({ role: 'teacher', page: 1, size: COURSE_PICKER_SIZE }),
+        api.teaching.getCourses({ role: 'teacher', page: 1, size: PAGINATION_MAX_SIZE }),
       ]).then(([experiment, courses]) => ({ experiment, courses: courses.list })),
     [experimentId],
     (value) => value.experiment === undefined
@@ -419,22 +414,7 @@ function WizardContent({ experiment, courses, onSaved }: WizardContentProps) {
                 修正后再发布,否则学生进入实验时可能无法准备环境。
               </Callout>
             )}
-            {(validateResult?.issues ?? []).length > 0 ? (
-              <ul className="flex flex-col gap-2">
-                {validateResult?.issues.map((issue, index) => (
-                  <li key={index} className="flex items-start gap-2 text-sm">
-                    <Badge
-                      tone={
-                        issue.level === EXPERIMENT_VALIDATION_LEVEL.ERROR ? 'danger' : 'warning'
-                      }
-                    >
-                      {issue.level === EXPERIMENT_VALIDATION_LEVEL.ERROR ? '必须修正' : '建议检查'}
-                    </Badge>
-                    <span className="min-w-0 text-ink">{issue.message}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
+            <ExperimentValidationIssues issues={validateResult?.issues ?? []} />
           </ModalBody>
           <ModalFooter>
             <Button variant="outline" onClick={() => setValidateResult(undefined)}>

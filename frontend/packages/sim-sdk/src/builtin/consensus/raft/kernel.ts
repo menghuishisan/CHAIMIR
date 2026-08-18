@@ -55,7 +55,7 @@ export function reduceRaftEvent(state: RaftState, event: SimEvent, _context: Red
 /**
  * advanceRaft 按 Raft 协议顺序推进一个过程单元。
  */
-export function advanceRaft(state: RaftState): RaftState {
+function advanceRaft(state: RaftState): RaftState {
   const phaseIndex = Math.min(raftPhases.length - 1, state.phaseIndex + (state.lastTransition === raftPhases[state.phaseIndex].id ? 1 : 0));
   const next = { ...state, phaseIndex, tick: state.tick + 1 };
   if (phaseIndex === 1) return startElection(next);
@@ -85,7 +85,7 @@ export function raftSingleLeader(state: RaftState): CheckpointResult {
 /**
  * finalizeRaftState 刷新派生说明、指标、消息进度和代码追踪。
  */
-export function finalizeRaftState(state: RaftState): RaftState {
+function finalizeRaftState(state: RaftState): RaftState {
   return {
     ...state,
     phase: raftPhases[state.phaseIndex].label,

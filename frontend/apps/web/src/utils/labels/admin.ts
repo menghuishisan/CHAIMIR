@@ -1,8 +1,6 @@
 // admin labels 文件维护 M9 管理后台枚举与审计动作的用户向文案。
 
-import type { StatusTone } from '@chaimir/ui'
 import {
-  AdminScope,
   AlertLevel,
   AlertStatus,
   AuditActorRole,
@@ -10,36 +8,15 @@ import {
   BackupType,
 } from '@chaimir/api-client'
 
-const SCOPE_LABELS: Record<AdminScope, string> = {
-  [AdminScope.GLOBAL]: '平台全局',
-  [AdminScope.TENANT]: '本校',
-}
-
-/** adminScopeLabel 返回配置与规则的作用范围文案。 */
-export function adminScopeLabel(scope: AdminScope): string {
-  return SCOPE_LABELS[scope]
-}
-
 const ALERT_STATUS_LABELS: Record<AlertStatus, string> = {
   [AlertStatus.PENDING]: '待处理',
   [AlertStatus.HANDLED]: '已处理',
   [AlertStatus.IGNORED]: '已忽略',
 }
 
-const ALERT_STATUS_TONES: Record<AlertStatus, StatusTone> = {
-  [AlertStatus.PENDING]: 'warning',
-  [AlertStatus.HANDLED]: 'success',
-  [AlertStatus.IGNORED]: 'neutral',
-}
-
 /** alertStatusLabel 返回告警处理状态文案。 */
 export function alertStatusLabel(status: AlertStatus): string {
   return ALERT_STATUS_LABELS[status]
-}
-
-/** alertStatusTone 返回告警处理状态语义色。 */
-export function alertStatusTone(status: AlertStatus): StatusTone {
-  return ALERT_STATUS_TONES[status]
 }
 
 /** 告警级别文案与后端 1 提示、2 警告、3 严重、4 紧急的闭集契约一致。 */
@@ -50,30 +27,10 @@ const ALERT_LEVEL_LABELS: Record<AlertLevel, string> = {
   [AlertLevel.CRITICAL]: '紧急',
 }
 
-const ALERT_LEVEL_TONES: Record<AlertLevel, StatusTone> = {
-  [AlertLevel.NOTICE]: 'info',
-  [AlertLevel.WARNING]: 'warning',
-  [AlertLevel.SEVERE]: 'danger',
-  [AlertLevel.CRITICAL]: 'danger',
-}
-
 /** alertLevelLabel 返回告警级别文案。 */
 export function alertLevelLabel(level: AlertLevel): string {
   return ALERT_LEVEL_LABELS[level]
 }
-
-/** alertLevelTone 返回告警级别语义色。 */
-export function alertLevelTone(level: AlertLevel): StatusTone {
-  return ALERT_LEVEL_TONES[level]
-}
-
-/** ALERT_LEVELS 供规则表单按登记顺序渲染级别选项。 */
-export const ALERT_LEVELS = [
-  AlertLevel.NOTICE,
-  AlertLevel.WARNING,
-  AlertLevel.SEVERE,
-  AlertLevel.CRITICAL,
-] as const satisfies readonly AlertLevel[]
 
 const BACKUP_TYPE_LABELS: Record<BackupType, string> = {
   [BackupType.FULL]: '全量备份',
@@ -90,20 +47,9 @@ const BACKUP_STATUS_LABELS: Record<BackupStatus, string> = {
   [BackupStatus.FAILED]: '备份失败',
 }
 
-const BACKUP_STATUS_TONES: Record<BackupStatus, StatusTone> = {
-  [BackupStatus.RUNNING]: 'info',
-  [BackupStatus.SUCCEEDED]: 'success',
-  [BackupStatus.FAILED]: 'danger',
-}
-
 /** backupStatusLabel 返回备份状态文案。 */
 export function backupStatusLabel(status: BackupStatus): string {
   return BACKUP_STATUS_LABELS[status]
-}
-
-/** backupStatusTone 返回备份状态语义色。 */
-export function backupStatusTone(status: BackupStatus): StatusTone {
-  return BACKUP_STATUS_TONES[status]
 }
 
 const ACTOR_ROLE_LABELS: Record<AuditActorRole, string> = {
@@ -254,43 +200,11 @@ export function statisticsMetricLabel(key: string): string | undefined {
   return STATISTICS_METRIC_LABELS[key]
 }
 
-/** 一组语义相近的统计指标,对应看板上的一张趋势图。 */
-export interface StatisticsMetricGroup {
-  id: string
-  title: string
-  /** 该组包含的指标键;逐日快照里没出现的键自动跳过 */
-  keys: string[]
-}
-
-/**
- * 统计指标的分组:一张折线图最多 6 条系列(规范 §8.1),而已登记指标有 14 个,
- * 全塞一张图会糊成一团。故按语义分组,每组一张图;各端只会渲染出自己数据里真有的那几组。
- */
-export const STATISTICS_METRIC_GROUPS: StatisticsMetricGroup[] = [
-  {
-    id: 'account',
-    title: '账号',
-    keys: ['account_count', 'active_account_count', 'new_account_count'],
-  },
-  { id: 'tenant', title: '学校', keys: ['tenant_count'] },
-  {
-    id: 'teaching',
-    title: '教学',
-    keys: ['course_count', 'active_course_count', 'experiment_count', 'active_instance_count'],
-  },
-  {
-    id: 'contest',
-    title: '竞赛与判题',
-    keys: ['contest_count', 'active_contest_count', 'submission_count', 'judge_task_count'],
-  },
-  { id: 'resource', title: '资源与时长', keys: ['active_sandbox_count', 'learning_duration_sec'] },
-]
-
 /**
  * 系统配置项的用户向名称与说明。
  * 配置值是 JSONB,界面按已登记的配置项渲染显式表单,不给裸 JSON 文本域。
  */
-export const CONFIG_KEY_LABELS: Record<string, { name: string; description: string }> = {
+const CONFIG_KEY_LABELS: Record<string, { name: string; description: string }> = {
   'sandbox.default_quota': {
     name: '沙箱默认配额',
     description: '新学校开通时的沙箱并发与资源上限',
@@ -315,33 +229,33 @@ export function configKeyDescription(key: string): string | undefined {
  * 告警指标的用户向名称。metric 是后端开放字符串,规则表单从已登记指标里选,
  * 不让管理员手写指标名(写错要等到告警不触发才发现)。
  */
-export const ALERT_METRICS = [
-  { value: 'sandbox.active_count', label: '活跃实验环境数' },
-  { value: 'sandbox.failed_rate', label: '实验环境创建失败率' },
-  { value: 'judge.queue_length', label: '待评分任务数量' },
-  { value: 'judge.failed_rate', label: '自动评分失败率' },
-  { value: 'account.login_failed_count', label: '登录失败次数' },
-  { value: 'transfer.failed_count', label: '导入导出失败数' },
-  { value: 'grade.warning_count', label: '学业预警数' },
-] as const
+const ALERT_METRIC_LABELS: Record<string, string> = {
+  'sandbox.active_count': '活跃实验环境数',
+  'sandbox.failed_rate': '实验环境创建失败率',
+  'judge.queue_length': '待评分任务数量',
+  'judge.failed_rate': '自动评分失败率',
+  'account.login_failed_count': '登录失败次数',
+  'transfer.failed_count': '导入导出失败数',
+  'grade.warning_count': '学业预警数',
+}
 
 /** alertMetricLabel 返回告警指标名称;未登记指标显示原值(便于排查配置)。 */
 export function alertMetricLabel(metric: string): string {
-  return ALERT_METRICS.find((item) => item.value === metric)?.label ?? metric
+  return ALERT_METRIC_LABELS[metric] ?? metric
 }
 
 /**
  * 告警条件的结构化键。condition 是 JSONB,规则表单按「比较方式 + 阈值 + 持续时间」
  * 三个显式字段组装,不给裸 JSON。
  */
-export const ALERT_CONDITION_OPERATORS = [
-  { value: 'gt', label: '大于' },
-  { value: 'gte', label: '大于或等于' },
-  { value: 'lt', label: '小于' },
-  { value: 'lte', label: '小于或等于' },
-] as const
+const ALERT_CONDITION_OPERATOR_LABELS: Record<string, string> = {
+  gt: '大于',
+  gte: '大于或等于',
+  lt: '小于',
+  lte: '小于或等于',
+}
 
 /** alertConditionOperatorLabel 返回比较方式文案。 */
 export function alertConditionOperatorLabel(operator: string): string {
-  return ALERT_CONDITION_OPERATORS.find((item) => item.value === operator)?.label ?? operator
+  return ALERT_CONDITION_OPERATOR_LABELS[operator] ?? operator
 }

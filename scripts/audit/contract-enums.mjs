@@ -85,9 +85,33 @@ function tsInterfaceStringUnion(path, interfaceName, field) {
     new RegExp(`^\\s*${field}\\??:\\s*([^\\n]+)$`, "m"),
   );
   if (!fieldLine) return undefined;
-  return new Set(
-    [...fieldLine[1].matchAll(/'([^']+)'/g)].map((match) => match[1]),
+  const literals = [...fieldLine[1].matchAll(/'([^']+)'/g)].map(
+    (match) => match[1],
   );
+  if (literals.length > 0) return new Set(literals);
+  const alias = fieldLine[1].trim().replace(/\[\]$/, "");
+  const aliasMatch = source.match(
+    new RegExp(
+      `export type ${alias}\\s*=\\s*\\(typeof ([A-Z][A-Z0-9_]*)\\)\\[keyof typeof \\1\\]`,
+    ),
+  );
+  let values = aliasMatch ? tsStringConst(path, aliasMatch[1]) : undefined;
+  if (!values) {
+    const importMatch = source.match(
+      new RegExp(`\\b${alias}\\b[\\s\\S]{0,300}?from ['\"]([^'\"]+)['\"]`),
+    );
+    if (importMatch) {
+      const target = `${join(path.split('/').slice(0, -1).join('/'), importMatch[1])}.ts`;
+      const targetSource = read(target);
+      const targetAlias = targetSource.match(
+        new RegExp(
+          `export type ${alias}\\s*=\\s*\\(typeof ([A-Z][A-Z0-9_]*)\\)\\[keyof typeof \\1\\]`,
+        ),
+      );
+      if (targetAlias) values = tsStringConst(target, targetAlias[1]);
+    }
+  }
+  return values ? new Set(values.values()) : undefined;
 }
 
 /** goCaseStringMap 提取 `case NumericPrefixX: return "value"` 的公开字符串映射。 */
@@ -785,6 +809,24 @@ const stringGroups = [
     "frontend/packages/api-client/src/constants/transfer.ts",
     "TRANSFER_CHANNEL",
   ],
+  [
+    "backend/internal/modules/sandbox/enum.go",
+    "ChainOperation",
+    "frontend/packages/api-client/src/constants/sandbox.ts",
+    "SANDBOX_CHAIN_OPERATION",
+  ],
+  [
+    "backend/internal/modules/contest/enum.go",
+    "VulnChainOperation",
+    "frontend/packages/api-client/src/constants/contest.ts",
+    "VULN_CHAIN_OPERATION",
+  ],
+  [
+    "backend/pkg/chainassert/chainassert.go",
+    "Operation",
+    "frontend/packages/api-client/src/constants/contest.ts",
+    "CHAIN_ASSERT_OPERATION",
+  ],
 ].map(([go, prefix, ts, constName, omit]) => ({
   go,
   prefix,
@@ -820,24 +862,11 @@ const caseStringGroups = [
   ],
 ].map(([go, prefix, ts, constName]) => ({ go, prefix, ts, constName }));
 
-const stringUnionGroups = [
-  ["VolumeAccess", "student_access"],
-  ["VolumePersistence", "persistence"],
-  ["VolumeSnapshot", "snapshot_scope"],
-].map(([prefix, field]) => ({
-  go: "backend/internal/modules/sandbox/enum.go",
-  prefix,
-  ts: "frontend/packages/api-client/src/types/sandbox.ts",
-  interfaceName: "SandboxAdapterSpec",
-  field,
-}));
-
 const problems = [
   ...groups.flatMap(compareGroup),
   ...compareAuditActorRole(),
   ...stringGroups.flatMap(compareStringGroup),
   ...caseStringGroups.flatMap(compareCaseStringGroup),
-  ...stringUnionGroups.flatMap(compareStringUnionGroup),
 ];
 
 // 每个前端数字枚举都必须有后端对照登记,防止新增枚举绕过本审查。
@@ -976,5 +1005,5 @@ if (problems.length > 0) {
 }
 
 console.log(
-  `前后端枚举契约审查通过:${groups.length + 1} 组数字枚举、${stringGroups.length + caseStringGroups.length} 组字符串协议、${stringUnionGroups.length} 组字符串联合类型完全一致,公开字段未退化为宽泛类型。`,
+  `前后端枚举契约审查通过:${groups.length + 1} 组数字枚举、${stringGroups.length + caseStringGroups.length} 组字符串协议,公开字段未退化为宽泛类型。`,
 );

@@ -639,6 +639,39 @@ func (q *Queries) CreateCourse(ctx context.Context, arg CreateCourseParams) (Cre
 	return i, err
 }
 
+const createCourseGradeExportRequest = `-- name: CreateCourseGradeExportRequest :one
+INSERT INTO course_grade_export_request (transfer_task_id, tenant_id, account_id, course_id, next_check_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, now(), now(), now())
+RETURNING transfer_task_id, tenant_id, account_id, course_id, next_check_at, created_at, updated_at
+`
+
+type CreateCourseGradeExportRequestParams struct {
+	TransferTaskID int64 `json:"transfer_task_id"`
+	TenantID       int64 `json:"tenant_id"`
+	AccountID      int64 `json:"account_id"`
+	CourseID       int64 `json:"course_id"`
+}
+
+func (q *Queries) CreateCourseGradeExportRequest(ctx context.Context, arg CreateCourseGradeExportRequestParams) (CourseGradeExportRequest, error) {
+	row := q.db.QueryRow(ctx, createCourseGradeExportRequest,
+		arg.TransferTaskID,
+		arg.TenantID,
+		arg.AccountID,
+		arg.CourseID,
+	)
+	var i CourseGradeExportRequest
+	err := row.Scan(
+		&i.TransferTaskID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.CourseID,
+		&i.NextCheckAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createCourseMember = `-- name: CreateCourseMember :one
 INSERT INTO course_member (id, tenant_id, course_id, student_id, joined_at, join_mode)
 VALUES ($1, $2, $3, $4, now(), $5)
@@ -980,6 +1013,21 @@ type DeleteAssignmentItemsParams struct {
 
 func (q *Queries) DeleteAssignmentItems(ctx context.Context, arg DeleteAssignmentItemsParams) error {
 	_, err := q.db.Exec(ctx, deleteAssignmentItems, arg.TenantID, arg.AssignmentID)
+	return err
+}
+
+const deleteCourseGradeExportRequest = `-- name: DeleteCourseGradeExportRequest :exec
+DELETE FROM course_grade_export_request
+WHERE transfer_task_id = $1 AND tenant_id = $2
+`
+
+type DeleteCourseGradeExportRequestParams struct {
+	TransferTaskID int64 `json:"transfer_task_id"`
+	TenantID       int64 `json:"tenant_id"`
+}
+
+func (q *Queries) DeleteCourseGradeExportRequest(ctx context.Context, arg DeleteCourseGradeExportRequestParams) error {
+	_, err := q.db.Exec(ctx, deleteCourseGradeExportRequest, arg.TransferTaskID, arg.TenantID)
 	return err
 }
 
@@ -2017,6 +2065,47 @@ func (q *Queries) ListDiscussionPosts(ctx context.Context, arg ListDiscussionPos
 	return items, nil
 }
 
+const listDueCourseGradeExportRequests = `-- name: ListDueCourseGradeExportRequests :many
+SELECT transfer_task_id, tenant_id, account_id, course_id, next_check_at, created_at, updated_at
+FROM course_grade_export_request
+WHERE next_check_at <= $1
+ORDER BY next_check_at ASC, created_at ASC
+LIMIT $2
+`
+
+type ListDueCourseGradeExportRequestsParams struct {
+	NextCheckAt pgtype.Timestamptz `json:"next_check_at"`
+	Limit       int32              `json:"limit"`
+}
+
+func (q *Queries) ListDueCourseGradeExportRequests(ctx context.Context, arg ListDueCourseGradeExportRequestsParams) ([]CourseGradeExportRequest, error) {
+	rows, err := q.db.Query(ctx, listDueCourseGradeExportRequests, arg.NextCheckAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CourseGradeExportRequest{}
+	for rows.Next() {
+		var i CourseGradeExportRequest
+		if err := rows.Scan(
+			&i.TransferTaskID,
+			&i.TenantID,
+			&i.AccountID,
+			&i.CourseID,
+			&i.NextCheckAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listGradeWeights = `-- name: ListGradeWeights :many
 SELECT id, tenant_id, course_id, source_type, source_ref, weight::float8 AS weight, created_at, updated_at
 FROM grade_weight
@@ -2994,6 +3083,34 @@ func (q *Queries) RetryJudgeOutbox(ctx context.Context, arg RetryJudgeOutboxPara
 		&i.LastError,
 		&i.Score,
 		&i.CompletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setCourseGradeExportRequestNextCheck = `-- name: SetCourseGradeExportRequestNextCheck :one
+UPDATE course_grade_export_request
+SET next_check_at = $3, updated_at = now()
+WHERE transfer_task_id = $1 AND tenant_id = $2
+RETURNING transfer_task_id, tenant_id, account_id, course_id, next_check_at, created_at, updated_at
+`
+
+type SetCourseGradeExportRequestNextCheckParams struct {
+	TransferTaskID int64              `json:"transfer_task_id"`
+	TenantID       int64              `json:"tenant_id"`
+	NextCheckAt    pgtype.Timestamptz `json:"next_check_at"`
+}
+
+func (q *Queries) SetCourseGradeExportRequestNextCheck(ctx context.Context, arg SetCourseGradeExportRequestNextCheckParams) (CourseGradeExportRequest, error) {
+	row := q.db.QueryRow(ctx, setCourseGradeExportRequestNextCheck, arg.TransferTaskID, arg.TenantID, arg.NextCheckAt)
+	var i CourseGradeExportRequest
+	err := row.Scan(
+		&i.TransferTaskID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.CourseID,
+		&i.NextCheckAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

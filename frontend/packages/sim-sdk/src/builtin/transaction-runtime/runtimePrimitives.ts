@@ -5,7 +5,7 @@ import { fnv1aHex } from '../../runtime/deterministic';
 /**
  * runtimeDigest 用阶段化压缩生成交易执行相关摘要。
  */
-export function runtimeDigest(domain: string, fields: Record<string, string | number | boolean>, length = 16): string {
+function runtimeDigest(domain: string, fields: Record<string, string | number | boolean>, length = 16): string {
   const encoded = Object.keys(fields)
     .sort()
     .map((key) => `${key}=${String(fields[key])}`)

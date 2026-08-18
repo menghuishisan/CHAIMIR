@@ -2,7 +2,7 @@
 
 import type { SimState } from '../../../types';
 
-export interface ZkBatchInput {
+interface ZkBatchInput {
   id: string;
   kind: 'tx' | 'public-input' | 'proof';
   value: string;

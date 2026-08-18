@@ -109,7 +109,7 @@ func (s *Service) GetJudgeSpec(ctx context.Context, tenantID int64, itemCode, it
 	if raw, ok := item.Body["judge_config"].(map[string]any); ok {
 		spec.JudgerCode = jsonx.StringValue(raw["judger_code"])
 		spec.SuiteRef = jsonx.StringValue(raw["suite_ref"])
-		spec.MaxScore = int32FromAny(raw["max_score"])
+		spec.MaxScore = jsonx.Int32FromAny(raw["max_score"], 0)
 		if expectation, ok := raw["expectation"].(map[string]any); ok {
 			cloned, err := jsonx.CloneObjectStrict(expectation)
 			if err != nil {
@@ -119,7 +119,7 @@ func (s *Service) GetJudgeSpec(ctx context.Context, tenantID int64, itemCode, it
 		}
 	}
 	if spec.MaxScore == 0 {
-		spec.MaxScore = int32FromAny(item.Body["max_score"])
+		spec.MaxScore = jsonx.Int32FromAny(item.Body["max_score"], 0)
 	}
 	if spec.SuiteRef == "" {
 		spec.SuiteRef = jsonx.StringValue(item.Body["suite_ref"])
@@ -194,9 +194,4 @@ func (s *Service) SystemImportContentFromHTTP(ctx context.Context, req SystemImp
 		return ItemSnapshotDTO{}, err
 	}
 	return ItemSnapshotDTO{ItemDTO: ItemDTO{Code: snapshot.ItemCode, Version: snapshot.ItemVersion, Type: snapshot.Type, Title: snapshot.Title, Difficulty: snapshot.Difficulty, Visibility: snapshot.Visibility, Tags: snapshot.Tags, KnowledgePoints: snapshot.KnowledgePoints, VersionHash: snapshot.VersionHash, Status: snapshot.Status}, Body: snapshot.Body}, nil
-}
-
-// int32FromAny 从 JSON 动态值读取整数。
-func int32FromAny(value any) int32 {
-	return jsonx.Int32FromAny(value, 0)
 }

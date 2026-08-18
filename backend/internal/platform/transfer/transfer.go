@@ -2,14 +2,29 @@
 package transfer
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"chaimir/internal/platform/ids"
-	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 )
+
+// LeaseArtifactFileName 为每次任务租约生成稳定且不暴露租约值的内部产物文件名。
+// 任务资源前缀仍保持 taskID,因此下载授权契约不变;租约摘要避免过期 worker 与新 worker 竞写同一对象。
+func LeaseArtifactFileName(fileName, leaseToken string) (string, error) {
+	fileName = strings.TrimSpace(fileName)
+	leaseToken = strings.TrimSpace(leaseToken)
+	if fileName == "" || fileName == "." || fileName == ".." || strings.Contains(fileName, "/") || strings.Contains(fileName, "\\") || filepath.Base(fileName) != fileName || leaseToken == "" {
+		return "", fmt.Errorf("导入导出任务租约产物文件名参数非法")
+	}
+	digest := sha256.Sum256([]byte(leaseToken))
+	ext := filepath.Ext(fileName)
+	stem := strings.TrimSuffix(fileName, ext)
+	return stem + "." + hex.EncodeToString(digest[:8]) + ext, nil
+}
 
 // Status 表示统一导入导出任务的生命周期状态。
 type Status string
@@ -37,11 +52,11 @@ const (
 	ChannelExport Channel = "export"
 )
 
-// Config 描述统一导入导出中心的重试和下载授权边界。
+// Config 描述统一导入导出中心的重试边界。
 type Config struct {
-	MaxAttempts      int
-	RetryDelay       time.Duration
-	DownloadGrantTTL time.Duration
+	MaxAttempts   int
+	RetryDelay    time.Duration
+	LeaseDuration time.Duration
 }
 
 // Artifact 表示任务成功后产出的统一文件服务对象引用。
@@ -70,12 +85,13 @@ type Task struct {
 	UpdatedAt        time.Time
 	CompletedAt      time.Time
 	NextAttemptAfter time.Time
+	LeaseToken       string
+	LeaseUntil       time.Time
 }
 
-// Manager 负责统一导入导出中心的通用状态流转和下载授权编排。
+// Manager 负责统一导入导出中心的通用状态流转。
 type Manager struct {
-	Config            Config
-	StorageSigningKey string
+	Config Config
 }
 
 // NewTaskRequest 描述创建统一导入导出任务所需的通用字段。
@@ -156,6 +172,8 @@ func (m Manager) CompleteTask(task Task, req CompleteTaskRequest) (Task, error) 
 	task.CompletedAt = timex.Now()
 	task.UpdatedAt = task.CompletedAt
 	task.NextAttemptAfter = time.Time{}
+	task.LeaseToken = ""
+	task.LeaseUntil = time.Time{}
 	return task, nil
 }
 
@@ -172,7 +190,6 @@ func (m Manager) FailTask(task Task, cause error, now time.Time) (Task, error) {
 	} else {
 		now = timex.UTC(now)
 	}
-	task.AttemptCount++
 	task.LastError = strings.TrimSpace(cause.Error())
 	task.UpdatedAt = now
 	if task.AttemptCount < task.MaxAttempts {
@@ -183,42 +200,32 @@ func (m Manager) FailTask(task Task, cause error, now time.Time) (Task, error) {
 	task.Status = StatusFailed
 	task.CompletedAt = now
 	task.NextAttemptAfter = time.Time{}
+	task.LeaseToken = ""
+	task.LeaseUntil = time.Time{}
 	return task, nil
 }
 
-// BuildDownloadGrant 为已完成任务的产物签发统一文件服务短时下载授权,供下载中心复用。
-func (m Manager) BuildDownloadGrant(task Task, now time.Time) (string, storage.DownloadGrant, error) {
+// ClaimTask 为模块 worker 生成本次执行的租约快照。尝试次数在领取时增加，进程崩溃后的过期租约也会消耗一次尝试。
+func (m Manager) ClaimTask(task Task, leaseToken string, now time.Time) (Task, error) {
 	if err := m.validateConfig(); err != nil {
-		return "", storage.DownloadGrant{}, err
+		return Task{}, err
 	}
-	if task.Status != StatusSucceeded {
-		return "", storage.DownloadGrant{}, fmt.Errorf("仅已完成任务可签发下载授权")
-	}
-	if strings.TrimSpace(task.Artifact.ObjectRef) == "" {
-		return "", storage.DownloadGrant{}, fmt.Errorf("任务缺少产物对象引用")
-	}
-	if strings.TrimSpace(m.StorageSigningKey) == "" {
-		return "", storage.DownloadGrant{}, fmt.Errorf("统一导入导出中心缺少文件服务签名密钥")
+	if strings.TrimSpace(leaseToken) == "" {
+		return Task{}, fmt.Errorf("导入导出任务缺少租约令牌")
 	}
 	if now.IsZero() {
 		now = timex.Now()
 	} else {
 		now = timex.UTC(now)
 	}
-	service := storage.Service{
-		SigningKey:       m.StorageSigningKey,
-		DownloadGrantTTL: m.Config.DownloadGrantTTL,
-	}
-	return service.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
-		TenantID:           task.TenantID,
-		AccountID:          task.AccountID,
-		AllowPlatformScope: task.TenantID == 0,
-		ObjectRef:          task.Artifact.ObjectRef,
-		Module:             "transfer",
-		ResourceType:       string(task.Channel),
-		ResourceID:         ids.Format(task.TaskID),
-		ExpiresAt:          now.Add(m.Config.DownloadGrantTTL),
-	})
+	task.Status = StatusRunning
+	task.AttemptCount++
+	task.LastError = ""
+	task.LeaseToken = strings.TrimSpace(leaseToken)
+	task.LeaseUntil = now.Add(m.Config.LeaseDuration)
+	task.NextAttemptAfter = time.Time{}
+	task.UpdatedAt = now
+	return task, nil
 }
 
 // validateConfig 校验统一导入导出中心的全局运行边界。
@@ -229,8 +236,8 @@ func (m Manager) validateConfig() error {
 	if m.Config.RetryDelay <= 0 {
 		return fmt.Errorf("统一导入导出中心重试间隔必须大于 0")
 	}
-	if m.Config.DownloadGrantTTL <= 0 {
-		return fmt.Errorf("统一导入导出中心下载授权 TTL 必须大于 0")
+	if m.Config.LeaseDuration <= 0 {
+		return fmt.Errorf("统一导入导出中心任务租约时长必须大于 0")
 	}
 	return nil
 }

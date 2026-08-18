@@ -52,18 +52,21 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import {
-  VULN_SOURCE_CONFIG_FIELDS,
   vulnLevelLabel,
-  vulnLevelTone,
   vulnPrevalidateStatusLabel,
-  vulnPrevalidateStatusTone,
   vulnProblemStatusLabel,
-  vulnProblemStatusTone,
   vulnRuntimeModeLabel,
   vulnSourceTypeLabel,
 } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { VulnSourceFormModal } from '../vuln-source-form'
+import { VulnSourceFormModal } from '../../components/VulnSourceFormModal'
+import {
+  vulnLevelTone,
+  vulnPrevalidateStatusTone,
+  vulnProblemStatusTone,
+} from '../../statusPresentation'
+import { VULN_SOURCE_CONFIG_FIELDS } from '../../vulnerabilityContract'
+import { readString } from '../../jsonReaders'
 import { VulnProblemFormModal } from './vuln-problem-form'
 import { VulnPrevalidateModal } from './vuln-prevalidate'
 
@@ -475,7 +478,3 @@ function VulnSourceCard({ source, onEdit, onSynced, onError }: VulnSourceCardPro
 }
 
 /** readString 从来源配置里读字符串字段;被后端脱敏的字段回空串,不把掩码对象抛到界面上。 */
-function readString(source: Record<string, unknown>, key: string): string {
-  const value = source[key]
-  return typeof value === 'string' ? value : ''
-}

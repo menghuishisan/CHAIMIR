@@ -22,6 +22,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -34,13 +35,6 @@ var coverCanonicalNames = map[string]string{
 	"image/jpeg": "cover.jpg",
 	"image/png":  "cover.png",
 	"image/webp": "cover.webp",
-}
-
-// CourseCoverUploadRequest 描述已读入内存的封面文件。
-type CourseCoverUploadRequest struct {
-	FileName    string
-	ContentType string
-	Content     []byte
 }
 
 // UploadCourseCover 校验封面并写入上传教师的暂存位,只返回对象引用,不改课程记录。
@@ -131,7 +125,7 @@ func (s *Service) IssueCourseCoverAccess(ctx context.Context, courseID int64) (C
 	if err != nil {
 		return CourseCoverAccessDTO{}, apperr.ErrTeachingCourseCoverInvalid.WithCause(err)
 	}
-	return CourseCoverAccessDTO{Token: token, Mode: grant.Mode, ExpiresAt: grant.ExpiresAt.Format("2006-01-02T15:04:05Z07:00")}, nil
+	return CourseCoverAccessDTO{Token: token, Mode: grant.Mode, ExpiresAt: timex.RFC3339OrEmpty(grant.ExpiresAt)}, nil
 }
 
 // promoteCourseCover 把暂存位的封面搬到该课程的正式位,返回要落库的对象引用。

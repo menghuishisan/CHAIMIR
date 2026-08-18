@@ -33,6 +33,7 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { baseIdentityLabel } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { isPasswordStrong, isPhoneNumber } from '../../authForm'
 
 /** 入学年份的合理范围:上限给到明年,便于提前建下一届。 */
 const MIN_ENROLLMENT_YEAR = 1990
@@ -94,10 +95,10 @@ export function AccountFormModal({ account, onClose, onSaved }: AccountFormModal
     }
 
     if (!editing) {
-      next.phone = /^1\d{10}$/.test(phone.trim()) ? null : '请输入 11 位手机号'
+      next.phone = isPhoneNumber(phone) ? null : '请输入有效的 11 位手机号'
       next.no = no.trim() === '' ? '请输入学工号' : null
       if (!useActivation) {
-        next.initialPassword = isStrongPassword(initialPassword)
+        next.initialPassword = isPasswordStrong(initialPassword)
           ? null
           : '初始密码至少 8 位,且要同时包含字母和数字'
       }
@@ -408,9 +409,4 @@ export function AccountFormModal({ account, onClose, onSaved }: AccountFormModal
       </ModalContent>
     </Modal>
   )
-}
-
-/** isStrongPassword 与后端 ValidatePassword 同一口径:至少 8 位且含字母与数字。 */
-function isStrongPassword(password: string): boolean {
-  return password.length >= 8 && /[a-zA-Z]/.test(password) && /\d/.test(password)
 }

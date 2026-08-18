@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { tendermintRoundPhases } from './model';
 
-export const tendermintRoundsSource = [
+const tendermintRoundsSource = [
   'function runRound(round) {',
   '  proposal = proposer(round).broadcast();',
   '  prevotes = collectPrevotes(proposal);',

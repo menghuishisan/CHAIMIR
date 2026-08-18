@@ -107,10 +107,31 @@ function storageKey(workbench: WorkbenchId, side: "left" | "right"): string {
  * 免得窄屏默认收起的状态被带进宽屏后一直是两条把手。
  */
 function readStoredCollapsed(key: string): boolean | undefined {
-  const raw = window.localStorage.getItem(key);
-  if (raw === "true") return true;
-  if (raw === "false") return false;
-  return undefined;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return undefined;
+  } catch (error) {
+    // 折叠偏好不是业务草稿;存储被策略禁用时按当前视口默认值继续可用。
+    console.warn("workbench_preference_read_failed", {
+      operation: "read_collapsed_preference",
+      error: { kind: error instanceof Error ? error.name : typeof error },
+    });
+    return undefined;
+  }
+}
+
+/** writeStoredCollapsed 持久化可选布局偏好,存储不可用不影响当前交互。 */
+function writeStoredCollapsed(key: string, collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(key, String(collapsed));
+  } catch (error) {
+    console.warn("workbench_preference_write_failed", {
+      operation: "write_collapsed_preference",
+      error: { kind: error instanceof Error ? error.name : typeof error },
+    });
+  }
 }
 
 interface WorkbenchPanelProps {
@@ -145,7 +166,7 @@ function WorkbenchPanel({ workbench, side, label, count, wide, children }: Workb
     const next = !collapsed;
     if (next) setSeen(count ?? 0);
     setChoice(next);
-    window.localStorage.setItem(key, String(next));
+    writeStoredCollapsed(key, next);
   }, [collapsed, count, key]);
 
   const isLeft = side === "left";

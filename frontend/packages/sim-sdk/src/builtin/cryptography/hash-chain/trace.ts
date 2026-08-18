@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { hashChainPhases } from './model';
 
-export const hashChainSource = [
+const hashChainSource = [
   'function verifyHashChain(records) {',
   '  bytes = canonicalSerialize(record.payload);',
   '  hash = H(bytes, record.parentHash);',

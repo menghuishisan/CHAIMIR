@@ -1,6 +1,6 @@
 // Transfer API 文件定义统一导入导出任务中心前端调用入口。
 
-import { ApiClient } from '../client'
+import { ApiClient, encodePathSegment } from '../client'
 import type { AttachmentResponse } from '../client'
 import type { PaginatedResponse } from '../types/common'
 import type { TransferChannel, TransferStatus } from '../constants/transfer'
@@ -36,14 +36,14 @@ export class TransferApi {
    * getTask 读取当前账号可见的单个导入导出任务。
    */
   async getTask(taskId: string): Promise<TransferTask> {
-    return this.client.get(`/transfer/tasks/${taskId}`)
+    return this.client.get(`/transfer/tasks/${encodePathSegment(taskId)}`)
   }
 
   /**
    * downloadGrant 为已完成任务签发短时下载授权。
    */
   async downloadGrant(taskId: string): Promise<TransferDownloadGrant> {
-    return this.client.post(`/transfer/tasks/${taskId}/download-grant`)
+    return this.client.post(`/transfer/tasks/${encodePathSegment(taskId)}/download-grant`)
   }
 
   /**

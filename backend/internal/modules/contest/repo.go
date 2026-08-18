@@ -3,12 +3,12 @@ package contest
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"chaimir/internal/modules/contest/internal/sqlcgen"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/intx"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
@@ -118,11 +118,11 @@ func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxSto
 }
 
 // isNoRows 统一识别未命中错误,让 service 不直接依赖 pgx。
-func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
+func isNoRows(err error) bool { return db.IsNoRows(err) }
 
 // CreateContest 创建竞赛草稿。
 func (tx *txStore) CreateContest(ctx context.Context, item Contest) (Contest, error) {
-	rules, err := encodeJSON(item.Rules, apperr.ErrContestInvalid)
+	rules, err := jsonx.AnyBytes(item.Rules, apperr.ErrContestInvalid)
 	if err != nil {
 		return Contest{}, err
 	}
@@ -186,7 +186,7 @@ func (tx *txStore) ListStudentContests(ctx context.Context, tenantID int64, stat
 
 // UpdateContest 更新草稿竞赛。
 func (tx *txStore) UpdateContest(ctx context.Context, item Contest) (Contest, error) {
-	rules, err := encodeJSON(item.Rules, apperr.ErrContestInvalid)
+	rules, err := jsonx.AnyBytes(item.Rules, apperr.ErrContestInvalid)
 	if err != nil {
 		return Contest{}, err
 	}
@@ -335,7 +335,7 @@ func (tx *txStore) AccountTeamIDs(ctx context.Context, tenantID, contestID, memb
 
 // CreateSolveSubmission 创建解题提交记录。
 func (tx *txStore) CreateSolveSubmission(ctx context.Context, item SolveSubmission) (SolveSubmission, error) {
-	content, err := encodeJSON(item.ContentRef, apperr.ErrContestSubmissionInvalid)
+	content, err := jsonx.AnyBytes(item.ContentRef, apperr.ErrContestSubmissionInvalid)
 	if err != nil {
 		return SolveSubmission{}, err
 	}
@@ -634,7 +634,7 @@ func (tx *txStore) ListActiveBattleSourceRefsForArchive(ctx context.Context, ten
 
 // FinishBattleMatch 保存对局终态结果。
 func (tx *txStore) FinishBattleMatch(ctx context.Context, item BattleMatch) (BattleMatch, error) {
-	delta, err := encodeJSON(battleScoreDeltaForJSON(item.ScoreDelta), apperr.ErrContestBattleMatchFailed)
+	delta, err := jsonx.AnyBytes(battleScoreDeltaForJSON(item.ScoreDelta), apperr.ErrContestBattleMatchFailed)
 	if err != nil {
 		return BattleMatch{}, err
 	}
@@ -656,7 +656,7 @@ func (tx *txStore) FailBattleMatch(ctx context.Context, tenantID, id int64) (Bat
 
 // UpsertLadderSnapshot 保存封榜或归档阶段的权威榜单快照。
 func (tx *txStore) UpsertLadderSnapshot(ctx context.Context, item LadderSnapshot) (LadderSnapshot, error) {
-	raw, err := encodeJSON(ladderSnapshotEntriesJSON(item.Ranking), apperr.ErrContestInvalid)
+	raw, err := jsonx.AnyBytes(ladderSnapshotEntriesJSON(item.Ranking), apperr.ErrContestInvalid)
 	if err != nil {
 		return LadderSnapshot{}, err
 	}
@@ -678,7 +678,7 @@ func (tx *txStore) GetLadderSnapshot(ctx context.Context, tenantID, contestID in
 
 // CreateCheatRecord 创建违规处理记录。
 func (tx *txStore) CreateCheatRecord(ctx context.Context, item CheatRecord) (CheatRecord, error) {
-	evidence, err := encodeJSON(item.Evidence, apperr.ErrContestCheatInvalid)
+	evidence, err := jsonx.AnyBytes(item.Evidence, apperr.ErrContestCheatInvalid)
 	if err != nil {
 		return CheatRecord{}, err
 	}
@@ -713,7 +713,7 @@ func (tx *txStore) ListCheatRecords(ctx context.Context, tenantID, contestID int
 
 // UpsertVulnSource 新增或更新租户漏洞源配置。
 func (tx *txStore) UpsertVulnSource(ctx context.Context, item VulnSource) (VulnSource, error) {
-	cfg, err := encodeJSON(item.Config, apperr.ErrContestVulnSourceInvalid)
+	cfg, err := jsonx.AnyBytes(item.Config, apperr.ErrContestVulnSourceInvalid)
 	if err != nil {
 		return VulnSource{}, err
 	}
@@ -761,7 +761,7 @@ func (tx *txStore) MarkVulnSourceSynced(ctx context.Context, tenantID, id int64)
 
 // UpsertVulnProblem 新增或更新漏洞题草稿。
 func (tx *txStore) UpsertVulnProblem(ctx context.Context, item VulnProblem) (VulnProblem, error) {
-	body, err := encodeJSON(item.DraftBody, apperr.ErrContestVulnProblemInvalid)
+	body, err := jsonx.AnyBytes(item.DraftBody, apperr.ErrContestVulnProblemInvalid)
 	if err != nil {
 		return VulnProblem{}, err
 	}
@@ -805,7 +805,7 @@ func (tx *txStore) ListVulnProblems(ctx context.Context, tenantID, sourceID int6
 
 // SetVulnProblemPrevalidate 保存预验证结论。
 func (tx *txStore) SetVulnProblemPrevalidate(ctx context.Context, tenantID, id int64, status int16, detail map[string]any) (VulnProblem, error) {
-	raw, err := encodeJSON(detail, apperr.ErrContestVulnProblemInvalid)
+	raw, err := jsonx.AnyBytes(detail, apperr.ErrContestVulnProblemInvalid)
 	if err != nil {
 		return VulnProblem{}, err
 	}

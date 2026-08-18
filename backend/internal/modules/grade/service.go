@@ -566,7 +566,7 @@ func (s *Service) CreateAppeal(ctx context.Context, req AppealRequest) (AppealDT
 			return apperr.ErrGradeAppealInvalid.WithCause(err)
 		}
 		appealSemesterID = review.SemesterID.Int64()
-		reviewedAt, err := time.Parse(time.RFC3339, review.ReviewedAt)
+		reviewedAt, err := timex.ParseRFC3339(review.ReviewedAt)
 		if err != nil {
 			return apperr.ErrGradeAppealInvalid.WithCause(err)
 		}

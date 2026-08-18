@@ -30,7 +30,7 @@ export function reducePatriciaTrieEvent(state: PatriciaTrieState, event: SimEven
 /**
  * advancePatriciaTrie 按 Trie 更新流程推进一个过程单元。
  */
-export function advancePatriciaTrie(state: PatriciaTrieState, event: SimEvent): PatriciaTrieState {
+function advancePatriciaTrie(state: PatriciaTrieState, event: SimEvent): PatriciaTrieState {
   const phaseIndex = Math.min(patriciaTriePhases.length - 1, state.phaseIndex + 1);
   const next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: patriciaTriePhases[phaseIndex].id };
   return phaseIndex >= 3 ? rehashTrie(next) : next;
@@ -39,7 +39,7 @@ export function advancePatriciaTrie(state: PatriciaTrieState, event: SimEvent): 
 /**
  * finalizePatriciaTrieState 刷新指标、检查点和代码追踪。
  */
-export function finalizePatriciaTrieState(state: PatriciaTrieState): PatriciaTrieState {
+function finalizePatriciaTrieState(state: PatriciaTrieState): PatriciaTrieState {
   return { ...state, phase: patriciaTriePhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: state.proofValid ? '根哈希有效' : '等待重算', risk: state.proofValid ? 8 : 68, entries: state.entries.length }, checkpointValues: { rootValid: state.rootHash === computeTrieRoot(state.entries), proofValid: state.proofValid }, _trace: { triggeredLines: traceLinesForPatriciaTrie(state.lastTransition), variables: { rootHash: state.rootHash, proofKey: state.proofKey }, executionPath: `patricia-trie/${state.lastTransition}` } };
 }
 
@@ -54,21 +54,21 @@ export function patriciaTrieValid(state: PatriciaTrieState): CheckpointResult {
 /**
  * encodeTrieKey 生成教学用 nibble 路径。
  */
-export function encodeTrieKey(key: string): string {
+function encodeTrieKey(key: string): string {
   return key.split('').map((char) => char.charCodeAt(0).toString(16)).join('');
 }
 
 /**
  * leafHash 计算叶子哈希。
  */
-export function leafHash(key: string, value: string): string {
+function leafHash(key: string, value: string): string {
   return trieLeafHash(key, encodeTrieKey(key), value);
 }
 
 /**
  * computeTrieRoot 计算 Trie 根哈希。
  */
-export function computeTrieRoot(entries: TrieEntry[]): string {
+function computeTrieRoot(entries: TrieEntry[]): string {
   return trieRootHash(entries.map((entry) => ({ path: entry.path, hash: entry.hash })));
 }
 

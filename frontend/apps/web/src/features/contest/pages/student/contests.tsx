@@ -24,12 +24,9 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDateTime, formatRelativeDeadline } from '../../../../utils/formatters'
-import {
-  contestModeLabel,
-  contestStatusLabel,
-  contestStatusTone,
-  teamModeLabel,
-} from '../../../../utils/labels/contest'
+import { contestStatusLabel } from '../../../../utils/labels/contest'
+import { ContestIdentityCell, ContestScheduleCell } from '../../components/ContestTableCells'
+import { contestStatusTone } from '../../statusPresentation'
 
 /** 报名进行中的状态:只有此状态下报名入口有效(后端 validateSignupWindow 同口径)。 */
 const SIGNUP_OPEN_STATUS = ContestStatus.SIGNUP
@@ -67,14 +64,7 @@ export default function StudentContestsPage() {
     {
       key: 'name',
       header: '赛事',
-      render: (contest) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{contest.name}</div>
-          <div className="truncate text-xs text-ink-sub">
-            {contestModeLabel(contest.mode)} · {teamModeLabel(contest.team_mode)}
-          </div>
-        </div>
-      ),
+      render: (contest) => <ContestIdentityCell contest={contest} />,
     },
     {
       key: 'signup',
@@ -93,11 +83,7 @@ export default function StudentContestsPage() {
     {
       key: 'start_at',
       header: '比赛时间',
-      render: (contest) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDateTime(contest.start_at)} — {formatDateTime(contest.end_at)}
-        </span>
-      ),
+      render: (contest) => <ContestScheduleCell contest={contest} />,
     },
     {
       key: 'status',

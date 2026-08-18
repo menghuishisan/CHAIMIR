@@ -37,15 +37,13 @@ import { useAsyncResource } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import {
   accountStatusLabel,
-  accountStatusTone,
   baseIdentityLabel,
   sessionStatusLabel,
-  sessionStatusTone,
   tenantStatusLabel,
-  tenantStatusTone,
   userRolesLabel,
 } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { accountStatusTone, sessionStatusTone, tenantStatusTone } from '../../statusPresentation'
 import {
   confirmPasswordError,
   passwordRuleError,
@@ -53,7 +51,7 @@ import {
   requiredError,
   useFieldErrors,
   useSmsCooldown,
-} from '../auth/auth-form'
+} from '../../authForm'
 
 export interface ProfilePageProps {
   /**

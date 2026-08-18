@@ -47,26 +47,22 @@ import {
   Stat,
   StatusIndicator,
   Table,
-  toast,
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
+import { isJudgeTaskAbnormal, isJudgeTaskActive } from '../../../judge/rules'
+import { judgeTaskStatusTone } from '../../../judge/statusPresentation'
+import { useRejudgeTask } from '../../../judge/useRejudgeTask'
 import { useAsyncResource, useResourceTotal } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import {
   battleMatchStatusLabel,
-  battleMatchStatusTone,
   battleResultLabel,
   contestStatusLabel,
 } from '../../../../utils/labels/contest'
-import {
-  isJudgeTaskAbnormal,
-  isJudgeTaskActive,
-  judgeTaskStatusLabel,
-  judgeTaskStatusTone,
-} from '../../../../utils/labels/judge'
-import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { judgeTaskStatusLabel } from '../../../../utils/labels/judge'
+import { battleMatchStatusTone } from '../../../contest/statusPresentation'
 
 /** 监控面板一次取回的条数:监控看的是"当下有没有问题",不是全量历史。 */
 const MONITOR_SIZE = 30
@@ -220,25 +216,7 @@ function JudgeMonitorSection({
   onFilterChange,
   onOpenDetail,
 }: JudgeMonitorSectionProps) {
-  const [rejudgingId, setRejudgingId] = useState<string>()
-  const [actionError, setActionError] = useState<string>()
-
-  const rejudge = useCallback(
-    async (task: JudgeTask) => {
-      setRejudgingId(task.task_id)
-      setActionError(undefined)
-      try {
-        await api.judge.rejudgeTask(task.task_id)
-        toast.success('已重新提交判题')
-        tasks.reload()
-      } catch (error) {
-        setActionError(userFacingErrorMessage(error, '重判没有成功,请稍后重试。'))
-      } finally {
-        setRejudgingId(undefined)
-      }
-    },
-    [tasks],
-  )
+  const { rejudge, rejudgingId, actionError } = useRejudgeTask(tasks.reload)
 
   const columns: TableColumn<JudgeTask>[] = [
     {
@@ -305,7 +283,7 @@ function JudgeMonitorSection({
               size="sm"
               leftIcon={RotateCcw}
               loading={rejudgingId === task.task_id}
-              onClick={() => void rejudge(task)}
+              onClick={() => void rejudge(task.task_id)}
             >
               重判
             </Button>

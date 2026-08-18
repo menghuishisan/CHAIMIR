@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 )
 
@@ -20,8 +22,8 @@ func validateCourseRequest(req CourseRequest) (CourseRequest, time.Time, time.Ti
 	req.Semester = strings.TrimSpace(req.Semester)
 	req.StartAt = strings.TrimSpace(req.StartAt)
 	req.EndAt = strings.TrimSpace(req.EndAt)
-	startAt, startErr := time.Parse(time.RFC3339, req.StartAt)
-	endAt, endErr := time.Parse(time.RFC3339, req.EndAt)
+	startAt, startErr := timex.ParseRFC3339(req.StartAt)
+	endAt, endErr := timex.ParseRFC3339(req.EndAt)
 	if req.Name == "" || req.Semester == "" || !validCourseType(req.Type) || !validDifficulty(req.Difficulty) || req.Credits < 0 || req.Credits > 99 {
 		return CourseRequest{}, time.Time{}, time.Time{}, apperr.ErrTeachingCourseInvalid
 	}
@@ -95,7 +97,7 @@ func lessonContentRefMap(contentType int16, ref LessonContentRefRequest) map[str
 // validateAssignmentRequest 校验作业输入。
 func validateAssignmentRequest(req AssignmentRequest) (AssignmentRequest, time.Time, error) {
 	req.Title = strings.TrimSpace(req.Title)
-	due, err := time.Parse(time.RFC3339, strings.TrimSpace(req.DueAt))
+	due, err := timex.ParseRFC3339(req.DueAt)
 	if err != nil || req.Title == "" || req.MaxAttempts <= 0 || !validLatePolicy(req.LatePolicy) || len(req.Items) == 0 {
 		return AssignmentRequest{}, time.Time{}, apperr.ErrTeachingAssignmentInvalid
 	}
@@ -311,10 +313,14 @@ func hasLatePenaltyRule(rule map[string]any) bool {
 // latePenaltyAmount 从 JSON 策略解析扣分分值或百分比。
 func latePenaltyAmount(rule map[string]any, rawScore int32) (int32, error) {
 	if points, ok := numericRuleValue(rule, "points"); ok {
-		if points < 0 {
+		if math.IsNaN(points) || math.IsInf(points, 0) || points < 0 || points > math.MaxInt32 {
 			return 0, apperr.ErrTeachingAssignmentInvalid
 		}
-		return int32(math.Ceil(points)), nil
+		penalty, fits := intx.Int64ToInt32(int64(math.Ceil(points)))
+		if !fits {
+			return 0, apperr.ErrTeachingAssignmentInvalid
+		}
+		return penalty, nil
 	}
 	if percent, ok := numericRuleValue(rule, "percent"); ok {
 		if percent < 0 || percent > 100 {

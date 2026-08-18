@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS transfer_task (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     completed_at TIMESTAMPTZ,
     next_attempt_after TIMESTAMPTZ,
+	lease_token VARCHAR(64) NOT NULL DEFAULT '',
+	lease_until TIMESTAMPTZ,
     CONSTRAINT transfer_task_channel_check CHECK (channel IN ('import', 'export')),
     CONSTRAINT transfer_task_status_check CHECK (status IN ('pending', 'running', 'retrying', 'succeeded', 'failed')),
     CONSTRAINT transfer_task_tenant_check CHECK (tenant_id >= 0),
@@ -28,6 +30,7 @@ CREATE TABLE IF NOT EXISTS transfer_task (
 CREATE INDEX IF NOT EXISTS idx_transfer_task_tenant_account_status ON transfer_task(tenant_id, account_id, status);
 CREATE INDEX IF NOT EXISTS idx_transfer_task_tenant_created ON transfer_task(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_transfer_task_due ON transfer_task(status, next_attempt_after) WHERE next_attempt_after IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_transfer_task_lease ON transfer_task(status, lease_until) WHERE lease_until IS NOT NULL;
 
 ALTER TABLE transfer_task ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS transfer_task_tenant_rls ON transfer_task;

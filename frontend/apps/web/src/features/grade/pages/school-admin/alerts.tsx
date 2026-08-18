@@ -12,6 +12,7 @@ import { RefreshCw, Settings2, TriangleAlert, UserCheck } from 'lucide-react'
 import {
   GradeWarningStatus,
   BaseIdentity,
+  PAGINATION_MAX_SIZE,
   type Account,
   type GradeWarning,
   type Semester,
@@ -50,13 +51,10 @@ import { formatDateTime } from '../../../../utils/formatters'
 import {
   gradeWarningDetailTerm,
   gradeWarningStatusLabel,
-  gradeWarningStatusTone,
   gradeWarningTypeLabel,
 } from '../../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-
-/** 学生选择器一次取回的条数:后端分页上限 100。 */
-const STUDENT_PICKER_SIZE = 100
+import { gradeWarningStatusTone } from '../../statusPresentation'
 
 /** 状态筛选项:值为空串表示不过滤;学生与状态都由服务端过滤。 */
 const STATUS_FILTERS = [
@@ -99,7 +97,11 @@ export default function SchoolAdminAlertsPage() {
   // 预警只回 student_id / semester_id,姓名与学期名在此解析
   const students = useAsyncResource(
     () =>
-      api.identity.getAccounts({ role: BaseIdentity.STUDENT, page: 1, size: STUDENT_PICKER_SIZE }),
+      api.identity.getAccounts({
+        role: BaseIdentity.STUDENT,
+        page: 1,
+        size: PAGINATION_MAX_SIZE,
+      }),
     [],
     () => false
   )

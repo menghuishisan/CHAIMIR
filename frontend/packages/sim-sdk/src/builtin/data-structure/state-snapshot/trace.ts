@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { snapshotPhases } from './model';
 
-export const snapshotSource = [
+const snapshotSource = [
   'function snapshot(state) {',
   '  root = hashSortedAccounts(state);',
   '  deltas = recordDirtyWrites();',

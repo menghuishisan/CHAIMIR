@@ -17,7 +17,6 @@ import {
   ToolStatus,
   type SandboxToolRequest,
   type SandboxToolResourceSpec,
-  type WorkloadComponent,
 } from '@chaimir/api-client'
 import {
   Badge,
@@ -40,15 +39,15 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import {
-  SANDBOX_TOOL_KINDS,
-  TOOL_STATUSES,
   sandboxToolKindLabel,
   toolStatusLabel,
 } from '../../../../utils/labels/sandbox'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { SANDBOX_TOOL_KINDS, TOOL_STATUSES } from '../../options'
+import { asRecord } from '../../runtimeSpec'
 
 /** 工具编码规则,与后端 codePattern 一致。 */
-const CODE_PATTERN = /^[a-z][a-z0-9-]{0,30}[a-z0-9]$/
+const CODE_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/
 
 /** 命令工具的单容器清单骨架:恰好一个组件,不声明端口。 */
 const COMMAND_COMPONENT_TEMPLATE = `[
@@ -172,7 +171,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
     const next: Record<string, string | null> = {
       code: CODE_PATTERN.test(code.trim())
         ? null
-        : '用小写字母开头,只含小写字母、数字与连字符,长度 2 到 32 位',
+        : '以小写字母或数字开头,只含小写字母、数字与连字符,长度 3 到 64 位',
       name: name.trim() === '' ? '请输入工具名称' : null,
       builtinEndpoint: null,
       allowedArgv: null,
@@ -534,7 +533,7 @@ const KIND_HINTS: Record<SandboxToolKind, string> = {
 
 /** ParsedComponents 是命令工具容器清单的解析结果。 */
 interface ParsedComponents {
-  components: WorkloadComponent[]
+  components: Record<string, unknown>[]
   error?: string
 }
 
@@ -560,7 +559,7 @@ function parseComponents(text: string): ParsedComponents {
   if (!first || typeof first.name !== 'string' || first.name.trim() === '') {
     return { components: [], error: '组件要有名字(name)。' }
   }
-  return { components: raw as WorkloadComponent[] }
+  return { components: [first] }
 }
 
 /** ParsedWebEmbed 是网页工具清单的解析结果。 */
@@ -605,14 +604,7 @@ function parseWebEmbedSpec(text: string): ParsedWebEmbed {
 }
 
 /** readComponentField 读容器声明里的字符串字段,用于摘要展示。 */
-function readComponentField(component: WorkloadComponent, key: 'name' | 'image_url'): string {
+function readComponentField(component: Record<string, unknown>, key: 'name' | 'image_url'): string {
   const value = component[key]
   return typeof value === 'string' ? value : ''
-}
-
-/** asRecord 把未知值收敛成对象;非对象回 undefined,调用方按缺失处理。 */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined
 }

@@ -30,7 +30,7 @@ export function reduceNonceEvent(state: NonceState, event: SimEvent, _context: R
 /**
  * advanceNonce 按 nonce 排序流程推进。
  */
-export function advanceNonce(state: NonceState, event: SimEvent): NonceState {
+function advanceNonce(state: NonceState, event: SimEvent): NonceState {
   if (state.phaseIndex === 4 && !state.gapDetected && state.txs.some((tx) => tx.status !== 'included')) {
     return includeNextOrdered({ ...state, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: 'include' });
   }
@@ -42,7 +42,7 @@ export function advanceNonce(state: NonceState, event: SimEvent): NonceState {
 /**
  * finalizeNonceState 刷新 nonce 指标、检查点和代码追踪。
  */
-export function finalizeNonceState(state: NonceState): NonceState {
+function finalizeNonceState(state: NonceState): NonceState {
   const valid = !state.gapDetected && state.txs.every((tx) => tx.status !== 'blocked');
   return { ...state, phase: noncePhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: valid ? '顺序有效' : 'nonce 缺口阻塞', risk: valid ? 8 : 70, accountNonce: state.accountNonce }, checkpointValues: { valid: valid && state.txs.every((tx) => tx.status === 'included') }, _trace: { triggeredLines: traceLinesForNonce(state.lastTransition), variables: { accountNonce: state.accountNonce, gapDetected: state.gapDetected }, executionPath: `nonce/${state.lastTransition}` } };
 }

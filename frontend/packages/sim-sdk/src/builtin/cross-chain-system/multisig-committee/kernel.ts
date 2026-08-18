@@ -33,7 +33,7 @@ export function reduceCommitteeEvent(state: CommitteeState, event: SimEvent, _co
 /**
  * advanceCommittee 按多签授权流程推进。
  */
-export function advanceCommittee(state: CommitteeState, event: SimEvent): CommitteeState {
+function advanceCommittee(state: CommitteeState, event: SimEvent): CommitteeState {
   const phaseIndex = Math.min(committeePhases.length - 1, state.phaseIndex + 1);
   let next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: committeePhases[phaseIndex].id };
   if (phaseIndex === 1) next = signCommitteeMessage(next);
@@ -45,7 +45,7 @@ export function advanceCommittee(state: CommitteeState, event: SimEvent): Commit
 /**
  * finalizeCommitteeState 刷新委员会指标、检查点和代码追踪。
  */
-export function finalizeCommitteeState(state: CommitteeState): CommitteeState {
+function finalizeCommitteeState(state: CommitteeState): CommitteeState {
   const valid = validSignatures(state);
   const authorized = state.authorized || (state.phaseIndex >= 4 && valid >= state.threshold);
   return { ...state, authorized, phase: committeePhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: authorized ? '授权通过' : '等待签名', risk: state.members.some((member) => member.malicious && member.signed) ? 76 : 8, validSignatures: valid }, checkpointValues: { authorized }, _trace: { triggeredLines: traceLinesForCommittee(state.lastTransition), variables: { validSignatures: valid, threshold: state.threshold, aggregateSignature: state.aggregateSignature }, executionPath: `multisig/${state.lastTransition}` } };

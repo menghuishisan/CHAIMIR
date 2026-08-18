@@ -22,6 +22,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { isPasswordStrong } from '../../authForm'
 
 export interface ResetPasswordModalProps {
   account: Account
@@ -41,7 +42,7 @@ export function ResetPasswordModal({ account, onClose, onDone }: ResetPasswordMo
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (password.length < 8 || !/[a-zA-Z]/.test(password) || !/\d/.test(password)) {
+      if (!isPasswordStrong(password)) {
         setFormError('密码至少 8 位,且要同时包含字母和数字')
         return
       }

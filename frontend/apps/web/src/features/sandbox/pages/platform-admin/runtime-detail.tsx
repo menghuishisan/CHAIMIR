@@ -59,14 +59,23 @@ import { useAsyncResource } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import {
   imagePrepullStatusLabel,
-  imagePrepullStatusTone,
   runtimeImageStatusLabel,
   runtimeSelftestStatusLabel,
-  runtimeSelftestStatusTone,
   runtimeStatusLabel,
-  runtimeStatusTone,
 } from '../../../../utils/labels/sandbox'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import {
+  imagePrepullStatusTone,
+  runtimeSelftestStatusTone,
+  runtimeStatusTone,
+} from '../../statusPresentation'
+import {
+  runtimeContainerName,
+  runtimeContainerPortCount,
+  runtimeDefaultToolCodes,
+  runtimeSidecarCount,
+  runtimeWorkspaceDir,
+} from '../../runtimeSpec'
 
 /**
  * PlatformRuntimeDetailPage 承载单条运行时的镜像、预拉取与自检。
@@ -209,24 +218,27 @@ function RuntimeOverview({
                   : '未指定,指定后才能自检',
               },
               { term: '镜像版本数', description: `${images.length} 个` },
-              { term: '工作区目录', description: runtime.adapter_spec.workspace_dir, mono: true },
+              {
+                term: '工作区目录',
+                description: runtimeWorkspaceDir(runtime.adapter_spec),
+                mono: true,
+              },
               {
                 term: '主环境',
-                description: runtime.adapter_spec.runtime_container.name,
+                description: runtimeContainerName(runtime.adapter_spec),
                 mono: true,
               },
               {
                 term: '对外端口',
-                description: `${runtime.adapter_spec.runtime_container.ports?.length ?? 0} 个`,
+                description: `${runtimeContainerPortCount(runtime.adapter_spec)} 个`,
               },
               {
                 term: '附加组件',
-                description: `${runtime.adapter_spec.infra_sidecars?.length ?? 0} 个`,
+                description: `${runtimeSidecarCount(runtime.adapter_spec)} 个`,
               },
               {
                 term: '默认工具',
-                description:
-                  (runtime.adapter_spec.default_tool_codes ?? []).join('、') || '未指定',
+                description: runtimeDefaultToolCodes(runtime.adapter_spec).join('、') || '未指定',
               },
               {
                 term: '能力实现',

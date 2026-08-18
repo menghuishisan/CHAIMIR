@@ -4,10 +4,9 @@
 // 故不需要选导入对象。一份表里同时建院系、专业与班级,层级关系按表里的列解析。
 
 import { useCallback, useState } from 'react'
-import { CircleCheck, Download, FileSpreadsheet, Upload } from 'lucide-react'
+import { Download } from 'lucide-react'
 import type { ImportPreviewResponse } from '@chaimir/api-client'
 import {
-  Badge,
   Button,
   Callout,
   FormField,
@@ -16,17 +15,16 @@ import {
   ModalBody,
   ModalContent,
   ModalDescription,
-  ModalFooter,
   ModalHeader,
   ModalTitle,
   Progress,
-  Table,
   toast,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { ImportActionFooter } from '../../components/ImportActionFooter'
+import { ImportPreviewPanel } from '../../components/ImportPreviewPanel'
 
 export interface OrgImportModalProps {
   onClose: () => void
@@ -86,17 +84,6 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
     }
   }, [onCommitted, preview])
 
-  const errorRows = (preview?.rows ?? []).filter((row) => row.error)
-
-  const errorColumns: TableColumn<{ line: number; error?: string }>[] = [
-    { key: 'line', header: '行号', align: 'right', mono: true },
-    {
-      key: 'error',
-      header: '问题',
-      render: (row) => <span className="text-sm text-danger">{row.error}</span>,
-    },
-  ]
-
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
       <ModalContent size="xl">
@@ -135,66 +122,22 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
             <Progress value={uploadProgress} label="正在上传文件" />
           ) : null}
 
-          {preview ? (
-            <div className="flex flex-col gap-3 well p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge tone="neutral">共 {preview.total} 行</Badge>
-                <Badge tone="success">可导入 {preview.valid} 行</Badge>
-                {preview.invalid > 0 ? <Badge tone="danger">有问题 {preview.invalid} 行</Badge> : null}
-              </div>
-
-              {preview.invalid > 0 ? (
-                <>
-                  <Callout tone="warning" title="有问题的行不会被导入">
-                    修正这些行后重新上传,或直接提交只导入没有问题的行。
-                  </Callout>
-                  <Table columns={errorColumns} data={errorRows} rowKey={(row) => String(row.line)} />
-                </>
-              ) : (
-                <Callout tone="success" title="校验通过">
-                  全部 {preview.valid} 行都可以导入。
-                </Callout>
-              )}
-            </div>
-          ) : (
-            <Callout tone="info">
-              已存在的院系、专业与班级按名称匹配,不会重复创建。
-            </Callout>
-          )}
+          <ImportPreviewPanel
+            preview={preview}
+            emptyDescription="已存在的院系、专业与班级按名称匹配,不会重复创建。"
+          />
 
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
         </ModalBody>
-        <ModalFooter>
-          <Button variant="outline" onClick={onClose}>
-            取消
-          </Button>
-          {preview ? (
-            <>
-              <Button variant="outline" leftIcon={Upload} onClick={() => setPreview(undefined)}>
-                换个文件
-              </Button>
-              <Button
-                variant="primary"
-                leftIcon={CircleCheck}
-                loading={working}
-                disabled={preview.valid === 0}
-                onClick={() => void commit()}
-              >
-                提交导入 {preview.valid} 行
-              </Button>
-            </>
-          ) : (
-            <Button
-              variant="primary"
-              leftIcon={FileSpreadsheet}
-              loading={working}
-              disabled={!file}
-              onClick={() => void runPreview()}
-            >
-              上传并校验
-            </Button>
-          )}
-        </ModalFooter>
+        <ImportActionFooter
+          preview={preview}
+          fileSelected={Boolean(file)}
+          working={working}
+          onClose={onClose}
+          onReset={() => setPreview(undefined)}
+          onPreview={() => void runPreview()}
+          onCommit={() => void commit()}
+        />
       </ModalContent>
     </Modal>
   )

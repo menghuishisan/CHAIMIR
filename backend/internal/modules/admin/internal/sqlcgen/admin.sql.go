@@ -137,6 +137,39 @@ func (q *Queries) CreateAlertRule(ctx context.Context, arg CreateAlertRuleParams
 	return i, err
 }
 
+const createAuditExportRequest = `-- name: CreateAuditExportRequest :one
+INSERT INTO audit_export_request (transfer_task_id, tenant_id, account_id, query_snapshot, next_check_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, now(), now(), now())
+RETURNING transfer_task_id, tenant_id, account_id, query_snapshot, next_check_at, created_at, updated_at
+`
+
+type CreateAuditExportRequestParams struct {
+	TransferTaskID int64  `json:"transfer_task_id"`
+	TenantID       int64  `json:"tenant_id"`
+	AccountID      int64  `json:"account_id"`
+	QuerySnapshot  []byte `json:"query_snapshot"`
+}
+
+func (q *Queries) CreateAuditExportRequest(ctx context.Context, arg CreateAuditExportRequestParams) (AuditExportRequest, error) {
+	row := q.db.QueryRow(ctx, createAuditExportRequest,
+		arg.TransferTaskID,
+		arg.TenantID,
+		arg.AccountID,
+		arg.QuerySnapshot,
+	)
+	var i AuditExportRequest
+	err := row.Scan(
+		&i.TransferTaskID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.QuerySnapshot,
+		&i.NextCheckAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createBackupRecord = `-- name: CreateBackupRecord :one
 INSERT INTO backup_record (id, type, storage_ref, size_bytes, status, started_at, finished_at)
 VALUES ($1, $2, $3, $4, $5, now(), $6)
@@ -247,6 +280,21 @@ func (q *Queries) CreateSystemConfig(ctx context.Context, arg CreateSystemConfig
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const deleteAuditExportRequest = `-- name: DeleteAuditExportRequest :exec
+DELETE FROM audit_export_request
+WHERE transfer_task_id = $1 AND tenant_id = $2
+`
+
+type DeleteAuditExportRequestParams struct {
+	TransferTaskID int64 `json:"transfer_task_id"`
+	TenantID       int64 `json:"tenant_id"`
+}
+
+func (q *Queries) DeleteAuditExportRequest(ctx context.Context, arg DeleteAuditExportRequestParams) error {
+	_, err := q.db.Exec(ctx, deleteAuditExportRequest, arg.TransferTaskID, arg.TenantID)
+	return err
 }
 
 const getAlertRule = `-- name: GetAlertRule :one
@@ -546,6 +594,47 @@ func (q *Queries) ListConfigChangeLogs(ctx context.Context, arg ListConfigChange
 	return items, nil
 }
 
+const listDueAuditExportRequests = `-- name: ListDueAuditExportRequests :many
+SELECT transfer_task_id, tenant_id, account_id, query_snapshot, next_check_at, created_at, updated_at
+FROM audit_export_request
+WHERE next_check_at <= $1
+ORDER BY next_check_at ASC, created_at ASC
+LIMIT $2
+`
+
+type ListDueAuditExportRequestsParams struct {
+	NextCheckAt pgtype.Timestamptz `json:"next_check_at"`
+	Limit       int32              `json:"limit"`
+}
+
+func (q *Queries) ListDueAuditExportRequests(ctx context.Context, arg ListDueAuditExportRequestsParams) ([]AuditExportRequest, error) {
+	rows, err := q.db.Query(ctx, listDueAuditExportRequests, arg.NextCheckAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AuditExportRequest{}
+	for rows.Next() {
+		var i AuditExportRequest
+		if err := rows.Scan(
+			&i.TransferTaskID,
+			&i.TenantID,
+			&i.AccountID,
+			&i.QuerySnapshot,
+			&i.NextCheckAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPlatformStatistics = `-- name: ListPlatformStatistics :many
 SELECT id, scope, tenant_id, stat_date, metrics, created_at
 FROM platform_statistics
@@ -634,6 +723,34 @@ func (q *Queries) ListSystemConfigs(ctx context.Context, arg ListSystemConfigsPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const setAuditExportRequestNextCheck = `-- name: SetAuditExportRequestNextCheck :one
+UPDATE audit_export_request
+SET next_check_at = $3, updated_at = now()
+WHERE transfer_task_id = $1 AND tenant_id = $2
+RETURNING transfer_task_id, tenant_id, account_id, query_snapshot, next_check_at, created_at, updated_at
+`
+
+type SetAuditExportRequestNextCheckParams struct {
+	TransferTaskID int64              `json:"transfer_task_id"`
+	TenantID       int64              `json:"tenant_id"`
+	NextCheckAt    pgtype.Timestamptz `json:"next_check_at"`
+}
+
+func (q *Queries) SetAuditExportRequestNextCheck(ctx context.Context, arg SetAuditExportRequestNextCheckParams) (AuditExportRequest, error) {
+	row := q.db.QueryRow(ctx, setAuditExportRequestNextCheck, arg.TransferTaskID, arg.TenantID, arg.NextCheckAt)
+	var i AuditExportRequest
+	err := row.Scan(
+		&i.TransferTaskID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.QuerySnapshot,
+		&i.NextCheckAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateAlertRule = `-- name: UpdateAlertRule :one

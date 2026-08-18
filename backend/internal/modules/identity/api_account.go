@@ -66,10 +66,10 @@ func (a accountAPI) createAccount(c *gin.Context) {
 	}
 	dto, activation, err := a.svc.CreateAccountByAdmin(c.Request.Context(), req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{"account": dto, "activation_code": activation}, nil)
+	httpx.Write(c, AccountCreateResponse{Account: dto, ActivationCode: activation}, nil)
 }
 
 // updateAccount 绑定账号可编辑字段更新请求。
@@ -84,7 +84,7 @@ func (a accountAPI) updateAccount(c *gin.Context) {
 	}
 	out, err := a.svc.UpdateAccountByAdmin(c.Request.Context(), id, req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -122,10 +122,10 @@ func (a accountAPI) updateStatus(c *gin.Context, status int16) {
 		return
 	}
 	if err := a.svc.UpdateAccountStatusByAdmin(c.Request.Context(), id, status); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // forceLogout 强制吊销指定账号所有会话。
@@ -135,10 +135,10 @@ func (a accountAPI) forceLogout(c *gin.Context) {
 		return
 	}
 	if err := a.svc.ForceLogoutAccountByAdmin(c.Request.Context(), id); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // resetPassword 绑定管理员重置密码请求。
@@ -152,10 +152,10 @@ func (a accountAPI) resetPassword(c *gin.Context) {
 		return
 	}
 	if err := a.svc.ResetAccountPasswordByAdmin(c.Request.Context(), id, req); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // grantAdmin 授予教师学校管理员角色。
@@ -165,10 +165,10 @@ func (a accountAPI) grantAdmin(c *gin.Context) {
 		return
 	}
 	if err := a.svc.GrantSchoolAdmin(c.Request.Context(), id); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // revokeAdmin 撤销学校管理员角色。
@@ -178,10 +178,10 @@ func (a accountAPI) revokeAdmin(c *gin.Context) {
 		return
 	}
 	if err := a.svc.RevokeSchoolAdmin(c.Request.Context(), id); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // batchDisable 批量停用账号。
@@ -201,50 +201,50 @@ func (a accountAPI) batchStatus(c *gin.Context, status int16) {
 		return
 	}
 	if err := a.svc.BatchUpdateAccountStatusByAdmin(c.Request.Context(), req, status); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // importPreview 绑定账号导入预览请求。
 func (a accountAPI) importPreview(c *gin.Context) {
 	targetType, ok := parseImportTarget(c.PostForm("type"))
 	if !ok {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportTypeInvalid)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportTypeInvalid)
 		return
 	}
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid.WithCause(err))
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportContentInvalid.WithCause(err))
 		return
 	}
 	if maxBytes := a.svc.importMaxBytes(); maxBytes > 0 && fileHeader.Size > maxBytes {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportFileTooLarge)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportFileTooLarge)
 		return
 	}
 	// API 层只做上传边界检查和读取,文件类型与逐行校验交给 service 统一处理。
 	file, err := fileHeader.Open()
 	if err != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid.WithCause(err))
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportContentInvalid.WithCause(err))
 		return
 	}
 	content, sizeResult, readErr := upload.ReadBounded(file, a.svc.importMaxBytes())
 	closeErr := file.Close()
 	if readErr != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid.WithCause(readErr))
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportContentInvalid.WithCause(readErr))
 		return
 	}
 	if sizeResult == upload.SizeTooLarge {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportFileTooLarge)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportFileTooLarge)
 		return
 	}
 	if sizeResult == upload.SizeEmpty {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportContentInvalid)
 		return
 	}
 	if closeErr != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrInternal.WithCause(closeErr))
+		httpx.Write(c, struct{}{}, apperr.ErrInternal.WithCause(closeErr))
 		return
 	}
 	// 组装最小预览请求,避免 API 层理解导入业务状态机。
@@ -256,7 +256,7 @@ func (a accountAPI) importPreview(c *gin.Context) {
 	}
 	out, err := a.svc.PreviewAccountImport(c.Request.Context(), req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -266,12 +266,12 @@ func (a accountAPI) importPreview(c *gin.Context) {
 func (a accountAPI) importTemplate(c *gin.Context) {
 	targetType, ok := parseImportTarget(c.Query("type"))
 	if !ok {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportTypeInvalid)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportTypeInvalid)
 		return
 	}
 	tpl, err := a.svc.ImportTemplate(targetType, c.Query("format"))
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.WriteAttachment(c, tpl.FileName, tpl.ContentType, tpl.Content)
@@ -285,7 +285,7 @@ func (a accountAPI) importCommit(c *gin.Context) {
 	}
 	out, err := a.svc.CommitAccountImport(c.Request.Context(), req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -295,7 +295,7 @@ func (a accountAPI) importCommit(c *gin.Context) {
 func (a accountAPI) importBatches(c *gin.Context) {
 	out, err := a.svc.ListImportBatchesByAdmin(c.Request.Context())
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)

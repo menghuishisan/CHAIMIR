@@ -2,7 +2,7 @@
 
 import type { SimState } from '../../../types';
 
-export interface CommitteeMember {
+interface CommitteeMember {
   id: string;
   label: string;
   signature?: string;

@@ -66,7 +66,7 @@ export function reducePowEvent(state: PowState, event: SimEvent, _context: Reduc
 /**
  * advancePow 按 PoW 协议顺序推进一个内核过程单元。
  */
-export function advancePow(state: PowState): PowState {
+function advancePow(state: PowState): PowState {
   if (state.selfishMining && state.privateFork.length < state.privateMiningTargetDepth) {
     return continueSelfishMining({ ...state, tick: state.tick + 1 });
   }
@@ -103,7 +103,7 @@ export function powForkChoiceValid(state: PowState): CheckpointResult {
 /**
  * finalizePowState 刷新指标、检查点、历史样本和代码追踪。
  */
-export function finalizePowState(state: PowState): PowState {
+function finalizePowState(state: PowState): PowState {
   const risk = state.selfishMining ? 72 : state.privateFork.length > 0 ? 48 : 14;
   const finality = Math.min(96, state.blocks.length * 18 - (state.selfishMining ? 20 : 0));
   const samples = state.samples.concat({ x: state.tick + state.phaseIndex, quorum: Math.min(100, chainWork(state.blocks) * 8), risk, finality }).slice(-24);
@@ -218,7 +218,7 @@ function publishPrivateFork(state: PowState): PowState {
 /**
  * createPowBlock 创建确定性 PoW 区块。
  */
-export function createPowBlock(input: { id: string; height: number; minerId: string; parentHash: string; difficulty: number; nonce: number; mempoolSize: number; hash: string; attacker: boolean; canonical: boolean }): PowBlock {
+function createPowBlock(input: { id: string; height: number; minerId: string; parentHash: string; difficulty: number; nonce: number; mempoolSize: number; hash: string; attacker: boolean; canonical: boolean }): PowBlock {
   return { id: input.id, height: input.height, minerId: input.minerId, parentHash: input.parentHash, hash: input.hash, nonce: input.nonce, mempoolSize: input.mempoolSize, difficulty: input.difficulty, work: workForDifficulty(input.difficulty), canonical: input.canonical, attacker: input.attacker };
 }
 

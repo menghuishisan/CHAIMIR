@@ -38,7 +38,7 @@ export function reduceFeeMarketEvent(state: FeeMarketState, event: SimEvent, _co
 }
 
 /** finalizeFeeMarketState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
-export function finalizeFeeMarketState(state: FeeMarketState): FeeMarketState {
+function finalizeFeeMarketState(state: FeeMarketState): FeeMarketState {
   const included = state.transactions.filter((tx) => tx.included);
   const accepted = included.length > 0 && state.phaseIndex >= 4;
   return {

@@ -22,7 +22,6 @@ var (
 	envNamePattern   = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
 	mountNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	portNamePattern  = regexp.MustCompile(`^[a-z][a-z0-9-]{0,14}$`)
-	shellCommands    = map[string]struct{}{"sh": {}, "bash": {}, "dash": {}, "ash": {}, "zsh": {}, "ksh": {}, "csh": {}, "cmd": {}, "cmd.exe": {}, "powershell": {}, "powershell.exe": {}, "pwsh": {}, "pwsh.exe": {}}
 )
 
 // validateCreateRequest 校验内部创建沙箱请求的租户、来源和资源开关。
@@ -65,7 +64,7 @@ func validateRuntimeRequest(req RuntimeRequest, cfg config.SandboxConfig) (Adapt
 		return AdapterSpec{}, apperr.ErrSandboxRuntimeCreateInvalid
 	}
 	var spec AdapterSpec
-	if err := jsonx.DecodeStrict(req.AdapterSpec, &spec); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(req.AdapterSpec, &spec); err != nil {
 		return AdapterSpec{}, apperr.ErrSandboxAdapterSpecInvalid.WithCause(err)
 	}
 	if err := normalizeAndValidateAdapterSpec(&spec, cfg); err != nil {
@@ -93,7 +92,7 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 	}
 	var spec ToolResourceSpec
 	if len(req.ResourceSpec) > 0 {
-		if err := jsonx.DecodeStrict(req.ResourceSpec, &spec); err != nil {
+		if err := jsonx.DecodeStrictKnownFields(req.ResourceSpec, &spec); err != nil {
 			return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid.WithCause(err)
 		}
 	}
@@ -115,7 +114,7 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 			if component.MountWorkspace == nil {
 				return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 			}
-			if len(component.Command) > 0 && !safeNonShellCommand(component.Command) {
+			if len(component.Command) > 0 && !workload.ValidNonShellCommand(component.Command) {
 				return ToolResourceSpec{}, apperr.ErrSandboxToolCreateInvalid
 			}
 		}
@@ -132,7 +131,7 @@ func validateToolRequest(req ToolRequest, cfg config.SandboxConfig) (ToolResourc
 func ValidateToolResourceSpecDefinition(raw []byte, kind int16) error {
 	var spec ToolResourceSpec
 	if len(raw) > 0 {
-		if err := jsonx.DecodeStrict(raw, &spec); err != nil {
+		if err := jsonx.DecodeStrictKnownFields(raw, &spec); err != nil {
 			return apperr.ErrSandboxToolCreateInvalid.WithCause(err)
 		}
 	}
@@ -198,7 +197,7 @@ func validateCommandToolPolicy(policy *CommandToolPolicy) error {
 	seen := map[string]struct{}{}
 	for i := range policy.AllowedArgv {
 		argv := policy.AllowedArgv[i]
-		if !safeNonShellCommand(argv) {
+		if !workload.ValidNonShellCommand(argv) {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
 		for j := range argv {
@@ -219,13 +218,16 @@ func commandPolicyConfigured(policy CommandToolPolicy) bool {
 	return len(policy.AllowedArgv) > 0 || policy.DefaultTimeoutSeconds != 0 || policy.MaxTimeoutSeconds != 0
 }
 
-// validatePrepullCommand 校验镜像预拉取自检命令由 manifest 显式声明且没有空参数。
+// validatePrepullCommand 复用统一 argv 边界并归一镜像 manifest 提供的受控自检命令。
 func validatePrepullCommand(command []string) error {
+	if len(command) == 0 {
+		return nil
+	}
+	if !workload.ValidCommand(command) {
+		return apperr.ErrSandboxToolCreateInvalid
+	}
 	for i := range command {
 		command[i] = strings.TrimSpace(command[i])
-		if command[i] == "" {
-			return apperr.ErrSandboxToolCreateInvalid
-		}
 	}
 	return nil
 }
@@ -255,7 +257,7 @@ func validateCommandContainerSpec(spec *workload.ComponentSpec, cfg config.Sandb
 			return err
 		}
 	}
-	if !safeNonShellCommand(spec.Command) {
+	if !workload.ValidNonShellCommand(spec.Command) {
 		return apperr.ErrSandboxContainerSpecInvalid
 	}
 	if spec.MountWorkspace == nil {
@@ -657,7 +659,7 @@ func validateRuntimeContainerSpec(spec *workload.ComponentSpec, cfg config.Sandb
 			return err
 		}
 	}
-	if len(spec.Command) > 0 && !safeNonShellCommand(spec.Command) {
+	if len(spec.Command) > 0 && !workload.ValidNonShellCommand(spec.Command) {
 		return apperr.ErrSandboxContainerSpecInvalid
 	}
 	return nil
@@ -1095,11 +1097,11 @@ func validateWorkspaceOps(ops WorkspaceOps) error {
 		ops.Selftest,
 	}
 	for _, command := range helperCommands {
-		if !safeNonShellCommand(command) {
+		if !workload.ValidNonShellCommand(command) {
 			return apperr.ErrSandboxWorkspaceOpsInvalid
 		}
 	}
-	if !safeCommand(ops.Terminal) {
+	if !workload.ValidCommand(ops.Terminal) {
 		return apperr.ErrSandboxWorkspaceOpsInvalid
 	}
 	return nil
@@ -1117,7 +1119,7 @@ func validateCapabilityCommands(spec *AdapterSpec, cfg config.SandboxConfig) err
 		&spec.CapabilityCommands.Reset,
 	}
 	for _, command := range commands {
-		if !safeNonShellCommand(command.Command) {
+		if !workload.ValidNonShellCommand(command.Command) {
 			return apperr.ErrSandboxCapabilityCommandInvalid
 		}
 		if command.TimeoutSeconds < 0 {
@@ -1140,32 +1142,6 @@ func hasCapabilityCommands(commands CapabilityCommandSet) bool {
 		len(commands.Tx.Command) > 0 &&
 		len(commands.Query.Command) > 0 &&
 		len(commands.Reset.Command) > 0
-}
-
-// safeCommand 校验声明式命令为 argv 数组且不含控制字符,终端入口可在受限容器中启动 shell。
-func safeCommand(command []string) bool {
-	if len(command) == 0 {
-		return false
-	}
-	for _, part := range command {
-		if strings.TrimSpace(part) == "" {
-			return false
-		}
-		if strings.ContainsAny(part, "\x00\r\n") {
-			return false
-		}
-	}
-	return true
-}
-
-// safeNonShellCommand 禁止内部 helper、判题和链能力命令以 shell 解释器作为入口,避免字符串脚本成为注入面。
-func safeNonShellCommand(command []string) bool {
-	if !safeCommand(command) {
-		return false
-	}
-	executable := strings.ToLower(path.Base(strings.TrimSpace(command[0])))
-	_, blocked := shellCommands[executable]
-	return !blocked
 }
 
 // validateContainerSpec 校验单个容器声明不会绕过安全上下文或硬编码无效探针。
@@ -1243,7 +1219,7 @@ func validateProbeSpec(probe *workload.ProbeSpec, portNames map[string]struct{})
 			return apperr.ErrSandboxProbeSpecInvalid
 		}
 	case "exec":
-		if !safeNonShellCommand(probe.Command) {
+		if !workload.ValidNonShellCommand(probe.Command) {
 			return apperr.ErrSandboxProbeSpecInvalid
 		}
 	default:

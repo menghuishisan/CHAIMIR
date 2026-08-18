@@ -31,7 +31,7 @@ export function reduceReentrancyEvent(state: ReentrancyState, event: SimEvent, _
 /**
  * advanceReentrancy 按重入攻击调用栈推进一个过程单元。
  */
-export function advanceReentrancy(state: ReentrancyState, event: SimEvent): ReentrancyState {
+function advanceReentrancy(state: ReentrancyState, event: SimEvent): ReentrancyState {
   if (state.phaseIndex >= 2) return state;
   const phaseIndex = Math.min(reentrancyPhases.length - 1, state.phaseIndex + 1);
   const next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: reentrancyPhases[phaseIndex].id };
@@ -45,7 +45,7 @@ export function advanceReentrancy(state: ReentrancyState, event: SimEvent): Reen
 /**
  * finalizeReentrancyState 刷新参与方状态、指标、检查点和代码追踪。
  */
-export function finalizeReentrancyState(state: ReentrancyState): ReentrancyState {
+function finalizeReentrancyState(state: ReentrancyState): ReentrancyState {
   const safe = state.lockEnabled && state.blockedReentry;
   return { ...state, phase: reentrancyPhases[state.phaseIndex].label, actors: state.actors.map((actor) => ({ ...actor, status: actor.id === 'attacker' && state.reentered && !safe ? 'danger' : actor.id === 'vault' && safe ? 'success' : actor.status })), explanation: explain(state.phaseIndex), metrics: { result: safe ? '重入已阻断' : state.reentered ? '重入发生' : '流程进行中', risk: state.reentered && !safe ? 90 : safe ? 8 : 30, vaultBalance: state.vaultBalance }, checkpointValues: { blocked: safe }, _trace: { triggeredLines: traceLinesForReentrancy(state.lastTransition), variables: { vaultBalance: state.vaultBalance, attackerBalance: state.attackerBalance }, executionPath: `reentrancy/${state.lastTransition}` } };
 }

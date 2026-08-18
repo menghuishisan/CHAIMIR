@@ -11,7 +11,6 @@ import {
   ContentDifficulty,
   ContentType,
   PaperMode,
-  type ContentItem,
   type Paper,
   type PaperCriteria,
   type PaperItemInput,
@@ -51,17 +50,14 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
+import { CONTENT_DIFFICULTIES, CONTENT_TYPES } from '../../options'
 import {
-  CONTENT_DIFFICULTIES,
-  CONTENT_TYPES,
   contentDifficultyLabel,
   contentTypeLabel,
   paperModeLabel,
 } from '../../../../utils/labels/content'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-
-/** 题目选择器一次取回的条数:后端分页上限 100。 */
-const ITEM_PICKER_SIZE = 100
+import { ContentItemPicker } from '../../components/ContentItemPicker'
 
 /**
  * TeacherExamsPage 管理试卷。
@@ -456,8 +452,9 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
         </form>
 
         {pickerOpen ? (
-          <PaperItemPicker
+          <ContentItemPicker
             selectedCodes={new Set(items.map((item) => item.code))}
+            targetName="试卷"
             onClose={() => setPickerOpen(false)}
             onPick={(picked) => {
               setItems((current) => [
@@ -468,103 +465,6 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
             }}
           />
         ) : null}
-      </ModalContent>
-    </Modal>
-  )
-}
-
-interface PaperItemPickerProps {
-  selectedCodes: Set<string>
-  onClose: () => void
-  onPick: (items: ContentItem[]) => void
-}
-
-/**
- * PaperItemPicker 从题库选题。
- */
-function PaperItemPicker({ selectedCodes, onClose, onPick }: PaperItemPickerProps) {
-  const [picked, setPicked] = useState<ContentItem[]>([])
-  const items = useAsyncResource(() => api.content.getItems({ page: 1, size: ITEM_PICKER_SIZE }), [])
-
-  const columns: TableColumn<ContentItem>[] = [
-    {
-      key: 'title',
-      header: '题目',
-      render: (item) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{item.title}</div>
-          <div className="truncate font-mono text-xs text-ink-sub">
-            {item.code} · {item.version}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'type',
-      header: '类型',
-      render: (item) => (
-        <div className="flex flex-wrap gap-1.5">
-          <Badge tone="neutral">{contentTypeLabel(item.type)}</Badge>
-          <Badge tone="jade">{contentDifficultyLabel(item.difficulty)}</Badge>
-        </div>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (item) => {
-        const alreadyIn = selectedCodes.has(item.code)
-        const isPicked = picked.some((one) => one.code === item.code)
-        return (
-          <Button
-            type="button"
-            variant={isPicked ? 'outline' : 'ghost'}
-            size="sm"
-            disabled={alreadyIn}
-            onClick={() =>
-              setPicked((current) =>
-                isPicked ? current.filter((one) => one.code !== item.code) : [...current, item],
-              )
-            }
-          >
-            {alreadyIn ? '已在试卷中' : isPicked ? '取消选择' : '选择'}
-          </Button>
-        )
-      },
-    },
-  ]
-
-  return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="lg">
-        <ModalHeader>
-          <ModalTitle>从题库选题</ModalTitle>
-          <ModalDescription>题目按当前版本锁进试卷。</ModalDescription>
-        </ModalHeader>
-        <ModalBody>
-          <ResourceState
-            resource={items}
-            emptyIcon={FileText}
-            emptyTitle="题库里还没有题目"
-            emptyDescription="先在题库内容里创建题目,再回来组卷。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-          >
-            {(page) => (
-              <div className="max-h-96 overflow-y-auto">
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-              </div>
-            )}
-          </ResourceState>
-        </ModalBody>
-        <ModalFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
-            取消
-          </Button>
-          <Button type="button" variant="primary" disabled={picked.length === 0} onClick={() => onPick(picked)}>
-            添加 {picked.length > 0 ? `${picked.length} 道` : ''}题目
-          </Button>
-        </ModalFooter>
       </ModalContent>
     </Modal>
   )

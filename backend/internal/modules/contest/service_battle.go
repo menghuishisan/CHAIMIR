@@ -132,7 +132,11 @@ func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, page, 
 		// 组织者视角:teamID=0 即不按队伍过滤。非组织者退回本队视角,
 		// 且必须确实属于某支队伍 —— 未报名者读不到任何对局。
 		teamID := int64(0)
-		if canManageContest(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), contest) != nil {
+		isSchoolAdmin, err := s.isSchoolAdmin(ctx, id.AccountID)
+		if err != nil {
+			return err
+		}
+		if canManageContest(id.AccountID, isSchoolAdmin, contest) != nil {
 			team, err := s.currentAccountTeam(ctx, tx, id.TenantID, contestID, id.AccountID)
 			if err != nil {
 				return err

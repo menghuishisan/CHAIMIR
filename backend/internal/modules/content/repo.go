@@ -3,7 +3,6 @@ package content
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"chaimir/internal/modules/content/internal/sqlcgen"
@@ -71,7 +70,7 @@ func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Co
 
 // isNoRows 统一识别未命中错误,让 service 不直接依赖 pgx。
 func isNoRows(err error) bool {
-	return errors.Is(err, pgx.ErrNoRows)
+	return db.IsNoRows(err)
 }
 
 // CreateItem 创建内容外壳与正文。

@@ -2,7 +2,6 @@
 package judge
 
 import (
-	"encoding/hex"
 	"regexp"
 	"strings"
 
@@ -24,16 +23,6 @@ func validTaskState(state string) bool {
 	default:
 		return false
 	}
-}
-
-// isSHA256Hex 校验内容哈希格式。
-func isSHA256Hex(value string) bool {
-	value = strings.TrimSpace(value)
-	if len(value) != 64 {
-		return false
-	}
-	_, err := hex.DecodeString(value)
-	return err == nil
 }
 
 // validateManualScore 校验人工评分不会超过分值边界。

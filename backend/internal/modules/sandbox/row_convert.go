@@ -14,7 +14,7 @@ import (
 func runtimeFromRow(row sqlcgen.Runtime) (Runtime, error) {
 	var spec AdapterSpec
 	if len(row.AdapterSpec) > 0 {
-		if err := jsonx.DecodeStrict(row.AdapterSpec, &spec); err != nil {
+		if err := jsonx.DecodeStrictKnownFields(row.AdapterSpec, &spec); err != nil {
 			return Runtime{}, err
 		}
 	}
@@ -54,7 +54,7 @@ func runtimeImageFromRow(row sqlcgen.RuntimeImage) RuntimeImage {
 func toolFromRow(row sqlcgen.Tool) (Tool, error) {
 	var spec ToolResourceSpec
 	if len(row.ResourceSpec) > 0 {
-		if err := jsonx.DecodeStrict(row.ResourceSpec, &spec); err != nil {
+		if err := jsonx.DecodeStrictKnownFields(row.ResourceSpec, &spec); err != nil {
 			return Tool{}, err
 		}
 	}
@@ -162,7 +162,7 @@ func toolResourceSpecFromJSON(raw []byte) (ToolResourceSpec, error) {
 	if len(raw) == 0 {
 		return spec, nil
 	}
-	if err := jsonx.DecodeStrict(raw, &spec); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &spec); err != nil {
 		return ToolResourceSpec{}, err
 	}
 	return spec, nil

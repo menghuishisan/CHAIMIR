@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { dhtPhases } from './model';
 
-export const dhtSource = [
+const dhtSource = [
   'function dhtLookup(key) {',
   '  shortlist = nearestFromBuckets(key);',
   '  shortlist = sortByXorDistance(shortlist, key);',

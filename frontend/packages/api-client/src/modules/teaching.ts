@@ -1,7 +1,7 @@
 // Teaching API：课程、作业、提交
 // 对应后端 M6 模块
 
-import { ApiClient } from '../client'
+import { ApiClient, encodePathSegment } from '../client'
 import type { CourseStatus, SubmissionStatus } from '../constants/teaching'
 import type { PaginatedResponse } from '../types/common'
 import type {
@@ -75,56 +75,56 @@ export class TeachingApi {
    * 更新课程
    */
   async updateCourse(courseId: string, data: CourseRequest): Promise<Course> {
-    return this.client.patch(`/teaching/courses/${courseId}`, data)
+    return this.client.patch(`/teaching/courses/${encodePathSegment(courseId)}`, data)
   }
 
   /**
    * 发布课程。
    */
   async publishCourse(courseId: string): Promise<Course> {
-    return this.client.post(`/teaching/courses/${courseId}/publish`)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/publish`)
   }
 
   /**
    * 结束进行中的课程。
    */
   async endCourse(courseId: string): Promise<Course> {
-    return this.client.post(`/teaching/courses/${courseId}/end`)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/end`)
   }
 
   /**
    * 归档课程。
    */
   async archiveCourse(courseId: string): Promise<Course> {
-    return this.client.post(`/teaching/courses/${courseId}/archive`)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/archive`)
   }
 
   /**
    * 克隆课程
    */
   async cloneCourse(courseId: string, data: { name: string }): Promise<Course> {
-    return this.client.post(`/teaching/courses/${courseId}/clone`, data)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/clone`, data)
   }
 
   /**
    * 将课程设为共享库可见。
    */
   async shareCourse(courseId: string): Promise<Course> {
-    return this.client.post(`/teaching/courses/${courseId}/share`)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/share`)
   }
 
   /**
    * 刷新课程邀请码。
    */
   async refreshInviteCode(courseId: string): Promise<Course> {
-    return this.client.post(`/teaching/courses/${courseId}/invite-code/refresh`)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/invite-code/refresh`)
   }
 
   /**
    * 获取课程大纲（含章节、课时、进度）
    */
   async getCourseOutline(courseId: string): Promise<CourseOutline> {
-    return this.client.get(`/teaching/courses/${courseId}/outline`)
+    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/outline`)
   }
 
   /**
@@ -142,21 +142,21 @@ export class TeachingApi {
    * 创建章节
    */
   async createChapter(courseId: string, data: ChapterRequest): Promise<Chapter> {
-    return this.client.post(`/teaching/courses/${courseId}/chapters`, data)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/chapters`, data)
   }
 
   /**
    * 更新章节
    */
   async updateChapter(courseId: string, chapterId: string, data: ChapterRequest): Promise<Chapter> {
-    return this.client.patch(`/teaching/courses/${courseId}/chapters/${chapterId}`, data)
+    return this.client.patch(`/teaching/courses/${encodePathSegment(courseId)}/chapters/${encodePathSegment(chapterId)}`, data)
   }
 
   /**
    * 删除章节
    */
   async deleteChapter(courseId: string, chapterId: string): Promise<void> {
-    return this.client.delete(`/teaching/courses/${courseId}/chapters/${chapterId}`)
+    return this.client.delete(`/teaching/courses/${encodePathSegment(courseId)}/chapters/${encodePathSegment(chapterId)}`)
   }
 
   // ===== 课时 =====
@@ -165,28 +165,28 @@ export class TeachingApi {
    * 查询单个课时详情。
    */
   async getLesson(lessonId: string): Promise<Lesson> {
-    return this.client.get(`/teaching/lessons/${lessonId}`)
+    return this.client.get(`/teaching/lessons/${encodePathSegment(lessonId)}`)
   }
 
   /**
    * 创建课时
    */
   async createLesson(chapterId: string, data: LessonRequest): Promise<Lesson> {
-    return this.client.post(`/teaching/chapters/${chapterId}/lessons`, data)
+    return this.client.post(`/teaching/chapters/${encodePathSegment(chapterId)}/lessons`, data)
   }
 
   /**
    * 更新课时
    */
   async updateLesson(chapterId: string, lessonId: string, data: LessonRequest): Promise<Lesson> {
-    return this.client.patch(`/teaching/chapters/${chapterId}/lessons/${lessonId}`, data)
+    return this.client.patch(`/teaching/chapters/${encodePathSegment(chapterId)}/lessons/${encodePathSegment(lessonId)}`, data)
   }
 
   /**
    * 删除课时
    */
   async deleteLesson(chapterId: string, lessonId: string): Promise<void> {
-    return this.client.delete(`/teaching/chapters/${chapterId}/lessons/${lessonId}`)
+    return this.client.delete(`/teaching/chapters/${encodePathSegment(chapterId)}/lessons/${encodePathSegment(lessonId)}`)
   }
 
   /**
@@ -201,7 +201,7 @@ export class TeachingApi {
   ): Promise<Lesson> {
     const formData = new FormData()
     formData.append('file', file)
-    return this.client.postFormData(`/teaching/lessons/${lessonId}/material`, formData, onProgress)
+    return this.client.postFormData(`/teaching/lessons/${encodePathSegment(lessonId)}/material`, formData, onProgress)
   }
 
   /**
@@ -210,7 +210,7 @@ export class TeachingApi {
    * 拿到 token 后:视频交给 storage.streamUrl 作播放地址,附件交给 storage.consumeGrant 取件。
    */
   async issueLessonMaterialAccess(lessonId: string): Promise<LessonMaterialAccess> {
-    return this.client.post(`/teaching/lessons/${lessonId}/material/access`)
+    return this.client.post(`/teaching/lessons/${encodePathSegment(lessonId)}/material/access`)
   }
 
   /**
@@ -232,21 +232,21 @@ export class TeachingApi {
    * 封面只对能看到该课程的人可见,故没有公开路径,每次显示都要重新换取授权。
    */
   async issueCourseCoverAccess(courseId: string): Promise<CourseCoverAccess> {
-    return this.client.post(`/teaching/courses/${courseId}/cover/access`)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/cover/access`)
   }
 
   /**
    * 上报课时学习进度
    */
   async reportProgress(lessonId: string, data: ProgressRequest): Promise<Progress> {
-    return this.client.post(`/teaching/lessons/${lessonId}/progress`, data)
+    return this.client.post(`/teaching/lessons/${encodePathSegment(lessonId)}/progress`, data)
   }
 
   /**
    * 查询当前学生在课程内的学习进度。
    */
   async getMyProgress(courseId: string): Promise<Progress[]> {
-    return this.client.get(`/teaching/courses/${courseId}/my-progress`)
+    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/my-progress`)
   }
 
   // ===== 成员 =====
@@ -255,21 +255,21 @@ export class TeachingApi {
    * 查询课程成员列表。
    */
   async listMembers(courseId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<CourseMember>> {
-    return this.client.get(`/teaching/courses/${courseId}/members`, params)
+    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/members`, params)
   }
 
   /**
    * 批量添加课程成员。
    */
   async addMembers(courseId: string, data: BatchMembersRequest): Promise<CourseMember[]> {
-    return this.client.post(`/teaching/courses/${courseId}/members/batch`, data)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/members/batch`, data)
   }
 
   /**
    * 移除课程成员。
    */
   async removeMember(courseId: string, studentId: string): Promise<void> {
-    return this.client.delete(`/teaching/courses/${courseId}/members/${studentId}`)
+    return this.client.delete(`/teaching/courses/${encodePathSegment(courseId)}/members/${encodePathSegment(studentId)}`)
   }
 
   // ===== 作业 =====
@@ -280,35 +280,35 @@ export class TeachingApi {
    * 这是学生取得作业编号的唯一入口（课程大纲只含章节课时），响应为作业外壳不含题面。
    */
   async listCourseAssignments(courseId: string): Promise<Assignment[]> {
-    return this.client.get(`/teaching/courses/${courseId}/assignments`)
+    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/assignments`)
   }
 
   /**
    * 获取作业详情（含题目列表）
    */
   async getAssignment(assignmentId: string): Promise<AssignmentDetail> {
-    return this.client.get(`/teaching/assignments/${assignmentId}`)
+    return this.client.get(`/teaching/assignments/${encodePathSegment(assignmentId)}`)
   }
 
   /**
    * 创建作业
    */
   async createAssignment(courseId: string, data: AssignmentRequest): Promise<AssignmentDetail> {
-    return this.client.post(`/teaching/courses/${courseId}/assignments`, data)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/assignments`, data)
   }
 
   /**
    * 更新作业
    */
   async updateAssignment(assignmentId: string, data: AssignmentRequest): Promise<AssignmentDetail> {
-    return this.client.patch(`/teaching/assignments/${assignmentId}`, data)
+    return this.client.patch(`/teaching/assignments/${encodePathSegment(assignmentId)}`, data)
   }
 
   /**
    * 发布作业
    */
   async publishAssignment(assignmentId: string): Promise<Assignment> {
-    return this.client.post(`/teaching/assignments/${assignmentId}/publish`)
+    return this.client.post(`/teaching/assignments/${encodePathSegment(assignmentId)}/publish`)
   }
 
   // ===== 提交 =====
@@ -323,42 +323,42 @@ export class TeachingApi {
     page?: number
     size?: number
   }): Promise<PaginatedResponse<Submission>> {
-    return this.client.get(`/teaching/assignments/${assignmentId}/submissions`, params)
+    return this.client.get(`/teaching/assignments/${encodePathSegment(assignmentId)}/submissions`, params)
   }
 
   /**
    * 获取提交详情
    */
   async getSubmission(submissionId: string): Promise<Submission> {
-    return this.client.get(`/teaching/submissions/${submissionId}`)
+    return this.client.get(`/teaching/submissions/${encodePathSegment(submissionId)}`)
   }
 
   /**
    * 提交作业
    */
   async submitAssignment(assignmentId: string, data: SubmitRequest): Promise<Submission> {
-    return this.client.post(`/teaching/assignments/${assignmentId}/submit`, data)
+    return this.client.post(`/teaching/assignments/${encodePathSegment(assignmentId)}/submit`, data)
   }
 
   /**
    * 保存草稿
    */
   async saveDraft(assignmentId: string, data: { content: Record<string, unknown> }): Promise<DraftSave> {
-    return this.client.post(`/teaching/assignments/${assignmentId}/draft`, data)
+    return this.client.post(`/teaching/assignments/${encodePathSegment(assignmentId)}/draft`, data)
   }
 
   /**
    * 获取草稿
    */
   async getDraft(assignmentId: string): Promise<Draft> {
-    return this.client.get(`/teaching/assignments/${assignmentId}/draft`)
+    return this.client.get(`/teaching/assignments/${encodePathSegment(assignmentId)}/draft`)
   }
 
   /**
    * 教师批改作业提交。
    */
   async gradeSubmission(submissionId: string, data: { score: number; comment: string }): Promise<Submission> {
-    return this.client.post(`/teaching/submissions/${submissionId}/grade`, data)
+    return this.client.post(`/teaching/submissions/${encodePathSegment(submissionId)}/grade`, data)
   }
 
   // ===== 讨论与公告 =====
@@ -367,63 +367,63 @@ export class TeachingApi {
    * 查询课程讨论帖。
    */
   async listPosts(courseId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<TeachingPost>> {
-    return this.client.get(`/teaching/courses/${courseId}/posts`, params)
+    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/posts`, params)
   }
 
   /**
    * 发布课程讨论帖。
    */
   async createPost(courseId: string, data: TeachingPostRequest): Promise<TeachingPost> {
-    return this.client.post(`/teaching/courses/${courseId}/posts`, data)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/posts`, data)
   }
 
   /**
    * 点赞讨论帖。
    */
   async likePost(postId: string): Promise<TeachingPost> {
-    return this.client.post(`/teaching/posts/${postId}/like`)
+    return this.client.post(`/teaching/posts/${encodePathSegment(postId)}/like`)
   }
 
   /**
    * 置顶讨论帖。
    */
   async pinPost(postId: string): Promise<TeachingPost> {
-    return this.client.post(`/teaching/posts/${postId}/pin`)
+    return this.client.post(`/teaching/posts/${encodePathSegment(postId)}/pin`)
   }
 
   /**
    * 删除讨论帖。
    */
   async deletePost(postId: string): Promise<void> {
-    return this.client.delete(`/teaching/posts/${postId}`)
+    return this.client.delete(`/teaching/posts/${encodePathSegment(postId)}`)
   }
 
   /**
    * 查询课程公告。
    */
   async listAnnouncements(courseId: string): Promise<TeachingAnnouncement[]> {
-    return this.client.get(`/teaching/courses/${courseId}/announcements`)
+    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/announcements`)
   }
 
   /**
    * 创建课程公告。
    */
   async createAnnouncement(courseId: string, data: TeachingAnnouncementRequest): Promise<TeachingAnnouncement> {
-    return this.client.post(`/teaching/courses/${courseId}/announcements`, data)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/announcements`, data)
   }
 
   /**
    * 置顶课程公告。
    */
   async pinAnnouncement(announcementId: string): Promise<TeachingAnnouncement> {
-    return this.client.post(`/teaching/announcements/${announcementId}/pin`)
+    return this.client.post(`/teaching/announcements/${encodePathSegment(announcementId)}/pin`)
   }
 
   /**
    * 提交课程评价。
    */
   async reviewCourse(courseId: string, data: TeachingReviewRequest): Promise<TeachingReview> {
-    return this.client.post(`/teaching/courses/${courseId}/review`, data)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/review`, data)
   }
 
   // ===== 进度与成绩 =====
@@ -432,48 +432,48 @@ export class TeachingApi {
    * 查询课程学习进度统计。
    */
   async getProgressStats(courseId: string): Promise<ProgressStats> {
-    return this.client.get(`/teaching/courses/${courseId}/progress-stats`)
+    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/progress-stats`)
   }
 
   /**
    * 查询课程成绩权重。
    */
   async listGradeWeights(courseId: string): Promise<GradeWeight[]> {
-    return this.client.get(`/teaching/courses/${courseId}/grade-weights`)
+    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/grade-weights`)
   }
 
   /**
    * 设置课程成绩权重。
    */
   async setGradeWeights(courseId: string, data: GradeWeightRequest): Promise<GradeWeight[]> {
-    return this.client.put(`/teaching/courses/${courseId}/grade-weights`, data)
+    return this.client.put(`/teaching/courses/${encodePathSegment(courseId)}/grade-weights`, data)
   }
 
   /**
    * 触发课程成绩计算。
    */
   async computeGrades(courseId: string): Promise<TeachingCourseGrade[]> {
-    return this.client.post(`/teaching/courses/${courseId}/grades/compute`)
+    return this.client.post(`/teaching/courses/${encodePathSegment(courseId)}/grades/compute`)
   }
 
   /**
    * 查询课程成绩汇总。后端按课程成绩契约返回完整数组,不分页。
    */
   async listGrades(courseId: string): Promise<TeachingCourseGrade[]> {
-    return this.client.get(`/teaching/courses/${courseId}/grades`)
+    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/grades`)
   }
 
   /**
    * 人工调整单个学生课程总评。
    */
   async overrideGrade(courseId: string, studentId: string, data: OverrideGradeRequest): Promise<TeachingCourseGrade> {
-    return this.client.patch(`/teaching/courses/${courseId}/grades/${studentId}`, data)
+    return this.client.patch(`/teaching/courses/${encodePathSegment(courseId)}/grades/${encodePathSegment(studentId)}`, data)
   }
 
   /**
    * 创建课程成绩导出任务。
    */
   async exportGrades(courseId: string): Promise<TransferTask> {
-    return this.client.get(`/teaching/courses/${courseId}/grades/export`)
+    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/grades/export`)
   }
 }

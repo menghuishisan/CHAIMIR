@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { gossipPhases } from './model';
 
-export const gossipSource = [
+const gossipSource = [
   'function gossip(message) {',
   '  frontier = seedPeers(message);',
   '  targets = chooseFanout(frontier, fanout);',

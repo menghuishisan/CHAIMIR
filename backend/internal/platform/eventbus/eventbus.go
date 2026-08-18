@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/response"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -132,7 +133,7 @@ func (b *natsBus) Close() {
 
 // Decode 统一解码事件 payload,保留调用方给出的模块错误语义。
 func Decode(data []byte, dst any, invalid *apperr.Error) error {
-	if err := json.Unmarshal(data, dst); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(data, dst); err != nil {
 		return invalid.WithCause(err)
 	}
 	return nil

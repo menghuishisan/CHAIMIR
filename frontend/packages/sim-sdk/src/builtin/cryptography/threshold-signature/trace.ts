@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { thresholdSignaturePhases } from './model';
 
-export const thresholdSignatureSource = [
+const thresholdSignatureSource = [
   'function thresholdSign(message) {',
   '  shares = splitSecret(privateKey, n, t);',
   '  partials = signWithShares(message, shares);',

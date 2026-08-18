@@ -14,6 +14,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { CheckSquare, ClipboardCheck, RefreshCw, RotateCcw } from 'lucide-react'
 import {
+  PAGINATION_MAX_SIZE,
   SubmissionStatus,
   type Assignment,
   type Course,
@@ -57,18 +58,15 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
-import { GradeAppeals } from '../../../grade/pages/teacher/grade-appeals'
+import { GradeAppeals } from '../../../grade/components/GradeAppeals'
+import { isJudgeTaskActive } from '../../../judge/rules'
+import { judgeTaskStatusTone } from '../../../judge/statusPresentation'
+import { useRejudgeTask } from '../../../judge/useRejudgeTask'
 import { formatDateTime, formatScore } from '../../../../utils/formatters'
-import {
-  isJudgeTaskActive,
-  judgeTaskStatusLabel,
-  judgeTaskStatusTone,
-} from '../../../../utils/labels/judge'
-import { submissionStatusLabel, submissionStatusTone } from '../../../../utils/labels/teaching'
+import { judgeTaskStatusLabel } from '../../../../utils/labels/judge'
+import { submissionStatusLabel } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-
-/** 课程与作业选择器一次取回的条数:后端分页上限 100。 */
-const PICKER_SIZE = 100
+import { submissionStatusTone } from '../../statusPresentation'
 
 /** 待处理判题面板一次展示的条数:它是提示区不是全量列表。 */
 const PENDING_JUDGE_SIZE = 10
@@ -82,7 +80,7 @@ export default function TeacherGradingPage() {
   const [courseId, setCourseId] = useState<string>('')
 
   const courses = useAsyncResource(
-    () => api.teaching.getCourses({ role: 'teacher', page: 1, size: PICKER_SIZE }),
+    () => api.teaching.getCourses({ role: 'teacher', page: 1, size: PAGINATION_MAX_SIZE }),
     [],
     () => false,
   )
@@ -428,31 +426,13 @@ function GradeSubmissionModal({ submission, onClose, onSaved, onError }: GradeSu
  */
 function JudgeTasksPanel({ assignmentId }: { assignmentId: string }) {
   const [scoreTarget, setScoreTarget] = useState<JudgeTask>()
-  const [rejudgingId, setRejudgingId] = useState<string>()
-  const [actionError, setActionError] = useState<string>()
 
   const tasks = useAsyncResource(
     () => api.judge.getTasks({ pending_manual: true, page: 1, size: PENDING_JUDGE_SIZE }),
     [assignmentId],
     (value) => value.list.length === 0,
   )
-
-  const rejudge = useCallback(
-    async (task: JudgeTask) => {
-      setRejudgingId(task.task_id)
-      setActionError(undefined)
-      try {
-        await api.judge.rejudgeTask(task.task_id)
-        toast.success('已重新提交判题')
-        tasks.reload()
-      } catch (error) {
-        setActionError(userFacingErrorMessage(error, '重判没有成功,请稍后重试。'))
-      } finally {
-        setRejudgingId(undefined)
-      }
-    },
-    [tasks],
-  )
+  const { rejudge, rejudgingId, actionError } = useRejudgeTask(tasks.reload)
 
   return (
     <Card>
@@ -501,7 +481,7 @@ function JudgeTasksPanel({ assignmentId }: { assignmentId: string }) {
                       size="sm"
                       leftIcon={RotateCcw}
                       loading={rejudgingId === task.task_id}
-                      onClick={() => void rejudge(task)}
+                      onClick={() => void rejudge(task.task_id)}
                     >
                       重新判题
                     </Button>

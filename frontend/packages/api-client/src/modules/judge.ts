@@ -1,7 +1,7 @@
 // Judge API：判题
 // 对应后端 M3 模块
 
-import { ApiClient } from '../client'
+import { ApiClient, encodePathSegment } from '../client'
 import type { JudgeTaskState } from '../constants/judge'
 import type { PaginatedResponse } from '../types/common'
 import type {
@@ -47,28 +47,28 @@ export class JudgeApi {
    * 更新判题器配置。
    */
   async updateJudger(judgerId: string, data: JudgerRequest): Promise<Judger> {
-    return this.client.patch(`/judge/judgers/${judgerId}`, data)
+    return this.client.patch(`/judge/judgers/${encodePathSegment(judgerId)}`, data)
   }
 
   /**
    * 触发判题器自测。
    */
   async runJudgerSelftest(judgerId: string): Promise<Judger> {
-    return this.client.post(`/judge/judgers/${judgerId}/selftest`)
+    return this.client.post(`/judge/judgers/${encodePathSegment(judgerId)}/selftest`)
   }
 
   /**
    * 获取判题任务详情
    */
   async getTask(taskId: string): Promise<JudgeTask> {
-    return this.client.get(`/judge/tasks/${taskId}`)
+    return this.client.get(`/judge/tasks/${encodePathSegment(taskId)}`)
   }
 
   /**
    * 获取判题进度 WebSocket URL
    */
   getProgressWsUrl(taskId: string): string {
-    return this.client.wsURL(`/judge/tasks/${taskId}/progress`)
+    return this.client.wsURL(`/judge/tasks/${encodePathSegment(taskId)}/progress`)
   }
 
   /**
@@ -89,13 +89,13 @@ export class JudgeApi {
    * 按原始快照重判
    */
   async rejudgeTask(taskId: string): Promise<JudgeTask> {
-    return this.client.post(`/judge/tasks/${taskId}/rejudge`)
+    return this.client.post(`/judge/tasks/${encodePathSegment(taskId)}/rejudge`)
   }
 
   /**
    * 提交人工评分结果
    */
   async manualScore(taskId: string, data: JudgeManualScoreRequest): Promise<JudgeTask> {
-    return this.client.post(`/judge/tasks/${taskId}/manual-score`, data)
+    return this.client.post(`/judge/tasks/${encodePathSegment(taskId)}/manual-score`, data)
   }
 }

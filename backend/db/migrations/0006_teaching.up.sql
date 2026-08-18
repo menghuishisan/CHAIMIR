@@ -258,6 +258,18 @@ CREATE TABLE IF NOT EXISTS course_grade (
     FOREIGN KEY (tenant_id, student_id) REFERENCES account(tenant_id, id)
 );
 
+CREATE TABLE IF NOT EXISTS course_grade_export_request (
+    transfer_task_id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL REFERENCES tenant(id),
+    account_id BIGINT NOT NULL REFERENCES account(id),
+    course_id BIGINT NOT NULL,
+    next_check_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    FOREIGN KEY (tenant_id, course_id) REFERENCES course(tenant_id, id),
+    FOREIGN KEY (tenant_id, account_id) REFERENCES account(tenant_id, id)
+);
+
 CREATE TABLE IF NOT EXISTS teaching_grade_event_outbox (
     id BIGINT PRIMARY KEY,
     tenant_id BIGINT NOT NULL,
@@ -289,6 +301,7 @@ CREATE INDEX IF NOT EXISTS idx_lesson_progress_student ON lesson_progress(tenant
 CREATE INDEX IF NOT EXISTS idx_discussion_course_parent ON discussion_post(tenant_id, course_id, parent_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_announcement_course ON announcement(tenant_id, course_id, is_pinned, created_at) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_course_grade_student ON course_grade(tenant_id, student_id);
+CREATE INDEX IF NOT EXISTS idx_course_grade_export_request_due ON course_grade_export_request(next_check_at, created_at);
 CREATE INDEX IF NOT EXISTS idx_teaching_grade_event_outbox_status ON teaching_grade_event_outbox(status, created_at ASC);
 
 ALTER TABLE course ENABLE ROW LEVEL SECURITY;
@@ -306,6 +319,7 @@ ALTER TABLE announcement ENABLE ROW LEVEL SECURITY;
 ALTER TABLE course_review ENABLE ROW LEVEL SECURITY;
 ALTER TABLE grade_weight ENABLE ROW LEVEL SECURITY;
 ALTER TABLE course_grade ENABLE ROW LEVEL SECURITY;
+ALTER TABLE course_grade_export_request ENABLE ROW LEVEL SECURITY;
 ALTER TABLE teaching_grade_event_outbox ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY course_select_tenant_or_shared_rls ON course FOR SELECT USING (tenant_id = current_setting('app.tenant_id')::BIGINT OR visibility = 2);
@@ -326,4 +340,5 @@ CREATE POLICY announcement_tenant_rls ON announcement USING (tenant_id = current
 CREATE POLICY course_review_tenant_rls ON course_review USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY grade_weight_tenant_rls ON grade_weight USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY course_grade_tenant_rls ON course_grade USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY course_grade_export_request_tenant_rls ON course_grade_export_request USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY teaching_grade_event_outbox_tenant_rls ON teaching_grade_event_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT);

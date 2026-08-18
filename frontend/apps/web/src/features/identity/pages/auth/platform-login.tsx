@@ -8,18 +8,18 @@ import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router'
 import { ShieldCheck } from 'lucide-react'
 import { Icon } from '@chaimir/ui'
+import { AuthBrandMark } from '../../../../components/AuthBrand'
 import { api } from '../../../../app/api'
 import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { passwordRequiredError, requiredError, useFieldErrors } from './auth-form'
+import { passwordRequiredError, requiredError, useFieldErrors } from '../../authForm'
 import {
-  AuthBrandMark,
   AuthFormError,
   AuthHeading,
   AuthPanel,
   AuthSubmit,
   AuthTextField,
-} from './auth-ui'
+} from '../../components/AuthUI'
 
 /**
  * PlatformLoginPage 渲染账号密码表单并在成功后进入平台管理首个功能页。

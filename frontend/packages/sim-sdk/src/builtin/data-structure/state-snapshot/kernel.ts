@@ -29,7 +29,7 @@ export function reduceSnapshotEvent(state: SnapshotState, event: SimEvent, _cont
 /**
  * advanceSnapshot 按快照与回滚流程推进一个过程单元。
  */
-export function advanceSnapshot(state: SnapshotState, event: SimEvent): SnapshotState {
+function advanceSnapshot(state: SnapshotState, event: SimEvent): SnapshotState {
   const phaseIndex = Math.min(snapshotPhases.length - 1, state.phaseIndex + 1);
   let next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: snapshotPhases[phaseIndex].id };
   if (phaseIndex === 2) next = applyDirtyWrite(next);
@@ -40,7 +40,7 @@ export function advanceSnapshot(state: SnapshotState, event: SimEvent): Snapshot
 /**
  * finalizeSnapshotState 刷新趋势、检查点和代码追踪。
  */
-export function finalizeSnapshotState(state: SnapshotState): SnapshotState {
+function finalizeSnapshotState(state: SnapshotState): SnapshotState {
   const consistent = state.currentRoot === state.snapshotRoot;
   const samples = state.samples.concat({ x: state.tick + state.phaseIndex, consistency: consistent ? 100 : 45, risk: consistent ? 8 : 72, cost: 25 + state.accounts.filter((account) => account.dirty).length * 12 }).slice(-24);
   return { ...state, phase: snapshotPhases[state.phaseIndex].label, samples, explanation: explain(state.phaseIndex), metrics: { result: consistent ? '快照一致' : '状态偏离快照', risk: consistent ? 8 : 72, dirty: state.accounts.filter((account) => account.dirty).length }, checkpointValues: { consistent }, _trace: { triggeredLines: traceLinesForSnapshot(state.lastTransition), variables: { snapshotRoot: state.snapshotRoot, currentRoot: state.currentRoot }, executionPath: `snapshot/${state.lastTransition}` } };
@@ -57,7 +57,7 @@ export function snapshotValid(state: SnapshotState): CheckpointResult {
 /**
  * computeStateRoot 计算账户状态根。
  */
-export function computeStateRoot(accounts: AccountState[]): string {
+function computeStateRoot(accounts: AccountState[]): string {
   return stateRootHash(accounts);
 }
 

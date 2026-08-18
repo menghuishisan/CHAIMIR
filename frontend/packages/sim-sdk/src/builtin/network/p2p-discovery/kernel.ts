@@ -64,7 +64,7 @@ export function reduceDiscoveryEvent(state: DiscoveryState, event: SimEvent, _co
 /**
  * advanceDiscovery 按发现流程推进一个过程单元。
  */
-export function advanceDiscovery(state: DiscoveryState, event: SimEvent): DiscoveryState {
+function advanceDiscovery(state: DiscoveryState, event: SimEvent): DiscoveryState {
   const phaseIndex = Math.min(discoveryPhases.length - 1, state.phaseIndex + 1);
   const next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick };
   if (phaseIndex === 1) return exchangeAddresses(next);
@@ -85,7 +85,7 @@ export function healthyDiscovery(state: DiscoveryState): CheckpointResult {
 /**
  * finalizeDiscoveryState 刷新节点状态、消息进度、指标和代码追踪。
  */
-export function finalizeDiscoveryState(state: DiscoveryState): DiscoveryState {
+function finalizeDiscoveryState(state: DiscoveryState): DiscoveryState {
   const connected = state.peers.filter((peer) => peer.connected && peer.healthy && !peer.banned).length;
   const risky = state.peers.some((peer) => (peer.malicious || peer.failedHandshakeReason) && !peer.banned);
   const banned = state.peers.filter((peer) => peer.banned).length;

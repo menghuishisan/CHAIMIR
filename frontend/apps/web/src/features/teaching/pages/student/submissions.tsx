@@ -33,7 +33,8 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { usePagedResource } from '../../../../hooks'
 import { formatDateTime, formatScore } from '../../../../utils/formatters'
-import { submissionStatusLabel, submissionStatusTone } from '../../../../utils/labels/teaching'
+import { submissionStatusLabel } from '../../../../utils/labels/teaching'
+import { submissionStatusTone } from '../../statusPresentation'
 
 /**
  * StudentSubmissionsPage 列出本人在该作业下的历次提交与得分。

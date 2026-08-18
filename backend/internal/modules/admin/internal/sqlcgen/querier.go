@@ -14,9 +14,11 @@ type Querier interface {
 	CountConfigChangeLogs(ctx context.Context, configID int64) (int64, error)
 	CreateAlertEvent(ctx context.Context, arg CreateAlertEventParams) (AlertEvent, error)
 	CreateAlertRule(ctx context.Context, arg CreateAlertRuleParams) (AlertRule, error)
+	CreateAuditExportRequest(ctx context.Context, arg CreateAuditExportRequestParams) (AuditExportRequest, error)
 	CreateBackupRecord(ctx context.Context, arg CreateBackupRecordParams) (BackupRecord, error)
 	CreateConfigChangeLog(ctx context.Context, arg CreateConfigChangeLogParams) (ConfigChangeLog, error)
 	CreateSystemConfig(ctx context.Context, arg CreateSystemConfigParams) (SystemConfig, error)
+	DeleteAuditExportRequest(ctx context.Context, arg DeleteAuditExportRequestParams) error
 	GetAlertRule(ctx context.Context, id int64) (AlertRule, error)
 	GetConfigChangeLog(ctx context.Context, arg GetConfigChangeLogParams) (ConfigChangeLog, error)
 	GetSystemConfig(ctx context.Context, arg GetSystemConfigParams) (SystemConfig, error)
@@ -26,8 +28,10 @@ type Querier interface {
 	// status 传 0 不按结果过滤;传具体结果供备份巡检按「已成功/已失败/进行中」取数与计数。
 	ListBackupRecords(ctx context.Context, arg ListBackupRecordsParams) ([]BackupRecord, error)
 	ListConfigChangeLogs(ctx context.Context, arg ListConfigChangeLogsParams) ([]ConfigChangeLog, error)
+	ListDueAuditExportRequests(ctx context.Context, arg ListDueAuditExportRequestsParams) ([]AuditExportRequest, error)
 	ListPlatformStatistics(ctx context.Context, arg ListPlatformStatisticsParams) ([]PlatformStatistic, error)
 	ListSystemConfigs(ctx context.Context, arg ListSystemConfigsParams) ([]SystemConfig, error)
+	SetAuditExportRequestNextCheck(ctx context.Context, arg SetAuditExportRequestNextCheckParams) (AuditExportRequest, error)
 	UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams) (AlertRule, error)
 	UpdateSystemConfig(ctx context.Context, arg UpdateSystemConfigParams) (SystemConfig, error)
 	UpsertGlobalPlatformStatistics(ctx context.Context, arg UpsertGlobalPlatformStatisticsParams) (PlatformStatistic, error)

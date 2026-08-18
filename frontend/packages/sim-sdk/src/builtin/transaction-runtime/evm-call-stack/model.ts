@@ -3,7 +3,7 @@
 import type { SimState } from '../../../types';
 import type { RuntimeActor, RuntimeMessage } from '../runtimeView';
 
-export interface Frame {
+interface Frame {
   id: string;
   contract: string;
   depth: number;

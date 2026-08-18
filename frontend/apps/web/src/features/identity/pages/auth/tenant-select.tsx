@@ -8,7 +8,7 @@ import { Button, Icon } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { AuthFormError, AuthHeading, AuthPanel, AuthQuietAction } from './auth-ui'
+import { AuthFormError, AuthHeading, AuthPanel, AuthQuietAction } from '../../components/AuthUI'
 import { clearPendingTenantLogin, getPendingTenantLogin } from './pendingLogin'
 
 /**

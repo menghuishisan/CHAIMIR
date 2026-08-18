@@ -3,7 +3,7 @@
 import type { SimState } from '../../../types';
 import type { ViewMessage } from '../consensusView';
 
-export type RaftRole = 'follower' | 'candidate' | 'leader';
+type RaftRole = 'follower' | 'candidate' | 'leader';
 
 export interface RaftNode {
   id: string;
@@ -20,7 +20,7 @@ export interface RaftNode {
   partitioned: boolean;
 }
 
-export interface RaftEntry {
+interface RaftEntry {
   index: number;
   term: number;
   command: string;

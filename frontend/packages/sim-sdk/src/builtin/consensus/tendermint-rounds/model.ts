@@ -3,7 +3,7 @@
 import type { SimState } from '../../../types';
 import type { ViewMessage } from '../consensusView';
 
-export interface TendermintValidator {
+interface TendermintValidator {
   id: string;
   label: string;
   power: number;
@@ -13,7 +13,7 @@ export interface TendermintValidator {
   precommit?: string;
 }
 
-export interface TendermintProposal {
+interface TendermintProposal {
   id: string;
   proposer: string;
   value: string;

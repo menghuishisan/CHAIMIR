@@ -23,20 +23,18 @@ import (
 
 // GradeModuleDeps 汇总组合根装配 M11 需要的基础设施和跨模块契约。
 type GradeModuleDeps struct {
-	Router     gin.IRouter
-	Database   *db.DB
-	IDs        snowflake.Generator
-	Audit      audit.Writer
-	Teaching   contracts.TeachingReadService
-	EventBus   eventbus.Bus
-	Redis      *redis.Client
-	Storage    *storage.Storage
-	Upload     config.UploadConfig
-	MinIO      config.MinIOConfig
-	AuthConfig config.AuthConfig
-	Config     config.GradeConfig
-	Auth       *auth.Manager
-	Roles      contracts.IdentityService
+	Router      gin.IRouter
+	Database    *db.DB
+	IDs         snowflake.Generator
+	Audit       audit.Writer
+	Teaching    contracts.TeachingReadService
+	EventBus    eventbus.Bus
+	Redis       *redis.Client
+	Storage     *storage.Storage
+	FileService storage.Service
+	Config      config.GradeConfig
+	Auth        *auth.Manager
+	Roles       contracts.IdentityService
 }
 
 // RegisterGradeModule 构造成绩中心 store/service,注册路由、事件订阅和 outbox worker。
@@ -50,10 +48,6 @@ func RegisterGradeModule(ctx context.Context, deps GradeModuleDeps) (*grade.Serv
 	if deps.Database == nil {
 		return nil, fmt.Errorf("grade module 缺少 database")
 	}
-	fileService, err := storage.NewServiceFromConfig(deps.AuthConfig, deps.MinIO, deps.Upload)
-	if err != nil {
-		return nil, err
-	}
 	store := grade.NewStore(deps.Database)
 	svc, err := grade.NewService(grade.ServiceDeps{
 		Store:       store,
@@ -64,7 +58,7 @@ func RegisterGradeModule(ctx context.Context, deps GradeModuleDeps) (*grade.Serv
 		Bus:         deps.EventBus,
 		Cache:       deps.Redis,
 		Storage:     deps.Storage,
-		FileService: fileService,
+		FileService: deps.FileService,
 		Config:      deps.Config,
 	})
 	if err != nil {

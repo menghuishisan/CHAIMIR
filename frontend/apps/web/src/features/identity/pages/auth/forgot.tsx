@@ -17,7 +17,7 @@ import {
   requiredError,
   useFieldErrors,
   useSmsCooldown,
-} from './auth-form'
+} from '../../authForm'
 import {
   AuthFormError,
   AuthHeading,
@@ -28,7 +28,7 @@ import {
   AuthSubmit,
   AuthSuccess,
   AuthTextField,
-} from './auth-ui'
+} from '../../components/AuthUI'
 
 /**
  * ForgotPasswordPage 处理短信验证码重置密码。

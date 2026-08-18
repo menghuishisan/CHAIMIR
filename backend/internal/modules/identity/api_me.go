@@ -33,7 +33,7 @@ func (a meAPI) register(g gin.IRouter) {
 func (a meAPI) getMe(c *gin.Context) {
 	out, err := a.svc.GetMe(c.Request.Context())
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -50,10 +50,10 @@ func (a meAPI) changePassword(c *gin.Context) {
 		return
 	}
 	if err := a.svc.ChangeMyPassword(c.Request.Context(), sessionID, req); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // changePhone 绑定换绑手机号请求并委托 service 校验短信验证码。
@@ -63,17 +63,17 @@ func (a meAPI) changePhone(c *gin.Context) {
 		return
 	}
 	if err := a.svc.ChangeMyPhone(c.Request.Context(), req); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // sessions 返回当前账号服务端会话列表。
 func (a meAPI) sessions(c *gin.Context) {
 	out, err := a.svc.ListMySessions(c.Request.Context())
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -83,12 +83,12 @@ func (a meAPI) sessions(c *gin.Context) {
 func currentSessionID(c *gin.Context) (int64, bool) {
 	sessionID, exists := c.Get("session_id")
 	if !exists {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentitySessionContextMissing)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentitySessionContextMissing)
 		return 0, false
 	}
 	id, ok := sessionID.(int64)
 	if !ok || id <= 0 {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentitySessionContextMissing)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentitySessionContextMissing)
 		return 0, false
 	}
 	return id, true

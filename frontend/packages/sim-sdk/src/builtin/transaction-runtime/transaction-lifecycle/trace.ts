@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { txLifecyclePhases } from './model';
 
-export const txLifecycleSource = ['function submitTransaction(tx) {', '  txHash = sign(tx);', '  validateForMempool(tx);', '  includeInBlock(tx);', '  receipt = execute(tx);', '}'];
+const txLifecycleSource = ['function submitTransaction(tx) {', '  txHash = sign(tx);', '  validateForMempool(tx);', '  includeInBlock(tx);', '  receipt = execute(tx);', '}'];
 export const txLifecycleNarrative = phaseNarrative(txLifecyclePhases, 'tx-lifecycle-receipt');
 export const txLifecycleCodeTrace = { sourceCode: txLifecycleSource.join('\n'), language: 'pseudocode' as const, lineMapping: txLifecyclePhases.map((phase, index) => ({ line: Math.min(index + 1, txLifecycleSource.length), triggerCondition: phase.id, annotation: phase.reason, highlightStyle: phase.id === 'execute' ? ('success' as const) : ('normal' as const) })), variableWatch: [{ name: 'txHash', extract: 'state.txHash', format: 'hex' as const }] };
 

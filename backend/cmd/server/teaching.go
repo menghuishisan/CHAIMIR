@@ -25,21 +25,20 @@ import (
 
 // TeachingModuleDeps 汇总组合根装配 M6 需要的基础设施和跨模块契约。
 type TeachingModuleDeps struct {
-	Router   gin.IRouter
-	Database *db.DB
-	IDs      snowflake.Generator
-	Config   config.TeachingConfig
-	Upload   config.UploadConfig
-	MinIO    config.MinIOConfig
-	AuthCfg  config.AuthConfig
-	Content  contracts.ContentReadService
-	Judge    contracts.JudgeService
-	Transfer *transfer.Service
-	Storage  *storage.Storage
-	Audit    audit.Writer
-	EventBus eventbus.Bus
-	Auth     *auth.Manager
-	Roles    contracts.IdentityService
+	Router      gin.IRouter
+	Database    *db.DB
+	IDs         snowflake.Generator
+	Config      config.TeachingConfig
+	Upload      config.UploadConfig
+	FileService storage.Service
+	Content     contracts.ContentReadService
+	Judge       contracts.JudgeService
+	Transfer    *transfer.Service
+	Storage     *storage.Storage
+	Audit       audit.Writer
+	EventBus    eventbus.Bus
+	Auth        *auth.Manager
+	Roles       contracts.IdentityService
 }
 
 // RegisterTeachingModule 构造教学 store/service,注册路由、事件和 outbox worker。
@@ -59,10 +58,6 @@ func RegisterTeachingModule(ctx context.Context, deps TeachingModuleDeps) (*teac
 	if deps.Storage == nil {
 		return nil, fmt.Errorf("teaching module 缺少统一对象存储")
 	}
-	fileService, err := storage.NewServiceFromConfig(deps.AuthCfg, deps.MinIO, deps.Upload)
-	if err != nil {
-		return nil, err
-	}
 	store := teaching.NewStore(deps.Database)
 	svc, err := teaching.NewService(teaching.ServiceDeps{
 		Store:                  store,
@@ -74,7 +69,7 @@ func RegisterTeachingModule(ctx context.Context, deps TeachingModuleDeps) (*teac
 		Bus:                    deps.EventBus,
 		Transfers:              deps.Transfer,
 		Storage:                deps.Storage,
-		FileService:            fileService,
+		FileService:            deps.FileService,
 		Config:                 deps.Config,
 		CourseMaterialMaxBytes: deps.Upload.CourseMaterialMaxBytes,
 		CourseCoverMaxBytes:    deps.Upload.CourseCoverMaxBytes,
@@ -104,6 +99,11 @@ func RegisterTeachingModule(ctx context.Context, deps TeachingModuleDeps) (*teac
 		return nil, err
 	}
 	go background.Run(ctx, statusTask)
+	gradeExportTask, err := teachingGradeExportTask(deps.Config, svc)
+	if err != nil {
+		return nil, err
+	}
+	go background.Run(ctx, gradeExportTask)
 	return svc, nil
 }
 
@@ -156,4 +156,15 @@ func teachingCourseStatusTask(cfg config.TeachingConfig, svc *teaching.Service) 
 			return svc.AdvanceCourseStatusesOnce(ctx, timex.Now())
 		},
 	}, nil
+}
+
+// teachingGradeExportTask 把 M6 成绩导出请求处理接入统一后台任务运行器。
+func teachingGradeExportTask(cfg config.TeachingConfig, svc *teaching.Service) (background.Task, error) {
+	if svc == nil {
+		return background.Task{}, fmt.Errorf("teaching grade export worker 缺少 service")
+	}
+	if cfg.GradeExportWorkerPollMs <= 0 {
+		return background.Task{}, fmt.Errorf("TEACHING_GRADE_EXPORT_WORKER_POLL_INTERVAL_MS 必须大于 0")
+	}
+	return background.Task{Name: "teaching.grade_export", Interval: time.Duration(cfg.GradeExportWorkerPollMs) * time.Millisecond, Run: svc.RunGradeExportOnce}, nil
 }

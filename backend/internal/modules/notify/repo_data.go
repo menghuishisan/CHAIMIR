@@ -231,8 +231,8 @@ func parseOptionalTime(raw string) (time.Time, error) {
 	if raw == "" {
 		return time.Time{}, nil
 	}
-	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+	if t, err := timex.ParseRFC3339(raw); err == nil {
 		return t, nil
 	}
-	return time.Parse("2006-01-02", raw)
+	return timex.ParseDate(raw)
 }

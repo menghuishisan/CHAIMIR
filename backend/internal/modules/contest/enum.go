@@ -142,6 +142,17 @@ const (
 )
 
 const (
+	// VulnChainOperationDeploy 表示漏洞预验证部署合约步骤。
+	VulnChainOperationDeploy = "deploy"
+	// VulnChainOperationTx 表示漏洞预验证发送交易步骤。
+	VulnChainOperationTx = "tx"
+	// VulnChainOperationReset 表示漏洞预验证重置链状态步骤。
+	VulnChainOperationReset = "reset"
+	// VulnChainOperationQuery 表示漏洞预验证只读查询步骤。
+	VulnChainOperationQuery = "query"
+)
+
+const (
 	// contentTypeContestProblem 是 M5 竞赛题内容类型的稳定取值。
 	contentTypeContestProblem int16 = 2
 	// contentAuthorExternal 是 M5 外部来源导入作者类型的稳定取值。

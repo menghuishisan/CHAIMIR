@@ -38,8 +38,6 @@ import {
   CardHeader,
   Checkbox,
   Empty,
-  FilterBar,
-  FilterField,
   FormField,
   IconButton,
   Input,
@@ -56,8 +54,6 @@ import {
   SegmentedControl,
   Select,
   Stat,
-  StatusIndicator,
-  Table,
   toast,
   type TableColumn,
 } from '@chaimir/ui'
@@ -65,15 +61,17 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { CLASS_STATUS_FILTERS, CLASS_STATUS_LABELS, CLASS_STATUS_TONES } from '../../../../utils/labels/identity'
+import { CLASS_STATUS_LABELS } from '../../../../utils/labels/identity'
+import {
+  OrganizationClassSection,
+  type OrganizationClassRow,
+} from '../../components/OrganizationClassSection'
+import {
+  countClassesByMajor,
+  loadOrganizationView,
+  type OrganizationView,
+} from '../../organizationView'
 import { OrgImportModal } from './org-import'
-
-/** OrgView 是组织结构一次读齐的三层数据。 */
-interface OrgView {
-  departments: Department[]
-  majors: Major[]
-  classes: Class[]
-}
 
 /** 待删除目标:三层各自的删除前置条件不同,用一个联合类型统一确认弹窗。 */
 type DeleteTarget =
@@ -112,13 +110,8 @@ export default function SchoolAdminOrganizationPage() {
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
-  const view = useAsyncResource<OrgView>(
-    () =>
-      Promise.all([
-        api.identity.listDepartments(),
-        api.identity.listMajors(),
-        api.identity.listClasses(),
-      ]).then(([departments, majors, classes]) => ({ departments, majors, classes })),
+  const view = useAsyncResource<OrganizationView>(
+    loadOrganizationView,
     [],
     () => false,
   )
@@ -377,13 +370,7 @@ function DepartmentCard({
   onEditMajor,
   onDeleteMajor,
 }: DepartmentCardProps) {
-  const classCountByMajor = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const entity of classes) {
-      counts.set(entity.major_id, (counts.get(entity.major_id) ?? 0) + 1)
-    }
-    return counts
-  }, [classes])
+  const classCountByMajor = useMemo(() => countClassesByMajor(classes), [classes])
 
   return (
     <Card>
@@ -443,7 +430,7 @@ function DepartmentCard({
 }
 
 interface ClassesSectionProps {
-  view: OrgView
+  view: OrganizationView
   statusFilter: string
   keyword: string
   onStatusChange: (value: string) => void
@@ -453,13 +440,6 @@ interface ClassesSectionProps {
   onDelete: (item: Class) => void
   onPromote: () => void
   onArchive: () => void
-}
-
-/** ClassRow 是班级表格行:把院系与专业名挂到班级上,避免界面出现内部编号。 */
-interface ClassRow {
-  entity: Class
-  majorName: string
-  departmentName: string
 }
 
 /**
@@ -477,67 +457,7 @@ function ClassesSection({
   onPromote,
   onArchive,
 }: ClassesSectionProps) {
-  const departmentNameById = useMemo(
-    () => new Map(view.departments.map((department) => [department.id, department.name])),
-    [view.departments],
-  )
-
-  const majorById = useMemo(() => new Map(view.majors.map((major) => [major.id, major])), [view.majors])
-
-  const rows = useMemo<ClassRow[]>(() => {
-    const trimmed = keyword.trim()
-    return view.classes
-      .map((entity) => {
-        const major = majorById.get(entity.major_id)
-        return {
-          entity,
-          majorName: major ? major.name : '已撤销的专业',
-          departmentName: major
-            ? (departmentNameById.get(major.department_id) ?? '已撤销的院系')
-            : '已撤销的院系',
-        }
-      })
-      .filter((row) => {
-        if (statusFilter && String(row.entity.status) !== statusFilter) return false
-        if (trimmed === '') return true
-        return (
-          row.entity.name.includes(trimmed) ||
-          row.majorName.includes(trimmed) ||
-          row.departmentName.includes(trimmed)
-        )
-      })
-  }, [departmentNameById, keyword, majorById, statusFilter, view.classes])
-
-  const columns: TableColumn<ClassRow>[] = [
-    {
-      key: 'name',
-      header: '班级',
-      render: (row) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{row.entity.name}</div>
-          <div className="truncate text-xs text-ink-sub">
-            {row.departmentName} · {row.majorName}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'enrollment_year',
-      header: '入学年份',
-      align: 'right',
-      mono: true,
-      render: (row) => `${row.entity.enrollment_year} 级`,
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (row) => (
-        <StatusIndicator
-          tone={CLASS_STATUS_TONES[row.entity.status]}
-          label={CLASS_STATUS_LABELS[row.entity.status]}
-        />
-      ),
-    },
+  const columns: TableColumn<OrganizationClassRow>[] = [
     {
       key: 'actions',
       header: '操作',
@@ -564,9 +484,16 @@ function ClassesSection({
   ]
 
   return (
-    <PageSection
-      title="班级明细"
-      description={`共 ${rows.length} 个班级。升届把班级整体升到下一年级,归档把某一届班级转为已归档。`}
+    <OrganizationClassSection
+      view={view}
+      keyword={keyword}
+      statusFilter={statusFilter}
+      onKeywordChange={onKeywordChange}
+      onStatusChange={onStatusChange}
+      description={(count) => `共 ${count} 个班级。升届把班级整体升到下一年级,归档把某一届班级转为已归档。`}
+      emptyDescription={
+        view.majors.length === 0 ? '先建专业,才能在专业下建班级。' : '班级是学生账号的归属,开通学生账号前先建班级。'
+      }
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" size="sm" leftIcon={MoveUp} onClick={onPromote}>
@@ -586,48 +513,8 @@ function ClassesSection({
           </Button>
         </div>
       }
-    >
-      <div className="flex flex-col gap-4">
-        <FilterBar label="班级筛选">
-          <FilterField label="班级状态" group>
-            <SegmentedControl
-              aria-label="按班级状态筛选"
-              size="sm"
-              options={CLASS_STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-              value={statusFilter}
-              onValueChange={onStatusChange}
-            />
-          </FilterField>
-          <FilterField label="名称" htmlFor="org-keyword">
-            <Input
-              id="org-keyword"
-              value={keyword}
-              placeholder="班级、专业或院系名"
-              onChange={(event) => onKeywordChange(event.target.value)}
-            />
-          </FilterField>
-        </FilterBar>
-
-        <Table
-          columns={columns}
-          data={rows}
-          rowKey={(row) => row.entity.id}
-          empty={
-            <Empty
-              icon={Users}
-              title={keyword || statusFilter ? '没有匹配的班级' : '还没有班级'}
-              description={
-                keyword || statusFilter
-                  ? '换个条件再试,或清空筛选查看全部班级。'
-                  : view.majors.length === 0
-                    ? '先建专业,才能在专业下建班级。'
-                    : '班级是学生账号的归属,开通学生账号前先建班级。'
-              }
-            />
-          }
-        />
-      </div>
-    </PageSection>
+      extraColumns={columns}
+    />
   )
 }
 

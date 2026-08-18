@@ -1,6 +1,5 @@
 // identity labels 文件维护 identity 模块枚举值的用户向文案。
 
-import type { StatusTone } from '@chaimir/ui'
 import {
   AccountStatus,
   ApplicationStatus,
@@ -21,18 +20,6 @@ export const CLASS_STATUS_LABELS: Record<ClassStatus, string> = {
   [ClassStatus.ARCHIVED]: '已归档',
 }
 
-export const CLASS_STATUS_TONES: Record<ClassStatus, StatusTone> = {
-  [ClassStatus.ACTIVE]: 'success',
-  [ClassStatus.ARCHIVED]: 'neutral',
-}
-
-/** CLASS_STATUS_FILTERS 是组织页面共同使用的状态筛选清单。 */
-export const CLASS_STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(ClassStatus.ACTIVE), label: CLASS_STATUS_LABELS[ClassStatus.ACTIVE] },
-  { value: String(ClassStatus.ARCHIVED), label: CLASS_STATUS_LABELS[ClassStatus.ARCHIVED] },
-] as const
-
 /** 租户模块用户向文案与说明,供校管配置和平台只读详情共同使用。 */
 export const TENANT_MODULE_LABELS: Record<TenantModule, string> = {
   [TENANT_MODULE.TEACHING]: '教学',
@@ -42,14 +29,14 @@ export const TENANT_MODULE_LABELS: Record<TenantModule, string> = {
   [TENANT_MODULE.GRADE]: '成绩',
 }
 
-/** TENANT_MODULE_OPTIONS 是校管端模块开关的唯一用户向选项清单。 */
-export const TENANT_MODULE_OPTIONS = [
-  { value: TENANT_MODULE.TEACHING, label: '教学', description: '课程、章节课时、作业与批改' },
-  { value: TENANT_MODULE.EXPERIMENT, label: '实验', description: '实验编排与沙箱实验环境' },
-  { value: TENANT_MODULE.CONTEST, label: '竞赛', description: '赛事组织、解题赛与对抗赛' },
-  { value: TENANT_MODULE.SIM, label: '仿真', description: '区块链协议与系统推演' },
-  { value: TENANT_MODULE.GRADE, label: '成绩', description: '成绩汇总与学业分析' },
-] as const
+/** 租户模块说明文案,与模块名称共同供配置页面使用。 */
+export const TENANT_MODULE_DESCRIPTIONS: Record<TenantModule, string> = {
+  [TENANT_MODULE.TEACHING]: '课程、章节课时、作业与批改',
+  [TENANT_MODULE.EXPERIMENT]: '实验编排与沙箱实验环境',
+  [TENANT_MODULE.CONTEST]: '赛事组织、解题赛与对抗赛',
+  [TENANT_MODULE.SIM]: '区块链协议与系统推演',
+  [TENANT_MODULE.GRADE]: '成绩汇总与学业分析',
+}
 
 /** 机构类型取值与后端 school_type 一致(1 本科 / 2 高职高专 / 3 其他),取值与文案在此单一登记。 */
 const TENANT_APPLICATION_SCHOOL_TYPE_LABELS = {
@@ -58,13 +45,10 @@ const TENANT_APPLICATION_SCHOOL_TYPE_LABELS = {
   3: '其他教育机构',
 } as const
 
-export type TenantApplicationSchoolType = keyof typeof TENANT_APPLICATION_SCHOOL_TYPE_LABELS
-
-/** TENANT_APPLICATION_SCHOOL_TYPES 供表单按登记顺序渲染选项,避免页面再抄一份取值清单。 */
-export const TENANT_APPLICATION_SCHOOL_TYPES = [1, 2, 3] as const satisfies readonly TenantApplicationSchoolType[]
-
 /** tenantApplicationSchoolTypeLabel 返回入驻机构类型文案。 */
-export function tenantApplicationSchoolTypeLabel(type: TenantApplicationSchoolType): string {
+export function tenantApplicationSchoolTypeLabel(
+  type: keyof typeof TENANT_APPLICATION_SCHOOL_TYPE_LABELS,
+): string {
   return TENANT_APPLICATION_SCHOOL_TYPE_LABELS[type]
 }
 
@@ -78,7 +62,9 @@ export function schoolTypeLabel(type: number): string {
 }
 
 /** isKnownSchoolType 判断数字是否落在已登记的机构类型内。 */
-function isKnownSchoolType(type: number): type is TenantApplicationSchoolType {
+function isKnownSchoolType(
+  type: number,
+): type is keyof typeof TENANT_APPLICATION_SCHOOL_TYPE_LABELS {
   return type in TENANT_APPLICATION_SCHOOL_TYPE_LABELS
 }
 
@@ -108,22 +94,9 @@ const ACCOUNT_STATUS_LABELS: Record<AccountStatus, string> = {
   [AccountStatus.CANCELLED]: '已注销',
 }
 
-const ACCOUNT_STATUS_TONES: Record<AccountStatus, StatusTone> = {
-  [AccountStatus.PENDING]: 'warning',
-  [AccountStatus.ACTIVE]: 'success',
-  [AccountStatus.DISABLED]: 'danger',
-  [AccountStatus.ARCHIVED]: 'neutral',
-  [AccountStatus.CANCELLED]: 'neutral',
-}
-
 /** accountStatusLabel 返回账号状态文案。 */
 export function accountStatusLabel(status: AccountStatus): string {
   return ACCOUNT_STATUS_LABELS[status]
-}
-
-/** accountStatusTone 返回账号状态语义色。 */
-export function accountStatusTone(status: AccountStatus): StatusTone {
-  return ACCOUNT_STATUS_TONES[status]
 }
 
 const BASE_IDENTITY_LABELS: Record<BaseIdentity, string> = {
@@ -141,19 +114,9 @@ const SESSION_STATUS_LABELS: Record<SessionStatus, string> = {
   [SessionStatus.REVOKED]: '已退出',
 }
 
-const SESSION_STATUS_TONES: Record<SessionStatus, StatusTone> = {
-  [SessionStatus.ACTIVE]: 'success',
-  [SessionStatus.REVOKED]: 'neutral',
-}
-
 /** sessionStatusLabel 返回登录会话状态文案。 */
 export function sessionStatusLabel(status: SessionStatus): string {
   return SESSION_STATUS_LABELS[status]
-}
-
-/** sessionStatusTone 返回登录会话状态语义色。 */
-export function sessionStatusTone(status: SessionStatus): StatusTone {
-  return SESSION_STATUS_TONES[status]
 }
 
 const TENANT_STATUS_LABELS: Record<TenantStatus, string> = {
@@ -162,28 +125,10 @@ const TENANT_STATUS_LABELS: Record<TenantStatus, string> = {
   [TenantStatus.EXPIRED]: '已到期',
 }
 
-const TENANT_STATUS_TONES: Record<TenantStatus, StatusTone> = {
-  [TenantStatus.ACTIVE]: 'success',
-  [TenantStatus.DISABLED]: 'danger',
-  [TenantStatus.EXPIRED]: 'warning',
-}
-
 /** tenantStatusLabel 返回学校状态文案。 */
 export function tenantStatusLabel(status: TenantStatus): string {
   return TENANT_STATUS_LABELS[status]
 }
-
-/** tenantStatusTone 返回学校状态语义色。 */
-export function tenantStatusTone(status: TenantStatus): StatusTone {
-  return TENANT_STATUS_TONES[status]
-}
-
-/** TENANT_STATUSES 供状态调整表单按登记顺序渲染选项(后端只接受这三种)。 */
-export const TENANT_STATUSES = [
-  TenantStatus.ACTIVE,
-  TenantStatus.DISABLED,
-  TenantStatus.EXPIRED,
-] as const
 
 const DEPLOY_MODE_LABELS: Record<DeployMode, string> = {
   [DeployMode.SAAS]: '平台托管',
@@ -212,18 +157,7 @@ const APPLICATION_STATUS_LABELS: Record<ApplicationStatus, string> = {
   [ApplicationStatus.REJECTED]: '已驳回',
 }
 
-const APPLICATION_STATUS_TONES: Record<ApplicationStatus, StatusTone> = {
-  [ApplicationStatus.PENDING]: 'warning',
-  [ApplicationStatus.APPROVED]: 'success',
-  [ApplicationStatus.REJECTED]: 'neutral',
-}
-
 /** applicationStatusLabel 返回入驻申请状态文案。 */
 export function applicationStatusLabel(status: ApplicationStatus): string {
   return APPLICATION_STATUS_LABELS[status]
-}
-
-/** applicationStatusTone 返回入驻申请状态语义色。 */
-export function applicationStatusTone(status: ApplicationStatus): StatusTone {
-  return APPLICATION_STATUS_TONES[status]
 }

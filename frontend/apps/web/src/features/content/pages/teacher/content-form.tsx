@@ -33,16 +33,14 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { useAsyncResource } from '../../../../hooks'
+import { CONTENT_DIFFICULTIES, CONTENT_TYPES, CONTENT_VISIBILITIES } from '../../options'
 import {
-  CONTENT_DIFFICULTIES,
-  CONTENT_TYPES,
-  CONTENT_VISIBILITIES,
   contentDifficultyLabel,
   contentTypeLabel,
   contentVisibilityLabel,
 } from '../../../../utils/labels/content'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { ContentAttachmentsField } from '../../ContentAttachmentsField'
+import { ContentAttachmentsField } from '../../components/ContentAttachmentsField'
 
 /** 正文各字段在 body 里的键,与 M5 架构设计 §2.2 的类型化内容体对应。 */
 const BODY_KEYS = {

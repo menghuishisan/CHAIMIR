@@ -7,7 +7,7 @@ import React, { useCallback, useId, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { api } from '../../../../app/api'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { confirmPasswordError, passwordRuleError, requiredError, useFieldErrors } from './auth-form'
+import { confirmPasswordError, passwordRuleError, requiredError, useFieldErrors } from '../../authForm'
 import {
   AuthFormError,
   AuthHeading,
@@ -17,7 +17,7 @@ import {
   AuthSubmit,
   AuthSuccess,
   AuthTextField,
-} from './auth-ui'
+} from '../../components/AuthUI'
 
 /**
  * ActivatePage 处理激活码开通账号。

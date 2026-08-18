@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"time"
 
 	"chaimir/internal/platform/response"
@@ -52,7 +53,7 @@ func runOnce(ctx context.Context, task Task) {
 	)
 	defer func() {
 		if v := recover(); v != nil {
-			logging.ErrorContext(ctx, "background task panic", fmt.Sprint(v))
+			logging.ErrorContext(ctx, "background task panic", fmt.Sprintf("%v\n%s", v, debug.Stack()))
 		}
 	}()
 	if task.Run == nil {

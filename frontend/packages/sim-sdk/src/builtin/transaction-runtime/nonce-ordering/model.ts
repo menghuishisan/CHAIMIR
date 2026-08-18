@@ -2,7 +2,7 @@
 
 import type { SimState } from '../../../types';
 
-export interface NonceTx {
+interface NonceTx {
   id: string;
   nonce: number;
   fee: number;

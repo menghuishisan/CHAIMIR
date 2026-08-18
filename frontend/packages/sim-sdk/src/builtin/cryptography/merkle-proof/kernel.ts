@@ -49,7 +49,7 @@ export function reduceMerkleProofEvent(state: MerkleProofState, event: SimEvent,
 /**
  * advanceMerkleProof 推进 Merkle 证明验证阶段。
  */
-export function advanceMerkleProof(state: MerkleProofState, event: SimEvent): MerkleProofState {
+function advanceMerkleProof(state: MerkleProofState, event: SimEvent): MerkleProofState {
   const phaseIndex = Math.min(merkleProofPhases.length - 1, state.phaseIndex + 1);
   return rebuildProof({ ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick }, merkleProofPhases[phaseIndex].id);
 }
@@ -64,7 +64,7 @@ export function merkleProofValid(state: MerkleProofState): CheckpointResult {
 /**
  * finalizeMerkleProofState 刷新教学状态、指标和代码追踪。
  */
-export function finalizeMerkleProofState(state: MerkleProofState): MerkleProofState {
+function finalizeMerkleProofState(state: MerkleProofState): MerkleProofState {
   return {
     ...state,
     phase: merkleProofPhases[state.phaseIndex].label,

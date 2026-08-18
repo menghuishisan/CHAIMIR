@@ -30,10 +30,10 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
+import { contentStatusTone } from '../../statusPresentation'
 import {
   contentAuthorTypeLabel,
   contentStatusLabel,
-  contentStatusTone,
   contentVisibilityLabel,
 } from '../../../../utils/labels/content'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'

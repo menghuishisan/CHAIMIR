@@ -33,6 +33,16 @@ type AlertRule struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+type AuditExportRequest struct {
+	TransferTaskID int64              `json:"transfer_task_id"`
+	TenantID       int64              `json:"tenant_id"`
+	AccountID      int64              `json:"account_id"`
+	QuerySnapshot  []byte             `json:"query_snapshot"`
+	NextCheckAt    pgtype.Timestamptz `json:"next_check_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BackupRecord struct {
 	ID         int64              `json:"id"`
 	Type       int16              `json:"type"`

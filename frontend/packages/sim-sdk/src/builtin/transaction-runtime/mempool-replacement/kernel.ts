@@ -38,7 +38,7 @@ export function reduceMempoolReplacementEvent(state: MempoolReplacementState, ev
 }
 
 /** finalizeMempoolReplacementState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
-export function finalizeMempoolReplacementState(state: MempoolReplacementState): MempoolReplacementState {
+function finalizeMempoolReplacementState(state: MempoolReplacementState): MempoolReplacementState {
   const included = state.transactions.filter((tx) => tx.status === 'included').length;
   const rejected = state.transactions.filter((tx) => tx.status === 'rejected').length;
   return {

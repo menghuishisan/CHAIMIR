@@ -47,8 +47,9 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatDateTime, formatRelativeDeadline } from '../../../../utils/formatters'
 import { contentDifficultyLabel } from '../../../../utils/labels/content'
-import { ASSIGNMENT_DUE_TONE, latePolicyLabel } from '../../../../utils/labels/teaching'
-import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { latePolicyLabel } from '../../../../utils/labels/teaching'
+import { errorDiagnostics, userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { ASSIGNMENT_DUE_TONE } from '../../statusPresentation'
 import { itemStatement, itemChoices } from './assignment-item'
 
 /** 服务端草稿定时写回间隔:与 M6 接口设计 §6.2「自动每 60s」一致。 */
@@ -161,7 +162,7 @@ function AssignmentForm({
       console.error('作业草稿写回失败', {
         operation: 'teaching.assignment.saveDraft',
         reason: 'draft-save-failed',
-        error,
+        error: errorDiagnostics(error),
       })
     }
   }, [assignmentId])

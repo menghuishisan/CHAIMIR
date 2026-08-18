@@ -36,9 +36,10 @@ import {
   ecoTagsLabel,
   sandboxToolKindLabel,
   toolStatusLabel,
-  toolStatusTone,
 } from '../../../../utils/labels/sandbox'
+import { toolStatusTone } from '../../statusPresentation'
 import { ToolFormModal } from './tool-form'
+import { asRecord, readString } from '../../runtimeSpec'
 
 /** 类型筛选项:值为空串表示不过滤。 */
 const KIND_FILTERS = [
@@ -203,7 +204,7 @@ function ToolCard({ tool }: { tool: SandboxToolDefinition }) {
           },
           {
             term: '执行环境',
-            description: tool.resource_spec.components?.[0]?.name ?? '未配置',
+            description: readString(asRecord(tool.resource_spec.components?.[0]), 'name') || '未配置',
             mono: true,
           },
         ]

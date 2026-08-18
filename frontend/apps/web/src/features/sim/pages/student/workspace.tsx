@@ -15,17 +15,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router'
-import { Dices, LoaderCircle, Lock, Share2, TriangleAlert } from 'lucide-react'
+import { Dices, LoaderCircle, Lock, TriangleAlert } from 'lucide-react'
 import {
   Badge,
   Button,
-  ChainProgress,
-  TeachingFrameStage,
-  TeachingFrameStream,
-  WorkbenchShell,
-  WorkbenchTopbar,
-  frameStreamEntries,
-  frameHasStream,
   toast,
   useReducedMotion,
 } from '@chaimir/ui'
@@ -42,13 +35,13 @@ import { api } from '../../../../app/api'
 import { appConfig } from '../../../../app/config'
 import { AppStatusScreen } from '../../../../components/AppStatusScreen'
 import { useAsyncResource } from '../../../../hooks'
+import { errorDiagnostics } from '../../../../utils/userFacingError'
 import { useImmersive } from '../../../../layouts/immersive/context'
 import { moveCommand, replayMoves } from '../../replayMoves'
-import { narrativeProgress, useSimPlayback } from '../../playback'
-import { SimPlaybackControls } from '../../SimPlaybackControls'
-import { SimShareModal } from '../../SimShareModal'
-import { SimWorkbenchAside } from '../../SimWorkbenchAside'
-import { InteractionPanel } from '../../WorkbenchPanels'
+import { useSimPlayback } from '../../playback'
+import { SimPlaybackControls } from '../../components/SimPlaybackControls'
+import { SimRuntimeWorkbench } from '../../components/SimRuntimeWorkbench'
+import { SimShareModal } from '../../components/SimShareModal'
 import { useIsolatedSimStream, type IsolatedSnapshot } from '../../isolatedStream'
 
 /** 默认随机种子:固定值保证「同一个场景每次进来都一样」,换条件是显式动作。 */
@@ -278,7 +271,7 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
           payload,
         })
         .catch((reportError: unknown) => {
-          console.error('[sim] 操作上报失败', { sessionId, eventType, error: reportError })
+          console.error('[sim] 操作上报失败', { sessionId, eventType, error: errorDiagnostics(reportError) })
           toast.error('这一步没能记录到服务端,推演不受影响。')
         })
     },
@@ -375,79 +368,17 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
     )
   }
 
-  const frame = snapshot.view
-  const narrativeDone = narrativeProgress(descriptor, snapshot)
-  // 事件流:只有会产生消息/调用的场景才挂这一栏(默克尔树这类只有有界元素,给它空栏是占屏幕);
-  // 条数供壳在收起的把手上给未读计数(收起不等于失联)
-  const hasStream = frameHasStream(frame)
-  const streamCount = frameStreamEntries(frame).length
-
   return (
     <>
-      <WorkbenchShell
-        workbench="sim"
-        topbar={
-          <WorkbenchTopbar
-            onExit={exit}
-            exitLabel="退出推演"
-            title={title}
-            subtitle={version ? `${descriptor.meta.name} · ${version}` : descriptor.meta.name}
-            progress={
-              <ChainProgress
-                onDark
-                size="sm"
-                label="教学步骤"
-                total={descriptor.narrative.length}
-                done={narrativeDone}
-              />
-            }
-            cta={
-              sessionId ? (
-                <Button variant="primary" size="sm" leftIcon={Share2} onClick={() => setShareOpen(true)}>
-                  分享这次推演
-                </Button>
-              ) : undefined
-            }
-          />
-        }
-        left={
-          <SimWorkbenchAside
-            frame={frame}
-            checkpoints={descriptor.checkpoints}
-            checkpointResults={snapshot.checkpointResults}
-            codeTrace={descriptor.codeTrace}
-            trace={snapshot.state._trace}
-            selectedElementId={snapshot.state.selectedElementId}
-            onSelectElement={selectElement}
-            actions={
-              <InteractionPanel
-                interactions={descriptor.interactions}
-                availability={snapshot.interactionAvailability}
-                selectedElementId={snapshot.state.selectedElementId}
-                onInteract={interact}
-              />
-            }
-          />
-        }
-        leftLabel="说明与操作"
-        stage={
-          <TeachingFrameStage
-            frame={frame}
-            selectedElementId={snapshot.state.selectedElementId}
-            onSelectElement={selectElement}
-          />
-        }
-        right={
-          hasStream ? (
-            <TeachingFrameStream
-              frame={frame}
-              selectedElementId={snapshot.state.selectedElementId}
-              onSelectElement={selectElement}
-            />
-          ) : undefined
-        }
-        rightLabel="消息流"
-        rightCount={streamCount}
+      <SimRuntimeWorkbench
+        title={title}
+        version={version}
+        descriptor={descriptor}
+        snapshot={snapshot}
+        onExit={exit}
+        onShare={sessionId ? () => setShareOpen(true) : undefined}
+        onSelectElement={selectElement}
+        onInteract={interact}
         footer={
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
             <div className="flex min-w-0 flex-col">
@@ -607,77 +538,17 @@ function IsolatedRuntime({ version, sessionId }: IsolatedRuntimeProps) {
     )
   }
 
-  const frame = snapshot.view
-  const narrativeDone = narrativeProgress(descriptor, snapshot)
-  // 事件流:只有会产生消息/调用的场景才挂这一栏(默克尔树这类只有有界元素,给它空栏是占屏幕);
-  // 条数供壳在收起的把手上给未读计数(收起不等于失联)
-  const hasStream = frameHasStream(frame)
-  const streamCount = frameStreamEntries(frame).length
-
   return (
     <>
-      <WorkbenchShell
-        workbench="sim"
-        topbar={
-          <WorkbenchTopbar
-            onExit={exit}
-            exitLabel="退出推演"
-            title={title}
-            subtitle={version ? `${descriptor.meta.name} · ${version}` : descriptor.meta.name}
-            progress={
-              <ChainProgress
-                onDark
-                size="sm"
-                label="教学步骤"
-                total={descriptor.narrative.length}
-                done={narrativeDone}
-              />
-            }
-            cta={
-              <Button variant="primary" size="sm" leftIcon={Share2} onClick={() => setShareOpen(true)}>
-                分享这次推演
-              </Button>
-            }
-          />
-        }
-        left={
-          <SimWorkbenchAside
-            frame={frame}
-            checkpoints={descriptor.checkpoints}
-            checkpointResults={snapshot.checkpointResults}
-            codeTrace={descriptor.codeTrace}
-            trace={snapshot.state._trace}
-            selectedElementId={snapshot.state.selectedElementId}
-            onSelectElement={selectElement}
-            actions={
-              <InteractionPanel
-                interactions={descriptor.interactions}
-                availability={snapshot.interactionAvailability}
-                selectedElementId={snapshot.state.selectedElementId}
-                onInteract={interact}
-              />
-            }
-          />
-        }
-        leftLabel="说明与操作"
-        stage={
-          <TeachingFrameStage
-            frame={frame}
-            selectedElementId={snapshot.state.selectedElementId}
-            onSelectElement={selectElement}
-          />
-        }
-        right={
-          hasStream ? (
-            <TeachingFrameStream
-              frame={frame}
-              selectedElementId={snapshot.state.selectedElementId}
-              onSelectElement={selectElement}
-            />
-          ) : undefined
-        }
-        rightLabel="消息流"
-        rightCount={streamCount}
+      <SimRuntimeWorkbench
+        title={title}
+        version={version}
+        descriptor={descriptor}
+        snapshot={snapshot}
+        onExit={exit}
+        onShare={() => setShareOpen(true)}
+        onSelectElement={selectElement}
+        onInteract={interact}
         footer={<IsolatedFooter stream={stream} playback={playback} snapshot={snapshot} onStep={stepOnce} onStepBack={stepBack} onRestart={restart} />}
       />
 

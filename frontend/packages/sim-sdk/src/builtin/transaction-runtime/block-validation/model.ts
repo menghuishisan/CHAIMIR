@@ -2,7 +2,7 @@
 
 import type { SimState } from '../../../types';
 
-export interface ValidationItem {
+interface ValidationItem {
   id: string;
   label: string;
   expected: string;

@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { blockchainPhases } from './model';
 
-export const blockchainSource = [
+const blockchainSource = [
   'function validateChain(blocks) {',
   '  require(blocks[0].parentHash == "genesis");',
   '  for i in 1..blocks.length:',

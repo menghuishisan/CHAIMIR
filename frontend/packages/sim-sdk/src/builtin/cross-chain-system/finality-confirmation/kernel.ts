@@ -28,7 +28,7 @@ export function reduceFinalityEvent(state: FinalityState, event: SimEvent, _cont
 /**
  * advanceFinality 增加确认数并推进最终性状态。
  */
-export function advanceFinality(state: FinalityState, event: SimEvent): FinalityState {
+function advanceFinality(state: FinalityState, event: SimEvent): FinalityState {
   const tick = event.source === 'tick' ? state.tick + 1 : state.tick;
   if (!state.finalityProof && state.phaseIndex >= 1) {
     const confirmations = Math.min(state.requiredConfirmations, state.confirmations + state.confirmationStep);
@@ -44,7 +44,7 @@ export function advanceFinality(state: FinalityState, event: SimEvent): Finality
 /**
  * finalizeFinalityState 刷新最终性指标、检查点和代码追踪。
  */
-export function finalizeFinalityState(state: FinalityState): FinalityState {
+function finalizeFinalityState(state: FinalityState): FinalityState {
   const safe = state.released && state.finalityProof && !state.reorgDetected;
   return { ...state, phase: finalityPhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: safe ? '已安全释放' : state.reorgDetected ? '检测到重组' : '等待最终性', risk: safe ? 8 : state.reorgDetected ? 90 : 35 }, checkpointValues: { safe }, _trace: { triggeredLines: traceLinesForFinality(state.lastTransition), variables: { confirmations: state.confirmations, released: state.released }, executionPath: `finality/${state.lastTransition}` } };
 }

@@ -32,7 +32,7 @@ export function reduceBlockValidationEvent(state: BlockValidationState, event: S
 /**
  * advanceBlockValidation 按区块验证流程推进。
  */
-export function advanceBlockValidation(state: BlockValidationState, event: SimEvent): BlockValidationState {
+function advanceBlockValidation(state: BlockValidationState, event: SimEvent): BlockValidationState {
   const phaseIndex = Math.min(blockValidationPhases.length - 1, state.phaseIndex + 1);
   const allValid = state.items.every((item) => item.valid);
   // “拒绝无效区块”是失败分支,有效区块在状态根校验后即可接受。
@@ -43,7 +43,7 @@ export function advanceBlockValidation(state: BlockValidationState, event: SimEv
 /**
  * finalizeBlockValidationState 刷新区块验证指标、检查点和代码追踪。
  */
-export function finalizeBlockValidationState(state: BlockValidationState): BlockValidationState {
+function finalizeBlockValidationState(state: BlockValidationState): BlockValidationState {
   const accepted = state.accepted || (state.phaseIndex >= 4 && state.items.every((item) => item.valid));
   return { ...state, accepted, phase: blockValidationPhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: accepted ? '区块已接受' : state.items.some((item) => !item.valid) ? '区块被拒绝' : '验证中', risk: state.items.some((item) => !item.valid) ? 78 : 8 }, checkpointValues: { accepted }, _trace: { triggeredLines: traceLinesForBlockValidation(state.lastTransition), variables: { accepted }, executionPath: `block-validation/${state.lastTransition}` } };
 }

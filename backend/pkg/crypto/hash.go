@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"strings"
 
-	"chaimir/internal/platform/intx"
-
 	"golang.org/x/crypto/argon2"
 )
 
@@ -39,13 +37,16 @@ func HashPassword(password string) (string, error) {
 // VerifyPassword 恒定时间比较明文与存储哈希。
 func VerifyPassword(password, encoded string) (bool, error) {
 	parts := strings.Split(encoded, "$")
-	if len(parts) != 6 || parts[1] != "argon2id" {
+	if len(parts) != 6 || parts[1] != "argon2id" || parts[2] != "v=19" {
 		return false, fmt.Errorf("密码哈希格式非法")
 	}
 	var m, t uint32
 	var p uint8
 	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &m, &t, &p); err != nil {
 		return false, fmt.Errorf("解析 argon2 参数失败: %w", err)
+	}
+	if m != argonMemory || t != argonTime || p != argonThreads {
+		return false, fmt.Errorf("argon2 参数不符合平台安全配置")
 	}
 	salt, err := decodeRawStd(parts[4])
 	if err != nil {
@@ -55,11 +56,10 @@ func VerifyPassword(password, encoded string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("解析 hash 失败: %w", err)
 	}
-	hashLength, ok := intx.Uint32(len(want))
-	if !ok || hashLength == 0 {
+	if len(salt) != argonSaltLen || len(want) != argonKeyLen {
 		return false, fmt.Errorf("密码哈希长度非法")
 	}
-	got := argon2.IDKey([]byte(password), salt, t, m, p, hashLength)
+	got := argon2.IDKey([]byte(password), salt, t, m, p, argonKeyLen)
 	return EqualBytes(got, want), nil
 }
 
@@ -67,6 +67,16 @@ func VerifyPassword(password, encoded string) (bool, error) {
 func SHA256Hex(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+// ValidSHA256Hex 判断外部内容摘要是否为完整的十六进制 SHA-256。
+func ValidSHA256Hex(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 // HMACSHA256Hex 计算十六进制 HMAC-SHA256。

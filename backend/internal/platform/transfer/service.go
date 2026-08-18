@@ -9,9 +9,12 @@ import (
 
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/snowflake"
+
+	"github.com/google/uuid"
 )
 
 // Service 是统一导入导出中心对模块和 HTTP 层暴露的生产服务。
@@ -19,6 +22,12 @@ type Service struct {
 	store   Store
 	ids     snowflake.Generator
 	manager Manager
+	files   downloadGrantIssuer
+}
+
+// downloadGrantIssuer 是 transfer 使用统一文件服务所需的最小下载授权能力。
+type downloadGrantIssuer interface {
+	IssueDownloadGrant(storage.IssueDownloadGrantRequest) (string, storage.DownloadGrant, error)
 }
 
 // ServiceDeps 描述统一导入导出中心服务的装配依赖。
@@ -26,6 +35,7 @@ type ServiceDeps struct {
 	Store   Store
 	IDs     snowflake.Generator
 	Manager Manager
+	Files   downloadGrantIssuer
 }
 
 // TaskListQuery 描述 HTTP/API 查询任务列表的条件。
@@ -75,10 +85,10 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if err := deps.Manager.validateConfig(); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(deps.Manager.StorageSigningKey) == "" {
-		return nil, fmt.Errorf("transfer service 缺少下载签名密钥")
+	if deps.Files == nil {
+		return nil, fmt.Errorf("transfer service 缺少统一文件服务")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, manager: deps.Manager}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, manager: deps.Manager, files: deps.Files}, nil
 }
 
 // CreateTask 创建并持久化统一导入导出任务。
@@ -103,6 +113,14 @@ func (s *Service) GetTask(ctx context.Context, tenantID, taskID int64) (Task, er
 		return Task{}, apperr.ErrTransferTaskInvalid
 	}
 	return s.store.GetTask(ctx, tenantID, taskID)
+}
+
+// DeletePendingTask 补偿模块私有请求写入失败，仅允许删除从未领取的 pending 任务。
+func (s *Service) DeletePendingTask(ctx context.Context, tenantID, taskID int64) error {
+	if tenantID < 0 || taskID <= 0 {
+		return apperr.ErrTransferTaskInvalid
+	}
+	return s.store.DeletePendingTask(ctx, tenantID, taskID)
 }
 
 // ListTasks 查询当前账号的导入导出任务,返回当前页、总记录数与规范化后的分页参数。
@@ -134,30 +152,40 @@ func (s *Service) ListTasks(ctx context.Context, query TaskListQuery) ([]Task, i
 	return items, total, page, size, nil
 }
 
-// CompleteTask 完成任务并登记统一文件服务对象引用。
-func (s *Service) CompleteTask(ctx context.Context, tenantID, taskID int64, req CompleteTaskRequest) (Task, error) {
-	task, err := s.GetTask(ctx, tenantID, taskID)
+// ClaimTask 原子领取指定任务，模块 worker 只能使用返回的租约完成或失败任务。
+func (s *Service) ClaimTask(ctx context.Context, tenantID, taskID int64) (Task, error) {
+	if tenantID < 0 || taskID <= 0 {
+		return Task{}, apperr.ErrTransferTaskInvalid
+	}
+	claimed, err := s.manager.ClaimTask(Task{TaskID: taskID, TenantID: tenantID}, uuid.NewString(), timex.Now())
 	if err != nil {
-		return Task{}, err
+		return Task{}, apperr.ErrTransferTaskInvalid.WithCause(err)
+	}
+	return s.store.ClaimTask(ctx, claimed)
+}
+
+// CompleteTask 完成已由当前租约领取的任务并登记统一文件服务对象引用。
+func (s *Service) CompleteTask(ctx context.Context, task Task, req CompleteTaskRequest) (Task, error) {
+	if task.TenantID < 0 || task.TaskID <= 0 || task.Status != StatusRunning || strings.TrimSpace(task.LeaseToken) == "" {
+		return Task{}, apperr.ErrTransferTaskInvalid
 	}
 	completed, err := s.manager.CompleteTask(task, req)
 	if err != nil {
 		return Task{}, apperr.ErrTransferTaskInvalid.WithCause(err)
 	}
-	return s.store.UpdateTask(ctx, completed)
+	return s.store.CompleteTask(ctx, completed, task.LeaseToken)
 }
 
-// FailTask 按统一重试策略记录任务失败。
-func (s *Service) FailTask(ctx context.Context, tenantID, taskID int64, cause error, now time.Time) (Task, error) {
-	task, err := s.GetTask(ctx, tenantID, taskID)
-	if err != nil {
-		return Task{}, err
+// FailTask 按统一重试策略记录当前租约内的任务失败。
+func (s *Service) FailTask(ctx context.Context, task Task, cause error, now time.Time) (Task, error) {
+	if task.TenantID < 0 || task.TaskID <= 0 || task.Status != StatusRunning || strings.TrimSpace(task.LeaseToken) == "" {
+		return Task{}, apperr.ErrTransferTaskInvalid
 	}
 	failed, err := s.manager.FailTask(task, cause, now)
 	if err != nil {
 		return Task{}, apperr.ErrTransferTaskInvalid.WithCause(err)
 	}
-	return s.store.UpdateTask(ctx, failed)
+	return s.store.FailTask(ctx, failed, task.LeaseToken)
 }
 
 // BuildDownloadGrant 校验任务归属并签发统一文件服务下载授权。
@@ -172,7 +200,15 @@ func (s *Service) BuildDownloadGrant(ctx context.Context, tenantID, taskID, acco
 	if task.Status != StatusSucceeded || strings.TrimSpace(task.Artifact.ObjectRef) == "" {
 		return DownloadGrantDTO{}, apperr.ErrTransferTaskNotDownloadable
 	}
-	token, grant, err := s.manager.BuildDownloadGrant(task, timex.Now())
+	token, grant, err := s.files.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
+		TenantID:           task.TenantID,
+		AccountID:          task.AccountID,
+		AllowPlatformScope: task.TenantID == 0,
+		ObjectRef:          task.Artifact.ObjectRef,
+		Module:             "transfer",
+		ResourceType:       string(task.Channel),
+		ResourceID:         ids.Format(task.TaskID),
+	})
 	if err != nil {
 		return DownloadGrantDTO{}, apperr.ErrTransferTaskNotDownloadable.WithCause(err)
 	}

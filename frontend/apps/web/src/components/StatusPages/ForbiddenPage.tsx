@@ -10,7 +10,7 @@ import { AppStatusScreen } from '../AppStatusScreen'
 import { clearLoginTokens } from '../../utils/authSession'
 import { roleRouteForRoles } from '../../utils/roleRouting'
 
-export interface ForbiddenPageProps {
+interface ForbiddenPageProps {
   /** 当前账号的角色(用于计算「回到我的首页」落点) */
   roles: UserRole[]
 }

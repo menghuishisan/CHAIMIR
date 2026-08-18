@@ -20,6 +20,42 @@ func (s *txStore) UpsertProgress(ctx context.Context, progress LessonProgress) (
 	return progressFromRow(row), nil
 }
 
+// CreateCourseGradeExportRequest 保存可由 M6 worker 重放的成绩导出命令。
+func (s *txStore) CreateCourseGradeExportRequest(ctx context.Context, req CourseGradeExportRequest) (CourseGradeExportRequest, error) {
+	row, err := s.q.CreateCourseGradeExportRequest(ctx, sqlcgen.CreateCourseGradeExportRequestParams{TransferTaskID: req.TransferTaskID, TenantID: req.TenantID, AccountID: req.AccountID, CourseID: req.CourseID})
+	if err != nil {
+		return CourseGradeExportRequest{}, err
+	}
+	return courseGradeExportRequestFromRow(row), nil
+}
+
+// ListDueCourseGradeExportRequests 查询到期的 M6 导出请求。
+func (s *txStore) ListDueCourseGradeExportRequests(ctx context.Context, now time.Time, limit int32) ([]CourseGradeExportRequest, error) {
+	rows, err := s.q.ListDueCourseGradeExportRequests(ctx, sqlcgen.ListDueCourseGradeExportRequestsParams{NextCheckAt: timex.RequiredTimestamptz(now), Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]CourseGradeExportRequest, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, courseGradeExportRequestFromRow(row))
+	}
+	return out, nil
+}
+
+// SetCourseGradeExportRequestNextCheck 延后尚未完成的 M6 导出请求。
+func (s *txStore) SetCourseGradeExportRequestNextCheck(ctx context.Context, tenantID, taskID int64, next time.Time) (CourseGradeExportRequest, error) {
+	row, err := s.q.SetCourseGradeExportRequestNextCheck(ctx, sqlcgen.SetCourseGradeExportRequestNextCheckParams{TransferTaskID: taskID, TenantID: tenantID, NextCheckAt: timex.RequiredTimestamptz(next)})
+	if err != nil {
+		return CourseGradeExportRequest{}, err
+	}
+	return courseGradeExportRequestFromRow(row), nil
+}
+
+// DeleteCourseGradeExportRequest 删除已达到 transfer 终态的 M6 导出请求。
+func (s *txStore) DeleteCourseGradeExportRequest(ctx context.Context, tenantID, taskID int64) error {
+	return s.q.DeleteCourseGradeExportRequest(ctx, sqlcgen.DeleteCourseGradeExportRequestParams{TransferTaskID: taskID, TenantID: tenantID})
+}
+
 // GetProgress 读取单课时进度。
 func (s *txStore) GetProgress(ctx context.Context, tenantID, lessonID, studentID int64) (LessonProgress, error) {
 	row, err := s.q.GetLessonProgress(ctx, sqlcgen.GetLessonProgressParams{TenantID: tenantID, LessonID: lessonID, StudentID: studentID})

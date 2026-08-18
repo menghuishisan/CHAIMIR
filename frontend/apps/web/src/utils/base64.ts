@@ -26,7 +26,7 @@ export function decodeUtf8Base64(value: string): string {
     }
     return new TextDecoder().decode(bytes)
   } catch (error) {
-    console.error('[sandbox] 文件内容不是合法的 base64', error)
+    console.error('[sandbox] 文件内容不是合法的 base64', { kind: error instanceof Error ? error.name : typeof error })
     return ''
   }
 }

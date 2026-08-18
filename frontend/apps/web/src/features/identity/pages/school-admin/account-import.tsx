@@ -7,10 +7,8 @@
 // 而不是让部分成功部分失败(后端 commit 以预览为准,不重新解析文件)。
 
 import { useCallback, useState } from 'react'
-import { CircleCheck, FileSpreadsheet, Upload } from 'lucide-react'
 import type { ImportActivationCode, ImportPreviewResponse } from '@chaimir/api-client'
 import {
-  Badge,
   Button,
   Callout,
   FormField,
@@ -30,6 +28,8 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { ImportActionFooter } from '../../components/ImportActionFooter'
+import { ImportPreviewPanel } from '../../components/ImportPreviewPanel'
 
 /** 导入目标:教师与学生模板列不同,后端按 type 分别解析。 */
 const IMPORT_TARGETS = [
@@ -94,17 +94,6 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
       setWorking(false)
     }
   }, [onCommitted, preview])
-
-  const errorRows = (preview?.rows ?? []).filter((row) => row.error)
-
-  const errorColumns: TableColumn<{ line: number; error?: string }>[] = [
-    { key: 'line', header: '行号', align: 'right', mono: true },
-    {
-      key: 'error',
-      header: '问题',
-      render: (row) => <span className="text-sm text-danger">{row.error}</span>,
-    },
-  ]
 
   const codeColumns: TableColumn<ImportActivationCode>[] = [
     { key: 'name', header: '姓名' },
@@ -187,66 +176,22 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
             <Progress value={uploadProgress} label="正在上传文件" />
           ) : null}
 
-          {preview ? (
-            <div className="flex flex-col gap-3 well p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge tone="neutral">共 {preview.total} 行</Badge>
-                <Badge tone="success">可导入 {preview.valid} 行</Badge>
-                {preview.invalid > 0 ? <Badge tone="danger">有问题 {preview.invalid} 行</Badge> : null}
-              </div>
-
-              {preview.invalid > 0 ? (
-                <>
-                  <Callout tone="warning" title="有问题的行不会被导入">
-                    修正这些行后重新上传,或直接提交只导入没有问题的行。
-                  </Callout>
-                  <Table columns={errorColumns} data={errorRows} rowKey={(row) => String(row.line)} />
-                </>
-              ) : (
-                <Callout tone="success" title="校验通过">
-                  全部 {preview.valid} 行都可以导入。
-                </Callout>
-              )}
-            </div>
-          ) : (
-            <Callout tone="info">
-              上传后会逐行校验手机号、学工号与归属组织。校验通过才能提交。
-            </Callout>
-          )}
+          <ImportPreviewPanel
+            preview={preview}
+            emptyDescription="上传后会逐行校验手机号、学工号与归属组织。校验通过才能提交。"
+          />
 
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
         </ModalBody>
-        <ModalFooter>
-          <Button variant="outline" onClick={onClose}>
-            取消
-          </Button>
-          {preview ? (
-            <>
-              <Button variant="outline" leftIcon={Upload} onClick={() => setPreview(undefined)}>
-                换个文件
-              </Button>
-              <Button
-                variant="primary"
-                leftIcon={CircleCheck}
-                loading={working}
-                disabled={preview.valid === 0}
-                onClick={() => void commit()}
-              >
-                提交导入 {preview.valid} 行
-              </Button>
-            </>
-          ) : (
-            <Button
-              variant="primary"
-              leftIcon={FileSpreadsheet}
-              loading={working}
-              disabled={!file}
-              onClick={() => void runPreview()}
-            >
-              上传并校验
-            </Button>
-          )}
-        </ModalFooter>
+        <ImportActionFooter
+          preview={preview}
+          fileSelected={Boolean(file)}
+          working={working}
+          onClose={onClose}
+          onReset={() => setPreview(undefined)}
+          onPreview={() => void runPreview()}
+          onCommit={() => void commit()}
+        />
       </ModalContent>
     </Modal>
   )

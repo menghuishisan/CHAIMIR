@@ -41,16 +41,14 @@ import { useAsyncResource } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import {
   applicationStatusLabel,
-  applicationStatusTone,
   schoolTypeLabel,
 } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { isPhoneNumber } from '../../authForm'
+import { applicationStatusTone } from '../../statusPresentation'
 
 /** 学校编码规则,与后端 ValidateTenantCode 的正则一致。 */
 const TENANT_CODE_PATTERN = /^[a-z][a-z0-9-]{1,30}[a-z0-9]$/
-
-/** 手机号规则,与后端 ValidatePhone 一致。 */
-const PHONE_PATTERN = /^1[3-9]\d{9}$/
 
 /**
  * PlatformApplicationDetailPage 核对一份入驻申请并做出开通或驳回决定。
@@ -262,7 +260,7 @@ function ApproveModal({ application, onClose, onDone }: ReviewModalProps) {
           ? null
           : '用小写字母开头,只含小写字母、数字与连字符,长度 3 到 32 位',
         adminName: adminName.trim() === '' ? '请填写管理员姓名' : null,
-        adminPhone: PHONE_PATTERN.test(adminPhone.trim()) ? null : '请填写 11 位手机号',
+        adminPhone: isPhoneNumber(adminPhone) ? null : '请填写有效的 11 位手机号',
       }
       setErrors(next)
       if (Object.values(next).some((value) => value !== null)) return

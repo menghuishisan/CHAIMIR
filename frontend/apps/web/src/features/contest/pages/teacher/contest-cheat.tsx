@@ -12,6 +12,7 @@ import { Search, ShieldAlert, Trophy } from 'lucide-react'
 import {
   CheatAction,
   CheatType,
+  PAGINATION_MAX_SIZE,
   type CheatRecord,
   type CheatSuspect,
   type Contest,
@@ -51,16 +52,13 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../../hooks'
 import { formatDateTime, formatScore } from '../../../../utils/formatters'
 import {
-  CHEAT_ACTIONS,
-  CHEAT_TYPES,
   cheatActionLabel,
-  cheatActionTone,
   cheatTypeLabel,
 } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-
-/** 队伍选择器一次取回的条数:后端分页上限 100。 */
-const TEAM_PICKER_SIZE = 100
+import { CHEAT_ACTIONS, CHEAT_TYPES } from '../../options'
+import { readNumber, readString } from '../../jsonReaders'
+import { cheatActionTone } from '../../statusPresentation'
 
 /** 违规证据里的结构化键:后端在 action=扣分 时读取 penalty_score。 */
 const EVIDENCE_PENALTY_SCORE = 'penalty_score'
@@ -371,7 +369,7 @@ function CheatRecordModal({ contest, sourceRef, onClose, onSaved }: CheatRecordM
   const [submitting, setSubmitting] = useState(false)
 
   const ladder = useAsyncResource(
-    () => api.contest.getLadder(contest.id, { page: 1, size: TEAM_PICKER_SIZE }),
+    () => api.contest.getLadder(contest.id, { page: 1, size: PAGINATION_MAX_SIZE }),
     [contest.id],
     () => false,
   )
@@ -541,13 +539,3 @@ function CheatRecordModal({ contest, sourceRef, onClose, onSaved }: CheatRecordM
 }
 
 /** readNumber 从证据对象里读数字字段;非数字回 0(不把对象塞进界面)。 */
-function readNumber(source: Record<string, unknown>, key: string): number {
-  const value = source[key]
-  return typeof value === 'number' && Number.isFinite(value) ? value : 0
-}
-
-/** readString 从证据对象里读字符串字段;非字符串回空串。 */
-function readString(source: Record<string, unknown>, key: string): string {
-  const value = source[key]
-  return typeof value === 'string' ? value : ''
-}

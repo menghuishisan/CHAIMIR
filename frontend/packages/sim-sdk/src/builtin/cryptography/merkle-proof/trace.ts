@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { merkleProofPhases } from './model';
 
-export const merkleProofSource = [
+const merkleProofSource = [
   'function verifyMerkle(leaf, siblings, expectedRoot) {',
   '  hash = H(leaf);',
   '  for sibling in siblings:',

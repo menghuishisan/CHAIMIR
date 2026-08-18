@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { integerPhases } from './model';
 
-export const integerSource = ['function mint(amount, price) {', '  require(amount <= MAX_AMOUNT);', '  total = checkedMul(amount, price);', '  require(total <= cap);', '  mint(total);', '}'];
+const integerSource = ['function mint(amount, price) {', '  require(amount <= MAX_AMOUNT);', '  total = checkedMul(amount, price);', '  require(total <= cap);', '  mint(total);', '}'];
 export const integerNarrative = phaseNarrative(integerPhases, 'integer-boundary-safe');
 export const integerCodeTrace = { sourceCode: integerSource.join('\n'), language: 'solidity' as const, lineMapping: integerPhases.map((phase, index) => ({ line: Math.min(index + 1, integerSource.length), triggerCondition: phase.id, annotation: phase.reason, highlightStyle: phase.id === 'checked' ? ('success' as const) : ('normal' as const) })), variableWatch: [{ name: 'checkedMath', extract: 'state.checkedMath', format: 'bool' as const }] };
 

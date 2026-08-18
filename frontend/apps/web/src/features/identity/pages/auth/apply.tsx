@@ -8,12 +8,14 @@ import { ArrowLeft } from 'lucide-react'
 import { Select } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import {
-  TENANT_APPLICATION_SCHOOL_TYPES,
   tenantApplicationSchoolTypeLabel,
-  type TenantApplicationSchoolType,
 } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { emailError, phoneError, requiredError, useFieldErrors } from './auth-form'
+import { emailError, phoneError, requiredError, useFieldErrors } from '../../authForm'
+import {
+  TENANT_APPLICATION_SCHOOL_TYPES,
+  type TenantApplicationSchoolType,
+} from '../../options'
 import {
   AuthField,
   AuthFormError,
@@ -23,7 +25,7 @@ import {
   AuthSubmit,
   AuthSuccess,
   AuthTextField,
-} from './auth-ui'
+} from '../../components/AuthUI'
 
 /**
  * ApplyPage 处理学校入驻申请提交。

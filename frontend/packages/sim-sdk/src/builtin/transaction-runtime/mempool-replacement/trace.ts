@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { mempoolReplacementPhases } from './model';
 
-export const mempoolReplacementSource = [
+const mempoolReplacementSource = [
   'function acceptTx(tx) {',
   '  expected = accountNonce(tx.sender);',
   '  if tx.nonce > expected: queue(tx);',

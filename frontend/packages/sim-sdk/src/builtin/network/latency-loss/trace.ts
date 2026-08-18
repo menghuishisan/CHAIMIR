@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { latencyLossPhases } from './model';
 
-export const latencyLossSource = [
+const latencyLossSource = [
   'function reliableSend(packets) {',
   '  sendUpTo(congestionWindow);',
   '  waitForAckOrDeadline();',

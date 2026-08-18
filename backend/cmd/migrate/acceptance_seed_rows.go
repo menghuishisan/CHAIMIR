@@ -78,7 +78,10 @@ func seedRuntimeRows(ctx context.Context, tx pgx.Tx) error {
 	if err != nil {
 		return err
 	}
-	runtimeSpec, _ := jsonb(acceptanceRuntimeAdapterSpec(runtimeImageURL))
+	runtimeSpec, err := jsonb(acceptanceRuntimeAdapterSpec(runtimeImageURL))
+	if err != nil {
+		return fmt.Errorf("编码运行时适配器配置失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO runtime (id, code, name, eco, adapter_level, adapter_spec, capability_impl, selftest_status, selftest_detail, status)
 VALUES ($1,'evm-foundry','EVM Foundry 教学运行时','evm',2,$2,'sandbox-exec',1,'{"result":"pending","reason":"requires-runtime-selftest"}'::jsonb,2)
@@ -100,7 +103,7 @@ ON CONFLICT (runtime_id, version) DO UPDATE SET image_url=EXCLUDED.image_url, st
 	if err != nil {
 		return err
 	}
-	judgeSpec, _ := jsonb(map[string]any{
+	judgeSpec, err := jsonb(map[string]any{
 		"runtime_code":          "evm-foundry",
 		"runtime_image_version": "2026.06",
 		"genesis_ref":           "genesis/evm-foundry/acceptance.json",
@@ -113,6 +116,9 @@ ON CONFLICT (runtime_id, version) DO UPDATE SET image_url=EXCLUDED.image_url, st
 		"suite_archive_name":    "public-regression.tar.gz",
 		"selftest":              map[string]any{"case": "public-regression"},
 	})
+	if err != nil {
+		return fmt.Errorf("编码单元测试判题器配置失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO judger (id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status)
 VALUES ($1,'solidity-unit','Solidity 单元测试判题器',1,$3,true,60,$2,1,2)
@@ -120,7 +126,7 @@ ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, type=EXCLUDED.type, executo
 		acceptanceIDs.Judger, judgeSpec, judgerImageURL); err != nil {
 		return err
 	}
-	onchainSpec, _ := jsonb(map[string]any{
+	onchainSpec, err := jsonb(map[string]any{
 		"runtime_code":          "evm-foundry",
 		"runtime_image_version": "2026.06",
 		"genesis_ref":           "genesis/evm-foundry/acceptance.json",
@@ -139,6 +145,9 @@ ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name, type=EXCLUDED.type, executo
 			},
 		},
 	})
+	if err != nil {
+		return fmt.Errorf("编码链上断言判题器配置失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO judger (id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status)
 VALUES ($1,'onchain-assert','链上状态断言判题器',2,'m3-backend-strategy',true,60,$2,1,2)
@@ -407,7 +416,7 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
 	if err != nil {
 		return err
 	}
-	snapshot, _ := jsonb(map[string]any{
+	snapshot, err := jsonb(map[string]any{
 		"item_code":                   "ctf-reentrancy-vault",
 		"item_version":                "1.0.0",
 		"trace_id":                    "trace-acceptance-judge",
@@ -431,7 +440,13 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
 		"sanitized_code_archive_name": "submission.zip",
 		"sanitized_code_archive_ref":  "minio://chaimir-code/acceptance/submissions/S20260001/reentrancy-fixed.zip",
 	})
-	details, _ := jsonb([]map[string]any{{"case": "public-visible-tests", "passed": true, "actual": "全部公开断言通过"}})
+	if err != nil {
+		return fmt.Errorf("编码判题输入快照失败: %w", err)
+	}
+	details, err := jsonb([]map[string]any{{"case": "public-visible-tests", "passed": true, "actual": "全部公开断言通过"}})
+	if err != nil {
+		return fmt.Errorf("编码判题结果详情失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO judge_task (
 	id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope,
@@ -455,8 +470,11 @@ ON CONFLICT (tenant_id, task_id, version) DO UPDATE SET passed=EXCLUDED.passed, 
 
 // seedContentRows 写入内容库、题库和试卷数据。
 func seedContentRows(ctx context.Context, tx pgx.Tx) error {
-	bodyLab, _ := jsonb(map[string]any{"summary": "使用 Foundry 复现可重入漏洞并完成修复。", "steps": []string{"审计 withdraw 调用顺序", "编写攻击合约", "应用 checks-effects-interactions 修复"}})
-	bodyContest, _ := jsonb(map[string]any{
+	bodyLab, err := jsonb(map[string]any{"summary": "使用 Foundry 复现可重入漏洞并完成修复。", "steps": []string{"审计 withdraw 调用顺序", "编写攻击合约", "应用 checks-effects-interactions 修复"}})
+	if err != nil {
+		return fmt.Errorf("编码实验内容正文失败: %w", err)
+	}
+	bodyContest, err := jsonb(map[string]any{
 		"title":      "Reentrancy Vault 攻击题",
 		"scenario":   "给定简化金库合约,提交能够触发资金重复提取的最小攻击代码。",
 		"statement":  "请提交题面要求的答案,系统会按题目声明的答案键进行判定。",
@@ -469,7 +487,10 @@ func seedContentRows(ctx context.Context, tx pgx.Tx) error {
 			"expectation": map[string]any{"public": true, "flag_input_key": "answer"},
 		},
 	})
-	bodyBattle, _ := jsonb(map[string]any{
+	if err != nil {
+		return fmt.Errorf("编码竞赛题正文失败: %w", err)
+	}
+	bodyBattle, err := jsonb(map[string]any{
 		"scenario": "攻方提交攻击归档,守方提交防御归档;系统在隔离对局沙箱恢复双方参战物并用链上断言判定是否攻破。",
 		"battle":   map[string]any{"rule": "attack-defense", "runtime_code": "evm-foundry", "runtime_image_version": "2026.06", "tool_codes": []string{"code-server"}},
 		"judge_config": map[string]any{
@@ -482,7 +503,13 @@ func seedContentRows(ctx context.Context, tx pgx.Tx) error {
 			},
 		},
 	})
-	bodyTheory, _ := jsonb(map[string]any{"question": "解释拜占庭容错共识中安全性和活性的取舍。", "choices": []string{"只提高出块速度", "在部分节点作恶时仍保持一致性", "取消交易签名", "跳过网络传播"}})
+	if err != nil {
+		return fmt.Errorf("编码攻防题正文失败: %w", err)
+	}
+	bodyTheory, err := jsonb(map[string]any{"question": "解释拜占庭容错共识中安全性和活性的取舍。", "choices": []string{"只提高出块速度", "在部分节点作恶时仍保持一致性", "取消交易签名", "跳过网络传播"}})
+	if err != nil {
+		return fmt.Errorf("编码理论题正文失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO content_category (id, tenant_id, parent_id, name, sort)
 VALUES ($1,$2,NULL,'智能合约安全',10)
@@ -502,7 +529,10 @@ ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, sort=EXCLUDED.sort, deleted_a
 	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentTheory, "quiz-bft-safety-liveness", "1.0.0", 3, "BFT 安全性与活性理解题", 2, bodyTheory, []string{}); err != nil {
 		return err
 	}
-	criteria, _ := jsonb(map[string]any{"source": "manual", "coverage": []string{"solidity", "bft"}})
+	criteria, err := jsonb(map[string]any{"source": "manual", "coverage": []string{"solidity", "bft"}})
+	if err != nil {
+		return fmt.Errorf("编码试卷生成条件失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO paper (id, tenant_id, name, author_id, gen_mode, gen_criteria)
 VALUES ($1,$2,'区块链系统安全阶段测验',$3,1,$4)
@@ -552,7 +582,10 @@ ON CONFLICT (item_id) DO UPDATE SET body=EXCLUDED.body, sensitive_fields=EXCLUDE
 // 课程不写 cover_ref:种子只写库不往 MinIO 放字节,编个引用会让封面「有引用但取不到」;
 // 留空则走设计好的纸材质回落,真实封面在验收时经上传入口产生(同 seedAcceptanceTenant 的说明)。
 func seedTeachingRows(ctx context.Context, tx pgx.Tx) error {
-	schedule, _ := jsonb(map[string]any{"items": []map[string]any{{"weekday": 2, "time": "13:30-15:05", "room": "链安实验室 A302"}}})
+	schedule, err := jsonb(map[string]any{"items": []map[string]any{{"weekday": 2, "time": "13:30-15:05", "room": "链安实验室 A302"}}})
+	if err != nil {
+		return fmt.Errorf("编码课程排课配置失败: %w", err)
+	}
 	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	end := time.Date(2027, 1, 15, 23, 59, 59, 0, time.UTC)
 	if err := execJSON(ctx, tx, `
@@ -575,8 +608,14 @@ ON CONFLICT (id) DO UPDATE SET course_id=EXCLUDED.course_id, title=EXCLUDED.titl
 			return err
 		}
 	}
-	lessonIntro, _ := jsonb(map[string]any{"markdown": "本节梳理交易、区块、状态机与合约调用的关系。"})
-	lessonLab, _ := jsonb(map[string]any{"content_item_code": "lab-reentrancy-foundry", "content_item_version": "1.0.0"})
+	lessonIntro, err := jsonb(map[string]any{"markdown": "本节梳理交易、区块、状态机与合约调用的关系。"})
+	if err != nil {
+		return fmt.Errorf("编码导论课时内容失败: %w", err)
+	}
+	lessonLab, err := jsonb(map[string]any{"content_item_code": "lab-reentrancy-foundry", "content_item_version": "1.0.0"})
+	if err != nil {
+		return fmt.Errorf("编码实验课时内容失败: %w", err)
+	}
 	if err := upsertLesson(ctx, tx, acceptanceIDs.LessonIntro, acceptanceIDs.ChapterIntro, "交易生命周期与状态转换", 2, lessonIntro, 1); err != nil {
 		return err
 	}
@@ -595,7 +634,10 @@ ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE SET join_mode=EXCLUDED.
 			return err
 		}
 	}
-	latePolicy, _ := jsonb(map[string]any{"type": "daily_percent", "value": 10, "max_percent": 50})
+	latePolicy, err := jsonb(map[string]any{"type": "daily_percent", "value": 10, "max_percent": 50})
+	if err != nil {
+		return fmt.Errorf("编码迟交策略失败: %w", err)
+	}
 	due := time.Date(2026, 10, 20, 23, 59, 59, 0, time.UTC)
 	if err := execJSON(ctx, tx, `
 INSERT INTO assignment (id, tenant_id, course_id, title, chapter_id, due_at, max_attempts, late_policy, late_penalty, status)
@@ -611,7 +653,10 @@ ON CONFLICT (tenant_id, assignment_id, seq) DO UPDATE SET item_code=EXCLUDED.ite
 		acceptanceIDs.AssignmentItem, acceptanceIDs.TenantID, acceptanceIDs.Assignment); err != nil {
 		return err
 	}
-	submissionRef, _ := jsonb(map[string]any{"bucket": "chaimir-code", "key": "acceptance/submissions/S20260001/reentrancy-fixed.zip"})
+	submissionRef, err := jsonb(map[string]any{"bucket": "chaimir-code", "key": "acceptance/submissions/S20260001/reentrancy-fixed.zip"})
+	if err != nil {
+		return fmt.Errorf("编码提交存储引用失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO submission (id, tenant_id, assignment_id, student_id, attempt_no, content_ref, auto_score, final_score, comment, is_late, status)
 VALUES ($1,$2,$3,$4,1,$5,92,92,'修复思路完整,测试覆盖了重复提款路径。',false,3)
@@ -619,7 +664,10 @@ ON CONFLICT (tenant_id, assignment_id, student_id, attempt_no) DO UPDATE SET con
 		acceptanceIDs.SubmissionA, acceptanceIDs.TenantID, acceptanceIDs.Assignment, acceptanceIDs.StudentA, submissionRef); err != nil {
 		return err
 	}
-	draft, _ := jsonb(map[string]any{"note": "攻击合约已完成,正在补充修复说明。"})
+	draft, err := jsonb(map[string]any{"note": "攻击合约已完成,正在补充修复说明。"})
+	if err != nil {
+		return fmt.Errorf("编码作业草稿失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO submission_draft (id, tenant_id, assignment_id, student_id, content)
 VALUES ($1,$2,$3,$4,$5)
@@ -686,8 +734,11 @@ ON CONFLICT (id) DO UPDATE SET chapter_id=EXCLUDED.chapter_id, title=EXCLUDED.ti
 
 // seedExperimentRows 写入实验定义、分组、实例、检查点和报告。
 func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
-	groupConfig, _ := jsonb(map[string]any{"size": 2, "roles": []string{"leader", "member"}})
-	components, _ := jsonb(map[string]any{
+	groupConfig, err := jsonb(map[string]any{"size": 2, "roles": []string{"leader", "member"}})
+	if err != nil {
+		return fmt.Errorf("编码实验分组配置失败: %w", err)
+	}
+	components, err := jsonb(map[string]any{
 		"envs": []map[string]any{{
 			"id":                         "lab-foundry",
 			"runtime_code":               "evm-foundry",
@@ -708,6 +759,9 @@ func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
 			{"stage": 1, "title": "漏洞复现与修复", "description": "使用 Foundry 复现可重入攻击并完成修复。", "components": map[string]any{"envs": []string{"lab-foundry"}}},
 		},
 	})
+	if err != nil {
+		return fmt.Errorf("编码实验组件配置失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 	INSERT INTO experiment (id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status)
 	VALUES ($1,$2,$3,$4,'lab-reentrancy-foundry','1.0.0','可重入漏洞攻防实验','学生需要复现攻击、完成修复并提交报告。',$5,2,$6,true,6,2)
@@ -735,7 +789,7 @@ ON CONFLICT (tenant_id, group_id, student_id) DO UPDATE SET role=EXCLUDED.role`,
 			return err
 		}
 	}
-	sandboxRefs, _ := jsonb([]map[string]any{{
+	sandboxRefs, err := jsonb([]map[string]any{{
 		"component_id": "lab-foundry",
 		"stage":        1,
 		"sandbox_id":   acceptanceIDs.Sandbox,
@@ -747,7 +801,10 @@ ON CONFLICT (tenant_id, group_id, student_id) DO UPDATE SET role=EXCLUDED.role`,
 			"status":   1,
 		}},
 	}})
-	simRefs, _ := jsonb([]map[string]any{{
+	if err != nil {
+		return fmt.Errorf("编码实验沙箱引用失败: %w", err)
+	}
+	simRefs, err := jsonb([]map[string]any{{
 		"component_id": "gas-metering",
 		"stage":        1,
 		"session_id":   acceptanceIDs.SimSession,
@@ -755,6 +812,9 @@ ON CONFLICT (tenant_id, group_id, student_id) DO UPDATE SET role=EXCLUDED.role`,
 		"version":      "1.0.0",
 		"bundle_ref":   "builtin://sim-sdk/builtin__runtime-gas-metering@1.0.0",
 	}})
+	if err != nil {
+		return fmt.Errorf("编码实验仿真引用失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO experiment_instance (id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, score, finished_at)
 VALUES ($1,$2,$3,$4,$5,'experiment:2026:reentrancy:instance-a',$6,$7,4,88.50,now())
@@ -762,7 +822,10 @@ ON CONFLICT (id) DO UPDATE SET experiment_id=EXCLUDED.experiment_id, owner_accou
 		acceptanceIDs.ExperimentInstance, acceptanceIDs.TenantID, acceptanceIDs.Experiment, acceptanceIDs.StudentA, acceptanceIDs.ExperimentGroup, sandboxRefs, simRefs); err != nil {
 		return err
 	}
-	checkpointDetail, _ := jsonb(map[string]any{"assertion": "withdraw balance cannot be drained twice", "passed_cases": 7, "total_cases": 8})
+	checkpointDetail, err := jsonb(map[string]any{"assertion": "withdraw balance cannot be drained twice", "passed_cases": 7, "total_cases": 8})
+	if err != nil {
+		return fmt.Errorf("编码实验检查点详情失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO checkpoint_result (id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score, detail_ref, binding_output)
 VALUES ($1,$2,$3,'withdraw-guard','judge:acceptance:withdraw-guard',true,60.00,'reports/acceptance/checkpoints/withdraw-guard.json',$4)
@@ -788,7 +851,10 @@ func seedSimRows(ctx context.Context, tx pgx.Tx) error {
 		acceptanceSimPackageCode, acceptanceSimPackageVersion).Scan(&packageID); err != nil {
 		return fmt.Errorf("验收夹具需要内置仿真包 %s@%s,请先执行 migrate-and-seed: %w", acceptanceSimPackageCode, acceptanceSimPackageVersion, err)
 	}
-	params, _ := jsonb(map[string]any{"gas_limit": 42_000, "scenario": "classroom-demo"})
+	params, err := jsonb(map[string]any{"gas_limit": 42_000, "scenario": "classroom-demo"})
+	if err != nil {
+		return fmt.Errorf("编码仿真初始化参数失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO sim_session (id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status)
 VALUES ($1,$2,$3,'sim:2026:gas-metering:session-a',$4,2026061901,$5,1,4)
@@ -796,7 +862,10 @@ ON CONFLICT (id) DO UPDATE SET package_id=EXCLUDED.package_id, source_ref=EXCLUD
 		acceptanceIDs.SimSession, acceptanceIDs.TenantID, packageID, acceptanceIDs.StudentA, params); err != nil {
 		return err
 	}
-	payload, _ := jsonb(map[string]any{})
+	payload, err := jsonb(map[string]any{})
+	if err != nil {
+		return fmt.Errorf("编码仿真动作载荷失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO sim_action_log (id, tenant_id, session_id, seq, at_tick, event_type, payload)
 VALUES ($1,$2,$3,1,1,'advance',$4)
@@ -804,7 +873,10 @@ ON CONFLICT (tenant_id, session_id, seq) DO UPDATE SET at_tick=EXCLUDED.at_tick,
 		acceptanceIDs.SimAction, acceptanceIDs.TenantID, acceptanceIDs.SimSession, payload); err != nil {
 		return err
 	}
-	answer, _ := jsonb(map[string]any{"phase": "gas-deducted", "rollback_observed": true})
+	answer, err := jsonb(map[string]any{"phase": "gas-deducted", "rollback_observed": true})
+	if err != nil {
+		return fmt.Errorf("编码仿真检查点答案失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO sim_checkpoint (id, tenant_id, session_id, checkpoint_id, answer, achieved)
 VALUES ($1,$2,$3,'gas-metering-rollback',$4,true)
@@ -842,7 +914,10 @@ ON CONFLICT (id) DO UPDATE SET school_name=EXCLUDED.school_name, school_type=EXC
 
 // seedContestRows 写入解题赛、队伍、提交、榜单和漏洞题素材。
 func seedContestRows(ctx context.Context, tx pgx.Tx) error {
-	rules, _ := jsonb(map[string]any{"scoring": "static", "allowed_languages": []string{"solidity"}, "appeal_minutes": 20})
+	rules, err := jsonb(map[string]any{"scoring": "static", "allowed_languages": []string{"solidity"}, "appeal_minutes": 20})
+	if err != nil {
+		return fmt.Errorf("编码竞赛规则失败: %w", err)
+	}
 	signupStart := time.Date(2026, 11, 1, 8, 0, 0, 0, time.UTC)
 	signupEnd := time.Date(2026, 11, 8, 18, 0, 0, 0, time.UTC)
 	start := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
@@ -875,7 +950,10 @@ ON CONFLICT (tenant_id, team_id, member_tenant_id, account_id) DO UPDATE SET is_
 		acceptanceIDs.TeamAMember, acceptanceIDs.TenantID, acceptanceIDs.TeamA, acceptanceIDs.StudentA); err != nil {
 		return err
 	}
-	contentRef, _ := jsonb(map[string]any{"bucket": "chaimir-code", "key": "acceptance/contest/ZA2026/reentrancy-solve.zip"})
+	contentRef, err := jsonb(map[string]any{"bucket": "chaimir-code", "key": "acceptance/contest/ZA2026/reentrancy-solve.zip"})
+	if err != nil {
+		return fmt.Errorf("编码竞赛提交内容引用失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO solve_submission (id, tenant_id, contest_id, problem_id, team_id, submitter_id, content_ref, source_ref, passed, score, sandbox_ref)
 VALUES ($1,$2,$3,$4,$5,$6,$7,'contest:2026:solve:ZA2026-001',true,500,'sandbox:contest:ZA2026-001')
@@ -891,7 +969,10 @@ ON CONFLICT (tenant_id, contest_id, team_id) DO UPDATE SET score=EXCLUDED.score,
 		return err
 	}
 	snapshotAt := end
-	ranking, _ := jsonb([]map[string]any{{"rank": 1, "team_id": ids.Format(acceptanceIDs.TeamA), "score": 500, "solved_count": 1, "last_solve_at": snapshotAt, "updated_at": snapshotAt}})
+	ranking, err := jsonb([]map[string]any{{"rank": 1, "team_id": ids.Format(acceptanceIDs.TeamA), "score": 500, "solved_count": 1, "last_solve_at": snapshotAt, "updated_at": snapshotAt}})
+	if err != nil {
+		return fmt.Errorf("编码竞赛排行榜快照失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO contest_ladder_snapshot (id, tenant_id, contest_id, snapshot_status, ranking)
 VALUES ($1,$2,$3,6,$4)
@@ -899,10 +980,13 @@ ON CONFLICT (tenant_id, contest_id, snapshot_status) DO UPDATE SET ranking=EXCLU
 		acceptanceIDs.ResultSnapshot, acceptanceIDs.TenantID, acceptanceIDs.Contest, ranking); err != nil {
 		return err
 	}
-	battleConfig, _ := jsonb(map[string]any{
+	battleConfig, err := jsonb(map[string]any{
 		"runtime_code": "evm-foundry", "runtime_image_version": "2026.06",
 		"tool_codes": []string{"code-server"},
 	})
+	if err != nil {
+		return fmt.Errorf("编码攻防对局配置失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO contest (id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status)
 VALUES ($1,$2,$3,'2026 链安攻防回放验收赛',2,2,1,$4,$5,$6,$7,0,$8,5)
@@ -961,7 +1045,10 @@ ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUD
 		acceptanceIDs.BattleEntryB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleTeamB, strings.Repeat("b", 64)); err != nil {
 		return err
 	}
-	scoreDelta, _ := jsonb(map[string]any{"team_a": ids.Format(acceptanceIDs.BattleTeamA), "team_b": ids.Format(acceptanceIDs.BattleTeamB), "rating_a_before": 1200, "rating_b_before": 1200, "rating_a_after": 1216, "rating_b_after": 1184, "delta_a": 16, "delta_b": -16})
+	scoreDelta, err := jsonb(map[string]any{"team_a": ids.Format(acceptanceIDs.BattleTeamA), "team_b": ids.Format(acceptanceIDs.BattleTeamB), "rating_a_before": 1200, "rating_b_before": 1200, "rating_a_after": 1216, "rating_b_after": 1184, "delta_a": 16, "delta_b": -16})
+	if err != nil {
+		return fmt.Errorf("编码对局积分变更失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at)
 VALUES ($1,$2,$3,$4,$5,$6,'contest:2026:battle:acceptance-001','sandbox:acceptance-battle-001','judge:acceptance-battle-001',1,$7,NULL,3,now() - interval '18 minutes',now() - interval '10 minutes')
@@ -983,7 +1070,10 @@ ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, team_id=EXCLUDED.
 		acceptanceIDs.BattleLadderRankB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleTeamB); err != nil {
 		return err
 	}
-	sourceConfig, _ := jsonb(map[string]any{"source": "teacher-curated", "license": "internal-training"})
+	sourceConfig, err := jsonb(map[string]any{"source": "teacher-curated", "license": "internal-training"})
+	if err != nil {
+		return fmt.Errorf("编码竞赛来源配置失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO vuln_source (id, tenant_id, type, name, config, default_level, enabled, last_sync_at)
 VALUES ($1,$2,3,'校内智能合约漏洞案例库',$3,2,true,now())
@@ -991,7 +1081,10 @@ ON CONFLICT (tenant_id, id) DO UPDATE SET type=EXCLUDED.type, name=EXCLUDED.name
 		acceptanceIDs.VulnSource, acceptanceIDs.TenantID, sourceConfig); err != nil {
 		return err
 	}
-	draftBody, _ := jsonb(map[string]any{"contract": "Vault.sol", "weakness": "external call before balance update", "chain": "local-anvil"})
+	draftBody, err := jsonb(map[string]any{"contract": "Vault.sol", "weakness": "external call before balance update", "chain": "local-anvil"})
+	if err != nil {
+		return fmt.Errorf("编码竞赛草稿正文失败: %w", err)
+	}
 	return execJSON(ctx, tx, `
 INSERT INTO vuln_problem (id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status)
 VALUES ($1,$2,$3,'CL-REENTRANCY-2026-001','Vault withdraw 可重入漏洞',1,1,$4,2,'{"positive":"passed","negative":"passed"}'::jsonb,'ctf-reentrancy-vault','1.0.0',2)
@@ -1039,8 +1132,14 @@ ON CONFLICT (tenant_id, announcement_id, account_id) DO UPDATE SET read_at=now()
 
 // seedGradeRows 写入成绩中心等级、学期、审核、申诉、预警和成绩单。
 func seedGradeRows(ctx context.Context, tx pgx.Tx) error {
-	mapping, _ := jsonb([]map[string]any{{"min": 90, "grade": "A", "gpa": 4.0}, {"min": 80, "grade": "B", "gpa": 3.0}, {"min": 60, "grade": "C", "gpa": 2.0}, {"min": 0, "grade": "F", "gpa": 0.0}})
-	warningRules, _ := jsonb(map[string]any{"min_gpa": 2.0, "fail_count": 1})
+	mapping, err := jsonb([]map[string]any{{"min": 90, "grade": "A", "gpa": 4.0}, {"min": 80, "grade": "B", "gpa": 3.0}, {"min": 60, "grade": "C", "gpa": 2.0}, {"min": 0, "grade": "F", "gpa": 0.0}})
+	if err != nil {
+		return fmt.Errorf("编码等级映射失败: %w", err)
+	}
+	warningRules, err := jsonb(map[string]any{"min_gpa": 2.0, "fail_count": 1})
+	if err != nil {
+		return fmt.Errorf("编码成绩预警规则失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO grade_level_config (id, tenant_id, name, mapping, warning_rules, is_default)
 VALUES ($1,$2,'四分制等级换算',$3,$4,true)
@@ -1084,7 +1183,10 @@ ON CONFLICT (id) DO UPDATE SET reason=EXCLUDED.reason, status=EXCLUDED.status, h
 		acceptanceIDs.GradeAppeal, acceptanceIDs.TenantID, acceptanceIDs.StudentA, acceptanceIDs.Course, acceptanceIDs.TeacherMain); err != nil {
 		return err
 	}
-	detail, _ := jsonb(map[string]any{"gpa": 1.95, "suggestion": "建议预约导师并完成补强练习"})
+	detail, err := jsonb(map[string]any{"gpa": 1.95, "suggestion": "建议预约导师并完成补强练习"})
+	if err != nil {
+		return fmt.Errorf("编码学业预警详情失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO academic_warning (id, tenant_id, student_id, semester_id, type, detail, status)
 VALUES ($1,$2,$3,$4,2,$5,1)
@@ -1102,8 +1204,14 @@ ON CONFLICT (id) DO UPDATE SET scope=EXCLUDED.scope, semester_id=EXCLUDED.semest
 // seedIsolationGradeRows 为 SaaS 隔离租户提供空数据态所需的最小成绩配置。
 // 不写课程成绩、审核、申诉或成绩单，确保隔离租户仍保持业务空态。
 func seedIsolationGradeRows(ctx context.Context, tx pgx.Tx) error {
-	mapping, _ := jsonb([]map[string]any{{"min": 90, "grade": "A", "gpa": 4.0}, {"min": 80, "grade": "B", "gpa": 3.0}, {"min": 60, "grade": "C", "gpa": 2.0}, {"min": 0, "grade": "F", "gpa": 0.0}})
-	warningRules, _ := jsonb(map[string]any{"min_gpa": 2.0, "fail_count": 1})
+	mapping, err := jsonb([]map[string]any{{"min": 90, "grade": "A", "gpa": 4.0}, {"min": 80, "grade": "B", "gpa": 3.0}, {"min": 60, "grade": "C", "gpa": 2.0}, {"min": 0, "grade": "F", "gpa": 0.0}})
+	if err != nil {
+		return fmt.Errorf("编码隔离租户等级映射失败: %w", err)
+	}
+	warningRules, err := jsonb(map[string]any{"min_gpa": 2.0, "fail_count": 1})
+	if err != nil {
+		return fmt.Errorf("编码隔离租户成绩预警规则失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO grade_level_config (id, tenant_id, name, mapping, warning_rules, is_default)
 VALUES ($1,$2,'四分制等级换算',$3,$4,true)
@@ -1120,7 +1228,10 @@ ON CONFLICT (tenant_id, name) DO UPDATE SET start_date=EXCLUDED.start_date, end_
 
 // seedAdminRows 写入管理后台配置、告警、统计和备份记录。
 func seedAdminRows(ctx context.Context, tx pgx.Tx) error {
-	platformValue, _ := jsonb(map[string]any{"acceptance_mode": true, "max_retries": 3})
+	platformValue, err := jsonb(map[string]any{"acceptance_mode": true, "max_retries": 3})
+	if err != nil {
+		return fmt.Errorf("编码平台配置失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO system_config (id, scope, tenant_id, key, value, version, updated_by)
 VALUES ($1,1,NULL,'acceptance.platform.runtime',$2,1,$3)
@@ -1128,7 +1239,10 @@ ON CONFLICT (scope, key) WHERE tenant_id IS NULL DO UPDATE SET value=EXCLUDED.va
 		acceptanceIDs.SystemConfig+1, platformValue, acceptanceIDs.SchoolAdmin); err != nil {
 		return err
 	}
-	value, _ := jsonb(map[string]any{"max_concurrent_sandbox": 30, "idle_timeout_min": 45})
+	value, err := jsonb(map[string]any{"max_concurrent_sandbox": 30, "idle_timeout_min": 45})
+	if err != nil {
+		return fmt.Errorf("编码沙箱配额配置失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO system_config (id, scope, tenant_id, key, value, version, updated_by)
 VALUES ($1,2,$2,'sandbox.quota.default',$3,1,$4)
@@ -1136,7 +1250,10 @@ ON CONFLICT (scope, tenant_id, key) WHERE tenant_id IS NOT NULL DO UPDATE SET va
 		acceptanceIDs.SystemConfig, acceptanceIDs.TenantID, value, acceptanceIDs.SchoolAdmin); err != nil {
 		return err
 	}
-	condition, _ := jsonb(map[string]any{"metric": "sandbox_pending_seconds", "op": ">", "value": 180})
+	condition, err := jsonb(map[string]any{"metric": "sandbox_pending_seconds", "op": ">", "value": 180})
+	if err != nil {
+		return fmt.Errorf("编码告警条件失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO alert_rule (id, scope, tenant_id, name, metric, condition, level, enabled)
 VALUES ($1,2,$2,'实验环境等待时间过长','sandbox_pending_seconds',$3,2,true)
@@ -1151,7 +1268,10 @@ ON CONFLICT (id) DO UPDATE SET level=EXCLUDED.level, message=EXCLUDED.message, s
 		acceptanceIDs.AlertEvent, acceptanceIDs.AlertRule, acceptanceIDs.TenantID, acceptanceIDs.SchoolAdmin); err != nil {
 		return err
 	}
-	metrics, _ := jsonb(map[string]any{"active_students": 3, "published_courses": 1, "running_contests": 1, "completed_experiments": 1})
+	metrics, err := jsonb(map[string]any{"active_students": 3, "published_courses": 1, "running_contests": 1, "completed_experiments": 1})
+	if err != nil {
+		return fmt.Errorf("编码平台统计指标失败: %w", err)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO platform_statistics (id, scope, tenant_id, stat_date, metrics)
 VALUES ($1,2,$2,'2026-06-19',$3)
@@ -1184,7 +1304,10 @@ ON CONFLICT (id) DO UPDATE SET account_id=EXCLUDED.account_id, channel=EXCLUDED.
 
 // seedAuditRows 写入一条系统审计记录,便于审计列表接口有可核对数据。
 func seedAuditRows(ctx context.Context, tx pgx.Tx) error {
-	detail, _ := jsonb(map[string]any{"seed": "acceptance", "tenant_code": "acceptance-chainlab"})
+	detail, err := jsonb(map[string]any{"seed": "acceptance", "tenant_code": "acceptance-chainlab"})
+	if err != nil {
+		return fmt.Errorf("编码审计详情失败: %w", err)
+	}
 	return execJSON(ctx, tx, `
 INSERT INTO audit_log (id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id)
 VALUES ($1,$2,$3,2,'acceptance.seed.apply','identity.tenant',$2,$4,'127.0.0.1','trace-acceptance-seed-20260619')

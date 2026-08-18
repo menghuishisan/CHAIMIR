@@ -31,7 +31,7 @@ export function reduceFlashLoanEvent(state: FlashLoanState, event: SimEvent, _co
 /**
  * advanceFlashLoan 按原子交易步骤推进一个过程单元。
  */
-export function advanceFlashLoan(state: FlashLoanState, event: SimEvent): FlashLoanState {
+function advanceFlashLoan(state: FlashLoanState, event: SimEvent): FlashLoanState {
   const phaseIndex = Math.min(flashLoanPhases.length - 1, state.phaseIndex + 1);
   let next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: flashLoanPhases[phaseIndex].id };
   if (phaseIndex === 1) next = { ...next, loanAmount: next.baseLoanAmount, calls: next.calls.concat(call('attacker', 'flash-pool', '借款', next.tick, '攻击合约在同一交易内借入大量资金。')) };
@@ -44,7 +44,7 @@ export function advanceFlashLoan(state: FlashLoanState, event: SimEvent): FlashL
 /**
  * finalizeFlashLoanState 刷新攻击收益、检查点和代码追踪。
  */
-export function finalizeFlashLoanState(state: FlashLoanState): FlashLoanState {
+function finalizeFlashLoanState(state: FlashLoanState): FlashLoanState {
   const safe = state.limitEnabled && state.containedAttempt && state.attackerProfit === 0 && state.protocolDebt === 0;
   return { ...state, phase: flashLoanPhases[state.phaseIndex].label, actors: state.actors.map((actor) => ({ ...actor, status: actor.id === 'attacker' && state.attackerProfit > 0 ? 'danger' : actor.id === 'victim' && safe ? 'success' : actor.status })), explanation: explain(state.phaseIndex), metrics: { result: safe ? '冲击受控' : state.attackerProfit > 0 ? '攻击获利' : '流程进行中', risk: safe ? 8 : state.attackerProfit > 0 ? 88 : 32, attackerProfit: state.attackerProfit }, checkpointValues: { contained: safe }, _trace: { triggeredLines: traceLinesForFlashLoan(state.lastTransition), variables: { attackerProfit: state.attackerProfit, poolPrice: state.poolPrice }, executionPath: `flash-loan/${state.lastTransition}` } };
 }

@@ -39,7 +39,7 @@ export function reduceThresholdSignatureEvent(state: ThresholdState, event: SimE
 /**
  * advanceThresholdSignature 推进门限签名阶段。
  */
-export function advanceThresholdSignature(state: ThresholdState, event: SimEvent): ThresholdState {
+function advanceThresholdSignature(state: ThresholdState, event: SimEvent): ThresholdState {
   const phaseIndex = Math.min(thresholdSignaturePhases.length - 1, state.phaseIndex + 1);
   const next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: thresholdSignaturePhases[phaseIndex].id };
   if (phaseIndex === 2) return partialSign(next);
@@ -58,7 +58,7 @@ export function thresholdAggregateValid(state: ThresholdState): CheckpointResult
 /**
  * finalizeThresholdSignatureState 刷新门限签名派生状态。
  */
-export function finalizeThresholdSignatureState(state: ThresholdState): ThresholdState {
+function finalizeThresholdSignatureState(state: ThresholdState): ThresholdState {
   const valid = validShares(state);
   return {
     ...state,

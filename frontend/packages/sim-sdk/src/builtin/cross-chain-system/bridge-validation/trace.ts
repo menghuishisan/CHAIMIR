@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { bridgePhases } from './model';
 
-export const bridgeSource = ['function mintWithProof(proof) {', '  require(lightClient.synced());', '  require(verifyInclusion(proof));', '  require(!proof.used);', '  mint(proof.amount);', '}'];
+const bridgeSource = ['function mintWithProof(proof) {', '  require(lightClient.synced());', '  require(verifyInclusion(proof));', '  require(!proof.used);', '  mint(proof.amount);', '}'];
 export const bridgeNarrative = phaseNarrative(bridgePhases, 'bridge-proof-valid');
 export const bridgeCodeTrace = { sourceCode: bridgeSource.join('\n'), language: 'pseudocode' as const, lineMapping: bridgePhases.map((phase, index) => ({ line: Math.min(index + 1, bridgeSource.length), triggerCondition: phase.id, annotation: phase.reason, highlightStyle: phase.id === 'mint' ? ('success' as const) : ('normal' as const) })), variableWatch: [{ name: 'proofHash', extract: 'state.proofHash', format: 'hex' as const }] };
 

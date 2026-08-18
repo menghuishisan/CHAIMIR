@@ -70,3 +70,13 @@ export enum SandboxToolStatus {
   STARTING = 2,
   FAILED = 3,
 }
+
+/** SandboxChainOperation 是运行时能力声明使用的公开链操作值。 */
+export const SANDBOX_CHAIN_OPERATION = {
+  DEPLOY: 'deploy',
+  TRANSACTION: 'transaction',
+  QUERY: 'query',
+} as const
+
+export type SandboxChainOperation =
+  (typeof SANDBOX_CHAIN_OPERATION)[keyof typeof SANDBOX_CHAIN_OPERATION]

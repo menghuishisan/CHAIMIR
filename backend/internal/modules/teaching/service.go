@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
@@ -62,7 +63,11 @@ type fileService interface {
 // transferService 描述 M6 调用统一导入导出中心所需能力。
 type transferService interface {
 	CreateTask(context.Context, transfer.NewTaskRequest) (transfer.Task, error)
-	CompleteTask(context.Context, int64, int64, transfer.CompleteTaskRequest) (transfer.Task, error)
+	GetTask(context.Context, int64, int64) (transfer.Task, error)
+	DeletePendingTask(context.Context, int64, int64) error
+	ClaimTask(context.Context, int64, int64) (transfer.Task, error)
+	CompleteTask(context.Context, transfer.Task, transfer.CompleteTaskRequest) (transfer.Task, error)
+	FailTask(context.Context, transfer.Task, error, time.Time) (transfer.Task, error)
 }
 
 // ServiceDeps 是 teaching service 的装配依赖集合。
@@ -114,7 +119,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Transfers == nil || objects == nil || deps.FileService == nil {
 		return nil, fmt.Errorf("teaching service 缺少统一导入导出或文件服务依赖")
 	}
-	if deps.Config.CourseGradesMaxRows <= 0 || deps.Config.JudgeOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxStaleMs <= 0 || deps.Config.GradeExportBatchSize <= 0 || deps.CourseMaterialMaxBytes <= 0 || deps.CourseCoverMaxBytes <= 0 {
+	if deps.Config.CourseGradesMaxRows <= 0 || deps.Config.JudgeOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxBatchSize <= 0 || deps.Config.GradeEventOutboxStaleMs <= 0 || deps.Config.GradeExportBatchSize <= 0 || deps.Config.GradeExportWorkerBatchSize <= 0 || deps.Config.GradeExportWorkerPollMs <= 0 || deps.CourseMaterialMaxBytes <= 0 || deps.CourseCoverMaxBytes <= 0 {
 		return nil, fmt.Errorf("teaching service 配置不完整")
 	}
 	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, identity: deps.Identity, content: deps.Content, judge: deps.Judge, bus: deps.Bus, transfers: deps.Transfers, storage: objects, files: deps.FileService, cfg: deps.Config, materialMaxBytes: deps.CourseMaterialMaxBytes, coverMaxBytes: deps.CourseCoverMaxBytes, materialScanPolicy: deps.MaterialScanPolicy}, nil

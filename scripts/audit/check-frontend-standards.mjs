@@ -99,10 +99,36 @@ function addViolation(file, lineNumber, rule, match) {
   violations.push(`${path.relative(ROOT, file)}:${lineNumber} ${rule}: ${match.trim()}`)
 }
 
+/** checkLabelsResponsibility 保证 labels 目录只维护用户向文案映射。 */
+function checkLabelsResponsibility(file, lines) {
+  const labelsRoot = `${path.sep}apps${path.sep}web${path.sep}src${path.sep}utils${path.sep}labels${path.sep}`
+  if (!file.includes(labelsRoot)) return
+
+  lines.forEach((line, index) => {
+    const lineNumber = index + 1
+    if (/from ['"]@chaimir\/ui['"]/.test(line)) {
+      addViolation(file, lineNumber, 'labels 不得依赖 UI 呈现类型', line)
+    }
+    if (/\b(?:StatusTone|BadgeTone|CoverAccent|ReadonlySet|new Set)\b/.test(line)) {
+      addViolation(file, lineNumber, 'labels 只维护文案,不得承载呈现或业务规则', line)
+    }
+    if (/^export\s+function\s+(?:is[A-Z]|[A-Za-z0-9]+Tone\b)/.test(line)) {
+      addViolation(file, lineNumber, 'labels 不得导出业务判断或 tone 函数', line)
+    }
+    if (/^(?:export\s+)?(?:type|interface)\b/.test(line)) {
+      addViolation(file, lineNumber, 'labels 只维护用户向文案,不得定义业务或表单类型', line)
+    }
+    if (/^export\s+const\s+[A-Z0-9_]+\s*=\s*\[/.test(line)) {
+      addViolation(file, lineNumber, 'labels 不得导出表单选项数组', line)
+    }
+  })
+}
+
 for (const root of roots) {
   for (const file of collectFiles(root)) {
     if (file.endsWith(`${path.sep}tokens${path.sep}theme.css`)) continue
     const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/)
+    checkLabelsResponsibility(file, lines)
     lines.forEach((line, index) => {
       const lineNumber = index + 1
       // 规范 §1.2 explicitly permits the auth surface's documented halo; all other radial/conic gradients remain forbidden.
@@ -141,6 +167,6 @@ if (violations.length > 0) {
   process.exitCode = 1
 } else {
   console.log(
-    '前端规范检查通过:未发现禁用渐变、字距类、裸色值、任意值类、transition: all、emoji、边框圈盒或不存在的颜色令牌类。',
+    '前端规范检查通过:未发现禁用样式、错误颜色令牌或 labels 目录职责越界。',
   )
 }

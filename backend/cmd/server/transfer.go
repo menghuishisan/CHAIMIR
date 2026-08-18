@@ -9,6 +9,7 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/transfer"
 	"chaimir/pkg/snowflake"
 
@@ -17,13 +18,13 @@ import (
 
 // TransferDeps 汇总组合根装配统一导入导出中心需要的基础设施。
 type TransferDeps struct {
-	Router     gin.IRouter
-	Database   *db.DB
-	IDs        snowflake.Generator
-	Config     config.TransferConfig
-	AuthConfig config.AuthConfig
-	Auth       *auth.Manager
-	Roles      contracts.IdentityService
+	Router      gin.IRouter
+	Database    *db.DB
+	IDs         snowflake.Generator
+	Config      config.TransferConfig
+	FileService storage.Service
+	Auth        *auth.Manager
+	Roles       contracts.IdentityService
 }
 
 // RegisterTransfer 构造统一导入导出中心 store/service 并注册 HTTP 路由。
@@ -38,13 +39,13 @@ func RegisterTransfer(deps TransferDeps) (*transfer.Service, error) {
 	svc, err := transfer.NewService(transfer.ServiceDeps{
 		Store: store,
 		IDs:   deps.IDs,
+		Files: deps.FileService,
 		Manager: transfer.Manager{
 			Config: transfer.Config{
-				MaxAttempts:      deps.Config.TaskMaxAttempts,
-				RetryDelay:       time.Duration(deps.Config.TaskRetryDelayMs) * time.Millisecond,
-				DownloadGrantTTL: time.Duration(deps.Config.TaskDownloadTTLSeconds) * time.Second,
+				MaxAttempts:   deps.Config.TaskMaxAttempts,
+				RetryDelay:    time.Duration(deps.Config.TaskRetryDelayMs) * time.Millisecond,
+				LeaseDuration: time.Duration(deps.Config.TaskLeaseDurationMs) * time.Millisecond,
 			},
-			StorageSigningKey: deps.AuthConfig.HMACKey,
 		},
 	})
 	if err != nil {

@@ -42,14 +42,6 @@ type ReadSeekCloser interface {
 	io.Closer
 }
 
-// TenantQuota 表示统一文件服务执行上传前校验所需的租户文件配额快照。
-type TenantQuota struct {
-	MaxFiles  int64
-	MaxBytes  int64
-	UsedFiles int64
-	UsedBytes int64
-}
-
 // New 创建 MinIO 客户端并执行启动期连通性检查。
 func New(ctx context.Context, cfg config.MinIOConfig) (*Storage, error) {
 	for _, bucket := range []string{cfg.BucketCode, cfg.BucketAttach, cfg.BucketReport, cfg.BucketBackup} {
@@ -100,23 +92,6 @@ func (s *Storage) EnsureBuckets(ctx context.Context) error {
 				return fmt.Errorf("创建桶 %s 失败: %w", bucket, err)
 			}
 		}
-	}
-	return nil
-}
-
-// AllowUpload 根据租户文件数和总字节数配额判断一次上传是否允许进入后续链路。
-func (q TenantQuota) AllowUpload(fileCount, totalBytes int64) error {
-	if fileCount <= 0 {
-		return fmt.Errorf("上传文件数必须大于 0")
-	}
-	if totalBytes <= 0 {
-		return fmt.Errorf("上传字节数必须大于 0")
-	}
-	if q.MaxFiles > 0 && q.UsedFiles+fileCount > q.MaxFiles {
-		return fmt.Errorf("租户文件数量超出配额")
-	}
-	if q.MaxBytes > 0 && q.UsedBytes+totalBytes > q.MaxBytes {
-		return fmt.Errorf("租户文件总字节数超出配额")
 	}
 	return nil
 }
@@ -228,7 +203,12 @@ func (s *Storage) ListObjects(ctx context.Context, bucket, prefix string) (<-cha
 				errs <- ErrObjectRefInvalid
 				return
 			}
-			out <- ObjectInfo{Bucket: bucket, Key: obj.Key, Size: obj.Size}
+			select {
+			case out <- ObjectInfo{Bucket: bucket, Key: obj.Key, Size: obj.Size}:
+			case <-ctx.Done():
+				errs <- fmt.Errorf("枚举对象被取消: %w", ctx.Err())
+				return
+			}
 		}
 	}()
 	return out, errs, nil

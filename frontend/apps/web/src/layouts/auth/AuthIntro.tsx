@@ -8,8 +8,8 @@
 // 底层添加玉色径向光晕(规范 §1.2:用光晕、密度、暗化渐变过渡,不用边线/色块分隔)。
 
 import { BookOpen, Braces, Trophy } from 'lucide-react'
+import { AuthBrandMark, SchoolBrandLine } from '../../components/AuthBrand'
 import { useTenantBrand } from '../../features/identity/useTenantBrand'
-import { AuthBrandMark, SchoolBrandLine } from '../../features/identity/pages/auth/auth-ui'
 
 /** 平台能力点:三条对应三位一体(教学 · 实验 · 竞赛),与首页宣传口径同源 */
 const FEATURES = [

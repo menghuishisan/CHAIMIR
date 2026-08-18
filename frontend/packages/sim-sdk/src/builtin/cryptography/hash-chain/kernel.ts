@@ -43,7 +43,7 @@ export function reduceHashChainEvent(state: HashChainState, event: SimEvent, _co
 /**
  * advanceHashChain 推进哈希链教学阶段并在校验阶段刷新有效性。
  */
-export function advanceHashChain(state: HashChainState, event: SimEvent): HashChainState {
+function advanceHashChain(state: HashChainState, event: SimEvent): HashChainState {
   const phaseIndex = Math.min(hashChainPhases.length - 1, state.phaseIndex + 1);
   const transition = hashChainPhases[phaseIndex].id;
   const next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: transition };
@@ -61,7 +61,7 @@ export function hashChainValid(state: HashChainState): CheckpointResult {
 /**
  * finalizeHashChainState 刷新指标、检查点和代码追踪。
  */
-export function finalizeHashChainState(state: HashChainState): HashChainState {
+function finalizeHashChainState(state: HashChainState): HashChainState {
   const invalidRecords = state.records.filter((record) => !record.valid);
   const firstInvalidIndex = invalidRecords[0]?.index ?? 0;
   return {
@@ -126,7 +126,7 @@ function verifyHashChain(state: HashChainState): HashChainState {
 /**
  * digest 计算绑定序号、父摘要和规范化载荷的教学稳定摘要。
  */
-export function digest(index: number, payload: string, parentHash: string): string {
+function digest(index: number, payload: string, parentHash: string): string {
   return hashChainDigest(index, payload, parentHash);
 }
 

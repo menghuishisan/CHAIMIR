@@ -24,7 +24,11 @@ func (t *txStore) ListSystemConfigs(ctx context.Context, scope int16, tenantID i
 	}
 	out := make([]ConfigDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, configDTO(row))
+		item, err := configDTO(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -35,7 +39,7 @@ func (t *txStore) GetSystemConfig(ctx context.Context, scope int16, tenantID int
 	if err != nil {
 		return ConfigDTO{}, err
 	}
-	return configDTO(row), nil
+	return configDTO(row)
 }
 
 // CreateSystemConfig 创建配置项。
@@ -48,7 +52,7 @@ func (t *txStore) CreateSystemConfig(ctx context.Context, id int64, scope int16,
 	if err != nil {
 		return ConfigDTO{}, err
 	}
-	return configDTO(row), nil
+	return configDTO(row)
 }
 
 // UpdateSystemConfig 按乐观锁更新配置项。
@@ -61,7 +65,7 @@ func (t *txStore) UpdateSystemConfig(ctx context.Context, scope int16, tenantID 
 	if err != nil {
 		return ConfigDTO{}, err
 	}
-	return configDTO(row), nil
+	return configDTO(row)
 }
 
 // CreateConfigChangeLog 写入配置变更历史。
@@ -78,7 +82,7 @@ func (t *txStore) CreateConfigChangeLog(ctx context.Context, id, configID, tenan
 	if err != nil {
 		return ConfigChangeLogDTO{}, err
 	}
-	return configLogDTO(row), nil
+	return configLogDTO(row)
 }
 
 // GetConfigChangeLog 查询单条配置变更历史。
@@ -87,7 +91,7 @@ func (t *txStore) GetConfigChangeLog(ctx context.Context, id, configID int64) (C
 	if err != nil {
 		return ConfigChangeLogDTO{}, err
 	}
-	return configLogDTO(row), nil
+	return configLogDTO(row)
 }
 
 // ListConfigChangeLogs 查询配置变更历史和总数。
@@ -99,7 +103,11 @@ func (t *txStore) ListConfigChangeLogs(ctx context.Context, configID int64, page
 	}
 	out := make([]ConfigChangeLogDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, configLogDTO(row))
+		item, err := configLogDTO(row)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, item)
 	}
 	total, err := t.q.CountConfigChangeLogs(ctx, configID)
 	if err != nil {
@@ -118,7 +126,7 @@ func (t *txStore) CreateAlertRule(ctx context.Context, id int64, req AlertRuleRe
 	if err != nil {
 		return AlertRuleDTO{}, err
 	}
-	return alertRuleDTO(row), nil
+	return alertRuleDTO(row)
 }
 
 // ListAlertRules 查询告警规则。
@@ -129,7 +137,11 @@ func (t *txStore) ListAlertRules(ctx context.Context, scope int16, tenantID int6
 	}
 	out := make([]AlertRuleDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, alertRuleDTO(row))
+		item, err := alertRuleDTO(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -144,7 +156,7 @@ func (t *txStore) UpdateAlertRule(ctx context.Context, id int64, req AlertRuleRe
 	if err != nil {
 		return AlertRuleDTO{}, err
 	}
-	return alertRuleDTO(row), nil
+	return alertRuleDTO(row)
 }
 
 // CreateAlertEvent 创建告警事件。
@@ -185,11 +197,11 @@ func (t *txStore) HandleAlertEvent(ctx context.Context, id, tenantID int64, stat
 
 // ListPlatformStatistics 查询运营统计时间序列。
 func (t *txStore) ListPlatformStatistics(ctx context.Context, scope int16, tenantID int64, fromDate, toDate string) ([]StatisticsDTO, error) {
-	from, err := time.Parse("2006-01-02", fromDate)
+	from, err := timex.ParseDate(fromDate)
 	if err != nil {
 		return nil, apperr.ErrAdminStatisticsInvalid.WithCause(err)
 	}
-	to, err := time.Parse("2006-01-02", toDate)
+	to, err := timex.ParseDate(toDate)
 	if err != nil {
 		return nil, apperr.ErrAdminStatisticsInvalid.WithCause(err)
 	}
@@ -199,14 +211,18 @@ func (t *txStore) ListPlatformStatistics(ctx context.Context, scope int16, tenan
 	}
 	out := make([]StatisticsDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, StatisticsDTO{Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Date: pgtypex.DateValue(row.StatDate).Format("2006-01-02"), Metrics: jsonx.ObjectMap(row.Metrics)})
+		metrics, err := decodeStoredObject(row.Metrics, apperr.ErrAdminStatisticsInvalid)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, StatisticsDTO{Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Date: timex.DateOrEmpty(pgtypex.DateValue(row.StatDate)), Metrics: metrics})
 	}
 	return out, nil
 }
 
 // UpsertPlatformStatistics 写入或更新运营统计快照。
 func (t *txStore) UpsertPlatformStatistics(ctx context.Context, id int64, scope int16, tenantID int64, statDate string, metrics map[string]any) (StatisticsDTO, error) {
-	date, err := time.Parse("2006-01-02", statDate)
+	date, err := timex.ParseDate(statDate)
 	if err != nil {
 		return StatisticsDTO{}, apperr.ErrAdminStatisticsInvalid.WithCause(err)
 	}
@@ -223,7 +239,11 @@ func (t *txStore) UpsertPlatformStatistics(ctx context.Context, id int64, scope 
 	if err != nil {
 		return StatisticsDTO{}, err
 	}
-	return StatisticsDTO{Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Date: pgtypex.DateValue(row.StatDate).Format("2006-01-02"), Metrics: jsonx.ObjectMap(row.Metrics)}, nil
+	decodedMetrics, err := decodeStoredObject(row.Metrics, apperr.ErrAdminStatisticsInvalid)
+	if err != nil {
+		return StatisticsDTO{}, err
+	}
+	return StatisticsDTO{Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Date: timex.DateOrEmpty(pgtypex.DateValue(row.StatDate)), Metrics: decodedMetrics}, nil
 }
 
 // CreateBackupRecord 写入真实运维备份执行结果。
@@ -237,6 +257,42 @@ func (t *txStore) CreateBackupRecord(ctx context.Context, id int64, req BackupRe
 		return BackupRecordDTO{}, err
 	}
 	return backupDTO(row), nil
+}
+
+// CreateAuditExportRequest 保存可由 M9 worker 重放的审计导出命令。
+func (t *txStore) CreateAuditExportRequest(ctx context.Context, req AuditExportRequest) (AuditExportRequest, error) {
+	row, err := t.q.CreateAuditExportRequest(ctx, sqlcgen.CreateAuditExportRequestParams{TransferTaskID: req.TransferTaskID, TenantID: req.TenantID, AccountID: req.AccountID, QuerySnapshot: req.QuerySnapshot})
+	if err != nil {
+		return AuditExportRequest{}, err
+	}
+	return auditExportRequestFromRow(row), nil
+}
+
+// ListDueAuditExportRequests 查询到期的 M9 导出请求。
+func (t *txStore) ListDueAuditExportRequests(ctx context.Context, now time.Time, limit int32) ([]AuditExportRequest, error) {
+	rows, err := t.q.ListDueAuditExportRequests(ctx, sqlcgen.ListDueAuditExportRequestsParams{NextCheckAt: timex.RequiredTimestamptz(now), Limit: limit})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AuditExportRequest, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, auditExportRequestFromRow(row))
+	}
+	return out, nil
+}
+
+// SetAuditExportRequestNextCheck 延后尚未完成的 M9 导出请求。
+func (t *txStore) SetAuditExportRequestNextCheck(ctx context.Context, tenantID, taskID int64, next time.Time) (AuditExportRequest, error) {
+	row, err := t.q.SetAuditExportRequestNextCheck(ctx, sqlcgen.SetAuditExportRequestNextCheckParams{TransferTaskID: taskID, TenantID: tenantID, NextCheckAt: timex.RequiredTimestamptz(next)})
+	if err != nil {
+		return AuditExportRequest{}, err
+	}
+	return auditExportRequestFromRow(row), nil
+}
+
+// DeleteAuditExportRequest 删除已达到 transfer 终态的 M9 导出请求。
+func (t *txStore) DeleteAuditExportRequest(ctx context.Context, tenantID, taskID int64) error {
+	return t.q.DeleteAuditExportRequest(ctx, sqlcgen.DeleteAuditExportRequestParams{TransferTaskID: taskID, TenantID: tenantID})
 }
 
 // ListBackupRecords 查询备份记录和总数。
@@ -259,18 +315,48 @@ func (t *txStore) ListBackupRecords(ctx context.Context, status int16, page, siz
 }
 
 // configDTO 转换配置行。
-func configDTO(row sqlcgen.SystemConfig) ConfigDTO {
-	return ConfigDTO{ID: ids.ID(row.ID), Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Key: row.Key, Value: jsonx.ObjectMap(row.Value), Version: row.Version, UpdatedBy: ids.ID(row.UpdatedBy), UpdatedAt: row.UpdatedAt.Time}
+func configDTO(row sqlcgen.SystemConfig) (ConfigDTO, error) {
+	value, err := decodeStoredObject(row.Value, apperr.ErrAdminConfigInvalid)
+	if err != nil {
+		return ConfigDTO{}, err
+	}
+	return ConfigDTO{ID: ids.ID(row.ID), Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Key: row.Key, Value: value, Version: row.Version, UpdatedBy: ids.ID(row.UpdatedBy), UpdatedAt: row.UpdatedAt.Time}, nil
 }
 
 // configLogDTO 转换配置历史行。
-func configLogDTO(row sqlcgen.ConfigChangeLog) ConfigChangeLogDTO {
-	return ConfigChangeLogDTO{ID: ids.ID(row.ID), ConfigID: ids.ID(row.ConfigID), TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), OldValue: jsonx.ObjectMap(row.OldValue), NewValue: jsonx.ObjectMap(row.NewValue), OperatorID: ids.ID(row.OperatorID), CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt))}
+func configLogDTO(row sqlcgen.ConfigChangeLog) (ConfigChangeLogDTO, error) {
+	oldValue, err := decodeStoredObject(row.OldValue, apperr.ErrAdminConfigInvalid)
+	if err != nil {
+		return ConfigChangeLogDTO{}, err
+	}
+	newValue, err := decodeStoredObject(row.NewValue, apperr.ErrAdminConfigInvalid)
+	if err != nil {
+		return ConfigChangeLogDTO{}, err
+	}
+	return ConfigChangeLogDTO{ID: ids.ID(row.ID), ConfigID: ids.ID(row.ConfigID), TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), OldValue: oldValue, NewValue: newValue, OperatorID: ids.ID(row.OperatorID), CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt))}, nil
 }
 
 // alertRuleDTO 转换告警规则行。
-func alertRuleDTO(row sqlcgen.AlertRule) AlertRuleDTO {
-	return AlertRuleDTO{ID: ids.ID(row.ID), Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Name: row.Name, Metric: row.Metric, Condition: jsonx.ObjectMap(row.Condition), Level: row.Level, Enabled: row.Enabled, CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), UpdatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.UpdatedAt))}
+func alertRuleDTO(row sqlcgen.AlertRule) (AlertRuleDTO, error) {
+	condition, err := decodeStoredObject(row.Condition, apperr.ErrAdminAlertInvalid)
+	if err != nil {
+		return AlertRuleDTO{}, err
+	}
+	return AlertRuleDTO{ID: ids.ID(row.ID), Scope: row.Scope, TenantID: ids.ID(pgtypex.Int8Value(row.TenantID)), Name: row.Name, Metric: row.Metric, Condition: condition, Level: row.Level, Enabled: row.Enabled, CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), UpdatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.UpdatedAt))}, nil
+}
+
+// decodeStoredObject 严格读取 JSONB 对象,损坏或形态错误时保留模块错误链而不是静默改为空对象。
+func decodeStoredObject(raw []byte, invalid *apperr.Error) (map[string]any, error) {
+	value, err := jsonx.ObjectMapStrict(raw)
+	if err != nil {
+		return nil, invalid.WithCause(err)
+	}
+	return value, nil
+}
+
+// auditExportRequestFromRow 转换 M9 审计导出请求行。
+func auditExportRequestFromRow(row sqlcgen.AuditExportRequest) AuditExportRequest {
+	return AuditExportRequest{TransferTaskID: row.TransferTaskID, TenantID: row.TenantID, AccountID: row.AccountID, QuerySnapshot: row.QuerySnapshot, NextCheckAt: timex.FromTimestamptz(row.NextCheckAt), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
 }
 
 // alertEventDTO 转换告警事件行。

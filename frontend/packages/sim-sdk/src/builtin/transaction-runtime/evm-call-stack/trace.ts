@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { callStackPhases } from './model';
 
-export const callStackSource = ['function callA() {', '  frame.push(A);', '  ok = B.call(data);', '  require(ok);', '  frame.pop();', '  require(depth < MAX_DEPTH);', '}'];
+const callStackSource = ['function callA() {', '  frame.push(A);', '  ok = B.call(data);', '  require(ok);', '  frame.pop();', '  require(depth < MAX_DEPTH);', '}'];
 export const callStackNarrative = phaseNarrative(callStackPhases, 'call-stack-safe');
 export const callStackCodeTrace = { sourceCode: callStackSource.join('\n'), language: 'solidity' as const, lineMapping: callStackPhases.map((phase, index) => ({ line: Math.min(index + 1, callStackSource.length), triggerCondition: phase.id, annotation: phase.reason, highlightStyle: phase.id === 'revert' ? ('error' as const) : phase.id === 'depth' ? ('success' as const) : ('normal' as const) })), variableWatch: [{ name: 'depth', extract: 'state.metrics.depth', format: 'number' as const }] };
 

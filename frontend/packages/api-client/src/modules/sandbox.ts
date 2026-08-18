@@ -1,7 +1,7 @@
 // Sandbox API：沙箱管理
 // 对应后端 M2 模块
 
-import { ApiClient } from '../client'
+import { ApiClient, encodePathSegment } from '../client'
 import { API_BASE_PATH } from '../constants'
 import type { IdentityApi } from './identity'
 import type {
@@ -65,56 +65,56 @@ export class SandboxApi {
    * 更新链运行时声明。
    */
   async updateRuntime(runtimeId: string, data: SandboxRuntimeRequest): Promise<SandboxRuntime> {
-    return this.client.patch(`/sandbox/runtimes/${runtimeId}`, data)
+    return this.client.patch(`/sandbox/runtimes/${encodePathSegment(runtimeId)}`, data)
   }
 
   /**
    * 触发运行时接入即测。
    */
   async runRuntimeSelftest(runtimeId: string): Promise<SandboxRuntimeSelftestStatus> {
-    return this.client.post(`/sandbox/runtimes/${runtimeId}/selftest`)
+    return this.client.post(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/selftest`)
   }
 
   /**
    * 查询运行时接入即测结果。
    */
   async getRuntimeSelftest(runtimeId: string): Promise<SandboxRuntimeSelftestStatus> {
-    return this.client.get(`/sandbox/runtimes/${runtimeId}/selftest`)
+    return this.client.get(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/selftest`)
   }
 
   /**
    * 为运行时登记镜像版本。
    */
   async registerRuntimeImage(runtimeId: string, data: SandboxRuntimeImageRequest): Promise<SandboxRuntimeImage> {
-    return this.client.post(`/sandbox/runtimes/${runtimeId}/images`, data)
+    return this.client.post(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/images`, data)
   }
 
   /**
    * 查询运行时镜像版本列表。
    */
   async listRuntimeImages(runtimeId: string): Promise<SandboxRuntimeImage[]> {
-    return this.client.get(`/sandbox/runtimes/${runtimeId}/images`)
+    return this.client.get(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/images`)
   }
 
   /**
    * 停用运行时镜像版本。
    */
   async disableRuntimeImage(runtimeId: string, imageId: string): Promise<SandboxRuntimeImage> {
-    return this.client.delete(`/sandbox/runtimes/${runtimeId}/images/${imageId}`)
+    return this.client.delete(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/images/${encodePathSegment(imageId)}`)
   }
 
   /**
    * 触发运行时镜像预拉取。
    */
   async prepullRuntimeImage(runtimeId: string, imageId: string): Promise<SandboxPrepullStatus> {
-    return this.client.post(`/sandbox/runtimes/${runtimeId}/images/${imageId}/prepull`)
+    return this.client.post(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/images/${encodePathSegment(imageId)}/prepull`)
   }
 
   /**
    * 查询镜像预拉取闭环状态。
    */
   async getRuntimeImagePrepull(runtimeId: string, imageId: string): Promise<SandboxPrepullStatus> {
-    return this.client.get(`/sandbox/runtimes/${runtimeId}/images/${imageId}/prepull`)
+    return this.client.get(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/images/${encodePathSegment(imageId)}/prepull`)
   }
 
   /**
@@ -149,77 +149,77 @@ export class SandboxApi {
    * 获取沙箱实例详情
    */
   async getInstance(instanceId: string): Promise<SandboxInstance> {
-    return this.client.get(`/sandbox/sandboxes/${instanceId}`)
+    return this.client.get(`/sandbox/sandboxes/${encodePathSegment(instanceId)}`)
   }
 
   /**
    * 获取终端 WebSocket URL
    */
   getTerminalWsUrl(instanceId: string, container?: string): string {
-    return this.client.wsURL(`/sandbox/sandboxes/${instanceId}/terminal`, container ? { container } : undefined)
+    return this.client.wsURL(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/terminal`, container ? { container } : undefined)
   }
 
   /**
    * 获取进度 WebSocket URL
    */
   getProgressWsUrl(instanceId: string): string {
-    return this.client.wsURL(`/sandbox/sandboxes/${instanceId}/progress`)
+    return this.client.wsURL(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/progress`)
   }
 
   /**
    * 读取工作区文件
    */
   async readFile(instanceId: string, path: string): Promise<SandboxFileReadResponse> {
-    return this.client.get(`/sandbox/sandboxes/${instanceId}/files`, { path })
+    return this.client.get(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/files`, { path })
   }
 
   /**
    * 列出工作区目录
    */
   async listFiles(instanceId: string, path = '.'): Promise<SandboxFileListResponse> {
-    return this.client.get(`/sandbox/sandboxes/${instanceId}/files`, { mode: 'list', path })
+    return this.client.get(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/files`, { mode: 'list', path })
   }
 
   /**
    * 写入工作区文件
    */
   async writeFile(instanceId: string, data: SandboxFileWriteRequest): Promise<Record<string, never>> {
-    return this.client.put(`/sandbox/sandboxes/${instanceId}/files`, data)
+    return this.client.put(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/files`, data)
   }
 
   /**
    * 立即持久化工作区
    */
   async saveFiles(instanceId: string): Promise<SandboxFileSaveResponse> {
-    return this.client.post(`/sandbox/sandboxes/${instanceId}/files/save`)
+    return this.client.post(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/files/save`)
   }
 
   /**
    * 执行受控命令工具
    */
   async runCommandTool(instanceId: string, toolCode: string, data: SandboxCommandToolRunRequest): Promise<SandboxCommandToolRunResponse> {
-    return this.client.post(`/sandbox/sandboxes/${instanceId}/command-tools/${toolCode}/run`, data)
+    return this.client.post(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/command-tools/${encodePathSegment(toolCode)}/run`, data)
   }
 
   /**
    * 调用运行时统一链部署能力。
    */
   async chainDeploy(instanceId: string, data: SandboxChainRequest): Promise<SandboxChainResponse> {
-    return this.client.post(`/sandbox/sandboxes/${instanceId}/chain/deploy`, data)
+    return this.client.post(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/chain/deploy`, data)
   }
 
   /**
    * 调用运行时统一链交易能力。
    */
   async chainSendTx(instanceId: string, data: SandboxChainRequest): Promise<SandboxChainResponse> {
-    return this.client.post(`/sandbox/sandboxes/${instanceId}/chain/tx`, data)
+    return this.client.post(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/chain/tx`, data)
   }
 
   /**
    * 查询运行时链上状态。
    */
   async chainQuery(instanceId: string, target: string): Promise<SandboxChainResponse> {
-    return this.client.get(`/sandbox/sandboxes/${instanceId}/chain/query`, { target })
+    return this.client.get(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/chain/query`, { target })
   }
 
   /**
@@ -227,9 +227,9 @@ export class SandboxApi {
    */
   async getToolProxyUrl(instanceId: string, toolCode: string, proxyPath = '', toolOrigin: string): Promise<string> {
     const normalizedPath = proxyPath.replace(/^\/+/, '')
-    const encodedTool = encodeURIComponent(toolCode)
-    const pathPrefix = `${API_BASE_PATH}/sandbox/sandboxes/${instanceId}/tools/${encodedTool}`
-    const path = `/sandbox/sandboxes/${instanceId}/tools/${encodedTool}/${normalizedPath}`
+    const encodedTool = encodePathSegment(toolCode)
+    const pathPrefix = `${API_BASE_PATH}/sandbox/sandboxes/${encodePathSegment(instanceId)}/tools/${encodedTool}`
+    const path = `/sandbox/sandboxes/${encodePathSegment(instanceId)}/tools/${encodedTool}/${normalizedPath}`
     const { ticket } = await this.identity.issueBrowserAccessTicket(pathPrefix)
     return this.client.browserURLAtOrigin(toolOrigin, path, { ticket })
   }

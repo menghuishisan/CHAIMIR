@@ -58,17 +58,14 @@ import { ResourceState } from '../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../hooks'
 import { formatDateTime } from '../../../utils/formatters'
 import {
-  ALERT_CONDITION_OPERATORS,
-  ALERT_LEVELS,
-  ALERT_METRICS,
   alertConditionOperatorLabel,
   alertLevelLabel,
-  alertLevelTone,
   alertMetricLabel,
   alertStatusLabel,
-  alertStatusTone,
 } from '../../../utils/labels/admin'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
+import { ALERT_CONDITION_OPERATORS, ALERT_LEVELS, ALERT_METRICS } from '../options'
+import { alertLevelTone, alertStatusTone } from '../statusPresentation'
 
 /** 告警条件里的结构化键。 */
 const CONDITION_FIELDS = {
@@ -506,9 +503,9 @@ interface AlertRuleFormModalProps {
 function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModalProps) {
   const editing = rule !== undefined
   const [name, setName] = useState(rule?.name ?? '')
-  const [metric, setMetric] = useState(rule?.metric ?? ALERT_METRICS[0].value)
+  const [metric, setMetric] = useState(rule?.metric ?? ALERT_METRICS[0])
   const [operator, setOperator] = useState(
-    readString(rule?.condition, CONDITION_FIELDS.operator) || ALERT_CONDITION_OPERATORS[0].value
+    readString(rule?.condition, CONDITION_FIELDS.operator) || ALERT_CONDITION_OPERATORS[0]
   )
   const [threshold, setThreshold] = useState(
     String(readNumber(rule?.condition, CONDITION_FIELDS.threshold))
@@ -594,7 +591,10 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
             <FormField label="监控指标" htmlFor="rule-metric" required>
               <Select
                 id="rule-metric"
-                options={ALERT_METRICS.map((item) => ({ value: item.value, label: item.label }))}
+                options={ALERT_METRICS.map((item) => ({
+                  value: item,
+                  label: alertMetricLabel(item),
+                }))}
                 value={metric}
                 onValueChange={setMetric}
               />
@@ -605,8 +605,8 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
                 <Select
                   id="rule-operator"
                   options={ALERT_CONDITION_OPERATORS.map((item) => ({
-                    value: item.value,
-                    label: item.label,
+                    value: item,
+                    label: alertConditionOperatorLabel(item),
                   }))}
                   value={operator}
                   onValueChange={setOperator}

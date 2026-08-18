@@ -102,6 +102,7 @@ type infrastructure struct {
 	redis    *redis.Client
 	bus      eventbus.Bus
 	storage  *storage.Storage
+	files    storage.Service
 	k8s      *platformk8s.Client
 	auth     *auth.Manager
 	wsHub    *ws.Hub
@@ -129,6 +130,10 @@ func newInfrastructure(ctx context.Context, cfg *config.Config) (*infrastructure
 	if err := objectStore.EnsureBuckets(ctx); err != nil {
 		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
 	}
+	fileService, err := storage.NewServiceFromConfig(cfg.Auth, cfg.MinIO, cfg.Upload)
+	if err != nil {
+		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
+	}
 	k8sClient, err := platformk8s.New(cfg.Sandbox)
 	if err != nil {
 		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
@@ -151,6 +156,7 @@ func newInfrastructure(ctx context.Context, cfg *config.Config) (*infrastructure
 		redis:    redisClient,
 		bus:      bus,
 		storage:  objectStore,
+		files:    fileService,
 		k8s:      k8sClient,
 		auth:     auth.NewManager(cfg.Auth),
 		wsHub:    hub,
@@ -268,27 +274,28 @@ func readinessProbe(cfg *config.Config, infra *infrastructure) gin.HandlerFunc {
 // assembleModules 按地基、引擎、业务、聚合顺序装配 11 个模块和基础层路由。
 func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config, infra *infrastructure) error {
 	identitySvc, err := RegisterIdentityModule(IdentityModuleDeps{
-		Router:   router,
-		Database: infra.database,
-		Auth:     infra.auth,
-		Redis:    infra.redis,
-		IDs:      infra.ids,
-		Config:   *cfg,
-		Storage:  infra.storage,
-		EventBus: infra.bus,
+		Router:      router,
+		Database:    infra.database,
+		Auth:        infra.auth,
+		Redis:       infra.redis,
+		IDs:         infra.ids,
+		Config:      *cfg,
+		Storage:     infra.storage,
+		FileService: infra.files,
+		EventBus:    infra.bus,
 	})
 	if err != nil {
 		return err
 	}
 	auditWriter := identitySvc.AuditWriter()
-	transferSvc, err := RegisterTransfer(TransferDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Transfer, AuthConfig: cfg.Auth, Auth: infra.auth, Roles: identitySvc})
+	transferSvc, err := RegisterTransfer(TransferDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Transfer, FileService: infra.files, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
-	if err := storage.RegisterDownloadRoutes(router, infra.storage, infra.redis, cfg.Auth.HMACKey, infra.auth); err != nil {
+	if err := storage.RegisterDownloadRoutes(router, infra.storage, infra.redis, infra.files, infra.auth); err != nil {
 		return err
 	}
-	contentSvc, err := RegisterContentModule(ContentModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthCfg: cfg.Auth, Storage: infra.storage, Audit: auditWriter, Auth: infra.auth, Roles: identitySvc})
+	contentSvc, err := RegisterContentModule(ContentModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Upload: cfg.Upload, FileService: infra.files, Storage: infra.storage, Audit: auditWriter, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
@@ -320,7 +327,7 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if err != nil {
 		return fmt.Errorf("装配 M4 stdio-json 后端计算能力失败: %w", err)
 	}
-	simSvc, err := RegisterSimModule(ctx, SimModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthConfig: cfg.Auth, SimBackend: cfg.SimBackend, Storage: infra.storage, Audit: auditWriter, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc, BackendAdapters: stdioJSONAdapters})
+	simSvc, err := RegisterSimModule(ctx, SimModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Upload: cfg.Upload, FileService: infra.files, SimBackend: cfg.SimBackend, Storage: infra.storage, Audit: auditWriter, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc, BackendAdapters: stdioJSONAdapters})
 	if err != nil {
 		return err
 	}
@@ -328,7 +335,7 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if _, err := RegisterNotifyModule(ctx, NotifyModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Redis: infra.redis, Hub: infra.wsHub, Config: cfg.Notify, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc, Audit: auditWriter}); err != nil {
 		return err
 	}
-	teachingSvc, err := RegisterTeachingModule(ctx, TeachingModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Teaching, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthCfg: cfg.Auth, Content: contentSvc, Judge: judgeSvc, Transfer: transferSvc, Storage: infra.storage, Audit: auditWriter, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc})
+	teachingSvc, err := RegisterTeachingModule(ctx, TeachingModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Teaching, Upload: cfg.Upload, FileService: infra.files, Content: contentSvc, Judge: judgeSvc, Transfer: transferSvc, Storage: infra.storage, Audit: auditWriter, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
@@ -336,14 +343,14 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if err != nil {
 		return err
 	}
-	contestSvc, err := RegisterContestModule(ctx, ContestModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Contest, AuthConfig: cfg.Auth, MinIO: cfg.MinIO, Upload: cfg.Upload, Storage: infra.storage, Content: contentSvc, ContentImport: contentSvc, Sandbox: sandboxSvc, Judge: judgeSvc, Fingerprint: judgeSvc, Audit: auditWriter, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc})
+	contestSvc, err := RegisterContestModule(ctx, ContestModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Contest, AuthConfig: cfg.Auth, FileService: infra.files, Storage: infra.storage, Content: contentSvc, ContentImport: contentSvc, Sandbox: sandboxSvc, Judge: judgeSvc, Fingerprint: judgeSvc, Audit: auditWriter, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}
-	if _, err := RegisterAdminModule(ctx, AdminModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Identity: identitySvc, Stats: identitySvc, AuditRead: identitySvc, Teaching: teachingSvc, Sandbox: sandboxSvc, Experiment: experimentSvc, Contest: contestSvc, EventBus: infra.bus, Monitoring: cfg.Monitoring, Config: cfg.Admin, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthConfig: cfg.Auth, Transfer: transferSvc, Storage: infra.storage, Auth: infra.auth, Roles: identitySvc}); err != nil {
+	if _, err := RegisterAdminModule(ctx, AdminModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Identity: identitySvc, Stats: identitySvc, AuditRead: identitySvc, Teaching: teachingSvc, Sandbox: sandboxSvc, Experiment: experimentSvc, Contest: contestSvc, EventBus: infra.bus, Monitoring: cfg.Monitoring, Config: cfg.Admin, AuthConfig: cfg.Auth, FileService: infra.files, Transfer: transferSvc, Storage: infra.storage, Auth: infra.auth, Roles: identitySvc}); err != nil {
 		return err
 	}
-	if _, err := RegisterGradeModule(ctx, GradeModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Teaching: teachingSvc, EventBus: infra.bus, Redis: infra.redis, Storage: infra.storage, Upload: cfg.Upload, MinIO: cfg.MinIO, AuthConfig: cfg.Auth, Config: cfg.Grade, Auth: infra.auth, Roles: identitySvc}); err != nil {
+	if _, err := RegisterGradeModule(ctx, GradeModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Audit: auditWriter, Teaching: teachingSvc, EventBus: infra.bus, Redis: infra.redis, Storage: infra.storage, FileService: infra.files, Config: cfg.Grade, Auth: infra.auth, Roles: identitySvc}); err != nil {
 		return err
 	}
 	return nil

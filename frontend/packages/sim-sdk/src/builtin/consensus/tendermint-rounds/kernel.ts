@@ -37,7 +37,7 @@ export function reduceTendermintRoundsEvent(state: TendermintRoundsState, event:
 }
 
 /** finalizeTendermintRoundsState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
-export function finalizeTendermintRoundsState(state: TendermintRoundsState): TendermintRoundsState {
+function finalizeTendermintRoundsState(state: TendermintRoundsState): TendermintRoundsState {
   const prevotePower = votePower(state, 'prevote');
   const precommitPower = votePower(state, 'precommit');
   return {

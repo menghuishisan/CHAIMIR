@@ -1,4 +1,4 @@
-// jsonx 统一平台 JSON 序列化、宽松读取和强校验读取边界,避免业务模块各自处理 JSON 语义。
+// jsonx 统一平台 JSON 序列化和强校验读取边界,避免业务模块各自处理 JSON 语义。
 package jsonx
 
 import (
@@ -60,15 +60,6 @@ func AnyBytes(v any, marshalErr *apperr.Error) ([]byte, error) {
 	return data, nil
 }
 
-// ObjectMap 将 JSON 对象字节解析为 map;宽松读取场景遇到脏数据时返回空对象。
-func ObjectMap(data []byte) map[string]any {
-	var out map[string]any
-	if err := json.Unmarshal(data, &out); err != nil || out == nil {
-		return map[string]any{}
-	}
-	return out
-}
-
 // ObjectMapStrict 将 JSON 对象字节解析为 map;配置等强校验场景保留解析错误。
 func ObjectMapStrict(data []byte) (map[string]any, error) {
 	if len(data) == 0 {
@@ -82,18 +73,6 @@ func ObjectMapStrict(data []byte) (map[string]any, error) {
 		return map[string]any{}, nil
 	}
 	return out, nil
-}
-
-// Decode 解析 JSON 到指定类型;宽松读取失败时返回调用方给定零值。
-func Decode[T any](data []byte, zeroValue T) T {
-	if len(data) == 0 {
-		return zeroValue
-	}
-	var out T
-	if err := json.Unmarshal(data, &out); err != nil {
-		return zeroValue
-	}
-	return out
 }
 
 // DecodeStrict 解析 JSON 到指定目标;强校验读取时直接返回错误。
@@ -110,14 +89,6 @@ func DecodeStrictKnownFields(data []byte, out any) error {
 		return nil
 	}
 	return decodeStrict(data, out, true, false)
-}
-
-// DecodeStrictUseNumber 严格解析任意 JSON,并用 json.Number 保留输入数字精度。
-func DecodeStrictUseNumber(data []byte, out any) error {
-	if len(data) == 0 {
-		return nil
-	}
-	return decodeStrict(data, out, false, true)
 }
 
 // Valid 判断输入是否为合法 JSON,用于只需要结构合法性、不需要落地解析的边界校验。
@@ -205,14 +176,6 @@ func Int64FromAny(v any, defaultValue int64) int64 {
 	return defaultValue
 }
 
-// Float64FromAny 把 JSON 数字或数字字符串转换为 float64,无效值返回 0。
-func Float64FromAny(v any) float64 {
-	if n, ok := float64Scalar(v); ok {
-		return n
-	}
-	return 0
-}
-
 // Float64FromAnyOK 把 JSON 数字或数字字符串转换为 float64,并返回是否成功。
 func Float64FromAnyOK(v any) (float64, bool) {
 	return float64Scalar(v)
@@ -288,9 +251,10 @@ func int64Scalar(v any, bitSize int) (int64, bool) {
 func float64Scalar(v any) (float64, bool) {
 	switch val := v.(type) {
 	case float64:
-		return val, true
+		return val, isFiniteFloat64(val)
 	case float32:
-		return float64(val), true
+		converted := float64(val)
+		return converted, isFiniteFloat64(converted)
 	case int:
 		return float64(val), true
 	case int16:
@@ -301,13 +265,18 @@ func float64Scalar(v any) (float64, bool) {
 		return float64(val), true
 	case json.Number:
 		parsed, err := val.Float64()
-		return parsed, err == nil
+		return parsed, err == nil && isFiniteFloat64(parsed)
 	case string:
 		n, err := strconv.ParseFloat(strings.TrimSpace(val), 64)
-		return n, err == nil
+		return n, err == nil && isFiniteFloat64(n)
 	default:
 		return 0, false
 	}
+}
+
+// isFiniteFloat64 判断浮点值是否可安全参与范围比较和持久化。
+func isFiniteFloat64(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
 }
 
 // intFits 校验转换结果是否仍落在调用方要求的整数宽度内。

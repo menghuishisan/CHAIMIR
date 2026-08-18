@@ -2,7 +2,7 @@
 
 import type { SimState } from '../../../types';
 
-export interface EthPosValidator {
+interface EthPosValidator {
   id: string;
   label: string;
   weight: number;
@@ -10,7 +10,7 @@ export interface EthPosValidator {
   latestVote?: string;
 }
 
-export interface EthPosBlock {
+interface EthPosBlock {
   id: string;
   slot: number;
   epoch: number;

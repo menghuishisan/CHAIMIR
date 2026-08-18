@@ -2,7 +2,6 @@
 package judge
 
 import (
-	"path"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -11,6 +10,7 @@ import (
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 )
 
 // JudgerResourceSpec 描述判题器固定执行环境、自检样例和命令策略。
@@ -33,7 +33,7 @@ type JudgerResourceSpec struct {
 func parseJudgerResourceSpec(raw []byte, typ int16, runtimeRequired bool) (JudgerResourceSpec, error) {
 	spec := JudgerResourceSpec{}
 	if len(raw) > 0 {
-		if err := jsonx.DecodeStrict(raw, &spec); err != nil {
+		if err := jsonx.DecodeStrictKnownFields(raw, &spec); err != nil {
 			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
 		}
 	}
@@ -46,7 +46,7 @@ func parseJudgerResourceSpec(raw []byte, typ int16, runtimeRequired bool) (Judge
 		}
 	}
 	if typ == JudgerTypeTestcase || typ == JudgerTypeStaticScan {
-		if !safeNonShellCommand(spec.Command) {
+		if !workload.ValidNonShellCommand(spec.Command) {
 			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
 		}
 		if strings.TrimSpace(spec.ExecTarget) == "" || len(spec.ExecutionSidecars) == 0 {
@@ -86,7 +86,7 @@ func validateSubmitRequest(req contracts.JudgeSubmitRequest) error {
 		!auth.ValidSourceRef(req.SourceRef) {
 		return apperr.ErrJudgeSubmitInvalid
 	}
-	if strings.TrimSpace(req.CodeHash) != "" && !isSHA256Hex(req.CodeHash) {
+	if strings.TrimSpace(req.CodeHash) != "" && !pkgcrypto.ValidSHA256Hex(req.CodeHash) {
 		return apperr.ErrJudgeSubmitInvalid
 	}
 	mode, err := normalizedSandboxMode(req.SandboxMode)
@@ -147,35 +147,6 @@ func timeoutForSnapshot(j Judger) int32 {
 		return j.ResourceSpec.TimeoutSec
 	}
 	return j.DefaultTimeoutSec
-}
-
-// safeCommand 校验命令数组显式且不为空。
-func safeCommand(command []string) bool {
-	if len(command) == 0 {
-		return false
-	}
-	for _, item := range command {
-		if strings.TrimSpace(item) == "" {
-			return false
-		}
-		if strings.ContainsAny(item, "\x00\r\n") {
-			return false
-		}
-	}
-	return true
-}
-
-// safeNonShellCommand 禁止判题器通过 shell 解释器执行字符串脚本,让命令边界保持 argv 级别。
-func safeNonShellCommand(command []string) bool {
-	if !safeCommand(command) {
-		return false
-	}
-	blocked := map[string]struct{}{
-		"sh": {}, "bash": {}, "dash": {}, "ash": {}, "zsh": {}, "ksh": {}, "csh": {},
-		"cmd": {}, "cmd.exe": {}, "powershell": {}, "powershell.exe": {}, "pwsh": {}, "pwsh.exe": {},
-	}
-	_, ok := blocked[strings.ToLower(path.Base(strings.TrimSpace(command[0])))]
-	return !ok
 }
 
 // safeExecTarget 校验内部执行目标是 pod/container 形式的受控 DNS 标签。

@@ -1,6 +1,6 @@
 // Admin API 文件定义 M9 管理后台前端唯一调用入口。
 
-import { ApiClient } from '../client'
+import { ApiClient, encodePathSegment } from '../client'
 import type { AdminScope, AlertStatus, BackupStatus } from '../constants/admin'
 import type { PaginatedResponse } from '../types/common'
 import type {
@@ -67,7 +67,7 @@ export class AdminApi {
 
   // updateConfig 按配置 key 和乐观锁版本更新系统配置。
   async updateConfig(key: string, data: ConfigUpdateRequest): Promise<SystemConfig> {
-    return this.client.put(`/admin/configs/${encodeURIComponent(key)}`, data)
+    return this.client.put(`/admin/configs/${encodePathSegment(key)}`, data)
   }
 
   // listConfigHistory 查询配置变更历史。
@@ -75,12 +75,12 @@ export class AdminApi {
     key: string,
     params?: { scope?: AdminScope; tenant_id?: string; page?: number; size?: number },
   ): Promise<PaginatedResponse<ConfigChangeLog>> {
-    return this.client.get(`/admin/configs/${encodeURIComponent(key)}/history`, params)
+    return this.client.get(`/admin/configs/${encodePathSegment(key)}/history`, params)
   }
 
   // rollbackConfig 把配置回退到指定历史记录的旧值。
   async rollbackConfig(key: string, data: ConfigRollbackRequest): Promise<SystemConfig> {
-    return this.client.post(`/admin/configs/${encodeURIComponent(key)}/rollback`, data)
+    return this.client.post(`/admin/configs/${encodePathSegment(key)}/rollback`, data)
   }
 
   // listAlertRules 查询业务级告警规则。
@@ -95,7 +95,7 @@ export class AdminApi {
 
   // updateAlertRule 更新业务级告警规则。
   async updateAlertRule(ruleId: string, data: AlertRuleRequest): Promise<AlertRule> {
-    return this.client.patch(`/admin/alert-rules/${ruleId}`, data)
+    return this.client.patch(`/admin/alert-rules/${encodePathSegment(ruleId)}`, data)
   }
 
   // listAlertEvents 查询业务级告警事件。
@@ -105,7 +105,7 @@ export class AdminApi {
 
   // handleAlertEvent 处理或忽略一条待处理告警。
   async handleAlertEvent(eventId: string, data: AlertEventRequest): Promise<AlertEvent> {
-    return this.client.post(`/admin/alert-events/${eventId}/handle`, data)
+    return this.client.post(`/admin/alert-events/${encodePathSegment(eventId)}/handle`, data)
   }
 
   // monitoringPanels 读取外接监控系统安全嵌入入口。

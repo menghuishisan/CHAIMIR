@@ -6,16 +6,19 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"strings"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/secretmap"
@@ -48,10 +51,12 @@ type Service struct {
 	transfers    transferService
 	storage      objectStorage
 	files        fileService
+	cfg          config.AdminConfig
 }
 
 // objectStorage 描述 M9 导出产物写入统一对象存储所需能力。
 type objectStorage interface {
+	Delete(ctx context.Context, bucket, key string) error
 	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
 	BucketReport() string
 }
@@ -64,7 +69,11 @@ type fileService interface {
 // transferService 描述 M9 调用统一导入导出中心所需能力。
 type transferService interface {
 	CreateTask(context.Context, transfer.NewTaskRequest) (transfer.Task, error)
-	CompleteTask(context.Context, int64, int64, transfer.CompleteTaskRequest) (transfer.Task, error)
+	GetTask(context.Context, int64, int64) (transfer.Task, error)
+	DeletePendingTask(context.Context, int64, int64) error
+	ClaimTask(context.Context, int64, int64) (transfer.Task, error)
+	CompleteTask(context.Context, transfer.Task, transfer.CompleteTaskRequest) (transfer.Task, error)
+	FailTask(context.Context, transfer.Task, error, time.Time) (transfer.Task, error)
 }
 
 // ServiceDeps 是 M9 服务装配依赖。
@@ -82,6 +91,7 @@ type ServiceDeps struct {
 	Contest     contracts.ContestReadService
 	Bus         eventbus.Bus
 	Monitoring  config.MonitoringConfig
+	Config      config.AdminConfig
 	Cipher      *pkgcrypto.Cipher
 	Transfers   transferService
 	Storage     *storage.Storage
@@ -101,7 +111,10 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Transfers == nil || objects == nil || deps.FileService == nil {
 		return nil, fmt.Errorf("admin service 缺少统一导入导出或文件服务依赖")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, bus: deps.Bus, monitoring: deps.Monitoring, secretCipher: deps.Cipher, transfers: deps.Transfers, storage: objects, files: deps.FileService}, nil
+	if deps.Config.AuditExportWorkerBatchSize <= 0 || deps.Config.AuditExportWorkerPollMs <= 0 {
+		return nil, fmt.Errorf("admin audit export worker 配置不完整")
+	}
+	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, bus: deps.Bus, monitoring: deps.Monitoring, secretCipher: deps.Cipher, transfers: deps.Transfers, storage: objects, files: deps.FileService, cfg: deps.Config}, nil
 }
 
 // PlatformDashboard 聚合平台级看板。
@@ -203,7 +216,7 @@ func (s *Service) SchoolStatistics(ctx context.Context, fromDate, toDate string)
 
 // RunStatisticsSnapshotOnce 生成当天平台与租户统计快照。
 func (s *Service) RunStatisticsSnapshotOnce(ctx context.Context) error {
-	statDate := timex.Now().Format("2006-01-02")
+	statDate := timex.DateOrEmpty(timex.Now())
 	tenants, err := s.identity.ListTenants(ctx)
 	if err != nil {
 		return apperr.ErrAdminStatisticsInvalid.WithCause(err)
@@ -242,15 +255,16 @@ func (s *Service) QueryAudit(ctx context.Context, query contracts.AuditQuery) (c
 
 const auditExportSubject = "admin.audit_export"
 
-// ExportAuditCSV 导出审计日志 CSV 并登记到统一导入导出中心。
+// ExportAuditCSV 创建可重放的审计导出任务，产物由 M9 worker 异步生成。
 func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery) (transfer.TaskDTO, error) {
 	id, err := s.currentAdminIdentity(ctx)
 	if err != nil {
 		return transfer.TaskDTO{}, err
 	}
-	result, err := s.collectAuditExportRows(ctx, query)
+	query = scopedAuditExportQuery(id, query)
+	snapshot, err := json.Marshal(query)
 	if err != nil {
-		return transfer.TaskDTO{}, err
+		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportTaskCreateFailed.WithCause(err)
 	}
 	fileName := "audit.csv"
 	task, err := s.transfers.CreateTask(ctx, transfer.NewTaskRequest{
@@ -264,38 +278,158 @@ func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery
 	if err != nil {
 		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportTaskCreateFailed.WithCause(err)
 	}
-	data, err := auditCSVBytes(result)
-	if err != nil {
-		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportCSVFailed.WithCause(err)
+	if err := s.runWrite(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.CreateAuditExportRequest(ctx, AuditExportRequest{TransferTaskID: task.TaskID, TenantID: id.TenantID, AccountID: id.AccountID, QuerySnapshot: snapshot})
+		return err
+	}); err != nil {
+		if cleanupErr := s.transfers.DeletePendingTask(ctx, id.TenantID, task.TaskID); cleanupErr != nil {
+			logging.ErrorContext(ctx, "admin audit export task compensation failed", cleanupErr.Error(), slog.Int64("tenant_id", id.TenantID), slog.Int64("transfer_task_id", task.TaskID))
+		}
+		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportTaskCreateFailed.WithCause(err)
 	}
-	plan, err := s.files.PlanUpload(ctx, storage.PlanUploadRequest{
-		TenantID:           id.TenantID,
-		AccountID:          id.AccountID,
-		AllowPlatformScope: id.IsPlatform,
-		Module:             "transfer",
-		ResourceType:       string(transfer.ChannelExport),
-		ResourceID:         ids.Format(task.TaskID),
-		FileName:           fileName,
-		ContentType:        "text/csv; charset=utf-8",
-		Size:               int64(len(data)),
-		ExpectedBucket:     s.storage.BucketReport(),
-		AllowedFileName:    true,
-		Content:            data,
-	})
-	if err != nil {
-		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportUploadPlanFailed.WithCause(err)
-	}
-	if err := s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(data), int64(len(data)), "text/csv; charset=utf-8"); err != nil {
-		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportObjectWriteFailed.WithCause(err)
-	}
-	completed, err := s.transfers.CompleteTask(ctx, id.TenantID, task.TaskID, transfer.CompleteTaskRequest{ObjectRef: plan.ObjectRef, Size: int64(len(data))})
-	if err != nil {
-		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportTaskCompleteFailed.WithCause(err)
-	}
-	if err := s.writeAudit(ctx, id, "admin.audit.export", "audit_log", 0, map[string]any{"size": result.Size, "total": result.Total, "transfer_task_id": task.TaskID}); err != nil {
+	if err := s.writeAudit(ctx, id, "admin.audit.export", "audit_log", 0, map[string]any{"transfer_task_id": task.TaskID}); err != nil {
 		return transfer.TaskDTO{}, apperr.ErrAdminAuditWriteFailed.WithCause(err)
 	}
-	return exportTaskDTO(completed), nil
+	return exportTaskDTO(task), nil
+}
+
+// RunAuditExportOnce 执行一次 M9 审计导出请求扫描，供统一 background runner 调用。
+func (s *Service) RunAuditExportOnce(ctx context.Context) error {
+	limit, ok := intx.Int32(s.cfg.AuditExportWorkerBatchSize)
+	if !ok || limit <= 0 {
+		return apperr.ErrAdminAuditExportTaskCreateFailed
+	}
+	var requests []AuditExportRequest
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		requests, err = tx.ListDueAuditExportRequests(ctx, timex.Now(), limit)
+		return err
+	}); err != nil {
+		return apperr.ErrAdminAuditExportTaskCreateFailed.WithCause(err)
+	}
+	for _, req := range requests {
+		if err := s.runAuditExportRequest(ctx, req); err != nil {
+			logging.ErrorContext(ctx, "admin audit export worker item failed", err.Error(), slog.Int64("tenant_id", req.TenantID), slog.Int64("transfer_task_id", req.TransferTaskID))
+		}
+	}
+	return nil
+}
+
+// runAuditExportRequest claims one request's transfer task and generates its CSV artifact.
+func (s *Service) runAuditExportRequest(ctx context.Context, req AuditExportRequest) error {
+	task, err := s.transfers.ClaimTask(ctx, req.TenantID, req.TransferTaskID)
+	if err != nil {
+		return s.reconcileAuditExportRequest(ctx, req)
+	}
+	data, err := s.buildAuditExportCSV(ctx, req)
+	if err == nil {
+		artifactFileName, nameErr := transfer.LeaseArtifactFileName(task.FileName, task.LeaseToken)
+		plan, planErr := s.files.PlanUpload(ctx, storage.PlanUploadRequest{TenantID: req.TenantID, AccountID: req.AccountID, AllowPlatformScope: req.TenantID == 0, Module: "transfer", ResourceType: string(transfer.ChannelExport), ResourceID: ids.Format(task.TaskID), FileName: artifactFileName, ContentType: task.ContentType, Size: int64(len(data)), ExpectedBucket: s.storage.BucketReport(), AllowedFileName: true, Content: data})
+		if nameErr != nil {
+			planErr = nameErr
+		}
+		if planErr == nil {
+			planErr = s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(data), int64(len(data)), task.ContentType)
+		}
+		if planErr == nil {
+			_, planErr = s.transfers.CompleteTask(ctx, task, transfer.CompleteTaskRequest{ObjectRef: plan.ObjectRef, Size: int64(len(data))})
+			if planErr != nil {
+				if cleanupErr := s.storage.Delete(ctx, plan.Bucket, plan.Key); cleanupErr != nil {
+					logging.ErrorContext(ctx, "admin audit export artifact cleanup failed", cleanupErr.Error(), slog.Int64("tenant_id", req.TenantID), slog.Int64("transfer_task_id", req.TransferTaskID))
+				}
+			}
+		}
+		err = planErr
+	}
+	if err != nil {
+		return s.failAuditExportRequest(ctx, req, task, err)
+	}
+	return s.deleteAuditExportRequest(ctx, req)
+}
+
+// buildAuditExportCSV restores the persisted, already-authorized audit query for worker execution.
+func (s *Service) buildAuditExportCSV(ctx context.Context, req AuditExportRequest) ([]byte, error) {
+	var query contracts.AuditQuery
+	if err := json.Unmarshal(req.QuerySnapshot, &query); err != nil {
+		return nil, apperr.ErrAdminAuditExportCSVFailed.WithCause(err)
+	}
+	workerCtx := tenant.WithContext(ctx, tenant.Identity{TenantID: req.TenantID, AccountID: req.AccountID, IsPlatform: req.TenantID == 0})
+	if req.TenantID > 0 {
+		hasRole, err := s.roles.HasRole(workerCtx, req.AccountID, contracts.RoleSchoolAdmin)
+		if err != nil {
+			return nil, apperr.ErrForbidden.WithCause(err)
+		}
+		if !hasRole {
+			return nil, apperr.ErrForbidden
+		}
+	}
+	result, err := s.collectAuditExportRows(workerCtx, query)
+	if err != nil {
+		return nil, err
+	}
+	return auditCSVBytes(result)
+}
+
+// reconcileAuditExportRequest clears terminal requests or waits until their task becomes claimable.
+func (s *Service) reconcileAuditExportRequest(ctx context.Context, req AuditExportRequest) error {
+	task, err := s.transfers.GetTask(ctx, req.TenantID, req.TransferTaskID)
+	if err != nil {
+		if errors.Is(err, apperr.ErrTransferTaskNotFound) {
+			return s.deleteAuditExportRequest(ctx, req)
+		}
+		return s.deferAuditExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.AuditExportWorkerPollMs)*time.Millisecond))
+	}
+	switch task.Status {
+	case transfer.StatusSucceeded, transfer.StatusFailed:
+		return s.deleteAuditExportRequest(ctx, req)
+	case transfer.StatusRetrying:
+		return s.deferAuditExportRequest(ctx, req, task.NextAttemptAfter)
+	case transfer.StatusRunning:
+		return s.deferAuditExportRequest(ctx, req, task.LeaseUntil)
+	default:
+		return s.deferAuditExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.AuditExportWorkerPollMs)*time.Millisecond))
+	}
+}
+
+// failAuditExportRequest advances the leased task retry state and synchronizes its next M9 scan.
+func (s *Service) failAuditExportRequest(ctx context.Context, req AuditExportRequest, task transfer.Task, cause error) error {
+	failed, err := s.transfers.FailTask(ctx, task, cause, timex.Now())
+	if err != nil {
+		return s.deferAuditExportRequest(ctx, req, timex.Now().Add(time.Duration(s.cfg.AuditExportWorkerPollMs)*time.Millisecond))
+	}
+	if failed.Status == transfer.StatusFailed {
+		return s.deleteAuditExportRequest(ctx, req)
+	}
+	return s.deferAuditExportRequest(ctx, req, failed.NextAttemptAfter)
+}
+
+// deferAuditExportRequest schedules the next attempt in the request table owned by M9.
+func (s *Service) deferAuditExportRequest(ctx context.Context, req AuditExportRequest, next time.Time) error {
+	if next.IsZero() || !next.After(timex.Now()) {
+		next = timex.Now().Add(time.Duration(s.cfg.AuditExportWorkerPollMs) * time.Millisecond)
+	}
+	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		_, err := tx.SetAuditExportRequestNextCheck(ctx, req.TenantID, req.TransferTaskID, next)
+		return err
+	})
+}
+
+// deleteAuditExportRequest removes a terminal M9 request after its transfer task is durable.
+func (s *Service) deleteAuditExportRequest(ctx context.Context, req AuditExportRequest) error {
+	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		return tx.DeleteAuditExportRequest(ctx, req.TenantID, req.TransferTaskID)
+	})
+}
+
+// scopedAuditExportQuery freezes the requester's authorized tenant scope before persistence.
+func scopedAuditExportQuery(id tenant.Identity, query contracts.AuditQuery) contracts.AuditQuery {
+	if id.IsPlatform {
+		query.IncludePlatform = true
+		return query
+	}
+	query.TenantID = id.TenantID
+	query.IncludePlatform = false
+	return query
 }
 
 // collectAuditExportRows 按统一分页上限拉取当前权限范围内全部匹配审计记录。
@@ -745,10 +879,10 @@ func validateAlertRule(req AlertRuleRequest) error {
 
 // writeAudit 将 M9 管理操作写入 identity 共享审计表。
 func (s *Service) writeAudit(ctx context.Context, id tenant.Identity, action, targetType string, targetID int64, detail map[string]any) error {
-	role := int16(2)
+	role := contracts.RoleNumSchoolAdmin
 	tenantID := id.TenantID
 	if id.IsPlatform {
-		role = 1
+		role = contracts.RoleNumPlatformAdmin
 		tenantID = 0
 	}
 	entry, err := audit.BuildEntry(ctx, tenantID, id.AccountID, role, action, targetType, targetID, detail)

@@ -22,12 +22,38 @@ import { AppSidebar } from './AppSidebar'
 import { NotificationBell } from './NotificationBell'
 import { TaskCenterButton } from './TaskCenterButton'
 import { UserMenu } from './UserMenu'
+import { errorDiagnostics } from '../../utils/userFacingError'
 
 /** 侧栏折叠选择:仅界面偏好(非业务状态),全站一个键 —— 同一个人换端不需要重设一次 */
 const SIDEBAR_COLLAPSED_KEY = 'chaimir.sidebar_collapsed'
 
 /** 常驻侧栏断点:与 Tailwind lg(1024px)一致,禁止另造魔法断点 */
 const DESKTOP_QUERY = '(min-width: 64rem)'
+
+/** readSidebarCollapsed 读取可选布局偏好,存储被策略禁用时回到默认展开状态。 */
+function readSidebarCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true'
+  } catch (error) {
+    console.warn('sidebar_preference_read_failed', {
+      operation: 'read_sidebar_collapsed',
+      error: errorDiagnostics(error),
+    })
+    return false
+  }
+}
+
+/** writeSidebarCollapsed 持久化可选布局偏好,失败不影响当前交互。 */
+function writeSidebarCollapsed(collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(collapsed))
+  } catch (error) {
+    console.warn('sidebar_preference_write_failed', {
+      operation: 'write_sidebar_collapsed',
+      error: errorDiagnostics(error),
+    })
+  }
+}
 
 export interface MainLayoutProps {
   /** 本角色区的导航配置,由 routes/ 层在该区懒加载壳内注入(铁律 2:壳层不持有全角色清单) */
@@ -43,9 +69,7 @@ export function MainLayout({ config }: MainLayoutProps) {
   const location = useLocation()
   const isDesktop = useMediaQuery(DESKTOP_QUERY)
 
-  const [collapsed, setCollapsed] = useState(
-    () => window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true',
-  )
+  const [collapsed, setCollapsed] = useState(readSidebarCollapsed)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   /** 回到桌面宽度时关闭抽屉:否则抽屉遮罩会盖在已常驻的侧栏上 */
@@ -61,7 +85,7 @@ export function MainLayout({ config }: MainLayoutProps) {
   const toggleCollapsed = useCallback(() => {
     setCollapsed((previous) => {
       const next = !previous
-      window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(next))
+      writeSidebarCollapsed(next)
       return next
     })
   }, [])

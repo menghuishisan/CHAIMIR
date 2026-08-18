@@ -31,8 +31,8 @@ import { useAsyncResource } from '../../../../hooks/useAsyncResource'
 import { useImmersive } from '../../../../layouts/immersive/context'
 import { moveCommand, replayMoves } from '../../replayMoves'
 import { narrativeProgress, useSimPlayback } from '../../playback'
-import { SimPlaybackControls } from '../../SimPlaybackControls'
-import { SimWorkbenchAside } from '../../SimWorkbenchAside'
+import { SimPlaybackControls } from '../../components/SimPlaybackControls'
+import { SimWorkbenchAside } from '../../components/SimWorkbenchAside'
 
 /** injectedActionCount 数出快照里已复现的记录动作数(记录动作在 Worker 内是 user 事件)。 */
 function injectedActionCount(snapshot: RuntimeSnapshot): number {

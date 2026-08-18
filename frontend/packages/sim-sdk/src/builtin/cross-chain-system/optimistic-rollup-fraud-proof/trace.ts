@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { optimisticRollupPhases } from './model';
 
-export const optimisticRollupSource = [
+const optimisticRollupSource = [
   'function submitOptimisticBatch(batch) {',
   '  postStateRoot(batch.claimedRoot);',
   '  if challenger.detectsMismatch(): openChallenge();',

@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { raftPhases } from './model';
 
-export const raftSource = [
+const raftSource = [
   'function raft(command) {',
   '  candidate = onElectionDelay();',
   '  votes = requestVote(candidate.term, candidate.lastLogIndex, candidate.lastLogTerm);',

@@ -440,7 +440,7 @@ func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRe
 			return apperr.ErrIdentityImportPreviewExpired
 		}
 		var rows []orgImportRow
-		if err := jsonx.DecodeStrict(preview.Rows, &rows); err != nil {
+		if err := jsonx.DecodeStrictKnownFields(preview.Rows, &rows); err != nil {
 			return fmt.Errorf("解析组织导入预览失败: %w", err)
 		}
 		success, failed := int32(0), int32(0)

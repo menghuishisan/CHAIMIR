@@ -16,7 +16,7 @@ export interface FeeMarketTx {
   refunded: number;
 }
 
-export interface FeeMarketPoint {
+interface FeeMarketPoint {
   x: number;
   baseFee: number;
   gasUsed: number;

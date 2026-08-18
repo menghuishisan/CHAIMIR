@@ -2,7 +2,7 @@
 
 import type { SimState } from '../../../types';
 
-export interface RollupTx {
+interface RollupTx {
   id: string;
   action: string;
   valid: boolean;

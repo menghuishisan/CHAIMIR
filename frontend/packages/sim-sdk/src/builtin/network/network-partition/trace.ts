@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { partitionPhases } from './model';
 
-export const partitionSource = [
+const partitionSource = [
   'function handlePartition(topology) {',
   '  cutSet = findCrossRegionLinks(topology);',
   '  block(cutSet);',

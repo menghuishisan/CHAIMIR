@@ -268,7 +268,7 @@ func (a *StdioJSONAdapter) Preview(ctx context.Context, pkg Package, bundle *Exe
 		return PreviewResult{}, err
 	}
 	var response runnerVerifyResponse
-	if err := jsonx.DecodeStrict(raw, &response); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &response); err != nil {
 		return PreviewResult{}, fmt.Errorf("隔离预览输出无效: %w", err)
 	}
 	if !response.OK {
@@ -614,7 +614,7 @@ func (a *StdioJSONAdapter) execRunner(ctx context.Context, namespace string, sca
 		return runnerFrame{}, err
 	}
 	var response runnerSnapshotResponse
-	if err := jsonx.DecodeStrict(raw, &response); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &response); err != nil {
 		return runnerFrame{}, fmt.Errorf("隔离执行输出无效: %w", err)
 	}
 	if !response.OK {

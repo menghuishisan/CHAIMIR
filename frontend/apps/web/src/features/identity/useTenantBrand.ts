@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import type { TenantBrand } from '@chaimir/api-client'
 import { api } from '../../app/api'
 import { appConfig } from '../../app/config'
+import { errorDiagnostics } from '../../utils/userFacingError'
 
 /**
  * useTenantBrand 读取当前部署的学校品牌;平台托管或读取失败时返回 undefined。
@@ -25,7 +26,7 @@ export function useTenantBrand(): TenantBrand | undefined {
         if (active && result.display_name.trim() !== '') setBrand(result)
       } catch (error) {
         // 学校品牌只是登录页的身份标注,取不到不该挡住登录:原因只进控制台供排障。
-        console.error('学校品牌读取失败', error)
+        console.error('学校品牌读取失败', errorDiagnostics(error))
       }
     })()
     return () => {

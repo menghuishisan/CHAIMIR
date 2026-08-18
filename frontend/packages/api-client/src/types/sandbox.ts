@@ -2,12 +2,6 @@
 
 import type { SnowflakeID } from './common'
 import type {
-  WorkloadComponent,
-  WorkloadNetworkRule,
-  WorkloadRoute,
-  WorkloadService,
-} from './workload'
-import type {
   ImagePrepullStatus,
   RuntimeImageStatus,
   RuntimeAdapterLevel,
@@ -18,6 +12,7 @@ import type {
   SandboxToolKind,
   SandboxToolStatus,
   ToolStatus,
+  SandboxChainOperation,
 } from '../constants/sandbox'
 
 export interface SandboxInstance {
@@ -33,8 +28,6 @@ export interface SandboxInstance {
   capabilities: SandboxCapabilities
   resource_usage: SandboxResourceUsage
 }
-
-export type SandboxChainOperation = 'deploy' | 'transaction' | 'query'
 
 export interface SandboxCapabilities {
   file_workspace: boolean
@@ -118,37 +111,8 @@ export interface SandboxRuntimeRequest {
   status?: RuntimeStatus
 }
 
-export interface SandboxAdapterSpec {
-  workspace_dir: string
-  volume_domains?: Array<{
-    name: string
-    mount_path: string
-    student_access: 'none' | 'read_only' | 'read_write'
-    persistence: 'ephemeral' | 'minio_code' | 'snapshot'
-    snapshot_scope: 'never' | 'always' | 'snapshot_enabled'
-  }>
-  runtime_container: WorkloadComponent
-  infra_sidecars?: WorkloadComponent[]
-  services?: WorkloadService[]
-  routes?: WorkloadRoute[]
-  network_rules?: WorkloadNetworkRule[]
-  default_tool_codes?: string[]
-  selftest?: Record<string, unknown>
-  workspace_ops: {
-    read_file: string[]
-    write_file: string[]
-    list_files: string[]
-    pack_tar: string[]
-    unpack_tar: string[]
-    run_script: string[]
-    terminal: string[]
-    selftest: string[]
-  }
-  capability_commands?: Record<
-    'deploy' | 'tx' | 'query' | 'reset',
-    { command: string[]; timeout_seconds: number }
-  >
-}
+/** SandboxAdapterSpec 是管理员维护的动态声明,内部编排/K8s 结构不进入公开 SDK 类型。 */
+export type SandboxAdapterSpec = Record<string, unknown>
 
 export interface SandboxRuntime extends Omit<SandboxRuntimeRequest, 'status'> {
   id: SnowflakeID
@@ -186,10 +150,10 @@ export interface SandboxToolRequest {
 
 export interface SandboxToolResourceSpec {
   builtin_endpoint?: string
-  components?: WorkloadComponent[]
-  services?: WorkloadService[]
-  routes?: WorkloadRoute[]
-  network_rules?: WorkloadNetworkRule[]
+  components?: unknown[]
+  services?: unknown[]
+  routes?: unknown[]
+  network_rules?: unknown[]
   command_policy?: {
     allowed_argv: string[][]
     default_timeout_seconds: number

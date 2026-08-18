@@ -3,7 +3,6 @@ package sim
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"chaimir/internal/modules/sim/internal/sqlcgen"
@@ -14,7 +13,6 @@ import (
 	"chaimir/pkg/apperr"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // Store 定义 service 所需的 sim 持久化能力,不暴露 sqlc 行类型。
@@ -31,8 +29,7 @@ func isNoRows(err error) bool {
 
 // isUniqueViolation 识别 PostgreSQL 唯一约束冲突,用于分享码随机碰撞的窄重试。
 func isUniqueViolation(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+	return db.IsUniqueViolation(err)
 }
 
 // TxStore 定义单个事务内可调用的 sim 数据访问能力。

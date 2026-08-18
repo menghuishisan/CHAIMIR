@@ -20,11 +20,8 @@ import { api } from '../../app/api'
 import { useAsyncResource } from '../../hooks'
 import { formatShortDateTime } from '../../utils/formatters'
 import { TRANSFER_ACTIVE_STATUSES } from '../../utils/transfer'
-import {
-  transferTaskStatusLabel,
-  transferTaskStatusTone,
-  transferTaskSubjectLabel,
-} from '../../utils/labels/transfer'
+import { transferTaskStatusLabel, transferTaskSubjectLabel } from '../../utils/labels/transfer'
+import { transferTaskStatusTone } from '../../features/transfer/statusPresentation'
 
 /** 下拉内展示的任务条数:面板是「最近」摘要,全量在任务中心页 */
 const RECENT_SIZE = 5

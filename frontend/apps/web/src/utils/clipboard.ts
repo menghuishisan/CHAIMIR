@@ -3,6 +3,7 @@
 // 失败属前端自身错误,只给场景化用户向文案、不生成编号,技术原因进 console(规范 §6.7 B)。
 
 import { toast } from '@chaimir/ui'
+import { errorDiagnostics } from './userFacingError'
 
 export interface CopyTextOptions {
   /** 被复制内容的用户向名称,用于拼失败文案(如「邀请码」「操作编号」) */
@@ -22,7 +23,7 @@ export async function copyText(text: string, { what, operation }: CopyTextOption
     return true
   } catch (error) {
     toast.error(`复制没有成功,请手动选中${what}后复制。`)
-    console.error('剪贴板写入失败', { operation, reason: 'clipboard-write-failed', error })
+    console.error('剪贴板写入失败', { operation, reason: 'clipboard-write-failed', error: errorDiagnostics(error) })
     return false
   }
 }

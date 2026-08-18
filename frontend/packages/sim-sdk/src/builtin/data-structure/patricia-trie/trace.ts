@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { patriciaTriePhases } from './model';
 
-export const patriciaTrieSource = [
+const patriciaTrieSource = [
   'function updateTrie(key, value) {',
   '  path = encodeNibbles(key);',
   '  node = walkCompressedPath(path);',

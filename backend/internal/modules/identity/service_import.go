@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
-	"errors"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -15,16 +14,14 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
-
-	"chaimir/internal/platform/ids"
-	"chaimir/internal/platform/intx"
-	"github.com/jackc/pgx/v5"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -202,7 +199,7 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 			return apperr.ErrIdentityImportPreviewExpired
 		}
 		var rows []importRow
-		if err := jsonx.DecodeStrict(preview.Rows, &rows); err != nil {
+		if err := jsonx.DecodeStrictKnownFields(preview.Rows, &rows); err != nil {
 			return fmt.Errorf("解析导入预览失败: %w", err)
 		}
 		success, failed := int32(0), int32(0)
@@ -343,7 +340,7 @@ func (s *Service) applyAccountImportOpeningRules(ctx context.Context, tenantID i
 			}
 			seenNo[no] = rows[i].Line
 			existing, err := tx.GetAccountByNo(ctx, no)
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			if err != nil && !isNoRows(err) {
 				return err
 			}
 			if err == nil && existing.ID > 0 {

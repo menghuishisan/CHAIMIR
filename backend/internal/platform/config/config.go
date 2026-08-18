@@ -2,8 +2,8 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
+	"math"
 	"net/netip"
 	"net/url"
 	"os"
@@ -46,6 +46,9 @@ type DeployConfig struct {
 	PlatformEnabled bool
 	SchoolTenantID  int64
 }
+
+// DeployModeSaaS 是 DEPLOY_MODE 表示多租户 SaaS 部署的取值。
+const DeployModeSaaS = "saas"
 
 // DeployModeSchool 是 DEPLOY_MODE 表示学校私有化部署的取值,业务模块按它判断部署形态,不各写字面量。
 const DeployModeSchool = "school"
@@ -212,9 +215,9 @@ type UploadConfig struct {
 
 // TransferConfig 描述统一导入导出中心的任务重试与下载中心边界。
 type TransferConfig struct {
-	TaskMaxAttempts        int
-	TaskRetryDelayMs       int
-	TaskDownloadTTLSeconds int
+	TaskMaxAttempts     int
+	TaskRetryDelayMs    int
+	TaskLeaseDurationMs int
 }
 
 // ContestConfig 描述竞赛外部源访问边界。
@@ -253,6 +256,8 @@ type TeachingConfig struct {
 	GradeEventOutboxPollMs          int
 	GradeEventOutboxStaleMs         int
 	GradeExportBatchSize            int
+	GradeExportWorkerBatchSize      int
+	GradeExportWorkerPollMs         int
 }
 
 // ExperimentConfig 描述实验实例生命周期与报告批改的后台边界。
@@ -277,9 +282,12 @@ type GradeConfig struct {
 	LockOutboxStaleMs      int
 }
 
-// AdminConfig 描述管理后台统计快照后台任务边界。
+// AdminConfig 描述管理后台统计快照与受控备份任务边界。
 type AdminConfig struct {
 	StatisticsSnapshotIntervalSeconds int
+	BackupCommandOutputMaxBytes       int64
+	AuditExportWorkerBatchSize        int
+	AuditExportWorkerPollMs           int
 }
 
 // SandboxConfig 描述 K8s 沙箱编排与镜像证明边界。
@@ -468,8 +476,9 @@ func Load() (*Config, error) {
 	reqFloat64 := func(key string) float64 {
 		v := os.Getenv(key)
 		n, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("环境变量 %s 需为 float64,实际=%q", key, v))
+		if err != nil || math.IsNaN(n) || math.IsInf(n, 0) {
+			errs = append(errs, fmt.Sprintf("环境变量 %s 需为有限 float64,实际=%q", key, v))
+			return 0
 		}
 		return n
 	}
@@ -663,9 +672,9 @@ func Load() (*Config, error) {
 		PreviewFrameCount:              reqInt("SIM_PREVIEW_FRAME_COUNT"),
 	}
 	c.Transfer = TransferConfig{
-		TaskMaxAttempts:        reqInt("TRANSFER_TASK_MAX_ATTEMPTS"),
-		TaskRetryDelayMs:       reqInt("TRANSFER_TASK_RETRY_DELAY_MS"),
-		TaskDownloadTTLSeconds: reqInt("TRANSFER_TASK_DOWNLOAD_TTL_SECONDS"),
+		TaskMaxAttempts:     reqInt("TRANSFER_TASK_MAX_ATTEMPTS"),
+		TaskRetryDelayMs:    reqInt("TRANSFER_TASK_RETRY_DELAY_MS"),
+		TaskLeaseDurationMs: reqInt("TRANSFER_TASK_LEASE_DURATION_MS"),
 	}
 	c.Contest = ContestConfig{
 		VulnSourceMaxResponseBytes:       reqInt64("CONTEST_VULN_SOURCE_MAX_RESPONSE_BYTES"),
@@ -698,6 +707,8 @@ func Load() (*Config, error) {
 		GradeEventOutboxPollMs:          reqInt("TEACHING_GRADE_EVENT_OUTBOX_POLL_INTERVAL_MS"),
 		GradeEventOutboxStaleMs:         reqInt("TEACHING_GRADE_EVENT_OUTBOX_STALE_INTERVAL_MS"),
 		GradeExportBatchSize:            reqInt("TEACHING_GRADE_EXPORT_BATCH_SIZE"),
+		GradeExportWorkerBatchSize:      reqInt("TEACHING_GRADE_EXPORT_WORKER_BATCH_SIZE"),
+		GradeExportWorkerPollMs:         reqInt("TEACHING_GRADE_EXPORT_WORKER_POLL_INTERVAL_MS"),
 	}
 	c.Experiment = ExperimentConfig{
 		RecyclePollIntervalSeconds: reqInt("EXPERIMENT_RECYCLE_POLL_INTERVAL_SECONDS"),
@@ -719,6 +730,9 @@ func Load() (*Config, error) {
 	}
 	c.Admin = AdminConfig{
 		StatisticsSnapshotIntervalSeconds: reqInt("ADMIN_STATISTICS_SNAPSHOT_INTERVAL_SECONDS"),
+		BackupCommandOutputMaxBytes:       reqInt64("ADMIN_BACKUP_COMMAND_OUTPUT_MAX_BYTES"),
+		AuditExportWorkerBatchSize:        reqInt("ADMIN_AUDIT_EXPORT_WORKER_BATCH_SIZE"),
+		AuditExportWorkerPollMs:           reqInt("ADMIN_AUDIT_EXPORT_WORKER_POLL_INTERVAL_MS"),
 	}
 	c.Sandbox = SandboxConfig{
 		KubeconfigPath:                os.Getenv("KUBECONFIG_PATH"),
@@ -804,7 +818,20 @@ func Load() (*Config, error) {
 	}
 
 	// 第三步:集中执行跨字段约束和安全边界校验,避免运行时才暴露配置问题。
-	if c.Deploy.Mode == DeployModeSchool && c.Deploy.SchoolTenantID == 0 {
+	if c.Server.Port < 1 || c.Server.Port > 65535 {
+		errs = append(errs, "HTTP_PORT 必须在 1 到 65535 之间")
+	}
+	if c.Postgres.Port < 1 || c.Postgres.Port > 65535 {
+		errs = append(errs, "POSTGRES_PORT 必须在 1 到 65535 之间")
+	}
+	if c.Redis.Port < 1 || c.Redis.Port > 65535 {
+		errs = append(errs, "REDIS_PORT 必须在 1 到 65535 之间")
+	}
+	deployMode := strings.ToLower(strings.TrimSpace(c.Deploy.Mode))
+	if deployMode != DeployModeSaaS && deployMode != DeployModeSchool {
+		errs = append(errs, "DEPLOY_MODE 必须为 saas 或 school")
+	}
+	if deployMode == DeployModeSchool && c.Deploy.SchoolTenantID == 0 {
 		errs = append(errs, "DEPLOY_MODE=school 时必须设置 SCHOOL_TENANT_ID")
 	}
 	if c.Auth.ServiceAuthMaxSkewSeconds <= 0 {
@@ -863,7 +890,7 @@ func Load() (*Config, error) {
 	if c.Postgres.GrantTimeoutSeconds <= 0 {
 		errs = append(errs, "PG_GRANT_TIMEOUT_SECONDS 必须大于 0")
 	}
-	if strings.EqualFold(strings.TrimSpace(c.Postgres.SSLMode), "disable") && !isLocalLikeEnv(c.Server.AppEnv) {
+	if strings.EqualFold(strings.TrimSpace(c.Postgres.SSLMode), "disable") && !IsLocalLikeEnvironment(c.Server.AppEnv) {
 		errs = append(errs, "生产或预发布环境 PG_SSLMODE 不得为 disable")
 	}
 	if c.NATS.ReconnectWaitSeconds <= 0 {
@@ -953,8 +980,8 @@ func Load() (*Config, error) {
 	if c.Transfer.TaskRetryDelayMs <= 0 {
 		errs = append(errs, "TRANSFER_TASK_RETRY_DELAY_MS 必须大于 0")
 	}
-	if c.Transfer.TaskDownloadTTLSeconds <= 0 {
-		errs = append(errs, "TRANSFER_TASK_DOWNLOAD_TTL_SECONDS 必须大于 0")
+	if c.Transfer.TaskLeaseDurationMs <= 0 {
+		errs = append(errs, "TRANSFER_TASK_LEASE_DURATION_MS 必须大于 0")
 	}
 	if c.Contest.VulnSourceTimeoutSeconds < 1 || c.Contest.VulnSourceTimeoutSeconds > 60 {
 		errs = append(errs, "CONTEST_VULN_SOURCE_TIMEOUT_SECONDS 必须在 1 到 60 秒之间")
@@ -1031,6 +1058,12 @@ func Load() (*Config, error) {
 	if c.Teaching.GradeExportBatchSize <= 0 {
 		errs = append(errs, "TEACHING_GRADE_EXPORT_BATCH_SIZE 必须大于 0")
 	}
+	if c.Teaching.GradeExportWorkerBatchSize <= 0 {
+		errs = append(errs, "TEACHING_GRADE_EXPORT_WORKER_BATCH_SIZE 必须大于 0")
+	}
+	if c.Teaching.GradeExportWorkerPollMs <= 0 {
+		errs = append(errs, "TEACHING_GRADE_EXPORT_WORKER_POLL_INTERVAL_MS 必须大于 0")
+	}
 	if c.Experiment.RecyclePollIntervalSeconds <= 0 {
 		errs = append(errs, "EXPERIMENT_RECYCLE_POLL_INTERVAL_SECONDS 必须大于 0")
 	}
@@ -1105,6 +1138,15 @@ func Load() (*Config, error) {
 	}
 	if c.Admin.StatisticsSnapshotIntervalSeconds <= 0 {
 		errs = append(errs, "ADMIN_STATISTICS_SNAPSHOT_INTERVAL_SECONDS 必须大于 0")
+	}
+	if c.Admin.BackupCommandOutputMaxBytes <= 0 {
+		errs = append(errs, "ADMIN_BACKUP_COMMAND_OUTPUT_MAX_BYTES 必须大于 0")
+	}
+	if c.Admin.AuditExportWorkerBatchSize <= 0 {
+		errs = append(errs, "ADMIN_AUDIT_EXPORT_WORKER_BATCH_SIZE 必须大于 0")
+	}
+	if c.Admin.AuditExportWorkerPollMs <= 0 {
+		errs = append(errs, "ADMIN_AUDIT_EXPORT_WORKER_POLL_INTERVAL_MS 必须大于 0")
 	}
 	if c.Snowflake.NodeID < 0 || c.Snowflake.NodeID > 1023 {
 		errs = append(errs, "SNOWFLAKE_NODE_ID 必须在 0 到 1023 之间,且同一部署内每个后端副本必须唯一")
@@ -1232,7 +1274,7 @@ func Load() (*Config, error) {
 				errs = append(errs, "SMS_HTTP_ENDPOINT_SCOPE=public 时不得配置 SMS_HTTP_CLUSTER_CIDRS")
 			}
 		case "cluster":
-			if !isLocalLikeEnv(c.Server.AppEnv) {
+			if !IsLocalLikeEnvironment(c.Server.AppEnv) {
 				errs = append(errs, "SMS_HTTP_ENDPOINT_SCOPE=cluster 只能在 APP_ENV=local/dev/test 时使用")
 			}
 			if len(c.SMS.ClusterCIDRs) == 0 {
@@ -1286,8 +1328,8 @@ func parseCIDRPrefixes(raw string) ([]netip.Prefix, error) {
 	return prefixes, nil
 }
 
-// isLocalLikeEnv 判断配置是否处于本地或测试环境,用于限制验收专用能力。
-func isLocalLikeEnv(appEnv string) bool {
+// IsLocalLikeEnvironment 判断配置是否处于本地或测试环境,用于限制验收和开发专用能力。
+func IsLocalLikeEnvironment(appEnv string) bool {
 	switch strings.ToLower(strings.TrimSpace(appEnv)) {
 	case "local", "dev", "development", "test":
 		return true
@@ -1318,8 +1360,8 @@ func readPlatformImageAttestations(key string, errs *[]string) []PlatformImageAt
 		return nil
 	}
 	var out []PlatformImageAttestation
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		*errs = append(*errs, fmt.Sprintf("环境变量 %s 需为镜像证明 JSON 数组: %v", key, err))
+	if err := decodeStrictJSON(raw, &out); err != nil {
+		*errs = append(*errs, fmt.Sprintf("环境变量 %s 需为严格的镜像证明 JSON 数组: %v", key, err))
 		return nil
 	}
 	for i, item := range out {
@@ -1337,8 +1379,8 @@ func readSandboxTolerations(key string, errs *[]string) []SandboxToleration {
 		return nil
 	}
 	var out []SandboxToleration
-	if err := json.Unmarshal([]byte(raw), &out); err != nil {
-		*errs = append(*errs, fmt.Sprintf("环境变量 %s 需为 Kubernetes toleration JSON 数组: %v", key, err))
+	if err := decodeStrictJSON(raw, &out); err != nil {
+		*errs = append(*errs, fmt.Sprintf("环境变量 %s 需为严格的 Kubernetes toleration JSON 数组: %v", key, err))
 		return nil
 	}
 	return out

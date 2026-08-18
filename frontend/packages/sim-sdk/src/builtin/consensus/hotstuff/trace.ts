@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { hotstuffPhases } from './model';
 
-export const hotstuffSource = [
+const hotstuffSource = [
   'function hotstuff(view) {',
   '  highQC = collectNewView();',
   '  proposal = leader.propose(extend(highQC.block));',

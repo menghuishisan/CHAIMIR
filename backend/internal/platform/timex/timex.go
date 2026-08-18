@@ -2,10 +2,13 @@
 package timex
 
 import (
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const dateLayout = "2006-01-02"
 
 // Now 返回平台统一的当前 UTC 时间,避免容器本地时区渗入后端边界。
 func Now() time.Time {
@@ -20,12 +23,34 @@ func UTC(t time.Time) time.Time {
 	return t.UTC()
 }
 
+// ParseRFC3339 解析 API 机器时间并归一到 UTC。
+func ParseRFC3339(value string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(value))
+	if err != nil {
+		return time.Time{}, err
+	}
+	return UTC(parsed), nil
+}
+
+// ParseDate 解析平台统一的 YYYY-MM-DD 日期格式。
+func ParseDate(value string) (time.Time, error) {
+	return time.Parse(dateLayout, strings.TrimSpace(value))
+}
+
 // RFC3339OrEmpty 将 API 可选时间输出为 UTC RFC3339 字符串;零值保持空字符串。
 func RFC3339OrEmpty(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
 	return UTC(t).Format(time.RFC3339)
+}
+
+// DateOrEmpty 将有效时间输出为 YYYY-MM-DD 日期;零值保持空字符串。
+func DateOrEmpty(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return UTC(t).Format(dateLayout)
 }
 
 // Timestamptz 构造可空 PostgreSQL timestamptz,写库前统一剥离本地时区影响。

@@ -46,17 +46,15 @@ import {
   formatRelativeDeadline,
 } from '../../../../utils/formatters'
 import {
-  ASSIGNMENT_DUE_TONE,
   courseStatusLabel,
-  courseStatusTone,
-  courseTypeCover,
   courseTypeLabel,
   latePolicyLabel,
   lessonContentTypeLabel,
   progressStatusLabel,
-  progressStatusTone,
   teachingDifficultyLabel,
 } from '../../../../utils/labels/teaching'
+import { courseTypeCover } from '../../coursePresentation'
+import { ASSIGNMENT_DUE_TONE, courseStatusTone, progressStatusTone } from '../../statusPresentation'
 import { useCourseCoverSrc } from '../../useCourseCoverSrc'
 import { CourseDiscussion } from './course-discussion'
 import { CourseReviewCard } from './course-review'

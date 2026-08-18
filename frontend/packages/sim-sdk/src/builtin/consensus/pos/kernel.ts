@@ -55,7 +55,7 @@ export function reducePosEvent(state: PosState, event: SimEvent, _context: Reduc
 /**
  * advancePos 按 PoS 最终性流程推进一个过程单元。
  */
-export function advancePos(state: PosState): PosState {
+function advancePos(state: PosState): PosState {
   const phaseIndex = Math.min(posPhases.length - 1, state.phaseIndex + (state.lastTransition === posPhases[state.phaseIndex].id ? 1 : 0));
   const next = { ...state, phaseIndex, tick: state.tick + 1 };
   if (phaseIndex === 1) return chooseProposer(next);
@@ -86,7 +86,7 @@ export function posSlashingHandled(state: PosState): CheckpointResult {
 /**
  * finalizePosState 刷新 PoS 指标、消息过程、检查点和追踪。
  */
-export function finalizePosState(state: PosState): PosState {
+function finalizePosState(state: PosState): PosState {
   const risk = state.conflictingRoot ? 78 : state.validators.some((validator) => validator.slashed) ? 22 : 10;
   const finality = Math.min(100, Math.max(0, (state.finalizedEpoch - 5) * 25));
   const samples = state.samples.concat({ x: state.tick + state.phaseIndex, quorum: Math.round((attestedStake(state) / Math.max(1, activeStake(state))) * 100), risk, finality }).slice(-24);
@@ -200,7 +200,7 @@ export function attestedStake(state: PosState): number {
 /**
  * twoThirds 计算三分之二权益阈值。
  */
-export function twoThirds(total: number): number {
+function twoThirds(total: number): number {
   return weightedTwoThirdsThreshold(total);
 }
 

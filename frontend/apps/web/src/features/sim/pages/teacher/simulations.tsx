@@ -41,8 +41,8 @@ import {
   simCategoryLabel,
   simComputeLabel,
   simPackageStatusLabel,
-  simPackageStatusTone,
 } from '../../../../utils/labels/sim'
+import { simPackageStatusTone } from '../../statusPresentation'
 import { SimPackageFormModal } from './package-form'
 import { SimPackagePreviewModal } from './package-preview'
 

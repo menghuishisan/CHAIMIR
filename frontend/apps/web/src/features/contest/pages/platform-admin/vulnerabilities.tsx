@@ -29,12 +29,10 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
-import {
-  VULN_SOURCE_CONFIG_FIELDS,
-  vulnLevelLabel,
-  vulnSourceTypeLabel,
-} from '../../../../utils/labels/contest'
-import { VulnSourceFormModal } from '../vuln-source-form'
+import { vulnLevelLabel, vulnSourceTypeLabel } from '../../../../utils/labels/contest'
+import { VulnSourceFormModal } from '../../components/VulnSourceFormModal'
+import { VULN_SOURCE_CONFIG_FIELDS } from '../../vulnerabilityContract'
+import { readString } from '../../jsonReaders'
 
 /**
  * PlatformVulnerabilitiesPage 维护全平台共享的漏洞来源。
@@ -185,7 +183,3 @@ function VulnSourceCard({ source, onEdit }: VulnSourceCardProps) {
 }
 
 /** readString 从来源配置里读字符串字段;被后端脱敏的字段回空串,不把掩码对象抛到界面上。 */
-function readString(source: Record<string, unknown>, key: string): string {
-  const value = source[key]
-  return typeof value === 'string' ? value : ''
-}

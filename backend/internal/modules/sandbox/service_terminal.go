@@ -92,7 +92,7 @@ func (s *Service) ToolProxyTargetForOwner(ctx context.Context, tenantID, account
 
 // RunCommandToolForOwner 在命令工具容器中执行一次受控 argv 命令。
 func (s *Service) RunCommandToolForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, toolCode string, req ToolRunRequest) (ToolRunResponse, error) {
-	if tenantID <= 0 || accountID <= 0 || sandboxID <= 0 || strings.TrimSpace(toolCode) == "" || !safeNonShellCommand(req.Command) {
+	if tenantID <= 0 || accountID <= 0 || sandboxID <= 0 || strings.TrimSpace(toolCode) == "" || !workload.ValidNonShellCommand(req.Command) {
 		return ToolRunResponse{}, apperr.ErrSandboxToolRunRequestInvalid
 	}
 	stdin, err := decodeOptionalBase64(req.StdinBase64)
@@ -199,7 +199,7 @@ func commandToolExecTarget(tool SandboxTool) string {
 
 // commandToolCommandAllowed 判断请求 argv 是否逐项命中工具白名单。
 func commandToolCommandAllowed(policy CommandToolPolicy, command []string) bool {
-	if !safeNonShellCommand(command) {
+	if !workload.ValidNonShellCommand(command) {
 		return false
 	}
 	for _, allowed := range policy.AllowedArgv {

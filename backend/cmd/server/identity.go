@@ -14,7 +14,6 @@ import (
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/redis"
 	"chaimir/internal/platform/storage"
-	"chaimir/internal/platform/upload"
 	"chaimir/pkg/snowflake"
 
 	"github.com/gin-gonic/gin"
@@ -22,14 +21,15 @@ import (
 
 // IdentityModuleDeps 汇总组合根装配 M1 需要的基础设施。
 type IdentityModuleDeps struct {
-	Router   gin.IRouter
-	Database *db.DB
-	Auth     *auth.Manager
-	Redis    *redis.Client
-	IDs      snowflake.Generator
-	Config   config.Config
-	Storage  *storage.Storage
-	EventBus eventbus.Bus
+	Router      gin.IRouter
+	Database    *db.DB
+	Auth        *auth.Manager
+	Redis       *redis.Client
+	IDs         snowflake.Generator
+	Config      config.Config
+	Storage     *storage.Storage
+	FileService storage.Service
+	EventBus    eventbus.Bus
 }
 
 // RegisterIdentityModule 构造身份模块 store/service 并注册 HTTP 路由。
@@ -49,16 +49,8 @@ func RegisterIdentityModule(deps IdentityModuleDeps) (*identity.Service, error) 
 	if deps.Storage == nil {
 		return nil, fmt.Errorf("identity module 缺少统一对象存储")
 	}
-	fileService, err := storage.NewServiceFromConfig(deps.Config.Auth, deps.Config.MinIO, deps.Config.Upload)
-	if err != nil {
-		return nil, err
-	}
 	store := identity.NewStore(deps.Database)
 	smsSender, err := identity.NewSMSSender(deps.Config.SMS)
-	if err != nil {
-		return nil, err
-	}
-	scanner, err := upload.NewScannerFromConfig(deps.Config.Upload)
 	if err != nil {
 		return nil, err
 	}
@@ -70,9 +62,9 @@ func RegisterIdentityModule(deps IdentityModuleDeps) (*identity.Service, error) 
 		AuthConfig:     deps.Config.Auth,
 		IdentityConfig: deps.Config.Identity,
 		UploadConfig:   deps.Config.Upload,
-		Scanner:        scanner,
+		Scanner:        deps.FileService.Scanner,
 		Objects:        deps.Storage,
-		FileService:    fileService,
+		FileService:    deps.FileService,
 		DeployConfig:   deps.Config.Deploy,
 		SMSSender:      smsSender,
 		EventBus:       deps.EventBus,

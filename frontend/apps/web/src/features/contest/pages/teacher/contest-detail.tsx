@@ -16,7 +16,12 @@ import {
   Swords,
   Trophy,
 } from 'lucide-react'
-import { ContestStatus, type Contest, type ResultSnapshot } from '@chaimir/api-client'
+import {
+  ContestStatus,
+  PAGINATION_MAX_SIZE,
+  type Contest,
+  type ResultSnapshot,
+} from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
@@ -42,17 +47,14 @@ import { formatDateTime, formatScore } from '../../../../utils/formatters'
 import {
   contestModeLabel,
   contestStatusLabel,
-  contestStatusTone,
-  isContestLeaderboardFrozen,
   matchModeLabel,
   teamModeLabel,
 } from '../../../../utils/labels/contest'
-import { ContestFormModal } from './contest-form'
+import { isContestLeaderboardFrozen } from '../../rules'
+import { contestStatusTone } from '../../statusPresentation'
+import { ContestFormModal } from '../../components/ContestFormModal'
 import { ContestProblems } from './contest-problems'
 import { ContestCheat } from './contest-cheat'
-
-/** 定位单场赛事时一次取回的条数:与后端分页上限一致。 */
-const CONTEST_LOOKUP_SIZE = 100
 
 /**
  * TeacherContestDetailPage 读取赛事本体并按任务分区呈现管理能力。
@@ -63,7 +65,7 @@ export default function TeacherContestDetailPage() {
   const contest = useAsyncResource(
     () =>
       api.contest
-        .getContests({ page: 1, size: CONTEST_LOOKUP_SIZE })
+        .getContests({ page: 1, size: PAGINATION_MAX_SIZE })
         .then((page) => page.list.find((item) => item.id === contestId)),
     [contestId],
     (value) => value === undefined,

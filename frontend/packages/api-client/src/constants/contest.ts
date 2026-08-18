@@ -93,3 +93,25 @@ export enum VulnProblemStatus {
   FINALIZED = 2,
   DISCARDED = 3,
 }
+
+/** VULN_CHAIN_OPERATION 是漏洞题预验证步骤的公开操作协议。 */
+export const VULN_CHAIN_OPERATION = {
+  DEPLOY: 'deploy',
+  TX: 'tx',
+  RESET: 'reset',
+  QUERY: 'query',
+} as const
+
+export type VulnChainOperation =
+  (typeof VULN_CHAIN_OPERATION)[keyof typeof VULN_CHAIN_OPERATION]
+
+/** CHAIN_ASSERT_OPERATION 是链上状态断言的公开操作协议。 */
+export const CHAIN_ASSERT_OPERATION = {
+  EQ: 'eq',
+  NE: 'ne',
+  CONTAINS: 'contains',
+  EXISTS: 'exists',
+} as const
+
+export type ChainAssertOperation =
+  (typeof CHAIN_ASSERT_OPERATION)[keyof typeof CHAIN_ASSERT_OPERATION]

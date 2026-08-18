@@ -37,13 +37,9 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
-import {
-  experimentStageStatusLabel,
-  experimentStageStatusTone,
-  experimentStatusLabel,
-  experimentStatusTone,
-} from '../../../../utils/labels/experiment'
+import { experimentStageStatusLabel, experimentStatusLabel } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { experimentStageStatusTone, experimentStatusTone } from '../../statusPresentation'
 import { ExperimentGroupCard } from './experiment-group'
 
 /**

@@ -31,7 +31,7 @@ export function reduceBridgeEvent(state: BridgeState, event: SimEvent, _context:
 /**
  * advanceBridge 按桥验证流程推进。
  */
-export function advanceBridge(state: BridgeState, event: SimEvent): BridgeState {
+function advanceBridge(state: BridgeState, event: SimEvent): BridgeState {
   const phaseIndex = Math.min(bridgePhases.length - 1, state.phaseIndex + 1);
   let next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: bridgePhases[phaseIndex].id };
   if (phaseIndex === 1) next = { ...next, lightClientSynced: true };
@@ -44,7 +44,7 @@ export function advanceBridge(state: BridgeState, event: SimEvent): BridgeState 
 /**
  * finalizeBridgeState 刷新桥验证指标、检查点和代码追踪。
  */
-export function finalizeBridgeState(state: BridgeState): BridgeState {
+function finalizeBridgeState(state: BridgeState): BridgeState {
   const proofMatches = state.proofHash === state.canonicalProofHash;
   const valid = state.lightClientSynced && proofMatches && !state.invalidProof && state.minted;
   return { ...state, phase: bridgePhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: valid ? '证明已验证' : state.invalidProof ? '证明被拒绝' : '等待验证', risk: valid ? 8 : state.invalidProof ? 82 : 30 }, checkpointValues: { valid }, _trace: { triggeredLines: traceLinesForBridge(state.lastTransition), variables: { proofHash: state.proofHash, minted: state.minted }, executionPath: `bridge-validation/${state.lastTransition}` } };

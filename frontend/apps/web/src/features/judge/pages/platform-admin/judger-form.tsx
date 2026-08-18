@@ -17,7 +17,6 @@ import {
   type Judger,
   type JudgerRequest,
   type JudgerResourceSpec,
-  type WorkloadComponent,
 } from '@chaimir/api-client'
 import {
   Badge,
@@ -40,16 +39,12 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { useAsyncResource } from '../../../../hooks'
-import {
-  JUDGER_STATUSES,
-  JUDGER_TYPES,
-  judgerStatusLabel,
-  judgerTypeLabel,
-} from '../../../../utils/labels/judge'
+import { judgerStatusLabel, judgerTypeLabel } from '../../../../utils/labels/judge'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { JUDGER_STATUSES, JUDGER_TYPES } from '../../options'
 
 /** 判题器编码规则,与后端 codePattern 一致。 */
-const CODE_PATTERN = /^[a-z][a-z0-9-]{0,30}[a-z0-9]$/
+const CODE_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/
 
 /** 执行目标规则:pod/container 两段,各自都是受控编码(后端 safeExecTarget)。 */
 const EXEC_TARGET_PATTERN = /^[a-z][a-z0-9-]*[a-z0-9]\/[a-z][a-z0-9-]*[a-z0-9]$/
@@ -160,7 +155,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
     const next: Record<string, string | null> = {
       code: CODE_PATTERN.test(code.trim())
         ? null
-        : '用小写字母开头,只含小写字母、数字与连字符,长度 2 到 32 位',
+        : '以小写字母或数字开头,只含小写字母、数字与连字符,长度 3 到 64 位',
       name: name.trim() === '' ? '请输入判题器名称' : null,
       executorRef: executorRef.trim() === '' ? '请填写判题实现名称' : null,
       defaultTimeout:
@@ -673,7 +668,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
 
 /** ParsedSidecars 是执行容器清单的解析结果。 */
 interface ParsedSidecars {
-  sidecars: WorkloadComponent[]
+  sidecars: Record<string, unknown>[]
   error?: string
 }
 
@@ -700,5 +695,10 @@ function parseSidecars(text: string): ParsedSidecars {
       return { sidecars: [], error: '每个执行环境都要有名称(name)。' }
     }
   }
-  return { sidecars: raw as WorkloadComponent[] }
+  return {
+    sidecars: raw.filter(
+      (item): item is Record<string, unknown> =>
+        typeof item === 'object' && item !== null && !Array.isArray(item),
+    ) as Record<string, unknown>[],
+  }
 }

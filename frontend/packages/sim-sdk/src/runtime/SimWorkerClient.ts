@@ -204,7 +204,7 @@ export class SimWorkerClient {
     console.error('sim_client_error', {
       operation: 'worker-command',
       reason: message,
-      error: cause instanceof Error ? cause.message : String(cause ?? ''),
+      error: { kind: cause instanceof Error ? cause.name : typeof cause },
     });
     return message;
   }

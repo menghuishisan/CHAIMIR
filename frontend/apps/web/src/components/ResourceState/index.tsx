@@ -76,7 +76,7 @@ export function ResourceState<T>({
   return <>{resource.data === null ? null : children(resource.data)}</>
 }
 
-export interface ResourceErrorProps {
+interface ResourceErrorProps {
   /** 用户向失败文案 */
   message: string
   /** 后端签发的报障编号;不存在时不显示编号 */
@@ -86,9 +86,9 @@ export interface ResourceErrorProps {
 
 /**
  * ResourceError 渲染可恢复的读取失败态。
- * 单独导出供并列资源区(同页多块数据)复用,避免各区自行拼错误块。
+ * 由 ResourceState 在读取失败分支统一使用,避免各页面自行拼错误块。
  */
-export function ResourceError({ message, traceId, onRetry }: ResourceErrorProps) {
+function ResourceError({ message, traceId, onRetry }: ResourceErrorProps) {
   return (
     // 抬起片(规范 §6.5.1 第 1 级):失败块与它替代的那张表同层,故同样不画边框
     <div className="flex flex-col items-center gap-3 rounded-lg bg-surface px-6 py-12 text-center shadow-xs">

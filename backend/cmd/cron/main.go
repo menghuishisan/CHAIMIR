@@ -20,8 +20,10 @@ import (
 	"chaimir/internal/modules/admin"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
+	platformids "chaimir/internal/platform/ids"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
+	"chaimir/pkg/limitio"
 	"chaimir/pkg/logging"
 	"chaimir/pkg/snowflake"
 )
@@ -98,9 +100,9 @@ func runBackup(ctx context.Context, cfg *config.Config, database *db.DB, objects
 	if cfg == nil || database == nil || objects == nil || ids == nil {
 		return fmt.Errorf("备份任务依赖不完整")
 	}
-	batch := "backup-" + timex.Now().Format("20060102T150405Z")
-	workDir := filepath.Join(os.TempDir(), batch)
-	if err := os.MkdirAll(workDir, 0o700); err != nil {
+	batch := "backup-" + platformids.Format(ids.Generate())
+	workDir, err := os.MkdirTemp("", "chaimir-backup-")
+	if err != nil {
 		return fmt.Errorf("创建备份工作目录失败: %w", err)
 	}
 	defer func() {
@@ -250,9 +252,10 @@ func dumpPostgres(ctx context.Context, cfg *config.Config, outPath string) error
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("pg_dump 上下文已取消: %w", err)
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := limitio.NewBuffer(cfg.Admin.BackupCommandOutputMaxBytes)
+	stderr := limitio.NewBuffer(cfg.Admin.BackupCommandOutputMaxBytes)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("启动 pg_dump 失败: %w", err)
 	}
@@ -270,6 +273,9 @@ func dumpPostgres(ctx context.Context, cfg *config.Config, outPath string) error
 	close(finished)
 	out := append(stdout.Bytes(), stderr.Bytes()...)
 	if err != nil {
+		if errors.Is(err, limitio.ErrLimitExceeded) {
+			return fmt.Errorf("pg_dump 输出超过配置上限: %w", err)
+		}
 		return fmt.Errorf("pg_dump 执行失败: %w: %s", err, logging.SanitizeError(string(out)))
 	}
 	return nil

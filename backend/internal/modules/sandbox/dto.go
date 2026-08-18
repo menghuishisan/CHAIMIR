@@ -41,12 +41,14 @@ type ToolRequest struct {
 
 // RuntimeResponse 是运行时管理接口的稳定输出 DTO,避免内部模型字段名泄漏到 HTTP。
 type RuntimeResponse struct {
-	ID             ids.ID          `json:"id"`
-	Code           string          `json:"code"`
-	Name           string          `json:"name"`
-	Eco            string          `json:"eco"`
-	AdapterLevel   int16           `json:"adapter_level"`
-	AdapterSpec    AdapterSpec     `json:"adapter_spec"`
+	ID           ids.ID `json:"id"`
+	Code         string `json:"code"`
+	Name         string `json:"name"`
+	Eco          string `json:"eco"`
+	AdapterLevel int16  `json:"adapter_level"`
+	// AdapterSpec is the validated runtime declaration serialized at the public
+	// boundary. The executable AdapterSpec model stays private to sandbox.
+	AdapterSpec    json.RawMessage `json:"adapter_spec"`
 	CapabilityImpl string          `json:"capability_impl"`
 	PluginRef      string          `json:"plugin_ref"`
 	SelftestStatus int16           `json:"selftest_status"`
@@ -71,13 +73,15 @@ type RuntimeImageResponse struct {
 
 // ToolResponse 是沙箱工具管理接口的稳定输出 DTO。
 type ToolResponse struct {
-	ID           ids.ID           `json:"id"`
-	Code         string           `json:"code"`
-	Name         string           `json:"name"`
-	Kind         int16            `json:"kind"`
-	EcoTags      []string         `json:"eco_tags"`
-	ResourceSpec ToolResourceSpec `json:"resource_spec"`
-	Status       int16            `json:"status"`
+	ID      ids.ID   `json:"id"`
+	Code    string   `json:"code"`
+	Name    string   `json:"name"`
+	Kind    int16    `json:"kind"`
+	EcoTags []string `json:"eco_tags"`
+	// ResourceSpec is an opaque, validated tool declaration. Its internal
+	// workload model must not become an API-client type.
+	ResourceSpec json.RawMessage `json:"resource_spec"`
+	Status       int16           `json:"status"`
 }
 
 // OrchestrationCatalogResponse 是编排目录接口的输出,只含业务模块选运行时与工具所需字段。

@@ -111,8 +111,20 @@ func currentServiceTenant(ctx context.Context) (int64, error) {
 	return id.TenantID, nil
 }
 
-// isSchoolAdmin 判断当前账号是否具备学校管理员权限。
-func (s *Service) isSchoolAdmin(ctx context.Context, accountID int64) bool {
+// isSchoolAdmin 判断当前账号是否具备学校管理员权限,并显式保留角色服务错误链。
+func (s *Service) isSchoolAdmin(ctx context.Context, accountID int64) (bool, error) {
 	ok, err := s.roles.HasRole(ctx, accountID, contracts.RoleSchoolAdmin)
-	return err == nil && ok
+	if err != nil {
+		return false, apperr.ErrForbidden.WithCause(err)
+	}
+	return ok, nil
+}
+
+// ensureTeacherCanManage 校验教师作者或学校管理员权限,统一处理角色查询失败。
+func (s *Service) ensureTeacherCanManage(ctx context.Context, accountID int64, item Experiment) error {
+	isSchoolAdmin, err := s.isSchoolAdmin(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	return ensureTeacherCanManage(accountID, isSchoolAdmin, item)
 }

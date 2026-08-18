@@ -256,7 +256,7 @@ func queryRFC3339(c *gin.Context, key string) (time.Time, bool) {
 	if raw == "" {
 		return time.Time{}, true
 	}
-	value, err := time.Parse(time.RFC3339, raw)
+	value, err := timex.ParseRFC3339(raw)
 	if err != nil {
 		response.Fail(c, apperr.ErrAdminAuditQueryInvalid)
 		return time.Time{}, false

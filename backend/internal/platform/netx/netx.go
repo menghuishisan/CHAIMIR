@@ -12,6 +12,40 @@ import (
 	"time"
 )
 
+// publicSpecialPurposeExceptions 是 IANA 特殊用途注册表中位于保留父前缀内但明确全局可达的地址。
+var publicSpecialPurposeExceptions = [...]netip.Prefix{
+	netip.MustParsePrefix("192.0.0.9/32"),
+	netip.MustParsePrefix("192.0.0.10/32"),
+	netip.MustParsePrefix("2001:1::1/128"),
+	netip.MustParsePrefix("2001:1::2/128"),
+	netip.MustParsePrefix("2001:1::3/128"),
+	netip.MustParsePrefix("2001:3::/32"),
+	netip.MustParsePrefix("2001:4:112::/48"),
+	netip.MustParsePrefix("2001:20::/28"),
+	netip.MustParsePrefix("2001:30::/28"),
+}
+
+// nonPublicSpecialPurposePrefixes 收敛 IANA 注册表中标准库未完整分类的非公网 IPv4/IPv6 前缀。
+var nonPublicSpecialPurposePrefixes = [...]netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("100:0:0:1::/64"),
+	netip.MustParsePrefix("2001::/23"),
+	netip.MustParsePrefix("2001:db8::/32"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("3fff::/20"),
+	netip.MustParsePrefix("5f00::/16"),
+}
+
 // ValidatePublicHTTPURL 校验外部 HTTP(S) 端点,拒绝本机、私网、链路本地和格式非法地址。
 func ValidatePublicHTTPURL(raw string) (string, error) {
 	return validatePublicURL(raw, "HTTP", map[string]struct{}{"http": {}, "https": {}})
@@ -60,25 +94,25 @@ func isLocalHostname(host string) bool {
 	}
 }
 
-// isPublicAddr 使用 netip 标准地址属性拒绝 SSRF 常见目标网段。
+// isPublicAddr 结合 netip 分类和 IANA 特殊用途注册表拒绝所有非公网 SSRF 目标。
 func isPublicAddr(addr netip.Addr) bool {
 	if addr.Is4In6() {
 		addr = addr.Unmap()
 	}
-	if addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() ||
-		addr.IsLinkLocalMulticast() || addr.IsMulticast() || addr.IsUnspecified() {
+	if !addr.IsValid() || !addr.IsGlobalUnicast() || addr.IsPrivate() || addr.IsLinkLocalUnicast() {
 		return false
 	}
-	if isMetadataAddr(addr) {
-		return false
+	for _, prefix := range publicSpecialPurposeExceptions {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	for _, prefix := range nonPublicSpecialPurposePrefixes {
+		if prefix.Contains(addr) {
+			return false
+		}
 	}
 	return true
-}
-
-// isMetadataAddr 拒绝云平台元数据服务地址,即使它不属于 netip 的私网分类。
-func isMetadataAddr(addr netip.Addr) bool {
-	metadata := netip.MustParseAddr("169.254.169.254")
-	return addr == metadata
 }
 
 // NewPublicHTTPClient 创建带公网出站限制和显式超时的 HTTP client,用于用户/租户可配置的外部端点。
@@ -144,30 +178,6 @@ func ClusterHTTPTransport(base *http.Transport, allowed []netip.Prefix) *http.Tr
 		return dialer.DialContext(ctx, network, dialAddress)
 	}
 	return base
-}
-
-// PublicResolvedURL 把已校验的外部 URL 解析到公网地址,返回拨号 URL 与原始主机名。
-// TLS 客户端应继续使用原始主机名做 ServerName,避免解析到 IP 后破坏证书校验。
-func PublicResolvedURL(ctx context.Context, raw, defaultPort string) (resolvedURL string, serverName string, err error) {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return "", "", fmt.Errorf("外部端点 URL 格式非法")
-	}
-	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	host := parsed.Hostname()
-	port := parsed.Port()
-	if port == "" {
-		port = strings.TrimSpace(defaultPort)
-	}
-	if port == "" {
-		return "", "", fmt.Errorf("外部端点缺少端口")
-	}
-	dialAddress, err := publicDialAddress(ctx, host, port)
-	if err != nil {
-		return "", "", err
-	}
-	parsed.Host = dialAddress
-	return parsed.String(), host, nil
 }
 
 // PrivateResolvedURL 把允许私网的受控 URL 解析为拨号地址,用于学校自有 LDAPS 目录服务。
@@ -297,6 +307,7 @@ func clusterDialAddress(ctx context.Context, host, port string, allowed []netip.
 	return "", fmt.Errorf("集群端点未解析到允许的 Service CIDR 地址")
 }
 
+// isAllowedClusterAddr 判断解析地址是否属于显式集群 Service CIDR 且不是本机或组播地址。
 func isAllowedClusterAddr(addr netip.Addr, allowed []netip.Prefix) bool {
 	if addr.Is4In6() {
 		addr = addr.Unmap()

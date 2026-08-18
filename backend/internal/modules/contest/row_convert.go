@@ -257,34 +257,10 @@ func decodeMap(raw []byte, invalid *apperr.Error) (map[string]any, error) {
 	return out, nil
 }
 
-// decodeMapSlice 解析 JSONB 对象数组,空值按空数组处理。
-func decodeMapSlice(raw []byte, invalid *apperr.Error) ([]map[string]any, error) {
-	if len(raw) == 0 {
-		return []map[string]any{}, nil
-	}
-	var out []map[string]any
-	if err := jsonx.DecodeStrict(raw, &out); err != nil {
-		return nil, invalid.WithCause(err)
-	}
-	if out == nil {
-		return []map[string]any{}, nil
-	}
-	return out, nil
-}
-
-// encodeJSON 将结构化字段序列化为 JSONB 字节。
-func encodeJSON(v any, invalid *apperr.Error) ([]byte, error) {
-	raw, err := jsonx.AnyBytes(v, invalid)
-	if err != nil {
-		return nil, err
-	}
-	return raw, nil
-}
-
 // encodeOptionalJSON 将可空固定结构序列化为 JSONB;nil 保持数据库 NULL。
 func encodeOptionalJSON[T any](v *T, invalid *apperr.Error) ([]byte, error) {
 	if v == nil {
 		return nil, nil
 	}
-	return encodeJSON(v, invalid)
+	return jsonx.AnyBytes(v, invalid)
 }

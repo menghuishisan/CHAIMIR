@@ -185,6 +185,11 @@ func gradeFromUpsertRow(row sqlcgen.UpsertCourseGradeRow) CourseGrade {
 	return CourseGrade{ID: row.ID, TenantID: row.TenantID, CourseID: row.CourseID, StudentID: row.StudentID, AutoTotal: row.AutoTotal, OverrideTotal: row.OverrideTotal, IsOverridden: row.IsOverridden, IsLocked: row.IsLocked, UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
 }
 
+// courseGradeExportRequestFromRow 转换 M6 成绩导出请求行。
+func courseGradeExportRequestFromRow(row sqlcgen.CourseGradeExportRequest) CourseGradeExportRequest {
+	return CourseGradeExportRequest{TransferTaskID: row.TransferTaskID, TenantID: row.TenantID, AccountID: row.AccountID, CourseID: row.CourseID, NextCheckAt: timex.FromTimestamptz(row.NextCheckAt), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
+}
+
 // teachingGradeEventOutbox 转换成绩变更事件 outbox 行。
 func teachingGradeEventOutbox(row sqlcgen.TeachingGradeEventOutbox) TeachingGradeEventOutbox {
 	return TeachingGradeEventOutbox{ID: row.ID, TenantID: row.TenantID, CourseID: row.CourseID, StudentID: row.StudentID, TraceID: row.TraceID, EventUpdatedAt: timex.FromTimestamptz(row.EventUpdatedAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}

@@ -34,7 +34,7 @@ export function reduceGossipEvent(state: GossipState, event: SimEvent, _context:
 /**
  * advanceGossip 按 Gossip 传播流程推进一个过程单元。
  */
-export function advanceGossip(state: GossipState, event: SimEvent): GossipState {
+function advanceGossip(state: GossipState, event: SimEvent): GossipState {
   if (state.phaseIndex === 2 && state.frontier.length > 0 && coverage(state) < 80) {
     return spreadRound({ ...state, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: 'spread' });
   }
@@ -57,7 +57,7 @@ export function coverageCheckpoint(state: GossipState): CheckpointResult {
 /**
  * finalizeGossipState 刷新指标、趋势、消息进度和代码追踪。
  */
-export function finalizeGossipState(state: GossipState): GossipState {
+function finalizeGossipState(state: GossipState): GossipState {
   const covered = coverage(state);
   const risk = state.peers.some((peer) => peer.polluted) ? 78 : covered >= 80 ? 10 : 28;
   const samples = state.samples.concat({ x: state.tick + state.phaseIndex, coverage: covered, risk, latency: Math.min(100, state.messages.length * 2) }).slice(-24);

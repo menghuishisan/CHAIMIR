@@ -13,13 +13,17 @@ import type {
   BattleReplayResultDetail,
   SnowflakeID,
 } from '@chaimir/api-client'
-import { BattleRole, BattleRule } from '@chaimir/api-client'
+import { BattleRole, BattleRule, VULN_CHAIN_OPERATION } from '@chaimir/api-client'
 
 /** 当前认识的归档协议版本,与后端 battleReplayArchiveVersion 一致。 */
-export const SUPPORTED_ARCHIVE_VERSION = 1
+const SUPPORTED_ARCHIVE_VERSION = 1
 
 /** 链操作的封闭集,与 M3 runChainStep 支持的 op 一致。 */
-const KNOWN_OPS = new Set(['deploy', 'tx', 'reset'])
+const KNOWN_OPS = new Set<string>([
+  VULN_CHAIN_OPERATION.DEPLOY,
+  VULN_CHAIN_OPERATION.TX,
+  VULN_CHAIN_OPERATION.RESET,
+])
 
 /**
  * parseBattleReplayArchive 把归档正文解析为协议对象。

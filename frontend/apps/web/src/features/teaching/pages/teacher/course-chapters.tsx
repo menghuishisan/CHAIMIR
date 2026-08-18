@@ -40,11 +40,11 @@ import {
 import { api } from '../../../../app/api'
 import { formatFileSize } from '../../../../utils/formatters'
 import {
-  LESSON_CONTENT_TYPES,
-  isLessonMaterialType,
   lessonContentTypeLabel,
 } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { LESSON_CONTENT_TYPES } from '../../options'
+import { isLessonMaterialType } from '../../rules'
 
 export interface CourseChaptersProps {
   courseId: string

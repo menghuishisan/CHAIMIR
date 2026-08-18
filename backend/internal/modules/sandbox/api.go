@@ -146,7 +146,11 @@ func (a sandboxAPI) registerQuotaRoutes(g gin.IRouter, authn *auth.Manager, role
 // listRuntimes 返回运行时列表。
 func (a sandboxAPI) listRuntimes(c *gin.Context) {
 	out, err := a.svc.ListRuntimes(c.Request.Context())
-	httpx.Write(c, runtimeResponsesFromModels(out), err)
+	responses, convertErr := runtimeResponsesFromModels(out)
+	if err == nil {
+		err = convertErr
+	}
+	httpx.Write(c, responses, err)
 }
 
 // registerRuntime 绑定运行时注册或更新请求。
@@ -156,7 +160,11 @@ func (a sandboxAPI) registerRuntime(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.RegisterRuntime(c.Request.Context(), req)
-	httpx.Write(c, runtimeResponseFromModel(out), err)
+	response, convertErr := runtimeResponseFromModel(out)
+	if err == nil {
+		err = convertErr
+	}
+	httpx.Write(c, response, err)
 }
 
 // updateRuntime 绑定运行时更新请求并校验路径 ID。
@@ -170,7 +178,11 @@ func (a sandboxAPI) updateRuntime(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.UpdateRuntime(c.Request.Context(), runtimeID, req)
-	httpx.Write(c, runtimeResponseFromModel(out), err)
+	response, convertErr := runtimeResponseFromModel(out)
+	if err == nil {
+		err = convertErr
+	}
+	httpx.Write(c, response, err)
 }
 
 // registerRuntimeImage 绑定运行时镜像登记请求。
@@ -242,7 +254,11 @@ func (a sandboxAPI) getRuntimeImagePrepull(c *gin.Context) {
 // listTools 返回平台工具列表。
 func (a sandboxAPI) listTools(c *gin.Context) {
 	out, err := a.svc.ListTools(c.Request.Context())
-	httpx.Write(c, toolResponsesFromModels(out), err)
+	responses, convertErr := toolResponsesFromModels(out)
+	if err == nil {
+		err = convertErr
+	}
+	httpx.Write(c, responses, err)
 }
 
 // registerTool 绑定工具注册请求。
@@ -252,7 +268,11 @@ func (a sandboxAPI) registerTool(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.RegisterTool(c.Request.Context(), req)
-	httpx.Write(c, toolResponseFromModel(out), err)
+	response, convertErr := toolResponseFromModel(out)
+	if err == nil {
+		err = convertErr
+	}
+	httpx.Write(c, response, err)
 }
 
 // createSandbox 绑定内部创建沙箱请求。
@@ -307,7 +327,7 @@ func (a sandboxAPI) pauseSandbox(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.PauseSandbox(c.Request.Context(), contracts.SandboxControlRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef}))
+	httpx.Write(c, struct{}{}, a.svc.PauseSandbox(c.Request.Context(), contracts.SandboxControlRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef}))
 }
 
 // resumeSandbox 绑定内部恢复请求。
@@ -324,7 +344,7 @@ func (a sandboxAPI) resumeSandbox(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.ResumeSandbox(c.Request.Context(), contracts.SandboxControlRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef}))
+	httpx.Write(c, struct{}{}, a.svc.ResumeSandbox(c.Request.Context(), contracts.SandboxControlRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef}))
 }
 
 // destroySandbox 绑定内部销毁请求。
@@ -341,7 +361,7 @@ func (a sandboxAPI) destroySandbox(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.DestroySandbox(c.Request.Context(), contracts.SandboxControlRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef}))
+	httpx.Write(c, struct{}{}, a.svc.DestroySandbox(c.Request.Context(), contracts.SandboxControlRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef}))
 }
 
 // recycleBySourceRef 绑定来源级联回收请求。
@@ -360,7 +380,7 @@ func (a sandboxAPI) recycleBySourceRef(c *gin.Context) {
 		return
 	}
 	req.SourceRef = sourceRef
-	httpx.Write(c, gin.H{}, a.svc.RecycleBySourceRef(c.Request.Context(), contracts.SandboxRecycleRequest{TenantID: req.TenantID.Int64(), SourceRef: req.SourceRef, Reason: req.Reason}))
+	httpx.Write(c, struct{}{}, a.svc.RecycleBySourceRef(c.Request.Context(), contracts.SandboxRecycleRequest{TenantID: req.TenantID.Int64(), SourceRef: req.SourceRef, Reason: req.Reason}))
 }
 
 // getFiles 绑定工作区文件读取或目录列表请求。
@@ -400,7 +420,7 @@ func (a sandboxAPI) writeFile(c *gin.Context) {
 	if strings.TrimSpace(req.RelativePath) == "" {
 		req.RelativePath = c.Query("path")
 	}
-	httpx.Write(c, gin.H{}, a.svc.PutSandboxFileForOwner(c.Request.Context(), current.TenantID, current.AccountID, id, req))
+	httpx.Write(c, struct{}{}, a.svc.PutSandboxFileForOwner(c.Request.Context(), current.TenantID, current.AccountID, id, req))
 }
 
 // saveFiles 绑定立即持久化工作区请求。
@@ -626,7 +646,7 @@ func (a sandboxAPI) chainReset(c *gin.Context) {
 	} else {
 		err = apperr.ErrForbidden
 	}
-	httpx.Write(c, gin.H{}, err)
+	httpx.Write(c, struct{}{}, err)
 }
 
 // quotaStats 查询目标租户配额和活跃数量:校管读本租户,平台管理员按 tenant_id 读指定租户。

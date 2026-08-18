@@ -3,7 +3,7 @@
 import type { SimState } from '../../../types';
 import type { ViewMessage } from '../consensusView';
 
-export interface HotStuffReplica {
+interface HotStuffReplica {
   id: string;
   label: string;
   leader: boolean;

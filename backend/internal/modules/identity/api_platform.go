@@ -36,7 +36,7 @@ func (a platformAPI) createApplication(c *gin.Context) {
 	}
 	out, err := a.svc.CreateApplication(c.Request.Context(), req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, ToTenantApplicationDTO(out), nil)
@@ -50,7 +50,7 @@ func (a platformAPI) listApplications(c *gin.Context) {
 	}
 	out, err := a.svc.ListApplicationsByPlatform(c.Request.Context(), status)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, ToTenantApplicationDTOs(out), nil)
@@ -68,10 +68,10 @@ func (a platformAPI) approveApplication(c *gin.Context) {
 	}
 	tenant, activation, err := a.svc.ApproveApplication(c.Request.Context(), id, req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{"tenant": tenant, "activation_code": activation}, nil)
+	httpx.Write(c, TenantApprovalResponse{Tenant: tenant, ActivationCode: activation}, nil)
 }
 
 // rejectApplication 绑定平台驳回申请请求,驳回原因仅作为业务字段传给 service。
@@ -85,10 +85,10 @@ func (a platformAPI) rejectApplication(c *gin.Context) {
 		return
 	}
 	if err := a.svc.RejectApplication(c.Request.Context(), id, req.Reason); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // listTenants 读取平台租户列表,API 层不直接访问 repo。
@@ -114,7 +114,7 @@ func (a platformAPI) getTenant(c *gin.Context) {
 	}
 	out, err := a.svc.GetTenantByPlatform(c.Request.Context(), id)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -132,7 +132,7 @@ func (a platformAPI) updateTenant(c *gin.Context) {
 	}
 	out, err := a.svc.UpdateTenantStatusByPlatform(c.Request.Context(), id, req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)

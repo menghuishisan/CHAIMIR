@@ -44,8 +44,8 @@ import {
   simCategoryLabel,
   simComputeLabel,
   simPackageStatusLabel,
-  simPackageStatusTone,
 } from '../../../../utils/labels/sim'
+import { simPackageStatusTone } from '../../statusPresentation'
 
 /**
  * StudentSimulationsPage 检索可用仿真场景并进入推演。

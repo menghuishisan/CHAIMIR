@@ -392,14 +392,6 @@ func walkEntries(hintCount int, limits ArchiveLimits, iter func(func(name string
 	return names, nil
 }
 
-// max 返回两个整数中的较大值,用于避免空容量切片和 map。
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // looksLikeTar 通过 ustar 标记识别 TAR 归档,避免把任意二进制当成归档。
 func looksLikeTar(data []byte) bool {
 	return len(data) > 265 && string(data[257:262]) == "ustar"

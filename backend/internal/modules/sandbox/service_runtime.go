@@ -570,7 +570,7 @@ func (s *Service) GetRuntimeImagePrepull(ctx context.Context, runtimeID, imageID
 		ImageCount   int      `json:"image_count"`
 		Images       []string `json:"images"`
 	}
-	if err := jsonx.DecodeStrict(image.PrepullDetail, &detail); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(image.PrepullDetail, &detail); err != nil {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(err)
 	}
 	resp.DesiredNodes = detail.DesiredNodes

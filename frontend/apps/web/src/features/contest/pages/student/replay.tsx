@@ -32,6 +32,7 @@ import {
   BattleMatchStatus,
   BattleResult,
   BattleRole,
+  PAGINATION_MAX_SIZE,
   type BattleEntry,
   type BattleMatch,
   type BattleReplayArchive,
@@ -59,10 +60,8 @@ import {
   ChainLogStream,
   TraceAssertions,
   TraceLegend,
-} from '../../BattleTracePanels'
-
-/** 对局一次取回的条数:一场比赛内本队对局量级远小于此,足够铺满时间轴。 */
-const MATCH_PAGE_SIZE = 100
+} from '../../components/BattleTracePanels'
+import { CONTEST_LADDER_PREVIEW_SIZE } from '../../queryLimits'
 
 /**
  * StudentContestReplayPage 取回本队对局与参战记录。
@@ -72,7 +71,7 @@ export default function StudentContestReplayPage() {
   const { exit } = useImmersive()
 
   const matches = useAsyncResource(
-    () => api.contest.listBattleMatches(contestId, { page: 1, size: MATCH_PAGE_SIZE }),
+    () => api.contest.listBattleMatches(contestId, { page: 1, size: PAGINATION_MAX_SIZE }),
     [contestId],
     (value) => value.list.length === 0,
   )
@@ -82,7 +81,11 @@ export default function StudentContestReplayPage() {
     () => false,
   )
   const ladder = useAsyncResource(
-    () => api.contest.getLadder(contestId, { page: 1, size: 10 }),
+    () =>
+      api.contest.getLadder(contestId, {
+        page: 1,
+        size: CONTEST_LADDER_PREVIEW_SIZE,
+      }),
     [contestId],
     () => false,
   )

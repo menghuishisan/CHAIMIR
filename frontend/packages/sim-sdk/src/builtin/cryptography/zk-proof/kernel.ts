@@ -58,7 +58,7 @@ export function reduceZkProofEvent(state: ZkState, event: SimEvent, _context: Re
 /**
  * advanceZkProof 推进零知识交互阶段。
  */
-export function advanceZkProof(state: ZkState, event: SimEvent): ZkState {
+function advanceZkProof(state: ZkState, event: SimEvent): ZkState {
   const phaseIndex = Math.min(zkProofPhases.length - 1, state.phaseIndex + 1);
   const transition = zkProofPhases[phaseIndex].id;
   const next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: transition };
@@ -79,7 +79,7 @@ export function zkProofValid(state: ZkState): CheckpointResult {
 /**
  * finalizeZkProofState 刷新零知识证明派生状态。
  */
-export function finalizeZkProofState(state: ZkState): ZkState {
+function finalizeZkProofState(state: ZkState): ZkState {
   const risk = state.cheating ? 82 : state.verifierResult ? 5 : 22;
   return {
     ...state,

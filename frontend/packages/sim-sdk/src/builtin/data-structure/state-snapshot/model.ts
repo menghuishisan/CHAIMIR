@@ -10,7 +10,7 @@ export interface AccountState {
   restored: boolean;
 }
 
-export interface SnapshotPoint {
+interface SnapshotPoint {
   x: number;
   consistency: number;
   risk: number;

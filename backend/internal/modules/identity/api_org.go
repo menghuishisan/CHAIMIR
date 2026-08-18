@@ -55,7 +55,7 @@ func (a orgAPI) registerWrite(g gin.IRouter) {
 func (a orgAPI) listDepartments(c *gin.Context) {
 	out, err := a.svc.ListDepartmentsForViewer(c.Request.Context())
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -69,7 +69,7 @@ func (a orgAPI) createDepartment(c *gin.Context) {
 	}
 	out, err := a.svc.CreateDepartmentByAdmin(c.Request.Context(), req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -87,7 +87,7 @@ func (a orgAPI) updateDepartment(c *gin.Context) {
 	}
 	out, err := a.svc.UpdateDepartmentByAdmin(c.Request.Context(), id, req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -100,10 +100,10 @@ func (a orgAPI) deleteDepartment(c *gin.Context) {
 		return
 	}
 	if err := a.svc.DeleteDepartmentByAdmin(c.Request.Context(), id); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // listMajors 返回专业列表,支持 department_id 查询过滤。
@@ -114,7 +114,7 @@ func (a orgAPI) listMajors(c *gin.Context) {
 	}
 	out, err := a.svc.ListMajorsForViewer(c.Request.Context(), departmentID)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -128,7 +128,7 @@ func (a orgAPI) createMajor(c *gin.Context) {
 	}
 	out, err := a.svc.CreateMajorByAdmin(c.Request.Context(), req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -146,7 +146,7 @@ func (a orgAPI) updateMajor(c *gin.Context) {
 	}
 	out, err := a.svc.UpdateMajorByAdmin(c.Request.Context(), id, req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -159,10 +159,10 @@ func (a orgAPI) deleteMajor(c *gin.Context) {
 		return
 	}
 	if err := a.svc.DeleteMajorByAdmin(c.Request.Context(), id); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // listClasses 返回班级列表,支持 major_id 查询过滤。
@@ -173,7 +173,7 @@ func (a orgAPI) listClasses(c *gin.Context) {
 	}
 	out, err := a.svc.ListClassesForViewer(c.Request.Context(), majorID)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -197,7 +197,7 @@ func (a orgAPI) createClass(c *gin.Context) {
 	}
 	out, err := a.svc.CreateClassByAdmin(c.Request.Context(), req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -215,7 +215,7 @@ func (a orgAPI) updateClass(c *gin.Context) {
 	}
 	out, err := a.svc.UpdateClassByAdmin(c.Request.Context(), id, req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -228,44 +228,44 @@ func (a orgAPI) deleteClass(c *gin.Context) {
 		return
 	}
 	if err := a.svc.DeleteClassByAdmin(c.Request.Context(), id); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // importOrgPreview 绑定组织架构导入预览 multipart 请求。
 func (a orgAPI) importOrgPreview(c *gin.Context) {
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid.WithCause(err))
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportContentInvalid.WithCause(err))
 		return
 	}
 	if maxBytes := a.svc.importMaxBytes(); maxBytes > 0 && fileHeader.Size > maxBytes {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportFileTooLarge)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportFileTooLarge)
 		return
 	}
 	file, err := fileHeader.Open()
 	if err != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid.WithCause(err))
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportContentInvalid.WithCause(err))
 		return
 	}
 	content, sizeResult, readErr := upload.ReadBounded(file, a.svc.importMaxBytes())
 	closeErr := file.Close()
 	if readErr != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid.WithCause(readErr))
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportContentInvalid.WithCause(readErr))
 		return
 	}
 	if sizeResult == upload.SizeTooLarge {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportFileTooLarge)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportFileTooLarge)
 		return
 	}
 	if sizeResult == upload.SizeEmpty {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityImportContentInvalid)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityImportContentInvalid)
 		return
 	}
 	if closeErr != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrInternal.WithCause(closeErr))
+		httpx.Write(c, struct{}{}, apperr.ErrInternal.WithCause(closeErr))
 		return
 	}
 	out, err := a.svc.PreviewOrgImportByAdmin(c.Request.Context(), ImportPreviewRequest{
@@ -275,7 +275,7 @@ func (a orgAPI) importOrgPreview(c *gin.Context) {
 		Content:     content,
 	})
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -289,7 +289,7 @@ func (a orgAPI) importOrgCommit(c *gin.Context) {
 	}
 	out, err := a.svc.CommitOrgImportByAdmin(c.Request.Context(), req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -299,7 +299,7 @@ func (a orgAPI) importOrgCommit(c *gin.Context) {
 func (a orgAPI) importOrgTemplate(c *gin.Context) {
 	tpl, err := a.svc.OrgImportTemplate(c.Query("format"))
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.WriteAttachment(c, tpl.FileName, tpl.ContentType, tpl.Content)
@@ -312,10 +312,10 @@ func (a orgAPI) archiveClasses(c *gin.Context) {
 		return
 	}
 	if err := a.svc.ArchiveClassesByAdmin(c.Request.Context(), req); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // promoteClasses 绑定班级批量升级请求。
@@ -325,8 +325,8 @@ func (a orgAPI) promoteClasses(c *gin.Context) {
 		return
 	}
 	if err := a.svc.PromoteClassesByAdmin(c.Request.Context(), req); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }

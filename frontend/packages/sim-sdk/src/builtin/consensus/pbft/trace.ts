@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { pbftPhases } from './model';
 
-export const pbftSourceCode = [
+const pbftSourceCode = [
   'function runPbft(request) {',
   '  primary.receive(request)',
   '  digest = hash(view, sequence, request)',

@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { accessPhases } from './model';
 
-export const accessSource = ['function setConfig(value) {', '  require(hasRole(ADMIN, msg.sender));', '  config = value;', '  emit Audit(msg.sender, "setConfig");', '}'];
+const accessSource = ['function setConfig(value) {', '  require(hasRole(ADMIN, msg.sender));', '  config = value;', '  emit Audit(msg.sender, "setConfig");', '}'];
 
 export const accessNarrative = phaseNarrative(accessPhases, 'access-control-safe');
 

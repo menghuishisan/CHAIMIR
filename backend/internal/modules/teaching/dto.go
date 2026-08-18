@@ -3,6 +3,13 @@ package teaching
 
 import "chaimir/internal/platform/ids"
 
+// CourseCoverUploadRequest 描述 API 层已读取并校验大小后的封面文件。
+type CourseCoverUploadRequest struct {
+	FileName    string
+	ContentType string
+	Content     []byte
+}
+
 // CourseCoverUploadDTO 是封面上传后的受控对象引用。
 type CourseCoverUploadDTO struct {
 	ObjectRef string `json:"object_ref"`
@@ -25,6 +32,13 @@ type LessonMaterialAccessDTO struct {
 	Size        int64  `json:"size"`
 	ContentType string `json:"content_type"`
 	ExpiresAt   string `json:"expires_at"`
+}
+
+// LessonMaterialUploadRequest 描述 API 层已读取并校验大小后的课时材料。
+type LessonMaterialUploadRequest struct {
+	FileName    string
+	ContentType string
+	Content     []byte
 }
 
 // DraftSaveDTO 是服务端草稿保存成功后的固定响应。

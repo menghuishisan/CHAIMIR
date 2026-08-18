@@ -160,7 +160,7 @@ func reportFromJSON(raw []byte) (ValidationReport, error) {
 	if len(raw) == 0 {
 		return out, nil
 	}
-	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return ValidationReport{}, err
 	}
 	return out, nil
@@ -172,7 +172,7 @@ func decodeInteractionSchema(raw []byte) (InteractionSchema, error) {
 		return normalizeInteractionSchema(InteractionSchema{}), nil
 	}
 	var out InteractionSchema
-	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return InteractionSchema{}, err
 	}
 	return normalizeInteractionSchema(out), nil
@@ -184,7 +184,7 @@ func decodeCodeTraceAudit(raw []byte) (CodeTraceAudit, error) {
 		return CodeTraceAudit{}, nil
 	}
 	var out CodeTraceAudit
-	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return CodeTraceAudit{}, err
 	}
 	return out, nil

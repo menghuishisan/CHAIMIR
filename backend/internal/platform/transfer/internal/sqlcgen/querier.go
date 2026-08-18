@@ -9,12 +9,14 @@ import (
 )
 
 type Querier interface {
-	ClaimDueTransferTasks(ctx context.Context, arg ClaimDueTransferTasksParams) ([]TransferTask, error)
+	ClaimTransferTask(ctx context.Context, arg ClaimTransferTaskParams) (TransferTask, error)
+	CompleteTransferTask(ctx context.Context, arg CompleteTransferTaskParams) (TransferTask, error)
 	CountTransferTasks(ctx context.Context, arg CountTransferTasksParams) (int64, error)
 	CreateTransferTask(ctx context.Context, arg CreateTransferTaskParams) (TransferTask, error)
+	DeletePendingTransferTask(ctx context.Context, arg DeletePendingTransferTaskParams) error
+	FailTransferTask(ctx context.Context, arg FailTransferTaskParams) (TransferTask, error)
 	GetTransferTask(ctx context.Context, arg GetTransferTaskParams) (TransferTask, error)
 	ListTransferTasks(ctx context.Context, arg ListTransferTasksParams) ([]TransferTask, error)
-	UpdateTransferTask(ctx context.Context, arg UpdateTransferTaskParams) (TransferTask, error)
 }
 
 var _ Querier = (*Queries)(nil)

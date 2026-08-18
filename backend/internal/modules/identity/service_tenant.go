@@ -27,7 +27,7 @@ func (s *Service) GetTenantConfig(ctx context.Context) (TenantDTO, error) {
 		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
 	}
 	// 校徽随配置一起内联下发:设置页要在保存前就看到当前徽记,而这里没有第二个读取入口。
-	return s.tenantDTOWithLogo(ctx, id.TenantID, row), nil
+	return s.tenantDTOWithLogo(ctx, id.TenantID, row)
 }
 
 // UpdateTenantConfigByAdmin 更新当前租户展示、功能开关和认证模式配置。
@@ -71,7 +71,7 @@ func (s *Service) UpdateTenantConfigByAdmin(ctx context.Context, req TenantConfi
 	if err := s.auditTenantOperation(ctx, id, "tenant.config.update", "identity.tenant", id.TenantID, map[string]any{"auth_mode": req.AuthMode, "enable_activation_code": req.EnableActivationCode}); err != nil {
 		return TenantDTO{}, err
 	}
-	return s.tenantDTOWithLogo(ctx, id.TenantID, row), nil
+	return s.tenantDTOWithLogo(ctx, id.TenantID, row)
 }
 
 // validateTenantConfigRequest 校验租户配置输入,避免非法认证模式或不可序列化开关写入配置。

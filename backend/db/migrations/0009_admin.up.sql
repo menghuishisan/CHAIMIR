@@ -86,6 +86,19 @@ CREATE TABLE IF NOT EXISTS backup_record (
     CONSTRAINT chk_backup_record_status CHECK (status IN (1,2,3))
 );
 
+CREATE TABLE IF NOT EXISTS audit_export_request (
+    transfer_task_id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    account_id BIGINT NOT NULL,
+    query_snapshot JSONB NOT NULL,
+    next_check_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT audit_export_request_tenant_check CHECK (tenant_id >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_export_request_due ON audit_export_request(next_check_at, created_at);
+
 CREATE INDEX IF NOT EXISTS idx_backup_record_started ON backup_record(started_at DESC);
 
 ALTER TABLE system_config ENABLE ROW LEVEL SECURITY;
@@ -93,6 +106,7 @@ ALTER TABLE config_change_log ENABLE ROW LEVEL SECURITY;
 ALTER TABLE alert_rule ENABLE ROW LEVEL SECURITY;
 ALTER TABLE alert_event ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform_statistics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_export_request ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY system_config_tenant_rls ON system_config
     USING (tenant_id IS NULL OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
@@ -124,3 +138,5 @@ CREATE POLICY platform_statistics_tenant_rls ON platform_statistics
         (scope = 1 AND tenant_id IS NULL)
         OR (scope = 2 AND tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
     );
+CREATE POLICY audit_export_request_tenant_rls ON audit_export_request
+    USING (tenant_id = COALESCE(NULLIF(current_setting('app.tenant_id', true), '')::BIGINT, 0));

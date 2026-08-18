@@ -229,7 +229,10 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 		if err != nil {
 			return nil, err
 		}
-		command := toolPrepullCommandFromManifest(manifest)
+		command, err := toolPrepullCommandFromManifest(manifest)
+		if err != nil {
+			return nil, fmt.Errorf("解析工具 selftest.commands 失败: %w", err)
+		}
 		if len(command) == 0 {
 			return nil, fmt.Errorf("显式工具 WorkloadSpec 必须声明 selftest.commands 作为预拉取自检命令: %s", manifest.Name)
 		}
@@ -256,7 +259,11 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 	if kind == contracts.SandboxToolKindCommand {
 		spec["command_policy"] = manifest.Tool.CommandPolicy
 	}
-	if command := toolPrepullCommandFromManifest(manifest); len(command) > 0 {
+	command, err := toolPrepullCommandFromManifest(manifest)
+	if err != nil {
+		return nil, fmt.Errorf("解析工具 selftest.commands 失败: %w", err)
+	}
+	if len(command) > 0 {
 		spec["prepull_command"] = command
 	}
 	if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
@@ -341,23 +348,26 @@ func normalizeReferencedComponentImage(component map[string]any) error {
 	return nil
 }
 
-// toolPrepullCommandFromManifest 选择镜像声明的首个自检命令作为预拉取启动命令。
-func toolPrepullCommandFromManifest(manifest toolManifest) []string {
+// toolPrepullCommandFromManifest 选择镜像声明的首个自检命令作为预拉取启动命令,显式传播 manifest 解析错误。
+func toolPrepullCommandFromManifest(manifest toolManifest) ([]string, error) {
 	raw, ok := manifest.Selftest["commands"]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	data, err := json.Marshal(raw)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("编码 selftest.commands 失败: %w", err)
 	}
 	var commands []toolManifestSelftestCommand
-	if err := json.Unmarshal(data, &commands); err != nil || len(commands) == 0 {
-		return nil
+	if err := json.Unmarshal(data, &commands); err != nil {
+		return nil, fmt.Errorf("selftest.commands 结构非法: %w", err)
+	}
+	if len(commands) == 0 {
+		return nil, nil
 	}
 	command := commands[0].Command
 	if len(command) == 0 {
-		return nil
+		return nil, fmt.Errorf("selftest.commands 首条命令不能为空")
 	}
 	out := make([]string, 0, len(command))
 	for _, part := range command {
@@ -366,7 +376,10 @@ func toolPrepullCommandFromManifest(manifest toolManifest) []string {
 			out = append(out, trimmed)
 		}
 	}
-	return out
+	if len(out) == 0 {
+		return nil, fmt.Errorf("selftest.commands 首条命令不能为空")
+	}
+	return out, nil
 }
 
 // validateGeneratedToolResourceSpec 复用 M2 规则层校验 seed 产物,避免迁移入口绕过运行期约束。

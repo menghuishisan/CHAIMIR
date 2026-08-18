@@ -37,21 +37,25 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import {
-  VULN_ASSERTION_FIELDS,
-  VULN_ASSERT_OPS,
-  VULN_CHAIN_OPS,
-  VULN_CHAIN_STEP_FIELDS,
-  VULN_DRAFT_BODY_FIELDS,
-  VULN_LEVELS,
-  VULN_RUNTIME_MODES,
   vulnAssertOpLabel,
   vulnChainOpLabel,
   vulnLevelLabel,
   vulnRuntimeModeLabel,
-  type VulnAssertOp,
-  type VulnChainOp,
 } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import {
+  VULN_ASSERT_OPS,
+  VULN_CHAIN_OPS,
+  VULN_LEVELS,
+  VULN_RUNTIME_MODES,
+  type VulnAssertOp,
+  type VulnChainOp,
+} from '../../options'
+import {
+  VULN_ASSERTION_FIELDS,
+  VULN_CHAIN_STEP_FIELDS,
+  VULN_DRAFT_BODY_FIELDS,
+} from '../../vulnerabilityContract'
 
 /** ChainStep 是一条链上步骤的编辑态。 */
 interface ChainStep {

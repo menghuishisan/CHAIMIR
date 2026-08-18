@@ -28,7 +28,7 @@ func (t *txStore) CreateLevelConfig(ctx context.Context, id, tenantID int64, req
 	if err != nil {
 		return LevelConfigDTO{}, err
 	}
-	return levelConfigDTO(row), nil
+	return levelConfigDTO(row)
 }
 
 // ListLevelConfigs 查询等级映射配置。
@@ -39,7 +39,11 @@ func (t *txStore) ListLevelConfigs(ctx context.Context) ([]LevelConfigDTO, error
 	}
 	out := make([]LevelConfigDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, levelConfigDTO(row))
+		item, err := levelConfigDTO(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -50,7 +54,7 @@ func (t *txStore) GetDefaultLevelConfig(ctx context.Context) (LevelConfigDTO, er
 	if err != nil {
 		return LevelConfigDTO{}, err
 	}
-	return levelConfigDTO(row), nil
+	return levelConfigDTO(row)
 }
 
 // LockGradeLevelDefaultScope 串行化当前租户默认等级切换。
@@ -77,16 +81,16 @@ func (t *txStore) UpdateLevelConfig(ctx context.Context, id int64, req LevelConf
 	if err != nil {
 		return LevelConfigDTO{}, err
 	}
-	return levelConfigDTO(row), nil
+	return levelConfigDTO(row)
 }
 
 // CreateSemester 创建学期。
 func (t *txStore) CreateSemester(ctx context.Context, id, tenantID int64, req SemesterRequest) (SemesterDTO, error) {
-	start, err := time.Parse("2006-01-02", req.StartDate)
+	start, err := timex.ParseDate(req.StartDate)
 	if err != nil {
 		return SemesterDTO{}, apperr.ErrGradeConfigInvalid.WithCause(err)
 	}
-	end, err := time.Parse("2006-01-02", req.EndDate)
+	end, err := timex.ParseDate(req.EndDate)
 	if err != nil {
 		return SemesterDTO{}, apperr.ErrGradeConfigInvalid.WithCause(err)
 	}
@@ -292,7 +296,7 @@ func (t *txStore) UpsertStudentSemesterGrade(ctx context.Context, id, tenantID, 
 	if err != nil {
 		return GradeSummaryDTO{}, err
 	}
-	return semesterGradeSummary(row), nil
+	return semesterGradeSummary(row)
 }
 
 // ListStudentSemesterGrades 查询学生学期 GPA。
@@ -303,7 +307,11 @@ func (t *txStore) ListStudentSemesterGrades(ctx context.Context, studentID int64
 	}
 	out := make([]GradeSummaryDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, semesterGradeSummary(row))
+		item, err := semesterGradeSummary(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -316,7 +324,11 @@ func (t *txStore) ListKnownStudentSemesterGrades(ctx context.Context, studentID 
 	}
 	out := make([]GradeSummaryDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, semesterGradeSummary(row))
+		item, err := semesterGradeSummary(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -394,7 +406,7 @@ func (t *txStore) CreateAcademicWarning(ctx context.Context, id, tenantID, stude
 	if err != nil {
 		return WarningDTO{}, err
 	}
-	return warningDTO(row), nil
+	return warningDTO(row)
 }
 
 // ListAcademicWarnings 查询学业预警分页列表和总数。
@@ -407,7 +419,11 @@ func (t *txStore) ListAcademicWarnings(ctx context.Context, studentID int64, sta
 	}
 	out := make([]WarningDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, warningDTO(row))
+		item, err := warningDTO(row)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, item)
 	}
 	total, err := t.q.CountAcademicWarnings(ctx, sqlcgen.CountAcademicWarningsParams{StudentID: studentID, Status: status})
 	if err != nil {
@@ -422,7 +438,7 @@ func (t *txStore) AckAcademicWarning(ctx context.Context, id, studentID int64) (
 	if err != nil {
 		return WarningDTO{}, err
 	}
-	return warningDTO(row), nil
+	return warningDTO(row)
 }
 
 // CreateTranscriptRecord 创建成绩单记录。
@@ -458,13 +474,21 @@ func (t *txStore) ListTranscriptRecords(ctx context.Context, studentID int64, pa
 }
 
 // levelConfigDTO 转换等级配置行。
-func levelConfigDTO(row sqlcgen.GradeLevelConfig) LevelConfigDTO {
-	return LevelConfigDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), Name: row.Name, Mapping: jsonx.Decode(row.Mapping, []LevelRule{}), WarningRules: jsonx.Decode(row.WarningRules, WarningRules{}), IsDefault: row.IsDefault, CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), UpdatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.UpdatedAt))}
+func levelConfigDTO(row sqlcgen.GradeLevelConfig) (LevelConfigDTO, error) {
+	mapping := []LevelRule{}
+	if err := jsonx.DecodeStrictKnownFields(row.Mapping, &mapping); err != nil {
+		return LevelConfigDTO{}, apperr.ErrGradeConfigInvalid.WithCause(err)
+	}
+	warningRules := WarningRules{}
+	if err := jsonx.DecodeStrictKnownFields(row.WarningRules, &warningRules); err != nil {
+		return LevelConfigDTO{}, apperr.ErrGradeConfigInvalid.WithCause(err)
+	}
+	return LevelConfigDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), Name: row.Name, Mapping: mapping, WarningRules: warningRules, IsDefault: row.IsDefault, CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), UpdatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.UpdatedAt))}, nil
 }
 
 // semesterDTO 转换学期行。
 func semesterDTO(row sqlcgen.Semester) SemesterDTO {
-	return SemesterDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), Name: row.Name, StartDate: pgtypex.DateValue(row.StartDate).Format("2006-01-02"), EndDate: pgtypex.DateValue(row.EndDate).Format("2006-01-02"), IsCurrent: row.IsCurrent}
+	return SemesterDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), Name: row.Name, StartDate: timex.DateOrEmpty(pgtypex.DateValue(row.StartDate)), EndDate: timex.DateOrEmpty(pgtypex.DateValue(row.EndDate)), IsCurrent: row.IsCurrent}
 }
 
 // reviewDTO 转换审核行。
@@ -478,8 +502,20 @@ func gradeLockOutbox(row sqlcgen.GradeLockOutbox) GradeLockOutbox {
 }
 
 // semesterGradeSummary 转换学期成绩聚合行。
-func semesterGradeSummary(row sqlcgen.StudentSemesterGrade) GradeSummaryDTO {
-	return GradeSummaryDTO{StudentID: ids.ID(row.StudentID), SemesterID: ids.ID(row.SemesterID), TotalCredits: pgtypex.NumericValue(row.TotalCredits), GPA: pgtypex.NumericValue(row.Gpa), CumulativeGPA: pgtypex.NumericValue(row.CumulativeGpa), ComputedAt: timex.FromTimestamptz(row.ComputedAt)}
+func semesterGradeSummary(row sqlcgen.StudentSemesterGrade) (GradeSummaryDTO, error) {
+	totalCredits, err := pgtypex.NumericValue(row.TotalCredits)
+	if err != nil {
+		return GradeSummaryDTO{}, apperr.ErrGradeAggregationFailed.WithCause(err)
+	}
+	gpa, err := pgtypex.NumericValue(row.Gpa)
+	if err != nil {
+		return GradeSummaryDTO{}, apperr.ErrGradeAggregationFailed.WithCause(err)
+	}
+	cumulativeGPA, err := pgtypex.NumericValue(row.CumulativeGpa)
+	if err != nil {
+		return GradeSummaryDTO{}, apperr.ErrGradeAggregationFailed.WithCause(err)
+	}
+	return GradeSummaryDTO{StudentID: ids.ID(row.StudentID), SemesterID: ids.ID(row.SemesterID), TotalCredits: totalCredits, GPA: gpa, CumulativeGPA: cumulativeGPA, ComputedAt: timex.FromTimestamptz(row.ComputedAt)}, nil
 }
 
 // appealDTO 转换申诉行。
@@ -488,8 +524,12 @@ func appealDTO(row sqlcgen.GradeAppeal) AppealDTO {
 }
 
 // warningDTO 转换预警行。
-func warningDTO(row sqlcgen.AcademicWarning) WarningDTO {
-	return WarningDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), StudentID: ids.ID(row.StudentID), SemesterID: ids.ID(row.SemesterID), Type: row.Type, Detail: jsonx.ObjectMap(row.Detail), Status: row.Status, CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt))}
+func warningDTO(row sqlcgen.AcademicWarning) (WarningDTO, error) {
+	detail, err := jsonx.ObjectMapStrict(row.Detail)
+	if err != nil {
+		return WarningDTO{}, apperr.ErrGradeWarningInvalid.WithCause(err)
+	}
+	return WarningDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), StudentID: ids.ID(row.StudentID), SemesterID: ids.ID(row.SemesterID), Type: row.Type, Detail: detail, Status: row.Status, CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt))}, nil
 }
 
 // transcriptDTO 转换成绩单记录行。

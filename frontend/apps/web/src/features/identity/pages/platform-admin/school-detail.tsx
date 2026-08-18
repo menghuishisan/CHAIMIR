@@ -39,10 +39,10 @@ import {
   authModeLabel,
   deployModeLabel,
   tenantStatusLabel,
-  tenantStatusTone,
 } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { readTenantModules } from '../../tenantModules'
+import { tenantStatusTone } from '../../statusPresentation'
 
 /**
  * PlatformSchoolDetailPage 呈现单所学校的平台侧信息与沙箱配额。

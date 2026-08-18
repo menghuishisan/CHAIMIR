@@ -41,6 +41,7 @@ import {
 import { api } from '../../../../app/api'
 import { runtimeStatusLabel } from '../../../../utils/labels/sandbox'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { asRecord } from '../../runtimeSpec'
 
 /** 适配层级:1 只托管环境,2 提供标准链能力,3 自带插件实现。 */
 const ADAPTER_LEVELS = [
@@ -141,7 +142,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
       const next: Record<string, string | null> = {
         code: CODE_PATTERN.test(code.trim())
           ? null
-          : '用小写字母开头,只含小写字母、数字与连字符,长度 2 到 32 位',
+          : '以小写字母或数字开头,只含小写字母、数字与连字符,长度 3 到 64 位',
         name: name.trim() === '' ? '请输入运行时名称' : null,
         eco: eco.trim() === '' ? '请输入所属生态,例如 ethereum' : null,
         spec: parsed.error ?? null,
@@ -341,7 +342,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
 }
 
 /** 运行时编码规则,与后端 codePattern 一致。 */
-const CODE_PATTERN = /^[a-z][a-z0-9-]{0,30}[a-z0-9]$/
+const CODE_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/
 
 /** SpecSummary 是清单解析后的可读摘要,让人在保存前确认系统读到了什么。 */
 interface SpecSummaryData {
@@ -459,7 +460,7 @@ function parseSpec(text: string): ParsedSpec {
   return {
     // 必要字段已在上面逐项确认(工作区目录、主环境与端口、八个操作命令),
     // 其余细项由后端最终判定,故此处按声明类型交给 SDK,不再复制一份类型定义。
-    spec: spec as unknown as SandboxAdapterSpec,
+    spec: spec as SandboxAdapterSpec,
     summary: {
       workspaceDir,
       containerName,
@@ -489,11 +490,4 @@ const WORKSPACE_OP_LABELS: Record<(typeof WORKSPACE_OP_KEYS)[number], string> = 
 /** workspaceOpLabel 返回工作区操作名称。 */
 function workspaceOpLabel(key: (typeof WORKSPACE_OP_KEYS)[number]): string {
   return WORKSPACE_OP_LABELS[key]
-}
-
-/** asRecord 把未知值收敛成对象;非对象回 undefined,调用方按缺失处理。 */
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined
 }

@@ -7,7 +7,6 @@ import type {
   JudgerType,
 } from '../constants/judge'
 import type { SnowflakeID } from './common'
-import type { WorkloadComponent } from './workload'
 
 export interface JudgeTask {
   task_id: SnowflakeID
@@ -65,7 +64,7 @@ export interface JudgerResourceSpec {
   init_script_ref?: string
   command?: string[]
   exec_target?: string
-  execution_sidecars?: WorkloadComponent[]
+  execution_sidecars?: unknown[]
   timeout_sec?: number
   max_retries?: number
   suite_archive_name?: string

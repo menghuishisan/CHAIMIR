@@ -16,7 +16,6 @@ import {
   Undo2,
 } from 'lucide-react'
 import {
-  EXPERIMENT_VALIDATION_LEVEL,
   ExperimentStatus,
   type Experiment,
   type ValidationResult,
@@ -41,7 +40,6 @@ import {
   Pagination,
   SegmentedControl,
   Stat,
-  StatusIndicator,
   Table,
   toast,
   type TableColumn,
@@ -52,10 +50,10 @@ import { usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import {
   experimentCollabModeLabel,
-  experimentStatusLabel,
-  experimentStatusTone,
 } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { ExperimentIdentityCell, ExperimentStatusCell } from '../../components/ExperimentTableCells'
+import { ExperimentValidationIssues } from '../../components/ExperimentValidationIssues'
 
 /** 状态筛选项:值为空串表示不过滤。 */
 const STATUS_FILTERS = [
@@ -156,12 +154,7 @@ export default function TeacherExperimentsPage() {
     {
       key: 'name',
       header: '实验',
-      render: (experiment) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{experiment.name}</div>
-          <div className="line-clamp-1 text-xs text-ink-sub">{experiment.description}</div>
-        </div>
-      ),
+      render: (experiment) => <ExperimentIdentityCell experiment={experiment} />,
     },
     {
       key: 'components',
@@ -193,12 +186,7 @@ export default function TeacherExperimentsPage() {
     {
       key: 'status',
       header: '状态',
-      render: (experiment) => (
-        <StatusIndicator
-          tone={experimentStatusTone(experiment.status)}
-          label={experimentStatusLabel(experiment.status)}
-        />
-      ),
+      render: (experiment) => <ExperimentStatusCell experiment={experiment} />,
     },
     {
       key: 'actions',
@@ -361,24 +349,7 @@ export default function TeacherExperimentsPage() {
                     修正后再发布,否则学生进入实验时可能无法准备环境。
                   </Callout>
                 )}
-                {validateResult.result.issues.length > 0 ? (
-                  <ul className="flex flex-col gap-2">
-                    {validateResult.result.issues.map((issue, index) => (
-                      <li key={index} className="flex items-start gap-2 text-sm">
-                        <Badge
-                          tone={
-                            issue.level === EXPERIMENT_VALIDATION_LEVEL.ERROR ? 'danger' : 'warning'
-                          }
-                        >
-                          {issue.level === EXPERIMENT_VALIDATION_LEVEL.ERROR
-                            ? '必须修正'
-                            : '建议检查'}
-                        </Badge>
-                        <span className="min-w-0 text-ink">{issue.message}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
+                <ExperimentValidationIssues issues={validateResult.result.issues} />
               </>
             ) : null}
           </ModalBody>

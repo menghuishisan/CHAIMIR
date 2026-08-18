@@ -32,7 +32,7 @@ export function reduceUtxoEvent(state: UtxoState, event: SimEvent, _context: Red
 /**
  * advanceUtxo 按交易验证流程推进一个过程单元。
  */
-export function advanceUtxo(state: UtxoState, event: SimEvent): UtxoState {
+function advanceUtxo(state: UtxoState, event: SimEvent): UtxoState {
   const phaseIndex = Math.min(utxoPhases.length - 1, state.phaseIndex + 1);
   let next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: utxoPhases[phaseIndex].id };
   if (phaseIndex === 1) next = { ...next, utxos: next.utxos.map((item) => ({ ...item, selected: next.inputs.includes(item.id) })) };
@@ -44,7 +44,7 @@ export function advanceUtxo(state: UtxoState, event: SimEvent): UtxoState {
 /**
  * finalizeUtxoState 刷新指标、检查点和代码追踪。
  */
-export function finalizeUtxoState(state: UtxoState): UtxoState {
+function finalizeUtxoState(state: UtxoState): UtxoState {
   // 输入金额属于本次交易的消耗凭证,提交后即使标记 spent 也必须保留在校验统计中。
   const inputSum = state.utxos.filter((item) => state.inputs.includes(item.id)).reduce((sum, item) => sum + item.amount, 0);
   const outputSum = state.outputs.reduce((sum, item) => sum + item.amount, 0);

@@ -28,6 +28,7 @@ type Querier interface {
 	CreateAssignmentItem(ctx context.Context, arg CreateAssignmentItemParams) (AssignmentItem, error)
 	CreateChapter(ctx context.Context, arg CreateChapterParams) (Chapter, error)
 	CreateCourse(ctx context.Context, arg CreateCourseParams) (CreateCourseRow, error)
+	CreateCourseGradeExportRequest(ctx context.Context, arg CreateCourseGradeExportRequestParams) (CourseGradeExportRequest, error)
 	CreateCourseMember(ctx context.Context, arg CreateCourseMemberParams) (CourseMember, error)
 	CreateDiscussionPost(ctx context.Context, arg CreateDiscussionPostParams) (DiscussionPost, error)
 	CreateGradeWeight(ctx context.Context, arg CreateGradeWeightParams) (CreateGradeWeightRow, error)
@@ -36,6 +37,7 @@ type Querier interface {
 	CreateSubmission(ctx context.Context, arg CreateSubmissionParams) (Submission, error)
 	CreateTeachingGradeEventOutbox(ctx context.Context, arg CreateTeachingGradeEventOutboxParams) (TeachingGradeEventOutbox, error)
 	DeleteAssignmentItems(ctx context.Context, arg DeleteAssignmentItemsParams) error
+	DeleteCourseGradeExportRequest(ctx context.Context, arg DeleteCourseGradeExportRequestParams) error
 	DeleteCourseMember(ctx context.Context, arg DeleteCourseMemberParams) error
 	DeleteGradeWeights(ctx context.Context, arg DeleteGradeWeightsParams) error
 	DeleteSubmissionDraft(ctx context.Context, arg DeleteSubmissionDraftParams) error
@@ -64,6 +66,7 @@ type Querier interface {
 	ListCoursesDueToEnd(ctx context.Context, endAt pgtype.Timestamptz) ([]ListCoursesDueToEndRow, error)
 	ListCoursesDueToRun(ctx context.Context, startAt pgtype.Timestamptz) ([]ListCoursesDueToRunRow, error)
 	ListDiscussionPosts(ctx context.Context, arg ListDiscussionPostsParams) ([]DiscussionPost, error)
+	ListDueCourseGradeExportRequests(ctx context.Context, arg ListDueCourseGradeExportRequestsParams) ([]CourseGradeExportRequest, error)
 	ListGradeWeights(ctx context.Context, arg ListGradeWeightsParams) ([]ListGradeWeightsRow, error)
 	ListJudgeOutboxBySubmission(ctx context.Context, arg ListJudgeOutboxBySubmissionParams) ([]SubmissionJudgeOutbox, error)
 	ListLessonsByChapter(ctx context.Context, arg ListLessonsByChapterParams) ([]Lesson, error)
@@ -87,6 +90,7 @@ type Querier interface {
 	PublishAssignment(ctx context.Context, arg PublishAssignmentParams) (Assignment, error)
 	RefreshCourseInviteCode(ctx context.Context, arg RefreshCourseInviteCodeParams) (RefreshCourseInviteCodeRow, error)
 	RetryJudgeOutbox(ctx context.Context, arg RetryJudgeOutboxParams) (SubmissionJudgeOutbox, error)
+	SetCourseGradeExportRequestNextCheck(ctx context.Context, arg SetCourseGradeExportRequestNextCheckParams) (CourseGradeExportRequest, error)
 	SetCourseGradesLock(ctx context.Context, arg SetCourseGradesLockParams) error
 	SetCourseStatus(ctx context.Context, arg SetCourseStatusParams) (SetCourseStatusRow, error)
 	SetCourseVisibility(ctx context.Context, arg SetCourseVisibilityParams) (SetCourseVisibilityRow, error)

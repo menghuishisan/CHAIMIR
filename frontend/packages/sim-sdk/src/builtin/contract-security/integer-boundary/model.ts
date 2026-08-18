@@ -2,7 +2,7 @@
 
 import type { SimState } from '../../../types';
 
-export interface IntegerCase {
+interface IntegerCase {
   id: string;
   label: string;
   input: number;

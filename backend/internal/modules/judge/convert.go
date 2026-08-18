@@ -97,15 +97,7 @@ func judgeTaskDTOFromModel(info JudgeTaskInfo) JudgeTaskDTO {
 	if info.Result != nil {
 		details := make([]JudgeResultDetailDTO, 0, len(info.Result.Details))
 		for _, detail := range info.Result.Details {
-			details = append(details, JudgeResultDetailDTO{
-				Case:          detail.Case,
-				Source:        detail.Source,
-				Target:        detail.Target,
-				Passed:        detail.Passed,
-				ExpectedLabel: detail.ExpectedLabel,
-				Actual:        detail.Actual,
-				Hint:          detail.Hint,
-			})
+			details = append(details, JudgeResultDetailDTO(detail))
 		}
 		out.Result = &JudgeTaskResultDTO{
 			Passed:    info.Result.Passed,

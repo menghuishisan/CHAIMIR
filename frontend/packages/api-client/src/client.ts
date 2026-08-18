@@ -379,6 +379,11 @@ export class ApiClient {
 
 }
 
+/** encodePathSegment 将业务标识编码为单一路径段，避免标识中的斜杠或查询分隔符改变 API 路由。 */
+export function encodePathSegment(value: string): string {
+  return encodeURIComponent(value)
+}
+
 /**
  * AttachmentResponse 是附件下载的对外结果。
  */

@@ -3,12 +3,12 @@ package experiment
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
 	"chaimir/internal/modules/experiment/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
@@ -96,15 +96,15 @@ func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxSto
 }
 
 // isNoRows 统一识别未命中错误,让 service 不直接依赖 pgx。
-func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
+func isNoRows(err error) bool { return db.IsNoRows(err) }
 
 // CreateExperiment 创建向导草稿。
 func (tx *txStore) CreateExperiment(ctx context.Context, item Experiment) (Experiment, error) {
-	components, err := encodeJSON(item.Components, apperr.ErrExperimentInvalid)
+	components, err := jsonx.AnyBytes(item.Components, apperr.ErrExperimentInvalid)
 	if err != nil {
 		return Experiment{}, err
 	}
-	groupConfig, err := encodeJSON(item.GroupConfig, apperr.ErrExperimentGroupInvalid)
+	groupConfig, err := jsonx.AnyBytes(item.GroupConfig, apperr.ErrExperimentGroupInvalid)
 	if err != nil {
 		return Experiment{}, err
 	}
@@ -148,11 +148,11 @@ func (tx *txStore) ListExperiments(ctx context.Context, tenantID, courseID int64
 
 // UpdateExperiment 更新草稿实验定义。
 func (tx *txStore) UpdateExperiment(ctx context.Context, item Experiment) (Experiment, error) {
-	components, err := encodeJSON(item.Components, apperr.ErrExperimentInvalid)
+	components, err := jsonx.AnyBytes(item.Components, apperr.ErrExperimentInvalid)
 	if err != nil {
 		return Experiment{}, err
 	}
-	groupConfig, err := encodeJSON(item.GroupConfig, apperr.ErrExperimentGroupInvalid)
+	groupConfig, err := jsonx.AnyBytes(item.GroupConfig, apperr.ErrExperimentGroupInvalid)
 	if err != nil {
 		return Experiment{}, err
 	}
@@ -324,11 +324,11 @@ func (tx *txStore) GetInstanceBySourceRef(ctx context.Context, tenantID int64, s
 
 // UpdateInstanceResources 保存实例已创建的 M2/M4 引用。
 func (tx *txStore) UpdateInstanceResources(ctx context.Context, tenantID, id int64, sandboxes []SandboxRef, sims []SimSessionRef, status int16) (ExperimentInstance, error) {
-	sandboxRaw, err := encodeJSON(sandboxes, apperr.ErrExperimentInstanceInvalid)
+	sandboxRaw, err := jsonx.AnyBytes(sandboxes, apperr.ErrExperimentInstanceInvalid)
 	if err != nil {
 		return ExperimentInstance{}, err
 	}
-	simRaw, err := encodeJSON(sims, apperr.ErrExperimentInstanceInvalid)
+	simRaw, err := jsonx.AnyBytes(sims, apperr.ErrExperimentInstanceInvalid)
 	if err != nil {
 		return ExperimentInstance{}, err
 	}
@@ -414,7 +414,7 @@ func (tx *txStore) UpsertCheckpoint(ctx context.Context, item CheckpointResult) 
 	if item.BindingOutput == nil {
 		item.BindingOutput = map[string]any{}
 	}
-	bindingOutput, err := encodeJSON(item.BindingOutput, apperr.ErrExperimentCheckpointInvalid)
+	bindingOutput, err := jsonx.AnyBytes(item.BindingOutput, apperr.ErrExperimentCheckpointInvalid)
 	if err != nil {
 		return CheckpointResult{}, err
 	}
@@ -534,7 +534,7 @@ func (tx *txStore) CreateExperimentScoreOutbox(ctx context.Context, id int64, in
 	if err != nil {
 		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
 	}
-	return experimentScoreOutbox(row), nil
+	return experimentScoreOutbox(row)
 }
 
 // ClaimPendingExperimentScoreOutbox 跨租户领取待发布、失败待重试或卡住超时的得分事件。
@@ -545,7 +545,11 @@ func (tx *txStore) ClaimPendingExperimentScoreOutbox(ctx context.Context, limit 
 	}
 	out := make([]ExperimentScoreOutbox, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, experimentScoreOutbox(row))
+		item, err := experimentScoreOutbox(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -556,7 +560,7 @@ func (tx *txStore) MarkExperimentScoreOutboxPublished(ctx context.Context, tenan
 	if err != nil {
 		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
 	}
-	return experimentScoreOutbox(row), nil
+	return experimentScoreOutbox(row)
 }
 
 // MarkExperimentScoreOutboxFailed 标记得分事件投递失败并保留脱敏原因。
@@ -565,5 +569,5 @@ func (tx *txStore) MarkExperimentScoreOutboxFailed(ctx context.Context, tenantID
 	if err != nil {
 		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
 	}
-	return experimentScoreOutbox(row), nil
+	return experimentScoreOutbox(row)
 }

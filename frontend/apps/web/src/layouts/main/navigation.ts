@@ -16,7 +16,7 @@ export interface RoleNavigationItem {
   icon: LucideIcon
 }
 
-export interface RoleNavigationGroup {
+interface RoleNavigationGroup {
   /** 分组标题:纯中文短词,不加英文副标 */
   title: string
   items: RoleNavigationItem[]

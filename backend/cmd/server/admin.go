@@ -25,27 +25,26 @@ import (
 
 // AdminModuleDeps 汇总组合根装配 M9 需要的基础设施和跨模块契约。
 type AdminModuleDeps struct {
-	Router     gin.IRouter
-	Database   *db.DB
-	IDs        snowflake.Generator
-	Audit      audit.Writer
-	Identity   contracts.IdentityTenantReadService
-	Stats      contracts.IdentityStatsService
-	AuditRead  contracts.IdentityAuditReadService
-	Teaching   contracts.TeachingReadService
-	Sandbox    contracts.SandboxReadService
-	Experiment contracts.ExperimentReadService
-	Contest    contracts.ContestReadService
-	EventBus   eventbus.Bus
-	Monitoring config.MonitoringConfig
-	Config     config.AdminConfig
-	Upload     config.UploadConfig
-	MinIO      config.MinIOConfig
-	AuthConfig config.AuthConfig
-	Transfer   *transfer.Service
-	Storage    *storage.Storage
-	Auth       *auth.Manager
-	Roles      contracts.IdentityService
+	Router      gin.IRouter
+	Database    *db.DB
+	IDs         snowflake.Generator
+	Audit       audit.Writer
+	Identity    contracts.IdentityTenantReadService
+	Stats       contracts.IdentityStatsService
+	AuditRead   contracts.IdentityAuditReadService
+	Teaching    contracts.TeachingReadService
+	Sandbox     contracts.SandboxReadService
+	Experiment  contracts.ExperimentReadService
+	Contest     contracts.ContestReadService
+	EventBus    eventbus.Bus
+	Monitoring  config.MonitoringConfig
+	Config      config.AdminConfig
+	AuthConfig  config.AuthConfig
+	FileService storage.Service
+	Transfer    *transfer.Service
+	Storage     *storage.Storage
+	Auth        *auth.Manager
+	Roles       contracts.IdentityService
 }
 
 // RegisterAdminModule 构造管理后台 store/service 并注册 HTTP 路由。
@@ -73,10 +72,6 @@ func RegisterAdminModule(ctx context.Context, deps AdminModuleDeps) (*admin.Serv
 	if err != nil {
 		return nil, err
 	}
-	fileService, err := storage.NewServiceFromConfig(deps.AuthConfig, deps.MinIO, deps.Upload)
-	if err != nil {
-		return nil, err
-	}
 	store := admin.NewStore(deps.Database)
 	svc, err := admin.NewService(admin.ServiceDeps{
 		Store:       store,
@@ -92,10 +87,11 @@ func RegisterAdminModule(ctx context.Context, deps AdminModuleDeps) (*admin.Serv
 		Contest:     deps.Contest,
 		Bus:         deps.EventBus,
 		Monitoring:  deps.Monitoring,
+		Config:      deps.Config,
 		Cipher:      cipher,
 		Transfers:   deps.Transfer,
 		Storage:     deps.Storage,
-		FileService: fileService,
+		FileService: deps.FileService,
 	})
 	if err != nil {
 		return nil, err
@@ -108,6 +104,11 @@ func RegisterAdminModule(ctx context.Context, deps AdminModuleDeps) (*admin.Serv
 		return nil, err
 	}
 	go background.Run(ctx, task)
+	auditExportTask, err := adminAuditExportTask(deps.Config, svc)
+	if err != nil {
+		return nil, err
+	}
+	go background.Run(ctx, auditExportTask)
 	return svc, nil
 }
 
@@ -120,4 +121,15 @@ func adminStatisticsSnapshotTask(cfg config.AdminConfig, svc *admin.Service) (ba
 		return background.Task{}, fmt.Errorf("ADMIN_STATISTICS_SNAPSHOT_INTERVAL_SECONDS 必须大于 0")
 	}
 	return background.Task{Name: "admin.statistics_snapshot", Interval: time.Duration(cfg.StatisticsSnapshotIntervalSeconds) * time.Second, Run: svc.RunStatisticsSnapshotOnce}, nil
+}
+
+// adminAuditExportTask 把 M9 审计导出请求处理接入统一后台任务运行器。
+func adminAuditExportTask(cfg config.AdminConfig, svc *admin.Service) (background.Task, error) {
+	if svc == nil {
+		return background.Task{}, fmt.Errorf("admin audit export worker 缺少 service")
+	}
+	if cfg.AuditExportWorkerPollMs <= 0 {
+		return background.Task{}, fmt.Errorf("ADMIN_AUDIT_EXPORT_WORKER_POLL_INTERVAL_MS 必须大于 0")
+	}
+	return background.Task{Name: "admin.audit_export", Interval: time.Duration(cfg.AuditExportWorkerPollMs) * time.Millisecond, Run: svc.RunAuditExportOnce}, nil
 }

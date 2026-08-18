@@ -133,6 +133,16 @@ func NewStore(database *db.DB) Store {
 	return &store{database: database}
 }
 
+// isNoRows 通过统一数据库边界识别未命中,避免 service 依赖 pgx 错误类型。
+func isNoRows(err error) bool {
+	return db.IsNoRows(err)
+}
+
+// isUniqueViolation 通过统一数据库边界识别唯一约束冲突,供 service 映射稳定业务错误。
+func isUniqueViolation(err error) bool {
+	return db.IsUniqueViolation(err)
+}
+
 // UseTenant 在当前事务中注入 RLS 租户变量,用于平台审核创建租户后的同事务首管账号写入。
 func (t *txStore) UseTenant(ctx context.Context, tenantID int64) error {
 	if t == nil || t.tx == nil {

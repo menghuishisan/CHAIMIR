@@ -219,6 +219,17 @@ type CourseGrade struct {
 	UpdatedAt     time.Time
 }
 
+// CourseGradeExportRequest 是 M6 持久化的可重放成绩导出请求。
+type CourseGradeExportRequest struct {
+	TransferTaskID int64
+	TenantID       int64
+	AccountID      int64
+	CourseID       int64
+	NextCheckAt    time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
 // TeachingGradeEventOutbox 是成绩变更事件的生产者 outbox 记录。
 type TeachingGradeEventOutbox struct {
 	ID             int64

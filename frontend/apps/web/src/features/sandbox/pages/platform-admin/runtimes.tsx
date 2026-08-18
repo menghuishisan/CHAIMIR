@@ -37,11 +37,11 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import {
   runtimeSelftestStatusLabel,
-  runtimeSelftestStatusTone,
   runtimeStatusLabel,
-  runtimeStatusTone,
 } from '../../../../utils/labels/sandbox'
+import { runtimeSelftestStatusTone, runtimeStatusTone } from '../../statusPresentation'
 import { RuntimeFormModal } from './runtime-form'
+import { runtimeHasDeployCommand, runtimeWorkspaceDir } from '../../runtimeSpec'
 
 /** 接入四步:与后端的硬前置一致(镜像 → 预拉取 → 自检 → 可用)。 */
 const ONBOARDING_STEPS = ['填写环境配置', '登记镜像并预拉取', '自检通过', '开放给学校'] as const
@@ -225,7 +225,7 @@ function RuntimeCard({ runtime, onEdit }: RuntimeCardProps) {
             { term: '运行时短名', description: runtime.code, mono: true },
             {
               term: '工作区目录',
-              description: runtime.adapter_spec.workspace_dir,
+              description: runtimeWorkspaceDir(runtime.adapter_spec),
               mono: true,
             },
             {
@@ -274,7 +274,6 @@ function RuntimeCard({ runtime, onEdit }: RuntimeCardProps) {
 function capabilitySourceLabel(runtime: SandboxRuntime): string {
   if (runtime.plugin_ref.trim() !== '') return '运行时插件'
   if (runtime.capability_impl.trim() !== '') return '平台内置实现'
-  const commands = runtime.adapter_spec.capability_commands
-  if (commands && commands.deploy.command.length > 0) return '清单声明的链能力命令'
+  if (runtimeHasDeployCommand(runtime.adapter_spec)) return '清单声明的链能力命令'
   return '仅托管环境,链操作由学生自行完成'
 }

@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { reentrancyPhases } from './model';
 
-export const reentrancySource = ['function withdraw() {', '  require(balance[msg.sender] > 0);', '  amount = balance[msg.sender];', '  sendValue(msg.sender, amount);', '  balance[msg.sender] = 0;', '  nonReentrant();', '}'];
+const reentrancySource = ['function withdraw() {', '  require(balance[msg.sender] > 0);', '  amount = balance[msg.sender];', '  sendValue(msg.sender, amount);', '  balance[msg.sender] = 0;', '  nonReentrant();', '}'];
 
 export const reentrancyNarrative = phaseNarrative(reentrancyPhases, 'reentrancy-blocked');
 

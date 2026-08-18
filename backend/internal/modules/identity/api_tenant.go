@@ -49,30 +49,30 @@ func (a tenantAPI) uploadLogo(c *gin.Context) {
 	maxBytes := a.svc.uploadCfg.TenantLogoMaxBytes
 	file, err := c.FormFile("file")
 	if err != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityTenantLogoInvalid.WithCause(err))
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityTenantLogoInvalid.WithCause(err))
 		return
 	}
 	if file.Size <= 0 {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityTenantLogoInvalid)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityTenantLogoInvalid)
 		return
 	}
 	if file.Size > maxBytes {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityTenantLogoTooLarge)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityTenantLogoTooLarge)
 		return
 	}
 	opened, err := file.Open()
 	if err != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityTenantLogoInvalid.WithCause(err))
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityTenantLogoInvalid.WithCause(err))
 		return
 	}
 	defer logging.CloseContext(c.Request.Context(), "关闭校徽上传文件失败", opened)
 	content, result, err := upload.ReadBounded(opened, maxBytes)
 	if err != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityTenantLogoInvalid.WithCause(err))
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityTenantLogoInvalid.WithCause(err))
 		return
 	}
 	if result != upload.SizeOK {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentityTenantLogoTooLarge)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentityTenantLogoTooLarge)
 		return
 	}
 	out, err := a.svc.UploadTenantLogo(c.Request.Context(), TenantLogoUploadRequest{
@@ -87,7 +87,7 @@ func (a tenantAPI) uploadLogo(c *gin.Context) {
 func (a tenantAPI) clearLogo(c *gin.Context) {
 	out, err := a.svc.ClearTenantLogo(c.Request.Context())
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -97,7 +97,7 @@ func (a tenantAPI) clearLogo(c *gin.Context) {
 func (a tenantAPI) getConfig(c *gin.Context) {
 	out, err := a.svc.GetTenantConfig(c.Request.Context())
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -111,7 +111,7 @@ func (a tenantAPI) updateConfig(c *gin.Context) {
 	}
 	out, err := a.svc.UpdateTenantConfigByAdmin(c.Request.Context(), req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -121,7 +121,7 @@ func (a tenantAPI) updateConfig(c *gin.Context) {
 func (a tenantAPI) listSSO(c *gin.Context) {
 	out, err := a.svc.ListSSOConfigsByAdmin(c.Request.Context())
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)
@@ -135,7 +135,7 @@ func (a tenantAPI) upsertSSO(c *gin.Context) {
 	}
 	out, err := a.svc.UpsertSSOConfig(c.Request.Context(), req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	httpx.Write(c, out, nil)

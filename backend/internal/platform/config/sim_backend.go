@@ -2,12 +2,11 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
+	"chaimir/internal/platform/workload"
 	"chaimir/pkg/privacy"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -78,14 +77,8 @@ func readSimBackendAdapters(key string, errs *[]string) []SimBackendAdapterConfi
 		return nil
 	}
 	var out []SimBackendAdapterConfig
-	decoder := json.NewDecoder(strings.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&out); err != nil {
+	if err := decodeStrictJSON(raw, &out); err != nil {
 		*errs = append(*errs, fmt.Sprintf("环境变量 %s 需为严格的后端计算能力 JSON 数组: %v", key, err))
-		return nil
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		*errs = append(*errs, fmt.Sprintf("环境变量 %s 只能包含一个 JSON 数组", key))
 		return nil
 	}
 	return out
@@ -184,8 +177,8 @@ func validateSimBackendResources(prefix string, item SimBackendAdapterConfig) []
 
 // validateSimBackendCommand 校验容器启动或算法执行命令,禁止空参数和 PATH 隐式解析。
 func validateSimBackendCommand(name string, command []string) []string {
-	if len(command) == 0 || len(command) > 32 || !strings.HasPrefix(command[0], "/") {
-		return []string{name + " 必须包含 1 到 32 个参数且入口使用绝对路径"}
+	if len(command) > 32 || !workload.ValidNonShellCommand(command) || !strings.HasPrefix(command[0], "/") {
+		return []string{name + " 必须包含 1 到 32 个非 shell 参数且入口使用绝对路径"}
 	}
 	var errs []string
 	for index, value := range command {

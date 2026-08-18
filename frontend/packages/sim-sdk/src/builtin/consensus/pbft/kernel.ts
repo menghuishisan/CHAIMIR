@@ -63,7 +63,7 @@ export function reducePbftEvent(state: PbftState, event: SimEvent, context: Redu
 /**
  * advancePbft 按 PBFT 协议顺序推进一个过程单元,每步都会产生真实协议消息。
  */
-export function advancePbft(state: PbftState): PbftState {
+function advancePbft(state: PbftState): PbftState {
   if (state.phaseIndex >= pbftPhases.length - 1) return state;
   const tick = state.tick + 1;
   const currentPhaseId = pbftPhases[state.phaseIndex]?.id;
@@ -81,7 +81,7 @@ export function advancePbft(state: PbftState): PbftState {
 /**
  * injectByzantinePrimary 标记当前主节点为拜占庭,并准备一个冲突摘要供预准备阶段暴露。
  */
-export function injectByzantinePrimary(state: PbftState, context: ReducerContext): PbftState {
+function injectByzantinePrimary(state: PbftState, context: ReducerContext): PbftState {
   const primary = currentPrimary(state);
   const conflictingDigest = canonicalConsensusDigest('pbft-conflict', { digest: state.request.digest, sequence: context.seq }, 12);
   const messages =
@@ -112,7 +112,7 @@ export function injectByzantinePrimary(state: PbftState, context: ReducerContext
 /**
  * performViewChange 收集达到法定人数的 VIEW-CHANGE 证据并由新主节点安装 NEW-VIEW。
  */
-export function performViewChange(state: PbftState): PbftState {
+function performViewChange(state: PbftState): PbftState {
   const tick = state.tick + 1;
   const oldPrimary = currentPrimary(state);
   const newPrimary = state.replicas[(oldPrimary.index + 1) % state.replicas.length];
@@ -379,7 +379,7 @@ function stabilizeCheckpoint(state: PbftState): PbftState {
 /**
  * finalizePbftState 统一刷新教学解释、指标、检查点和代码追踪变量。
  */
-export function finalizePbftState(state: PbftState): PbftState {
+function finalizePbftState(state: PbftState): PbftState {
   const prepared = findCertificate(state, 'prepared');
   const committed = findCertificate(state, 'committed');
   const reply = findCertificate(state, 'reply');
@@ -468,7 +468,7 @@ function upsertCertificate(certificates: PbftCertificate[], certificate: PbftCer
 /**
  * findCertificate 查找指定类型证书。
  */
-export function findCertificate(state: PbftState, type: PbftCertificate['type']): PbftCertificate | undefined {
+function findCertificate(state: PbftState, type: PbftCertificate['type']): PbftCertificate | undefined {
   return state.certificates.find((certificate) => certificate.type === type);
 }
 
@@ -482,7 +482,7 @@ export function quorum(state: PbftState): number {
 /**
  * currentPrimary 返回当前视图主节点。
  */
-export function currentPrimary(state: PbftState): PbftReplica {
+function currentPrimary(state: PbftState): PbftReplica {
   return state.replicas.find((replica) => replica.primary) ?? state.replicas[0];
 }
 

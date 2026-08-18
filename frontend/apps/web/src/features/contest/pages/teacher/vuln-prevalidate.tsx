@@ -16,7 +16,6 @@ import {
   Badge,
   Button,
   Callout,
-  Checkbox,
   DescriptionList,
   FormField,
   Modal,
@@ -33,14 +32,16 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
+import { SandboxToolChecklist } from '../../../sandbox/components/SandboxToolChecklist'
 import { useOrchestrationCatalog } from '../../../sandbox/useOrchestrationCatalog'
 import {
   vulnLevelLabel,
   vulnPrevalidateStatusLabel,
-  vulnPrevalidateStatusTone,
   vulnRuntimeModeLabel,
 } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { vulnPrevalidateStatusTone } from '../../statusPresentation'
+import { readString } from '../../jsonReaders'
 
 /** 验证明细里的两段:后端 runVulnPrevalidation 固定写入这两个键。 */
 const DETAIL_POSITIVE = 'positive'
@@ -172,22 +173,11 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
 
                 {catalog.tools.length > 0 ? (
                   <FormField label="验证时可用工具" helper="按攻击步骤的需要勾选;不确定就不勾">
-                    <div className="flex flex-col gap-2">
-                      {catalog.tools.map((tool) => (
-                        <Checkbox
-                          key={tool.code}
-                          checked={toolCodes.includes(tool.code)}
-                          label={tool.name}
-                          onCheckedChange={(checked) =>
-                            setToolCodes((current) =>
-                              checked === true
-                                ? [...current, tool.code]
-                                : current.filter((code) => code !== tool.code),
-                            )
-                          }
-                        />
-                      ))}
-                    </div>
+                    <SandboxToolChecklist
+                      tools={catalog.tools}
+                      selectedCodes={toolCodes}
+                      onChange={setToolCodes}
+                    />
                   </FormField>
                 ) : null}
               </div>
@@ -365,10 +355,4 @@ function readAssertions(raw: unknown): AssertionResult[] {
       actual: readString(item, ASSERTION_ACTUAL),
       hint: readString(item, ASSERTION_HINT),
     }))
-}
-
-/** readString 从开放对象里读字符串字段;非字符串回空串。 */
-function readString(source: Record<string, unknown>, key: string): string {
-  const value = source[key]
-  return typeof value === 'string' ? value : ''
 }

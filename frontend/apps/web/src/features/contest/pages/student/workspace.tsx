@@ -39,13 +39,16 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { AppStatusScreen } from '../../../../components/AppStatusScreen'
-import { SandboxIdeWorkspace } from '../../../sandbox/SandboxIdeWorkspace'
+import { SandboxIdeWorkspace } from '../../../sandbox/components/SandboxIdeWorkspace'
 import { useSession } from '../../../../components/RoleGuard'
 import { useAsyncResource, useTicketedWebSocket } from '../../../../hooks'
 import { useImmersive } from '../../../../layouts/immersive/context'
+import { readString, readStringArray } from '../../jsonReaders'
 import { formatDateTime } from '../../../../utils/formatters'
-import { battleRoleLabel, contestStatusLabel, isContestLeaderboardFrozen } from '../../../../utils/labels/contest'
+import { battleRoleLabel, contestStatusLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { CONTEST_LADDER_PREVIEW_SIZE } from '../../queryLimits'
+import { isContestLeaderboardFrozen } from '../../rules'
 
 /** 题面开放载荷里的键:与题库正文写入的键一致。 */
 const FACE_KEYS = {
@@ -146,7 +149,11 @@ function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
   const answerable = contest.status === ContestStatus.RUNNING
 
   const ladder = useAsyncResource(
-    () => api.contest.getLadder(contest.id, { page: 1, size: 10 }),
+    () =>
+      api.contest.getLadder(contest.id, {
+        page: 1,
+        size: CONTEST_LADDER_PREVIEW_SIZE,
+      }),
     [contest.id],
     () => false,
   )
@@ -719,13 +726,3 @@ function LadderPanel({ ranks, live, frozen }: LadderPanelProps) {
 }
 
 /** readString 从开放对象里读字符串;缺失或类型不符回空串。 */
-function readString(source: Record<string, unknown>, key: string): string {
-  const value = source[key]
-  return typeof value === 'string' ? value : ''
-}
-
-/** readStringArray 从开放对象里读字符串数组;缺失或类型不符回空数组。 */
-function readStringArray(source: Record<string, unknown>, key: string): string[] {
-  const value = source[key]
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
-}

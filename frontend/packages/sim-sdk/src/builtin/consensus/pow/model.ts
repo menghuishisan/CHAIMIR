@@ -3,7 +3,7 @@
 import type { SimState } from '../../../types';
 import type { ViewMessage } from '../consensusView';
 
-export interface PowMiner {
+interface PowMiner {
   id: string;
   label: string;
   hashPower: number;

@@ -191,7 +191,7 @@ func decodeSnapshot(raw []byte) (JudgeInputSnapshot, error) {
 	if len(raw) == 0 {
 		return out, nil
 	}
-	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return JudgeInputSnapshot{}, err
 	}
 	return out, nil
@@ -203,7 +203,7 @@ func decodeDetails(raw []byte) ([]JudgeResultDetail, error) {
 		return nil, nil
 	}
 	var out []JudgeResultDetail
-	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -215,7 +215,7 @@ func decodeReplayTrace(raw []byte) (contracts.JudgeReplayTrace, error) {
 		return contracts.JudgeReplayTrace{Actions: []contracts.JudgeReplayAction{}}, nil
 	}
 	var out contracts.JudgeReplayTrace
-	if err := jsonx.DecodeStrict(raw, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return contracts.JudgeReplayTrace{}, err
 	}
 	if out.Actions == nil {

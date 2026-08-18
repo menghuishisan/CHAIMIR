@@ -45,7 +45,7 @@ export function reduceZkRollupEvent(state: ZkRollupState, event: SimEvent, _cont
 }
 
 /** finalizeZkRollupState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
-export function finalizeZkRollupState(state: ZkRollupState): ZkRollupState {
+function finalizeZkRollupState(state: ZkRollupState): ZkRollupState {
   return {
     ...state,
     phase: zkRollupPhases[state.phaseIndex].label,

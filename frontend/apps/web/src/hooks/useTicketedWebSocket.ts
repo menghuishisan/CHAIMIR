@@ -6,12 +6,12 @@
 // 也就是说「换票 → 带票建连」这两步不可拆,任何页面自己 new WebSocket 都会 401。
 // 故收敛到这一处:沙箱终端、沙箱进度、判题进度、仿真实时流与全局业务事件共用它。
 //
-// 票据是一次性的,重连必须重新换票;因此 reconnect 走的是同一条「换票 → 建连」路径,
-// 不复用上一张票。
+// 重连必须重新换票;因此 reconnect 走的是同一条「换票 → 建连」路径,
+// 不复用上一张短时、路径绑定的票据。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../app/api'
-import { userFacingErrorMessage } from '../utils/userFacingError'
+import { errorDiagnostics, userFacingErrorMessage } from '../utils/userFacingError'
 
 export type SocketStatus = 'idle' | 'connecting' | 'open' | 'closed' | 'error'
 
@@ -65,7 +65,7 @@ export function useTicketedWebSocket(options: TicketedSocketOptions): TicketedSo
         ticket = await api.webSocketTicketProvider(url)
       } catch (ticketError) {
         if (!active) return
-        console.error('[ws] 换取连接票据失败', { url, error: ticketError })
+        console.error('[ws] 换取连接票据失败', { url, error: errorDiagnostics(ticketError) })
         setError(userFacingErrorMessage(ticketError, '实时连接没能建立,请稍后重试。'))
         setStatus('error')
         return

@@ -1,7 +1,7 @@
 // Experiment API：实验编排
 // 对应后端 M7 模块
 
-import { ApiClient } from '../client'
+import { ApiClient, encodePathSegment } from '../client'
 import type { ExperimentReportStatus, ExperimentStatus } from '../constants/experiment'
 import type { PaginatedResponse } from '../types/common'
 import type {
@@ -52,7 +52,7 @@ export class ExperimentApi {
    * 实验详情页深链、刷新以及退出沉浸式工作台后的回落都用这条。
    */
   async getPublishedExperiment(experimentId: string): Promise<StudentExperiment> {
-    return this.client.get(`/experiment/student/experiments/${experimentId}`)
+    return this.client.get(`/experiment/student/experiments/${encodePathSegment(experimentId)}`)
   }
 
   /**
@@ -66,28 +66,28 @@ export class ExperimentApi {
    * 更新实验
    */
   async updateExperiment(experimentId: string, data: ExperimentRequest): Promise<Experiment> {
-    return this.client.patch(`/experiment/experiments/${experimentId}`, data)
+    return this.client.patch(`/experiment/experiments/${encodePathSegment(experimentId)}`, data)
   }
 
   /**
    * 发布前校验
    */
   async validateExperiment(experimentId: string): Promise<ValidationResult> {
-    return this.client.post(`/experiment/experiments/${experimentId}/validate`)
+    return this.client.post(`/experiment/experiments/${encodePathSegment(experimentId)}/validate`)
   }
 
   /**
    * 发布实验
    */
   async publishExperiment(experimentId: string): Promise<Experiment> {
-    return this.client.post(`/experiment/experiments/${experimentId}/publish`)
+    return this.client.post(`/experiment/experiments/${encodePathSegment(experimentId)}/publish`)
   }
 
   /**
    * 下架实验
    */
   async unpublishExperiment(experimentId: string): Promise<Experiment> {
-    return this.client.post(`/experiment/experiments/${experimentId}/unpublish`)
+    return this.client.post(`/experiment/experiments/${encodePathSegment(experimentId)}/unpublish`)
   }
 
   /**
@@ -98,21 +98,21 @@ export class ExperimentApi {
     page?: number
     size?: number
   }): Promise<PaginatedResponse<ReportDTO>> {
-    return this.client.get(`/experiment/experiments/${experimentId}/reports`, params)
+    return this.client.get(`/experiment/experiments/${encodePathSegment(experimentId)}/reports`, params)
   }
 
   /**
    * 教师批改实验报告。
    */
   async gradeReport(reportId: string, data: GradeReportRequest): Promise<ReportDTO> {
-    return this.client.post(`/experiment/reports/${reportId}/grade`, data)
+    return this.client.post(`/experiment/reports/${encodePathSegment(reportId)}/grade`, data)
   }
 
   /**
    * 创建实验协作小组。
    */
   async createGroup(experimentId: string, data: ExperimentGroupRequest): Promise<ExperimentGroup> {
-    return this.client.post(`/experiment/experiments/${experimentId}/groups`, data)
+    return this.client.post(`/experiment/experiments/${encodePathSegment(experimentId)}/groups`, data)
   }
 
   /**
@@ -120,28 +120,28 @@ export class ExperimentApi {
    * 与 getGroup 的差别:这里按实验列全部分组、不含共享实例;getGroup 按组读单组并附带实例。
    */
   async listGroups(experimentId: string): Promise<ExperimentGroup[]> {
-    return this.client.get(`/experiment/experiments/${experimentId}/groups`)
+    return this.client.get(`/experiment/experiments/${encodePathSegment(experimentId)}/groups`)
   }
 
   /**
    * 加入或调整协作小组成员角色。
    */
   async upsertGroupMember(groupId: string, data: ExperimentGroupMemberRequest): Promise<ExperimentGroup> {
-    return this.client.post(`/experiment/groups/${groupId}/members`, data)
+    return this.client.post(`/experiment/groups/${encodePathSegment(groupId)}/members`, data)
   }
 
   /**
    * 创建实验实例（学生发起）
    */
   async createInstance(experimentId: string, data: CreateInstanceRequest): Promise<ExperimentInstance> {
-    return this.client.post(`/experiment/experiments/${experimentId}/instances`, data)
+    return this.client.post(`/experiment/experiments/${encodePathSegment(experimentId)}/instances`, data)
   }
 
   /**
    * 获取实验实例详情
    */
   async getInstance(instanceId: string): Promise<ExperimentInstance> {
-    return this.client.get(`/experiment/instances/${instanceId}`)
+    return this.client.get(`/experiment/instances/${encodePathSegment(instanceId)}`)
   }
 
   /**
@@ -152,55 +152,55 @@ export class ExperimentApi {
     checkpointId: string,
     data: CheckpointJudgeRequest
   ): Promise<CheckpointResult> {
-    return this.client.post(`/experiment/instances/${instanceId}/checkpoints/${checkpointId}/judge`, data)
+    return this.client.post(`/experiment/instances/${encodePathSegment(instanceId)}/checkpoints/${encodePathSegment(checkpointId)}/judge`, data)
   }
 
   /**
    * 提交实验报告
    */
   async submitReport(instanceId: string, data: { content_ref: string }): Promise<ReportDTO> {
-    return this.client.post(`/experiment/instances/${instanceId}/report`, data)
+    return this.client.post(`/experiment/instances/${encodePathSegment(instanceId)}/report`, data)
   }
 
   /**
    * 获取实验进度订阅信息
    */
   async getProgress(instanceId: string): Promise<ProgressDTO> {
-    return this.client.get(`/experiment/instances/${instanceId}/progress`)
+    return this.client.get(`/experiment/instances/${encodePathSegment(instanceId)}/progress`)
   }
 
   /**
    * 读取协作小组详情。
    */
   async getGroup(groupId: string): Promise<ExperimentGroup> {
-    return this.client.get(`/experiment/groups/${groupId}`)
+    return this.client.get(`/experiment/groups/${encodePathSegment(groupId)}`)
   }
 
   /**
    * 暂停实验实例
    */
   async pauseInstance(instanceId: string): Promise<ExperimentInstance> {
-    return this.client.post(`/experiment/instances/${instanceId}/pause`)
+    return this.client.post(`/experiment/instances/${encodePathSegment(instanceId)}/pause`)
   }
 
   /**
    * 恢复实验实例
    */
   async resumeInstance(instanceId: string): Promise<ExperimentInstance> {
-    return this.client.post(`/experiment/instances/${instanceId}/resume`)
+    return this.client.post(`/experiment/instances/${encodePathSegment(instanceId)}/resume`)
   }
 
   /**
    * 激活已解锁阶段
    */
   async activateStage(instanceId: string, stage: number): Promise<ExperimentInstance> {
-    return this.client.post(`/experiment/instances/${instanceId}/stages/${stage}/activate`)
+    return this.client.post(`/experiment/instances/${encodePathSegment(instanceId)}/stages/${encodePathSegment(String(stage))}/activate`)
   }
 
   /**
    * 完成实验实例
    */
   async finishInstance(instanceId: string): Promise<ExperimentInstance> {
-    return this.client.post(`/experiment/instances/${instanceId}/finish`)
+    return this.client.post(`/experiment/instances/${encodePathSegment(instanceId)}/finish`)
   }
 }

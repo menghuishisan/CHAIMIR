@@ -28,9 +28,11 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { copyText } from '../../../../utils/clipboard'
 import { formatShortDateTime } from '../../../../utils/formatters'
-import { teamStatusLabel, teamStatusTone } from '../../../../utils/labels/contest'
+import { teamStatusLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { teamStatusTone } from '../../statusPresentation'
 
 export interface ContestTeamCardProps {
   teamId: string
@@ -85,20 +87,17 @@ function TeamDetail({ team, onChanged }: TeamDetailProps) {
 
   const locked = team.status === TeamStatus.LOCKED
 
-  /** copyInviteCode 复制邀请码,复制失败给就近提示而不是静默。 */
+  /** copyInviteCode 复制邀请码;失败提示与结构化日志由全站剪贴板入口统一处理。 */
   const copyInviteCode = useCallback(async () => {
     if (!team.invite_code) return
-    try {
-      await navigator.clipboard.writeText(team.invite_code)
+    setActionError(undefined)
+    const copiedSuccessfully = await copyText(team.invite_code, {
+      what: '队伍邀请码',
+      operation: 'contest.team.copyInviteCode',
+    })
+    if (copiedSuccessfully) {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 2000)
-    } catch (error) {
-      setActionError('复制没有成功,请手动选中邀请码后复制。')
-      console.error('队伍邀请码复制失败', {
-        operation: 'contest.team.copyInviteCode',
-        reason: 'clipboard-write-failed',
-        error,
-      })
     }
   }, [team.invite_code])
 

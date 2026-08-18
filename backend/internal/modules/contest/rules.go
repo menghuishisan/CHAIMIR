@@ -2,7 +2,6 @@
 package contest
 
 import (
-	"encoding/hex"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 )
 
 var (
@@ -215,16 +215,6 @@ func battleSourceRef(id int64, now time.Time) string {
 	return fmt.Sprintf("contest:%04d:battle:%s", now.Year(), ids.Format(id))
 }
 
-// isSHA256Hex 校验参赛提交的内容哈希格式,与 M3 判题契约保持一致。
-func isSHA256Hex(value string) bool {
-	value = strings.TrimSpace(value)
-	if len(value) != 64 {
-		return false
-	}
-	_, err := hex.DecodeString(value)
-	return err == nil
-}
-
 // validContestSourceRef 校验事件来源确属 M8。
 func validContestSourceRef(sourceRef string) bool {
 	return auth.ValidSourceRef(sourceRef) && strings.HasPrefix(strings.TrimSpace(sourceRef), "contest:")
@@ -243,7 +233,7 @@ func validateTeamName(name string) (string, error) {
 func validateBattleEntryRequest(req BattleEntryRequest) (BattleEntryRequest, error) {
 	req.ArtifactRef = strings.TrimSpace(req.ArtifactRef)
 	req.CodeHash = strings.TrimSpace(req.CodeHash)
-	if req.ProblemID <= 0 || req.ArtifactRef == "" || len(req.ArtifactRef) > 255 || !isSHA256Hex(req.CodeHash) {
+	if req.ProblemID <= 0 || req.ArtifactRef == "" || len(req.ArtifactRef) > 255 || !pkgcrypto.ValidSHA256Hex(req.CodeHash) {
 		return BattleEntryRequest{}, apperr.ErrContestBattleEntryInvalid
 	}
 	if req.Role != BattleRoleStrategy && req.Role != BattleRoleDefense && req.Role != BattleRoleAttack {

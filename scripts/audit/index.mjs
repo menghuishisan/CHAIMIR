@@ -1,12 +1,13 @@
-// 一次性审查脚本:合规审查的统一入口,依次跑九项静态一致性检查并汇总判定。
+// 一次性审查脚本:合规审查的统一入口,依次跑十项静态一致性检查并汇总判定。
 // 用法:node scripts/audit/index.mjs
 // 源码门禁(不依赖前端构建产物):node scripts/audit/index.mjs --source-only
 //
-// 九项分别回答一个问题:
+// 十项分别回答一个问题:
 //   structure-responsibilities 后端文件职责、模块边界和前端目录职责是否符合工程规范
 //   route-matrix          后端注册路由 ↔ openapi 契约是否四方一致、有无同 handler 双轨
 //   sdk-matrix            api-client 每条路径是否命中真实后端路由、有无不可达方法
 //   contract-enums        后端公开枚举 ↔ api-client 数值、类型是否完全一致
+//   pagination-contract   后端分页默认值/上限 ↔ api-client 常量是否一致
 //   role-guard-crosscheck 各角色页面调用的接口守卫是否与该角色相容(静态检查发现不了的越权)
 //   sim-catalog-drift     后端内置仿真包清单产物 ↔ 前端 sim-sdk 源码是否一致
 //   check-frontend-standards 前端实现是否符合设计令牌、组件和无障碍规范
@@ -26,6 +27,7 @@ const CHECKS = [
   { name: "route-matrix", title: "后端路由 ↔ openapi 契约一致性" },
   { name: "sdk-matrix", title: "api-client ↔ 后端路由双向可达性" },
   { name: "contract-enums", title: "后端公开枚举 ↔ api-client 契约一致性" },
+  { name: "pagination-contract", title: "后端分页契约 ↔ api-client 常量一致性" },
   { name: "role-guard-crosscheck", title: "角色页面 ↔ 接口守卫相容性" },
   { name: "sim-catalog-drift", title: "内置仿真包清单 ↔ sim-sdk 源码一致性" },
   { name: "check-frontend-standards", title: "前端设计规范门禁" },
@@ -72,6 +74,6 @@ console.log(`\n${"=".repeat(72)}`);
 console.log(
   failed
     ? "有检查未能完成,见上方输出。"
-    : "九项检查全部执行完毕,逐项结论见上方输出。",
+    : "十项检查全部执行完毕,逐项结论见上方输出。",
 );
 if (failed) process.exitCode = 1;

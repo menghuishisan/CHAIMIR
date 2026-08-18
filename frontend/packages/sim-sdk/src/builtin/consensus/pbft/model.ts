@@ -41,7 +41,7 @@ export interface PbftReplica {
   };
 }
 
-export interface PbftRequest {
+interface PbftRequest {
   clientId: string;
   operation: string;
   digest: string;

@@ -11,9 +11,9 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
-	"chaimir/internal/platform/tenant"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -50,6 +50,12 @@ func IsNoRows(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
 }
 
+// IsUniqueViolation 统一识别 PostgreSQL 唯一约束冲突,供 repo 实现窄重试或业务错误映射。
+func IsUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
 // Close 关闭所有已创建的连接池。
 func (d *DB) Close() {
 	if d.priv != nil {
@@ -66,42 +72,6 @@ func (d *DB) Ping(ctx context.Context) error {
 		return fmt.Errorf("app 连接池未初始化")
 	}
 	return d.app.Ping(ctx)
-}
-
-// HasPrivileged 判断是否配置了特权连接池。
-func (d *DB) HasPrivileged() bool {
-	if d == nil {
-		return false
-	}
-	return d.priv != nil
-}
-
-// AppPool 暴露 app 池给需要直接构造 sqlc 查询对象的 repo 装配层使用。
-func (d *DB) AppPool() *pgxpool.Pool {
-	if d == nil {
-		return nil
-	}
-	return d.app
-}
-
-// PrivilegedPool 暴露特权池给受控装配层使用;未配置时返回 nil。
-func (d *DB) PrivilegedPool() *pgxpool.Pool {
-	if d == nil {
-		return nil
-	}
-	return d.priv
-}
-
-// WithTenantTx 从上下文读取租户身份并注入 RLS 会话变量后执行事务。
-func (d *DB) WithTenantTx(ctx context.Context, fn TxFunc) error {
-	if d == nil {
-		return fmt.Errorf("数据库未初始化")
-	}
-	id, ok := tenant.FromContext(ctx)
-	if !ok {
-		return fmt.Errorf("数据访问缺少租户上下文(未鉴权或未注入 tenant)")
-	}
-	return d.WithTenantTxID(ctx, id.TenantID, fn)
 }
 
 // WithTenantTxID 用显式租户 ID 注入 RLS 会话变量后执行事务。
@@ -139,18 +109,24 @@ func (d *DB) WithPrivilegedTx(ctx context.Context, fn TxFunc) error {
 	return runTx(ctx, d.priv, fn)
 }
 
-// WithPrivilegedModuleTx 仅限模块后台维护任务扫描本模块自有 RLS 表。
+// WithPrivilegedModuleTx 以数据库维护角色强制模块表边界后执行跨租户事务。
 func (d *DB) WithPrivilegedModuleTx(ctx context.Context, module string, fn TxFunc) error {
 	if d == nil {
 		return fmt.Errorf("数据库未初始化")
 	}
-	if strings.TrimSpace(module) == "" {
-		return fmt.Errorf("模块维护特权事务缺少模块名")
+	policy, ok := MaintenancePolicyForModule(module)
+	if !ok {
+		return fmt.Errorf("模块维护特权事务拒绝未知模块: %q", strings.TrimSpace(module))
 	}
 	if d.priv == nil {
 		return fmt.Errorf("未配置特权连接(PG_PRIV_USER),无法执行模块维护任务")
 	}
-	return runTx(ctx, d.priv, fn)
+	return runTx(ctx, d.priv, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SET LOCAL ROLE "+pgx.Identifier{policy.Role}.Sanitize()); err != nil {
+			return fmt.Errorf("切换模块维护角色失败: %w", err)
+		}
+		return fn(ctx, tx)
+	})
 }
 
 // openPool 构造并连通检查一个连接池。

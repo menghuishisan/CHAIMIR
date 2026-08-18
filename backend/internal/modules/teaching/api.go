@@ -241,7 +241,7 @@ func (a teachingAPI) deleteChapter(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.DeleteChapter(c.Request.Context(), id))
+	httpx.Write(c, struct{}{}, a.svc.DeleteChapter(c.Request.Context(), id))
 }
 
 // createLesson 绑定课时创建请求。
@@ -404,7 +404,7 @@ func (a teachingAPI) deleteLesson(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.DeleteLesson(c.Request.Context(), id))
+	httpx.Write(c, struct{}{}, a.svc.DeleteLesson(c.Request.Context(), id))
 }
 
 // joinCourse 绑定学生邀请码入课请求。
@@ -455,7 +455,7 @@ func (a teachingAPI) removeMember(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.RemoveCourseMember(c.Request.Context(), courseID, studentID))
+	httpx.Write(c, struct{}{}, a.svc.RemoveCourseMember(c.Request.Context(), courseID, studentID))
 }
 
 // getOutline 读取课程目录和本人进度。
@@ -695,7 +695,7 @@ func (a teachingAPI) deletePost(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.DeletePost(c.Request.Context(), id))
+	httpx.Write(c, struct{}{}, a.svc.DeletePost(c.Request.Context(), id))
 }
 
 // createAnnouncement 创建课程公告。

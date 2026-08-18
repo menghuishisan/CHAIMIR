@@ -3,7 +3,6 @@ package identity
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // CreateApplication 提交学校入驻申请,这是申请流程而非自助注册。
@@ -50,8 +48,7 @@ func (s *Service) CreateApplication(ctx context.Context, req CreateApplicationRe
 		app = row
 		return nil
 	}); err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		if isUniqueViolation(err) {
 			return TenantApplication{}, apperr.ErrIdentityApplicationInvalid
 		}
 		return TenantApplication{}, apperr.ErrInternal.WithCause(err)
@@ -133,7 +130,11 @@ func (s *Service) ApproveApplication(ctx context.Context, appID int64, req Revie
 		return TenantDTO{}, "", apperr.ErrInternal.WithCause(err)
 	}
 	s.drainTenantProvisionOutboxBestEffort(ctx)
-	return ToTenantDTO(created), activation, nil
+	dto, err := ToTenantDTO(created)
+	if err != nil {
+		return TenantDTO{}, "", err
+	}
+	return dto, activation, nil
 }
 
 // RejectApplication 驳回学校入驻申请。
@@ -209,7 +210,11 @@ func (s *Service) ListTenantsByPlatform(ctx context.Context, status int16, keywo
 	}
 	out := make([]TenantDTO, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, ToTenantDTO(row))
+		dto, err := ToTenantDTO(row)
+		if err != nil {
+			return nil, 0, page, size, err
+		}
+		out = append(out, dto)
 	}
 	return out, total, page, size, nil
 }
@@ -234,7 +239,7 @@ func (s *Service) GetTenantByPlatform(ctx context.Context, tenantID int64) (Tena
 	}); err != nil {
 		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
 	}
-	return ToTenantDTO(row), nil
+	return ToTenantDTO(row)
 }
 
 // UpdateTenantStatusByPlatform 修改租户启停和到期时间,平台管理员边界由 service 再次校验。
@@ -263,7 +268,7 @@ func (s *Service) UpdateTenantStatusByPlatform(ctx context.Context, tenantID int
 	if err := s.auditPlatformOperation(ctx, id.AccountID, "tenant.status.update", "identity.tenant", tenantID, map[string]any{"status": req.Status}); err != nil {
 		return TenantDTO{}, err
 	}
-	return ToTenantDTO(row), nil
+	return ToTenantDTO(row)
 }
 
 // BootstrapSchoolTenant 为私有化初始化创建固定学校租户和首个学校管理员。
@@ -350,7 +355,7 @@ func (s *Service) BootstrapSchoolTenant(ctx context.Context, cfg config.Bootstra
 		return TenantDTO{}, apperr.AsAppError(err)
 	}
 	s.drainTenantProvisionOutboxBestEffort(ctx)
-	return ToTenantDTO(created), nil
+	return ToTenantDTO(created)
 }
 
 // BootstrapPlatformAdmin 为 SaaS 初始化首个平台管理员,已存在同名账号时保持原密码不变。

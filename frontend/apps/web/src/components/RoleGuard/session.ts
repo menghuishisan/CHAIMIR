@@ -4,9 +4,9 @@
 import { createContext, useContext } from 'react'
 import type { api } from '../../app/api'
 
-export type SessionData = Awaited<ReturnType<typeof api.identity.getMe>>
+type SessionData = Awaited<ReturnType<typeof api.identity.getMe>>
 
-export interface SessionValue {
+interface SessionValue {
   /** 当前登录账号(经服务端 /me 校验) */
   me: SessionData
   /** 重新拉取会话(如资料更新后) */

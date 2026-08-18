@@ -19,16 +19,15 @@ import (
 
 // ContentModuleDeps 汇总组合根装配 M5 需要的基础设施和跨模块契约。
 type ContentModuleDeps struct {
-	Router   gin.IRouter
-	Database *db.DB
-	IDs      snowflake.Generator
-	Upload   config.UploadConfig
-	MinIO    config.MinIOConfig
-	AuthCfg  config.AuthConfig
-	Storage  *storage.Storage
-	Audit    audit.Writer
-	Auth     *auth.Manager
-	Roles    contracts.IdentityService
+	Router      gin.IRouter
+	Database    *db.DB
+	IDs         snowflake.Generator
+	Upload      config.UploadConfig
+	FileService storage.Service
+	Storage     *storage.Storage
+	Audit       audit.Writer
+	Auth        *auth.Manager
+	Roles       contracts.IdentityService
 }
 
 // RegisterContentModule 构造题库 store/service 并注册 HTTP 路由。
@@ -42,17 +41,13 @@ func RegisterContentModule(deps ContentModuleDeps) (*content.Service, error) {
 	if deps.Storage == nil {
 		return nil, fmt.Errorf("content module 缺少统一对象存储")
 	}
-	fileService, err := storage.NewServiceFromConfig(deps.AuthCfg, deps.MinIO, deps.Upload)
-	if err != nil {
-		return nil, err
-	}
 	store := content.NewStore(deps.Database)
 	svc, err := content.NewService(content.ServiceDeps{
 		Store:                     store,
 		IDs:                       deps.IDs,
 		Audit:                     deps.Audit,
 		Storage:                   deps.Storage,
-		FileService:               fileService,
+		FileService:               deps.FileService,
 		ContentAttachmentMaxBytes: deps.Upload.ContentAttachmentMaxBytes,
 		AttachmentScanPolicy:      upload.ScanPolicy{Required: deps.Upload.VirusScanRequired},
 	})

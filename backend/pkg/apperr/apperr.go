@@ -8,14 +8,14 @@ import (
 
 // Error 是跨 HTTP/API 边界传递的应用错误。
 type Error struct {
-	Code    string
-	Message string
+	code    string
+	message string
 	cause   error
 }
 
 // New 构造不带内部原因的应用错误模板。
 func New(code string, userMessage string) *Error {
-	return &Error{Code: code, Message: userMessage}
+	return &Error{code: code, message: userMessage}
 }
 
 // Error 只返回稳定错误码和用户向文案,避免 err.Error 被响应或业务状态误用时泄露内部原因。
@@ -23,7 +23,7 @@ func (e *Error) Error() string {
 	if e == nil {
 		return ""
 	}
-	return fmt.Sprintf("[%s] %s", e.Code, e.Message)
+	return fmt.Sprintf("[%s] %s", e.code, e.message)
 }
 
 // LogString 返回包含底层原因链的排障字符串,只能用于结构化日志和运维可见链路。
@@ -32,7 +32,7 @@ func (e *Error) LogString() string {
 		return ""
 	}
 	if e.cause != nil {
-		return fmt.Sprintf("[%s] %s: %v", e.Code, e.Message, e.cause)
+		return fmt.Sprintf("[%s] %s: %v", e.code, e.message, e.cause)
 	}
 	return e.Error()
 }
@@ -42,7 +42,7 @@ func (e *Error) UserCode() string {
 	if e == nil {
 		return CodeInternal
 	}
-	return e.Code
+	return e.code
 }
 
 // UserMessage 返回用户向提示文案。
@@ -50,7 +50,7 @@ func (e *Error) UserMessage() string {
 	if e == nil {
 		return MessageInternal
 	}
-	return e.Message
+	return e.message
 }
 
 // Unwrap 暴露内部错误链给日志和 errors.Is/As,但响应层不得输出该原因。
@@ -61,12 +61,18 @@ func (e *Error) Unwrap() error {
 	return e.cause
 }
 
+// Is 按稳定错误码识别同类应用错误,使 WithCause 后仍可用 errors.Is 判断模板。
+func (e *Error) Is(target error) bool {
+	other, ok := target.(*Error)
+	return ok && e != nil && other != nil && e.code != "" && e.code == other.code
+}
+
 // WithCause 基于错误模板包裹底层原因,保留排障链路。
 func (e *Error) WithCause(cause error) *Error {
 	if e == nil {
 		return ErrInternal.WithCause(cause)
 	}
-	return &Error{Code: e.Code, Message: e.Message, cause: cause}
+	return &Error{code: e.code, message: e.message, cause: cause}
 }
 
 // AsAppError 将任意错误归一为应用错误,未知错误统一收敛成内部错误。

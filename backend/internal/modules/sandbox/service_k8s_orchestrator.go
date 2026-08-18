@@ -155,7 +155,10 @@ func (o *K8sOrchestrator) waitVolumeSnapshotReady(ctx context.Context, gvr schem
 		if err != nil {
 			return fmt.Errorf("查询 VolumeSnapshot 状态失败: %w", err)
 		}
-		contentName, _, _ := unstructured.NestedString(current.Object, "status", "boundVolumeSnapshotContentName")
+		contentName, _, err := unstructured.NestedString(current.Object, "status", "boundVolumeSnapshotContentName")
+		if err != nil {
+			return fmt.Errorf("解析 VolumeSnapshot 绑定内容失败: %w", err)
+		}
 		if contentName != "" {
 			content, err := o.client.Dynamic().Resource(contentGVR).Get(ctx, contentName, metav1.GetOptions{})
 			if err != nil {
@@ -178,16 +181,28 @@ func volumeSnapshotReadyAndBound(snapshot, content *unstructured.Unstructured, n
 	if snapshot == nil || content == nil {
 		return false
 	}
-	ready, _, _ := unstructured.NestedBool(snapshot.Object, "status", "readyToUse")
+	ready, _, err := unstructured.NestedBool(snapshot.Object, "status", "readyToUse")
+	if err != nil {
+		return false
+	}
 	if !ready {
 		return false
 	}
-	contentName, _, _ := unstructured.NestedString(snapshot.Object, "status", "boundVolumeSnapshotContentName")
+	contentName, _, err := unstructured.NestedString(snapshot.Object, "status", "boundVolumeSnapshotContentName")
+	if err != nil {
+		return false
+	}
 	if strings.TrimSpace(contentName) == "" || content.GetName() != contentName {
 		return false
 	}
-	refName, _, _ := unstructured.NestedString(content.Object, "spec", "volumeSnapshotRef", "name")
-	refNamespace, _, _ := unstructured.NestedString(content.Object, "spec", "volumeSnapshotRef", "namespace")
+	refName, _, err := unstructured.NestedString(content.Object, "spec", "volumeSnapshotRef", "name")
+	if err != nil {
+		return false
+	}
+	refNamespace, _, err := unstructured.NestedString(content.Object, "spec", "volumeSnapshotRef", "namespace")
+	if err != nil {
+		return false
+	}
 	return refName == name && refNamespace == namespace
 }
 
@@ -618,7 +633,10 @@ func volumeSnapshotClassAllowsDeletion(class *unstructured.Unstructured) bool {
 	if class == nil {
 		return false
 	}
-	policy, _, _ := unstructured.NestedString(class.Object, "deletionPolicy")
+	policy, _, err := unstructured.NestedString(class.Object, "deletionPolicy")
+	if err != nil {
+		return false
+	}
 	return strings.EqualFold(strings.TrimSpace(policy), "Delete")
 }
 

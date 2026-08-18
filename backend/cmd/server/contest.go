@@ -29,8 +29,7 @@ type ContestModuleDeps struct {
 	IDs           snowflake.Generator
 	Config        config.ContestConfig
 	AuthConfig    config.AuthConfig
-	MinIO         config.MinIOConfig
-	Upload        config.UploadConfig
+	FileService   storage.Service
 	Storage       *storage.Storage
 	Content       contracts.ContentReadService
 	ContentImport contracts.ContentImportService
@@ -66,10 +65,6 @@ func RegisterContestModule(ctx context.Context, deps ContestModuleDeps) (*contes
 	if err != nil {
 		return nil, err
 	}
-	fileService, err := storage.NewServiceFromConfig(deps.AuthConfig, deps.MinIO, deps.Upload)
-	if err != nil {
-		return nil, err
-	}
 	svc, err := contest.NewService(contest.ServiceDeps{
 		Store:         store,
 		IDs:           deps.IDs,
@@ -81,7 +76,7 @@ func RegisterContestModule(ctx context.Context, deps ContestModuleDeps) (*contes
 		Sandbox:       deps.Sandbox,
 		Judge:         deps.Judge,
 		Fingerprint:   deps.Fingerprint,
-		FileService:   fileService,
+		FileService:   deps.FileService,
 		ReplayStore:   deps.Storage,
 		ReplayBucket:  deps.Storage.BucketReport(),
 		Bus:           deps.EventBus,

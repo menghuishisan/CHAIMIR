@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { utxoPhases } from './model';
 
-export const utxoSource = [
+const utxoSource = [
   'function validateUtxoTx(tx) {',
   '  require(allInputsUnspent(tx.inputs));',
   '  require(sum(inputs) >= sum(outputs) + fee);',

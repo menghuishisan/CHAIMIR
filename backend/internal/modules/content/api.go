@@ -151,7 +151,7 @@ func (a contentAPI) deleteItem(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.DeleteItem(c.Request.Context(), id))
+	httpx.Write(c, struct{}{}, a.svc.DeleteItem(c.Request.Context(), id))
 }
 
 // listVersions 查询同 code 版本列表。
@@ -237,7 +237,7 @@ func (a contentAPI) attachmentDownloadGrant(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrContentAttachmentInvalid) {
 		return
 	}
-	out, err := a.svc.IssueAttachmentDownloadGrant(c.Request.Context(), req.ResourceID, req.ObjectRef)
+	out, err := a.svc.IssueAttachmentDownloadGrant(c.Request.Context(), req.ResourceID.Int64(), req.ObjectRef)
 	httpx.Write(c, out, err)
 }
 
@@ -316,7 +316,7 @@ func (a contentAPI) deleteCategory(c *gin.Context) {
 	if !ok {
 		return
 	}
-	httpx.Write(c, gin.H{}, a.svc.DeleteCategory(c.Request.Context(), id))
+	httpx.Write(c, struct{}{}, a.svc.DeleteCategory(c.Request.Context(), id))
 }
 
 // listPapers 查询试卷分页。

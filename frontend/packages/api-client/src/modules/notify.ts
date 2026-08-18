@@ -1,7 +1,7 @@
 // Notify API：通知与实时推送
 // 对应后端 M10 模块
 
-import { ApiClient } from '../client'
+import { ApiClient, encodePathSegment } from '../client'
 import type { PaginatedResponse } from '../types/common'
 import type {
   Notification,
@@ -44,7 +44,7 @@ export class NotifyApi {
    * 标记为已读
    */
   async markAsRead(notificationId: string): Promise<Notification> {
-    return this.client.post(`/notify/inbox/${notificationId}/read`)
+    return this.client.post(`/notify/inbox/${encodePathSegment(notificationId)}/read`)
   }
 
   /**
@@ -58,7 +58,7 @@ export class NotifyApi {
    * 删除通知
    */
   async deleteNotification(notificationId: string): Promise<void> {
-    return this.client.delete(`/notify/inbox/${notificationId}`)
+    return this.client.delete(`/notify/inbox/${encodePathSegment(notificationId)}`)
   }
 
   // ===== 通知偏好 =====
@@ -99,7 +99,7 @@ export class NotifyApi {
    * 标记公告已读
    */
   async markAnnouncementRead(announcementId: string): Promise<void> {
-    return this.client.post(`/notify/announcements/${announcementId}/read`)
+    return this.client.post(`/notify/announcements/${encodePathSegment(announcementId)}/read`)
   }
 
 }

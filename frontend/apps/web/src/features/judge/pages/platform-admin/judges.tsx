@@ -34,13 +34,10 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
-import {
-  JUDGER_TYPES,
-  judgerStatusLabel,
-  judgerStatusTone,
-  judgerTypeLabel,
-} from '../../../../utils/labels/judge'
+import { judgerStatusLabel, judgerTypeLabel } from '../../../../utils/labels/judge'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { JUDGER_TYPES } from '../../options'
+import { judgerStatusTone } from '../../statusPresentation'
 import { JudgerFormModal } from './judger-form'
 
 /** 类型筛选项:值为空串表示不过滤。 */

@@ -52,7 +52,7 @@ export function reduceHotStuffEvent(state: HotStuffState, event: SimEvent, _cont
 /**
  * advanceHotStuff 按 HotStuff 链式 BFT 流程推进一个过程单元。
  */
-export function advanceHotStuff(state: HotStuffState): HotStuffState {
+function advanceHotStuff(state: HotStuffState): HotStuffState {
   const phaseIndex = Math.min(hotstuffPhases.length - 1, state.phaseIndex + (state.lastTransition === hotstuffPhases[state.phaseIndex].id ? 1 : 0));
   const next = { ...state, phaseIndex, tick: state.tick + 1 };
   if (state.phaseIndex === hotstuffPhases.length - 1) return collectNewView(advanceView({ ...state, tick: next.tick }));
@@ -83,7 +83,7 @@ export function hotstuffTimeoutRecovered(state: HotStuffState): CheckpointResult
 /**
  * finalizeHotStuffState 刷新指标、消息进度、检查点和代码追踪。
  */
-export function finalizeHotStuffState(state: HotStuffState): HotStuffState {
+function finalizeHotStuffState(state: HotStuffState): HotStuffState {
   const risk = state.timeoutActive ? 65 : state.replicas.some((replica) => replica.faulty) ? 48 : 8;
   return {
     ...state,
@@ -177,7 +177,7 @@ function safeToVote(state: HotStuffState, proposal: HotStuffBlock): boolean {
 /**
  * makeHotStuffBlock 创建确定性 HotStuff 区块。
  */
-export function makeHotStuffBlock(id: string, parentId: string | undefined, view: number, proposerId: string, qc: boolean, committed: boolean): HotStuffBlock {
+function makeHotStuffBlock(id: string, parentId: string | undefined, view: number, proposerId: string, qc: boolean, committed: boolean): HotStuffBlock {
   return { id, parentId, view, proposerId, qc, committed, hash: canonicalConsensusDigest('hotstuff-block', { id, parentId: parentId ?? 'root', proposerId, view }, 12), qcSigners: qc ? [proposerId] : undefined, qcDigest: qc ? canonicalConsensusDigest('hotstuff-genesis-qc', { id, proposerId, view }, 16) : undefined };
 }
 
@@ -198,14 +198,14 @@ function blockById(state: HotStuffState, id: string): HotStuffBlock | undefined 
 /**
  * voteCount 统计当前提案票数。
  */
-export function voteCount(state: HotStuffState): number {
+function voteCount(state: HotStuffState): number {
   return Object.values(state.votes).filter((blockId) => blockId === state.proposalId).length;
 }
 
 /**
  * quorum 计算 HotStuff BFT 法定人数。
  */
-export function quorum(state: HotStuffState): number {
+function quorum(state: HotStuffState): number {
   return bftQuorumThreshold(state.replicas.length);
 }
 

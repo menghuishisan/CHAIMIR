@@ -202,3 +202,12 @@ const (
 	// VolumeSnapshotEnabled 表示仅显式开启快照时纳入。
 	VolumeSnapshotEnabled = "snapshot_enabled"
 )
+
+const (
+	// ChainOperationDeploy 表示标准链能力的部署动作。
+	ChainOperationDeploy = "deploy"
+	// ChainOperationTransaction 表示标准链能力的交易动作。
+	ChainOperationTransaction = "transaction"
+	// ChainOperationQuery 表示标准链能力的查询动作。
+	ChainOperationQuery = "query"
+)

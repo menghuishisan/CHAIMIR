@@ -138,3 +138,25 @@ LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 SELECT count(*)::bigint
 FROM backup_record
 WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint);
+
+-- name: CreateAuditExportRequest :one
+INSERT INTO audit_export_request (transfer_task_id, tenant_id, account_id, query_snapshot, next_check_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, now(), now(), now())
+RETURNING transfer_task_id, tenant_id, account_id, query_snapshot, next_check_at, created_at, updated_at;
+
+-- name: ListDueAuditExportRequests :many
+SELECT transfer_task_id, tenant_id, account_id, query_snapshot, next_check_at, created_at, updated_at
+FROM audit_export_request
+WHERE next_check_at <= $1
+ORDER BY next_check_at ASC, created_at ASC
+LIMIT $2;
+
+-- name: SetAuditExportRequestNextCheck :one
+UPDATE audit_export_request
+SET next_check_at = $3, updated_at = now()
+WHERE transfer_task_id = $1 AND tenant_id = $2
+RETURNING transfer_task_id, tenant_id, account_id, query_snapshot, next_check_at, created_at, updated_at;
+
+-- name: DeleteAuditExportRequest :exec
+DELETE FROM audit_export_request
+WHERE transfer_task_id = $1 AND tenant_id = $2;

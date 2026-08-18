@@ -8,7 +8,7 @@ import { TriangleAlert } from 'lucide-react'
 import { Button } from '@chaimir/ui'
 import { useLocation } from 'react-router'
 import { AppStatusScreen } from '../AppStatusScreen'
-import { traceIdOf } from '../../utils/userFacingError'
+import { errorDiagnostics, traceIdOf } from '../../utils/userFacingError'
 
 interface RouteErrorBoundaryProps {
   /** 路由标识:变化即重置错误态 */
@@ -50,7 +50,7 @@ class ErrorBoundaryView extends React.Component<RouteErrorBoundaryProps, RouteEr
 
   componentDidCatch(error: unknown, info: React.ErrorInfo): void {
     // 渲染异常必须留下可定位记录:不吞错(§8),同时不把技术细节展示给用户
-    console.error('页面渲染失败', error, info.componentStack)
+    console.error('页面渲染失败', { error: errorDiagnostics(error), component_stack: info.componentStack })
   }
 
   render(): React.ReactNode {

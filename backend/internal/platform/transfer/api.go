@@ -13,7 +13,7 @@ import (
 
 // RegisterRoutes 注册统一导入导出中心 HTTP API。
 func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles contracts.IdentityService) error {
-	if r == nil || svc == nil || authn == nil {
+	if r == nil || svc == nil || authn == nil || roles == nil {
 		return apperr.ErrHTTPServiceMissing
 	}
 	api := transferAPI{svc: svc, roles: roles}
@@ -81,7 +81,7 @@ func (a transferAPI) downloadGrant(c *gin.Context) {
 		var err error
 		tenantAdmin, err = a.isSchoolAdmin(c, id.AccountID)
 		if err != nil {
-			httpx.Write(c, gin.H{}, err)
+			httpx.Write(c, struct{}{}, err)
 			return
 		}
 	}
@@ -93,7 +93,7 @@ func (a transferAPI) downloadGrant(c *gin.Context) {
 func currentTenantIdentity(c *gin.Context) (tenant.Identity, bool) {
 	id, ok := tenant.FromContext(c.Request.Context())
 	if !ok || id.AccountID <= 0 {
-		httpx.Write(c, gin.H{}, apperr.ErrUnauthorized)
+		httpx.Write(c, struct{}{}, apperr.ErrUnauthorized)
 		return tenant.Identity{}, false
 	}
 	if id.IsPlatform {
@@ -101,7 +101,7 @@ func currentTenantIdentity(c *gin.Context) (tenant.Identity, bool) {
 		return id, true
 	}
 	if id.TenantID <= 0 {
-		httpx.Write(c, gin.H{}, apperr.ErrUnauthorized)
+		httpx.Write(c, struct{}{}, apperr.ErrUnauthorized)
 		return tenant.Identity{}, false
 	}
 	return id, true
@@ -110,7 +110,7 @@ func currentTenantIdentity(c *gin.Context) (tenant.Identity, bool) {
 // isSchoolAdmin 判断当前账号是否可读取同租户内其他账号任务,角色查询失败必须显式返回。
 func (a transferAPI) isSchoolAdmin(c *gin.Context, accountID int64) (bool, error) {
 	if a.roles == nil {
-		return false, nil
+		return false, apperr.ErrHTTPServiceMissing
 	}
 	ok, err := a.roles.HasRole(c.Request.Context(), accountID, contracts.RoleSchoolAdmin)
 	if err != nil {

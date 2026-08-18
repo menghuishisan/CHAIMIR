@@ -42,3 +42,14 @@ export function userFacingErrorMessage(error: unknown, defaultMessage: string): 
 export function traceIdOf(error: unknown): string | undefined {
   return error instanceof ApiError ? error.traceId : undefined
 }
+
+/**
+ * errorDiagnostics 生成可安全写入浏览器控制台的错误摘要。
+ * 不保留 Axios 配置、响应体或异常 message,避免把令牌、内部地址和服务端细节带入日志。
+ */
+export function errorDiagnostics(error: unknown): Record<string, string | undefined> {
+  if (error instanceof ApiError) {
+    return { kind: 'api', code: error.code, trace_id: error.traceId }
+  }
+  return { kind: error instanceof Error ? error.name : typeof error }
+}

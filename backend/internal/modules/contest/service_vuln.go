@@ -368,7 +368,7 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 	if err := jsonx.DecodeStrict(raw, &payload); err != nil {
 		return nil, apperr.ErrContestVulnSourceJSONInvalid.WithCause(err)
 	}
-	nodes := selectCases(payload, stringFromMap(cfg, "cases_path"))
+	nodes := selectCases(payload, strings.TrimSpace(jsonx.StringField(cfg, "cases_path")))
 	mapping := jsonx.StringMapFromAny(cfg["mapping"])
 	out := make([]VulnProblem, 0, len(nodes))
 	for _, node := range nodes {
@@ -440,15 +440,15 @@ func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID
 // runVulnChainStep 调用 M2 链能力执行预验证步骤。
 func (s *Service) runVulnChainStep(ctx context.Context, tenantID, sandboxID int64, sourceRef string, step map[string]any) error {
 	switch strings.ToLower(strings.TrimSpace(jsonx.StringFromAny(step["op"]))) {
-	case "deploy":
+	case VulnChainOperationDeploy:
 		_, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Payload: jsonx.ObjectFromAny(step["payload"])})
 		return err
-	case "tx":
+	case VulnChainOperationTx:
 		_, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Payload: jsonx.ObjectFromAny(step["payload"])})
 		return err
-	case "reset":
+	case VulnChainOperationReset:
 		return s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef})
-	case "query", "":
+	case VulnChainOperationQuery, "":
 		return nil
 	default:
 		return apperr.ErrContestVulnProblemInvalid
@@ -462,12 +462,18 @@ func (s *Service) checkVulnAssertions(ctx context.Context, tenantID, sandboxID i
 	}
 	out := make([]map[string]any, 0, len(assertions))
 	for _, raw := range assertions {
-		assertion := chainassert.FromMap(raw)
+		assertion, err := chainassert.FromMap(raw)
+		if err != nil {
+			return nil, apperr.ErrContestVulnProblemInvalid.WithCause(err)
+		}
 		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Target: assertion.Target})
 		if err != nil {
 			return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
 		}
-		result := chainassert.Check(assertion, actual)
+		result, err := chainassert.Check(assertion, actual)
+		if err != nil {
+			return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
+		}
 		passed := result.Passed
 		if !positive {
 			passed = !result.Passed
@@ -534,11 +540,11 @@ func vulnSourceFromRequest(req VulnSourceRequest, tenantID, generatedID int64) (
 
 // validateVulnSourceConfig 校验 HTTP 源配置边界。
 func validateVulnSourceConfig(cfg map[string]any, defaultTimeout int) error {
-	endpoint := stringFromMap(cfg, "endpoint")
+	endpoint := strings.TrimSpace(jsonx.StringField(cfg, "endpoint"))
 	if _, err := netx.ValidatePublicHTTPURL(endpoint); err != nil {
 		return apperr.ErrContestVulnSourceInvalid
 	}
-	method := strings.ToUpper(stringFromMap(cfg, "method"))
+	method := strings.ToUpper(strings.TrimSpace(jsonx.StringField(cfg, "method")))
 	if method == "" {
 		method = http.MethodGet
 	}
@@ -657,12 +663,4 @@ func vulnRuntimeFromAny(v any, defaultValue int16) int16 {
 		return x
 	}
 	return defaultValue
-}
-
-// stringFromMap 安全读取 JSON map 中的字符串字段。
-func stringFromMap(m map[string]any, key string) string {
-	if v, ok := m[key].(string); ok {
-		return strings.TrimSpace(v)
-	}
-	return ""
 }

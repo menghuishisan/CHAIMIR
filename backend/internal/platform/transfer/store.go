@@ -4,7 +4,6 @@ package transfer
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/intx"
@@ -19,9 +18,11 @@ import (
 type Store interface {
 	CreateTask(ctx context.Context, task Task) (Task, error)
 	GetTask(ctx context.Context, tenantID, taskID int64) (Task, error)
+	DeletePendingTask(ctx context.Context, tenantID, taskID int64) error
 	ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, int64, error)
-	UpdateTask(ctx context.Context, task Task) (Task, error)
-	ClaimDueTasks(ctx context.Context, tenantID int64, nowAt time.Time, limit int32) ([]Task, error)
+	ClaimTask(ctx context.Context, task Task) (Task, error)
+	CompleteTask(ctx context.Context, task Task, leaseToken string) (Task, error)
+	FailTask(ctx context.Context, task Task, leaseToken string) (Task, error)
 }
 
 // ListTasksQuery 描述当前账号查询统一导入导出任务的分页与过滤条件。
@@ -84,6 +85,8 @@ func (s *store) CreateTask(ctx context.Context, task Task) (Task, error) {
 			UpdatedAt:           timex.RequiredTimestamptz(task.UpdatedAt),
 			CompletedAt:         timex.Timestamptz(task.CompletedAt),
 			NextAttemptAfter:    timex.Timestamptz(task.NextAttemptAfter),
+			LeaseToken:          task.LeaseToken,
+			LeaseUntil:          timex.Timestamptz(task.LeaseUntil),
 		})
 		if err != nil {
 			return err
@@ -115,6 +118,20 @@ func (s *store) GetTask(ctx context.Context, tenantID, taskID int64) (Task, erro
 		return Task{}, mapStoreError(err)
 	}
 	return out, nil
+}
+
+// DeletePendingTask 删除尚未被 worker 领取的任务，仅用于模块请求落库失败时的补偿。
+func (s *store) DeletePendingTask(ctx context.Context, tenantID, taskID int64) error {
+	if s.db == nil {
+		return fmt.Errorf("transfer store 缺少 database")
+	}
+	err := s.withTaskTx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return sqlcgen.New(tx).DeletePendingTransferTask(ctx, sqlcgen.DeletePendingTransferTaskParams{TenantID: tenantID, ID: taskID})
+	})
+	if err != nil {
+		return mapStoreError(err)
+	}
+	return nil
 }
 
 // ListTasks 查询当前账号名下的导入导出任务,并在同一事务内取回符合条件的总数。
@@ -156,31 +173,19 @@ func (s *store) ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, in
 	return out, total, nil
 }
 
-// UpdateTask 更新导入导出任务状态、重试信息和产物引用。
-func (s *store) UpdateTask(ctx context.Context, task Task) (Task, error) {
+// ClaimTask 使用 task ID 和状态条件原子领取模块 worker 的任务。
+func (s *store) ClaimTask(ctx context.Context, task Task) (Task, error) {
 	if s.db == nil {
 		return Task{}, fmt.Errorf("transfer store 缺少 database")
 	}
-	attemptCount, maxAttempts, err := taskAttemptCounts(task)
-	if err != nil {
-		return Task{}, err
-	}
 	var out Task
-	err = s.withTaskTx(ctx, task.TenantID, func(ctx context.Context, tx pgx.Tx) error {
-		row, err := sqlcgen.New(tx).UpdateTransferTask(ctx, sqlcgen.UpdateTransferTaskParams{
-			TenantID:            task.TenantID,
-			ID:                  task.TaskID,
-			Status:              string(task.Status),
-			AttemptCount:        attemptCount,
-			MaxAttempts:         maxAttempts,
-			LastError:           task.LastError,
-			ArtifactRef:         task.Artifact.ObjectRef,
-			ArtifactSize:        task.Artifact.Size,
-			ArtifactContentType: task.Artifact.ContentType,
-			ArtifactFileName:    task.Artifact.FileName,
-			UpdatedAt:           timex.RequiredTimestamptz(task.UpdatedAt),
-			CompletedAt:         timex.Timestamptz(task.CompletedAt),
-			NextAttemptAfter:    timex.Timestamptz(task.NextAttemptAfter),
+	err := s.withTaskTx(ctx, task.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		row, err := sqlcgen.New(tx).ClaimTransferTask(ctx, sqlcgen.ClaimTransferTaskParams{
+			TenantID:   task.TenantID,
+			ID:         task.TaskID,
+			LeaseToken: task.LeaseToken,
+			UpdatedAt:  timex.RequiredTimestamptz(task.UpdatedAt),
+			LeaseUntil: timex.RequiredTimestamptz(task.LeaseUntil),
 		})
 		if err != nil {
 			return err
@@ -189,33 +194,55 @@ func (s *store) UpdateTask(ctx context.Context, task Task) (Task, error) {
 		return nil
 	})
 	if err != nil {
-		return Task{}, mapStoreError(err)
+		return Task{}, mapTransitionError(err)
 	}
 	return out, nil
 }
 
-// ClaimDueTasks 供后台执行器批量领取到期任务。
-func (s *store) ClaimDueTasks(ctx context.Context, tenantID int64, nowAt time.Time, limit int32) ([]Task, error) {
+// CompleteTask 仅允许持有有效租约的 worker 提交产物。
+func (s *store) CompleteTask(ctx context.Context, task Task, leaseToken string) (Task, error) {
 	if s.db == nil {
-		return nil, fmt.Errorf("transfer store 缺少 database")
+		return Task{}, fmt.Errorf("transfer store 缺少 database")
 	}
-	if tenantID < 0 || nowAt.IsZero() {
-		return nil, apperr.ErrTransferTaskInvalid
-	}
-	if limit <= 0 {
-		return nil, apperr.ErrTransferTaskInvalid
-	}
-	var out []Task
-	err := s.withTaskTx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := sqlcgen.New(tx).ClaimDueTransferTasks(ctx, sqlcgen.ClaimDueTransferTasksParams{ClaimTenantID: tenantID, NowAt: timex.Timestamptz(nowAt), BatchLimit: limit})
+	var out Task
+	err := s.withTaskTx(ctx, task.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		row, err := sqlcgen.New(tx).CompleteTransferTask(ctx, sqlcgen.CompleteTransferTaskParams{
+			TenantID: task.TenantID, ID: task.TaskID, LeaseToken: leaseToken,
+			ArtifactRef: task.Artifact.ObjectRef, ArtifactSize: task.Artifact.Size,
+			ArtifactContentType: task.Artifact.ContentType, ArtifactFileName: task.Artifact.FileName,
+			UpdatedAt: timex.RequiredTimestamptz(task.UpdatedAt), CompletedAt: timex.RequiredTimestamptz(task.CompletedAt),
+		})
 		if err != nil {
 			return err
 		}
-		out = tasksFromRows(rows)
+		out = taskFromRow(row)
 		return nil
 	})
 	if err != nil {
-		return nil, mapStoreError(err)
+		return Task{}, mapTransitionError(err)
+	}
+	return out, nil
+}
+
+// FailTask 仅允许持有有效租约的 worker 进入重试或最终失败状态。
+func (s *store) FailTask(ctx context.Context, task Task, leaseToken string) (Task, error) {
+	if s.db == nil {
+		return Task{}, fmt.Errorf("transfer store 缺少 database")
+	}
+	var out Task
+	err := s.withTaskTx(ctx, task.TenantID, func(ctx context.Context, tx pgx.Tx) error {
+		row, err := sqlcgen.New(tx).FailTransferTask(ctx, sqlcgen.FailTransferTaskParams{
+			TenantID: task.TenantID, ID: task.TaskID, LeaseToken: leaseToken, LastError: task.LastError,
+			UpdatedAt: timex.RequiredTimestamptz(task.UpdatedAt), CompletedAt: timex.Timestamptz(task.CompletedAt), NextAttemptAfter: timex.Timestamptz(task.NextAttemptAfter),
+		})
+		if err != nil {
+			return err
+		}
+		out = taskFromRow(row)
+		return nil
+	})
+	if err != nil {
+		return Task{}, mapTransitionError(err)
 	}
 	return out, nil
 }
@@ -238,6 +265,17 @@ func mapStoreError(err error) error {
 	}
 	if db.IsNoRows(err) {
 		return apperr.ErrTransferTaskNotFound
+	}
+	return apperr.ErrTransferTaskInvalid.WithCause(err)
+}
+
+// mapTransitionError 不把租约失效伪装成任务不存在，调用方据此停止当前 worker 的旧执行结果。
+func mapTransitionError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if db.IsNoRows(err) {
+		return apperr.ErrTransferTaskInvalid
 	}
 	return apperr.ErrTransferTaskInvalid.WithCause(err)
 }

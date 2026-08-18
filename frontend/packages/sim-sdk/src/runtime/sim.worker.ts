@@ -133,7 +133,7 @@ function reportRuntimeError(request: WorkerRequest, error: unknown): void {
   console.error('sim_worker_error', {
     operation: request.type,
     request_id: request.requestId,
-    error: error instanceof Error ? error.message : String(error),
+    error: { kind: error instanceof Error ? error.name : typeof error },
   });
   postToMain({ type: 'error', requestId: request.requestId, message: runtimeErrorMessage(error) });
 }

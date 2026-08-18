@@ -134,10 +134,13 @@ func currentServiceTenant(ctx context.Context) (int64, error) {
 	return id.TenantID, nil
 }
 
-// isSchoolAdmin 判断当前账号是否具备学校管理员权限。
-func (s *Service) isSchoolAdmin(ctx context.Context, accountID int64) bool {
+// isSchoolAdmin 判断当前账号是否具备学校管理员权限,并显式保留角色服务错误链。
+func (s *Service) isSchoolAdmin(ctx context.Context, accountID int64) (bool, error) {
 	ok, err := s.roles.HasRole(ctx, accountID, contracts.RoleSchoolAdmin)
-	return err == nil && ok
+	if err != nil {
+		return false, apperr.ErrForbidden.WithCause(err)
+	}
+	return ok, nil
 }
 
 // loadContestForManage 读取竞赛并校验教师或学校管理员管理权限。
@@ -146,7 +149,11 @@ func (s *Service) loadContestForManage(ctx context.Context, tx TxStore, tenantID
 	if err != nil {
 		return Contest{}, err
 	}
-	if err := canManageContest(accountID, s.isSchoolAdmin(ctx, accountID), item); err != nil {
+	isSchoolAdmin, err := s.isSchoolAdmin(ctx, accountID)
+	if err != nil {
+		return Contest{}, err
+	}
+	if err := canManageContest(accountID, isSchoolAdmin, item); err != nil {
 		return Contest{}, err
 	}
 	return item, nil
@@ -161,7 +168,11 @@ func (s *Service) loadContestForRead(ctx context.Context, tx TxStore, tenantID, 
 	if item.Status != ContestStatusDraft {
 		return item, nil
 	}
-	if err := canManageContest(accountID, s.isSchoolAdmin(ctx, accountID), item); err != nil {
+	isSchoolAdmin, err := s.isSchoolAdmin(ctx, accountID)
+	if err != nil {
+		return Contest{}, err
+	}
+	if err := canManageContest(accountID, isSchoolAdmin, item); err != nil {
 		return Contest{}, err
 	}
 	return item, nil

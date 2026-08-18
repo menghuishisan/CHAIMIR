@@ -13,7 +13,7 @@ import type { SimWorkerClient } from '@chaimir/sim-sdk'
 import type { SimActionLog } from '@chaimir/api-client'
 
 /** ReplayCommand 是一条待复现的记录动作:Worker 事件入参 + 它发生时的推演时刻。 */
-export interface ReplayCommand {
+interface ReplayCommand {
   eventType: string
   atTick: number
   payload: JsonObject
@@ -21,7 +21,7 @@ export interface ReplayCommand {
 }
 
 /** ReplayMove 是复现记录时的一次 Worker 命令:推进一个推演时刻,或注入一条记录动作。 */
-export type ReplayMove = { kind: 'tick' } | { kind: 'action'; command: ReplayCommand }
+type ReplayMove = { kind: 'tick' } | { kind: 'action'; command: ReplayCommand }
 
 /**
  * replayCommands 在 DTO 边界把后端动作日志收敛成 Worker 事件入参。
@@ -29,7 +29,7 @@ export type ReplayMove = { kind: 'tick' } | { kind: 'action'; command: ReplayCom
  * (见 sim-sdk 的 sim.worker.ts userEventInput),复现时按同一约定取回顶层 target。
  * 后端已保证动作按 seq 连续、at_tick 单调不减,这里不排序也不补洞。
  */
-export function replayCommands(actions: SimActionLog[]): ReplayCommand[] {
+function replayCommands(actions: SimActionLog[]): ReplayCommand[] {
   return actions.map((action) => {
     const payload = action.payload as JsonObject
     return {

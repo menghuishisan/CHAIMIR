@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { posPhases } from './model';
 
-export const posSource = [
+const posSource = [
   'function proofOfStake(slot) {',
   '  seed = mixRandomness(history, slot);',
   '  proposer = weightedSelect(activeValidators, seed);',

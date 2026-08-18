@@ -1,6 +1,6 @@
 // Contest API：对齐后端 M8 竞赛模块唯一 HTTP 契约。
 
-import { ApiClient } from '../client'
+import { ApiClient, encodePathSegment } from '../client'
 import type { ContestStatus, VulnProblemStatus } from '../constants/contest'
 import type { PaginatedResponse, SnowflakeID } from '../types/common'
 import type {
@@ -66,7 +66,7 @@ export class ContestApi {
    * 竞赛详情页深链、刷新以及退出竞赛答题/对局回放后的回落都用这条。
    */
   async getStudentContest(contestId: string): Promise<Contest> {
-    return this.client.get(`/contest/student/contests/${contestId}`)
+    return this.client.get(`/contest/student/contests/${encodePathSegment(contestId)}`)
   }
 
   /**
@@ -80,70 +80,70 @@ export class ContestApi {
    * 更新草稿竞赛。
    */
   async updateContest(contestId: string, data: ContestRequest): Promise<Contest> {
-    return this.client.patch(`/contest/contests/${contestId}`, data)
+    return this.client.patch(`/contest/contests/${encodePathSegment(contestId)}`, data)
   }
 
   /**
    * 发布竞赛。
    */
   async publishContest(contestId: string): Promise<Contest> {
-    return this.client.post(`/contest/contests/${contestId}/publish`)
+    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/publish`)
   }
 
   /**
    * 开始竞赛。
    */
   async startContest(contestId: string): Promise<Contest> {
-    return this.client.post(`/contest/contests/${contestId}/start`)
+    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/start`)
   }
 
   /**
    * 进入封榜期。
    */
   async freezeContest(contestId: string): Promise<Contest> {
-    return this.client.post(`/contest/contests/${contestId}/freeze`)
+    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/freeze`)
   }
 
   /**
    * 结束竞赛。
    */
   async endContest(contestId: string): Promise<Contest> {
-    return this.client.post(`/contest/contests/${contestId}/end`)
+    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/end`)
   }
 
   /**
    * 归档竞赛并生成最终榜单快照。
    */
   async archiveContest(contestId: string): Promise<ResultSnapshot> {
-    return this.client.post(`/contest/contests/${contestId}/archive`)
+    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/archive`)
   }
 
   /**
    * 获取竞赛最终榜单快照。
    */
   async getResultSnapshot(contestId: string): Promise<ResultSnapshot> {
-    return this.client.get(`/contest/contests/${contestId}/result-snapshot`)
+    return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/result-snapshot`)
   }
 
   /**
    * 获取竞赛题面列表。
    */
   async getProblems(contestId: string): Promise<ContestProblem[]> {
-    return this.client.get(`/contest/contests/${contestId}/problems`)
+    return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/problems`)
   }
 
   /**
    * 添加或更新竞赛题目。
    */
   async addProblem(contestId: string, data: ContestProblemRequest): Promise<ContestProblem> {
-    return this.client.post(`/contest/contests/${contestId}/problems`, data)
+    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/problems`, data)
   }
 
   /**
    * 学生报名或创建队伍。
    */
   async signup(contestId: string, data: SignupRequest): Promise<ContestTeam> {
-    return this.client.post(`/contest/contests/${contestId}/signup`, data)
+    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/signup`, data)
   }
 
   /**
@@ -151,82 +151,82 @@ export class ContestApi {
    * 只按邀请码定位队伍:队伍编号对学生是不可知的内部标识,不要求页面先取到它。
    */
   async joinTeam(contestId: string, data: JoinTeamRequest): Promise<ContestTeam> {
-    return this.client.post(`/contest/contests/${contestId}/join-team`, data)
+    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/join-team`, data)
   }
 
   /**
    * 获取队伍信息。
    */
   async getTeam(teamId: string): Promise<ContestTeam> {
-    return this.client.get(`/contest/teams/${teamId}`)
+    return this.client.get(`/contest/teams/${encodePathSegment(teamId)}`)
   }
 
   /**
    * 锁定队伍名单。
    */
   async lockTeam(teamId: string): Promise<ContestTeam> {
-    return this.client.post(`/contest/teams/${teamId}/lock`)
+    return this.client.post(`/contest/teams/${encodePathSegment(teamId)}/lock`)
   }
 
   /**
    * 创建解题赛实操环境。
    */
   async createEnv(contestId: string, problemId: string, data: EnvRequest): Promise<EnvSummary> {
-    return this.client.post(`/contest/contests/${contestId}/problems/${problemId}/env`, data)
+    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/problems/${encodePathSegment(problemId)}/env`, data)
   }
 
   /**
    * 提交解题赛答案或代码引用。
    */
   async submitSolve(contestId: string, problemId: string, data: ContestSubmitRequest): Promise<ContestSubmission> {
-    return this.client.post(`/contest/contests/${contestId}/problems/${problemId}/submit`, data)
+    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/problems/${encodePathSegment(problemId)}/submit`, data)
   }
 
   /**
    * 获取提交详情。
    */
   async getSubmission(submissionId: string): Promise<ContestSubmission> {
-    return this.client.get(`/contest/submissions/${submissionId}`)
+    return this.client.get(`/contest/submissions/${encodePathSegment(submissionId)}`)
   }
 
   /**
    * 提交对抗赛参战物。
    */
   async submitBattleEntry(contestId: string, data: BattleEntryRequest): Promise<BattleEntry> {
-    return this.client.post(`/contest/contests/${contestId}/battle/entry`, data)
+    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/battle/entry`, data)
   }
 
   /**
    * 查询当前队伍参战历史。
    */
   async listBattleEntries(contestId: string): Promise<BattleEntry[]> {
-    return this.client.get(`/contest/contests/${contestId}/battle/entries`)
+    return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/battle/entries`)
   }
 
   /**
    * 查询当前队伍对局列表。
    */
   async listBattleMatches(contestId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<BattleMatch>> {
-    return this.client.get(`/contest/contests/${contestId}/battle/matches`, params)
+    return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/battle/matches`, params)
   }
 
   /**
    * 获取对局回放引用。
    */
   async getBattleReplay(matchId: string): Promise<BattleReplayRef> {
-    return this.client.get(`/contest/matches/${matchId}/replay`)
+    return this.client.get(`/contest/matches/${encodePathSegment(matchId)}/replay`)
   }
 
   /** 为已授权的对局回放签发统一文件服务取件授权。 */
   async issueBattleReplayDownloadGrant(matchId: string): Promise<BattleReplayDownloadGrant> {
-    return this.client.post(`/contest/matches/${matchId}/replay/download-grant`)
+    return this.client.post(`/contest/matches/${encodePathSegment(matchId)}/replay/download-grant`)
   }
 
   /**
    * 获取排行榜。
    */
   async getLadder(contestId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<LadderRank>> {
-    return this.client.get(`/contest/contests/${contestId}/ladder`, params)
+    return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/ladder`, params)
   }
 
   /**
@@ -250,21 +250,21 @@ export class ContestApi {
     contestId: string,
     params: { problem_id: SnowflakeID; code_hash?: string; exclude_source_ref?: string; threshold?: number }
   ): Promise<CheatSuspect[]> {
-    return this.client.get(`/contest/contests/${contestId}/cheat-suspects`, params)
+    return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/cheat-suspects`, params)
   }
 
   /**
    * 查询违规处理记录。
    */
   async listCheatRecords(contestId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<CheatRecord>> {
-    return this.client.get(`/contest/contests/${contestId}/cheat-records`, params)
+    return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/cheat-records`, params)
   }
 
   /**
    * 创建违规处理记录。
    */
   async createCheatRecord(contestId: string, data: CheatRecordRequest): Promise<CheatRecord> {
-    return this.client.post(`/contest/contests/${contestId}/cheat-records`, data)
+    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/cheat-records`, data)
   }
 
   /**
@@ -295,7 +295,7 @@ export class ContestApi {
    * 同步漏洞源案例。
    */
   async syncVulnSource(sourceId: string): Promise<VulnProblem[]> {
-    return this.client.post(`/contest/vuln-sources/${sourceId}/sync`)
+    return this.client.post(`/contest/vuln-sources/${encodePathSegment(sourceId)}/sync`)
   }
 
   /**
@@ -318,13 +318,13 @@ export class ContestApi {
    * 执行漏洞题预验证。
    */
   async prevalidateVulnProblem(problemId: string, data: VulnPrevalidateRequest): Promise<VulnProblem> {
-    return this.client.post(`/contest/vuln-problems/${problemId}/prevalidate`, data)
+    return this.client.post(`/contest/vuln-problems/${encodePathSegment(problemId)}/prevalidate`, data)
   }
 
   /**
    * 固化漏洞题到题库。
    */
   async finalizeVulnProblem(problemId: string): Promise<VulnProblem> {
-    return this.client.post(`/contest/vuln-problems/${problemId}/finalize`)
+    return this.client.post(`/contest/vuln-problems/${encodePathSegment(problemId)}/finalize`)
   }
 }

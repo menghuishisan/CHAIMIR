@@ -4,7 +4,7 @@ import type { CodeTraceDef } from '../../../types';
 import { phaseNarrative } from '../../packageTools';
 import { digitalSignaturePhases } from './model';
 
-export const digitalSignatureSource = [
+const digitalSignatureSource = [
   'function verifySignedMessage(message, nonce, signature) {',
   '  digest = H(message, nonce);',
   '  signer = recover(digest, signature);',

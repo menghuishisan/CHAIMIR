@@ -49,7 +49,7 @@ func (a authAPI) loginPlatform(c *gin.Context) {
 	}
 	out, err := a.svc.LoginPlatform(c.Request.Context(), req, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	a.writeLoginResponse(c, out, req.Remember)
@@ -63,7 +63,7 @@ func (a authAPI) loginPhone(c *gin.Context) {
 	}
 	out, err := a.svc.LoginPhone(c.Request.Context(), req, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	a.writeLoginResponse(c, out, req.Remember)
@@ -77,7 +77,7 @@ func (a authAPI) loginNo(c *gin.Context) {
 	}
 	out, err := a.svc.LoginNo(c.Request.Context(), req, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	a.writeLoginResponse(c, out, req.Remember)
@@ -91,7 +91,7 @@ func (a authAPI) loginSMS(c *gin.Context) {
 	}
 	out, err := a.svc.LoginSMS(c.Request.Context(), req, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	a.writeLoginResponse(c, out, req.Remember)
@@ -107,27 +107,27 @@ func (a authAPI) sendSMS(c *gin.Context) {
 		return
 	}
 	if err := a.svc.SendSMS(c.Request.Context(), req); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // refreshToken 从 HttpOnly cookie 读取并轮转 Refresh Token，令牌不接受 JSON 输入。
 func (a authAPI) refreshToken(c *gin.Context) {
 	if !auth.ValidRefreshRequestHeader(c.GetHeader(auth.RefreshRequestHeader)) {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentitySessionInvalid)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentitySessionInvalid)
 		return
 	}
 	refreshToken, persistent, ok := auth.RefreshCookieFromRequest(c)
 	if !ok {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentitySessionInvalid)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentitySessionInvalid)
 		return
 	}
 	out, err := a.svc.RefreshToken(c.Request.Context(), refreshToken, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
 		a.authn.ClearRefreshCookie(c)
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	a.writeLoginResponse(c, out, persistent)
@@ -151,7 +151,7 @@ func (a authAPI) issuePathTicket(c *gin.Context, issue func(auth.SessionIdentity
 	}
 	id, ok := tenant.FromContext(c.Request.Context())
 	if !ok {
-		httpx.Write(c, gin.H{}, apperr.ErrIdentitySessionContextMissing)
+		httpx.Write(c, struct{}{}, apperr.ErrIdentitySessionContextMissing)
 		return
 	}
 	sessionID, ok := currentSessionID(c)
@@ -166,7 +166,7 @@ func (a authAPI) issuePathTicket(c *gin.Context, issue func(auth.SessionIdentity
 		Path:       req.Path,
 	})
 	if err != nil {
-		httpx.Write(c, gin.H{}, apperr.ErrUnauthorized.WithCause(err))
+		httpx.Write(c, struct{}{}, apperr.ErrUnauthorized.WithCause(err))
 		return
 	}
 	httpx.Write(c, PathTicketResponse{Ticket: ticket, ExpiresAt: timex.RFC3339OrEmpty(expiresAt)}, nil)
@@ -179,10 +179,10 @@ func (a authAPI) resetPassword(c *gin.Context) {
 		return
 	}
 	if err := a.svc.ResetPassword(c.Request.Context(), req); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // activate 绑定激活码开通请求,激活码明文只进入 service 校验不落库。
@@ -193,7 +193,7 @@ func (a authAPI) activate(c *gin.Context) {
 	}
 	out, err := a.svc.Activate(c.Request.Context(), req)
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	a.writeLoginResponse(c, out, false)
@@ -206,28 +206,28 @@ func (a authAPI) logout(c *gin.Context) {
 		return
 	}
 	if err := a.svc.Logout(c.Request.Context(), id); err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	a.authn.ClearRefreshCookie(c)
-	httpx.Write(c, gin.H{}, nil)
+	httpx.Write(c, struct{}{}, nil)
 }
 
 // casLoginURL 生成 CAS 登录跳转地址,回调 origin 白名单校验由 service 执行。
 func (a authAPI) casLoginURL(c *gin.Context) {
 	out, err := a.svc.CASLoginURL(c.Request.Context(), c.Param("tenant_code"), c.Query("service"))
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
-	httpx.Write(c, gin.H{"redirect_url": out}, nil)
+	httpx.Write(c, CASLoginURLResponse{RedirectURL: out}, nil)
 }
 
 // casCallback 绑定 CAS 回调参数并委托 service 完成验票与名单匹配。
 func (a authAPI) casCallback(c *gin.Context) {
 	out, err := a.svc.CASCallback(c.Request.Context(), c.Param("tenant_code"), c.Query("ticket"), c.Query("service"), c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	a.writeLoginResponse(c, out, false)
@@ -241,7 +241,7 @@ func (a authAPI) ldapLogin(c *gin.Context) {
 	}
 	out, err := a.svc.LDAPLogin(c.Request.Context(), c.Param("tenant_code"), req, c.GetHeader("User-Agent"), c.ClientIP())
 	if err != nil {
-		httpx.Write(c, gin.H{}, err)
+		httpx.Write(c, struct{}{}, err)
 		return
 	}
 	a.writeLoginResponse(c, out, false)

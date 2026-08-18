@@ -11,6 +11,7 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Download, FileText, GraduationCap, Layers, MessageSquareWarning } from 'lucide-react'
 import {
+  PAGINATION_MAX_SIZE,
   TranscriptScope,
   type Course,
   type CourseGrade,
@@ -51,9 +52,6 @@ import { formatDateTime, formatGpa, formatScore } from '../../../../utils/format
 import { transcriptScopeLabel } from '../../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
-/** 课程名映射一次取回的课程条数上限:后端分页上限 100,足以覆盖一名学生的在读与历史课程。 */
-const COURSE_NAME_LOOKUP_SIZE = 100
-
 /** GradeView 是成绩中心一次读齐的数据。 */
 interface GradeView {
   semesters: Semester[]
@@ -77,7 +75,7 @@ export default function StudentGradesPage() {
         api.grade.listSemesters(),
         api.grade.studentGrades(studentId, semesterId || undefined),
         api.grade.studentGPA(studentId),
-        api.teaching.getCourses({ role: 'student', page: 1, size: COURSE_NAME_LOOKUP_SIZE }),
+        api.teaching.getCourses({ role: 'student', page: 1, size: PAGINATION_MAX_SIZE }),
       ]).then(([semesters, summary, history, courses]) => ({
         semesters,
         summary,

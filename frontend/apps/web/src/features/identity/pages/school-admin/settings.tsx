@@ -38,8 +38,9 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatDate } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { authModeLabel, deployModeLabel, TENANT_MODULE_OPTIONS } from '../../../../utils/labels/identity'
+import { authModeLabel, deployModeLabel } from '../../../../utils/labels/identity'
 import { readTenantModules, TENANT_MODULES_KEY } from '../../tenantModules'
+import { TENANT_MODULE_OPTIONS } from '../../options'
 
 /**
  * SchoolAdminSettingsPage 维护学校展示信息与开通策略。

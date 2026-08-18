@@ -33,7 +33,7 @@ export function reduceLatencyLossEvent(state: LatencyLossState, event: SimEvent,
 /**
  * advanceLatencyLoss 推进可靠传输阶段。
  */
-export function advanceLatencyLoss(state: LatencyLossState, event: SimEvent): LatencyLossState {
+function advanceLatencyLoss(state: LatencyLossState, event: SimEvent): LatencyLossState {
   if (state.phaseIndex === 4 && deliveredCount(state) < state.packets.length) {
     return recoverWindow({ ...state, tick: event.source === 'tick' ? state.tick + 1 : state.tick });
   }
@@ -57,7 +57,7 @@ export function allDelivered(state: LatencyLossState): CheckpointResult {
 /**
  * finalizeLatencyLossState 刷新可靠传输指标。
  */
-export function finalizeLatencyLossState(state: LatencyLossState): LatencyLossState {
+function finalizeLatencyLossState(state: LatencyLossState): LatencyLossState {
   const delivered = deliveredCount(state);
   const risk = state.packets.some((packet) => packet.dropped) ? 78 : 8;
   const samples = state.samples.concat({ x: state.tick + state.phaseIndex, coverage: Math.round((delivered / state.packets.length) * 100), risk, latency: averageLatency(state) }).slice(-24);

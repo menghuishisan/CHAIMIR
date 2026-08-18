@@ -1,6 +1,6 @@
 // 本文件提供共识仿真共享的可视化数据构造函数,不包含任何具体共识算法状态机。
 
-import type { ChartSeries, GraphEdge, GraphNode, LaneMessage, MatrixCell, PipelineStep } from '../../types';
+import type { ChartSeries, GraphEdge, GraphNode, LaneMessage, MatrixCell } from '../../types';
 
 export interface ViewNode {
   id: string;
@@ -55,33 +55,6 @@ export function graphEdges(messages: ViewMessage[]): GraphEdge[] {
  */
 export function laneMessages(messages: ViewMessage[], labelOf: (id: string) => string): LaneMessage[] {
   return messages.map((message) => ({ ...message, from: labelOf(message.from), to: labelOf(message.to) }));
-}
-
-/**
- * pipelineSteps 根据阶段序号生成流水线运行状态。
- */
-export function pipelineSteps(phases: ReadonlyArray<{ id: string; label: string; detail: string }>, activeIndex: number, failed = false): PipelineStep[] {
-  return phases.map((phase, index) => ({
-    id: phase.id,
-    label: phase.label,
-    detail: phase.detail,
-    status: index < activeIndex ? 'complete' : index === activeIndex ? (failed ? 'failed' : 'running') : 'pending',
-  }));
-}
-
-/**
- * processPipelineSteps 为共识过程流水线附加连续进度,避免各算法重复实现进度条逻辑。
- */
-export function processPipelineSteps(phases: ReadonlyArray<{ id: string; label: string; detail: string }>, activeIndex: number, currentTick: number, failed = false): PipelineStep[] {
-  return pipelineSteps(phases, activeIndex, failed).map((step, index) => ({
-    ...step,
-    process: {
-      startedAt: Math.max(0, currentTick - 1),
-      endedAt: currentTick + 1,
-      progress: index < activeIndex ? 1 : index === activeIndex ? 0.65 : 0,
-      label: step.detail,
-    },
-  }));
 }
 
 /**

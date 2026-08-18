@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strings"
 
 	"chaimir/pkg/apperr"
@@ -82,7 +83,7 @@ func RecoveryMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if v := recover(); v != nil {
-				responseErr := apperr.ErrPanicRecovered.WithCause(fmt.Errorf("panic: %v", v))
+				responseErr := apperr.ErrPanicRecovered.WithCause(fmt.Errorf("panic: %v\n%s", v, debug.Stack()))
 				Fail(c, responseErr)
 				c.Abort()
 			}
@@ -111,8 +112,8 @@ func Fail(c *gin.Context, err error) {
 	if !ok {
 		ae = apperr.ErrUnhandledFailure.WithCause(err)
 	}
-	logging.ErrorContext(c.Request.Context(), "request failed", ae.LogString(), errorCodeAttr(ae.Code))
-	c.JSON(http.StatusOK, Envelope{Code: ae.Code, Message: ae.Message, TraceID: traceID})
+	logging.ErrorContext(c.Request.Context(), "request failed", ae.LogString(), errorCodeAttr(ae.UserCode()))
+	c.JSON(http.StatusOK, Envelope{Code: ae.UserCode(), Message: ae.UserMessage(), TraceID: traceID})
 }
 
 // NoRoute 将未注册路径收敛为统一错误信封,避免 Gin 默认 404 空响应。

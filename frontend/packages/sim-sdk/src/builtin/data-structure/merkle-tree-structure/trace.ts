@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { merkleTreePhases } from './model';
 
-export const merkleTreeSource = [
+const merkleTreeSource = [
   'function buildMerkleTree(items) {',
   '  leaves = sort(items).map(hash);',
   '  while leaves.length > 1:',

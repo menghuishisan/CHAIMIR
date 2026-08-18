@@ -30,7 +30,7 @@ export function reduceOracleEvent(state: OracleState, event: SimEvent, _context:
 /**
  * advanceOracle 按价格风险流程推进一个过程单元。
  */
-export function advanceOracle(state: OracleState, event: SimEvent): OracleState {
+function advanceOracle(state: OracleState, event: SimEvent): OracleState {
   const phaseIndex = Math.min(oraclePhases.length - 1, state.phaseIndex + 1);
   let next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: oraclePhases[phaseIndex].id };
   if (phaseIndex === 1 || phaseIndex === 2) next = manipulate(next);
@@ -41,7 +41,7 @@ export function advanceOracle(state: OracleState, event: SimEvent): OracleState 
 /**
  * finalizeOracleState 刷新价格风险、检查点和代码追踪。
  */
-export function finalizeOracleState(state: OracleState): OracleState {
+function finalizeOracleState(state: OracleState): OracleState {
   const deviation = Math.abs(state.spotPrice - state.referencePrice);
   const safe = deviation <= 5 && !state.manipulationActive;
   return { ...state, phase: oraclePhases[state.phaseIndex].label, actors: state.actors.map((actor) => ({ ...actor, status: actor.id === 'attacker' && state.manipulationActive ? 'danger' : actor.id === 'lending' && safe ? 'success' : actor.status })), explanation: explain(state.phaseIndex), metrics: { result: safe ? '价格受控' : '价格偏离', risk: safe ? 8 : 84, deviation }, checkpointValues: { safe }, _trace: { triggeredLines: traceLinesForOracle(state.lastTransition), variables: { spotPrice: state.spotPrice, twapPrice: state.twapPrice }, executionPath: `oracle/${state.lastTransition}` } };

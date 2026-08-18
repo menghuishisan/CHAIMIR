@@ -228,6 +228,9 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken, device, ip str
 	if err == nil {
 		return s.refreshTenantSession(ctx, tenantSession, device, ip)
 	}
+	if !isNoRows(err) {
+		return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+	}
 	var platformSession PlatformAuthSession
 	err = s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		row, err := tx.GetPlatformAuthSessionByRefreshHash(ctx, hash)
@@ -238,6 +241,9 @@ func (s *Service) RefreshToken(ctx context.Context, refreshToken, device, ip str
 		return nil
 	})
 	if err != nil {
+		if !isNoRows(err) {
+			return LoginResponse{}, apperr.ErrInternal.WithCause(err)
+		}
 		return LoginResponse{}, apperr.ErrIdentitySessionInvalid
 	}
 	return s.refreshPlatformSession(ctx, platformSession, device, ip)

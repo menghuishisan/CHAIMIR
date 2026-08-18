@@ -64,10 +64,10 @@ import {
   simComputeLabel,
   simPackageStatusLabel,
   simReviewResultLabel,
-  simReviewResultTone,
 } from '../../../../utils/labels/sim'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { SimPreviewFrames } from '../../SimPreviewFrames'
+import { SimPreviewFrames } from '../../components/SimPreviewFrames'
+import { simReviewResultTone } from '../../statusPresentation'
 
 /**
  * 审核状态筛选项:三个结论已经穷尽所有记录,故不给「全部」——

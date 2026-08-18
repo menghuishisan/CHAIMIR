@@ -15,6 +15,8 @@ import (
 	"chaimir/internal/platform/intx"
 )
 
+const clamAVResponseMaxBytes = 4096
+
 // ClamAVScanner 通过 clamd 的 INSTREAM 协议执行病毒扫描,供统一文件服务复用。
 type ClamAVScanner struct {
 	network string
@@ -97,11 +99,30 @@ func (s *ClamAVScanner) Scan(ctx context.Context, req ScanRequest) (result ScanR
 	}
 
 	// 第二步:解析扫描结果,把 FOUND/OK 收敛到统一 Verdict。
-	line, err := bufio.NewReader(conn).ReadString('\x00')
+	responseReader := bufio.NewReaderSize(conn, clamAVResponseMaxBytes)
+	line, err := readClamAVResponse(responseReader)
 	if err != nil {
 		return ScanResult{}, fmt.Errorf("读取 ClamAV 结果失败: %w", err)
 	}
 	return parseClamAVResponse(line)
+}
+
+// readClamAVResponse 读取带 NUL 结尾的扫描结果并限制协议响应大小,避免扫描服务异常输出耗尽内存。
+func readClamAVResponse(reader *bufio.Reader) (string, error) {
+	var response []byte
+	for {
+		chunk, err := reader.ReadSlice('\x00')
+		response = append(response, chunk...)
+		if len(response) > clamAVResponseMaxBytes {
+			return "", fmt.Errorf("ClamAV 响应超出大小上限")
+		}
+		if err == nil {
+			return string(response), nil
+		}
+		if err != bufio.ErrBufferFull {
+			return "", err
+		}
+	}
 }
 
 // parseClamAVResponse 把 clamd 原始响应解析成平台统一扫描结果。

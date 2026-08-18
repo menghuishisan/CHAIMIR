@@ -43,7 +43,7 @@ export function reduceOptimisticRollupEvent(state: OptimisticRollupState, event:
 }
 
 /** finalizeOptimisticRollupState 执行当前内置仿真的状态推进、事件计算或校验逻辑。 */
-export function finalizeOptimisticRollupState(state: OptimisticRollupState): OptimisticRollupState {
+function finalizeOptimisticRollupState(state: OptimisticRollupState): OptimisticRollupState {
   return {
     ...state,
     phase: optimisticRollupPhases[state.phaseIndex].label,

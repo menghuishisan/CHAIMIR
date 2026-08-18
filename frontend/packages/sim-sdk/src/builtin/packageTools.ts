@@ -3,8 +3,6 @@
 import type {
   ChainBlock,
   ChartSeries,
-  CheckpointDef,
-  CodeTraceDef,
   GraphEdge,
   GraphNode,
   InteractionDef,
@@ -13,29 +11,11 @@ import type {
   NarrativeStep,
   PatternBinding,
   PipelineStep,
-  ReducerContext,
-  SimEvent,
-  SimInitParams,
-  SimPackage,
   SimState,
   TeachingFrame,
   TreeNode,
 } from '../types';
 import { narrativeQuestions, type PhaseNarrativeQuestion } from './narrativeQuestions';
-
-export interface AlgorithmPackageSpec<TState extends SimState> {
-  meta: SimPackage<TState>['meta'];
-  init: (params: SimInitParams, seed: number) => TState;
-  step: (state: TState, event: SimEvent, context: ReducerContext) => TState;
-  attack: (state: TState, event: SimEvent, context: ReducerContext) => TState;
-  recover: (state: TState, event: SimEvent, context: ReducerContext) => TState;
-  select?: (state: TState, event: SimEvent) => TState;
-  render: (state: TState) => TeachingFrame;
-  interactions: InteractionDef[];
-  narrative: NarrativeStep[];
-  codeTrace: CodeTraceDef;
-  checkpoints: CheckpointDef[];
-}
 
 export interface TeachingFrameInput {
   summary: string;
@@ -50,28 +30,6 @@ export interface TeachingFrameInput {
   focus: TeachingFrame['focus'];
   layout: TeachingFrame['layout'];
   annotations?: TeachingFrame['annotations'];
-}
-
-/**
- * createAlgorithmPackage 只把算法专属函数装配成 M4 SimPackage,不共享算法实现。
- */
-export function createAlgorithmPackage<TState extends SimState>(spec: AlgorithmPackageSpec<TState>): SimPackage<TState> {
-  return {
-    meta: spec.meta,
-    initState: spec.init,
-    reducer: (state, event, context) => {
-      if (event.type === 'advance' || event.type === 'tick') return spec.step(state, event, context);
-      if (event.type === 'attack') return spec.attack(state, event, context);
-      if (event.type === 'recover') return spec.recover(state, event, context);
-      if (event.type === 'select' && spec.select) return spec.select(state, event);
-      return state;
-    },
-    interactions: spec.interactions,
-    render: spec.render,
-    narrative: spec.narrative,
-    codeTrace: spec.codeTrace,
-    checkpoints: spec.checkpoints,
-  };
 }
 
 /**
@@ -126,22 +84,6 @@ export function phaseNarrative(
           }
         : undefined,
   }));
-}
-
-/**
- * codeTrace 从伪代码和阶段行号生成代码追踪配置。
- */
-export function codeTrace(sourceCode: string[], phases: Array<{ label: string; reason: string; line: number }>): CodeTraceDef {
-  return {
-    sourceCode: sourceCode.join('\n'),
-    language: 'pseudocode',
-    lineMapping: phases.map((phase) => ({ line: phase.line, triggerCondition: `phase == ${phase.label}`, annotation: phase.reason, highlightStyle: 'normal' })),
-    variableWatch: [
-      { name: '阶段', extract: 'state.phase', format: 'string' },
-      { name: '结果', extract: 'state.metrics.result', format: 'string' },
-      { name: '风险', extract: 'state.metrics.risk', format: 'number' },
-    ],
-  };
 }
 
 /**

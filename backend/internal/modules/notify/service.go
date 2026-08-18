@@ -445,11 +445,11 @@ func (s *Service) filterAnnouncementsByRole(ctx context.Context, accountID int64
 		}
 		allowed := false
 		for _, roleNum := range item.TargetRoles {
-			role := contracts.RoleCode(roleNum)
-			if role == "unknown" {
+			roleCode := contracts.RoleCode(roleNum)
+			if _, ok := contracts.RoleNumber(roleCode); !ok {
 				continue
 			}
-			has, err := s.roles.HasRole(ctx, accountID, role)
+			has, err := s.roles.HasRole(ctx, accountID, roleCode)
 			if err != nil {
 				return nil, apperr.ErrNotifyAnnouncementNotFound.WithCause(err)
 			}

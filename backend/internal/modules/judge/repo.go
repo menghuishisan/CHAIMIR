@@ -401,7 +401,7 @@ func (s *txStore) CreateOutbox(ctx context.Context, id int64, tenantID, taskID i
 		TenantID ids.ID `json:"tenant_id"`
 		TraceID  string `json:"trace_id"`
 	}
-	if err := jsonx.DecodeStrict(raw, &meta); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(raw, &meta); err != nil {
 		return JudgeEventOutbox{}, apperr.ErrJudgeEventPublishFailed.WithCause(err)
 	}
 	if meta.TenantID.Int64() != tenantID || strings.TrimSpace(meta.TraceID) == "" {

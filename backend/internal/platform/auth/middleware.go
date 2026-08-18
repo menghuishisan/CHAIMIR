@@ -227,33 +227,6 @@ func (m *Manager) ServiceMiddleware() gin.HandlerFunc {
 	}
 }
 
-// PlatformOrServiceMiddleware 允许平台管理员 JWT 或内部服务 HMAC 任一通过。
-func (m *Manager) PlatformOrServiceMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if hasServiceAuthHeaders(c) {
-			if !m.injectServiceIdentity(c) {
-				return
-			}
-			c.Next()
-			return
-		}
-		claims, _, ok := m.accessClaims(c)
-		if !ok {
-			return
-		}
-		if !claims.IsPlatform {
-			response.Fail(c, apperr.ErrForbidden)
-			c.Abort()
-			return
-		}
-		if !m.validateAccessSession(c, claims) {
-			return
-		}
-		injectAccessIdentity(c, claims)
-		c.Next()
-	}
-}
-
 // ServiceOrTenantAnyRoleMiddleware 允许内部服务签名或指定租户角色访问同一路由,用于同一 API 同时服务业务回调和教师操作。
 func (m *Manager) ServiceOrTenantAnyRoleMiddleware(identity contracts.IdentityService, roles ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {

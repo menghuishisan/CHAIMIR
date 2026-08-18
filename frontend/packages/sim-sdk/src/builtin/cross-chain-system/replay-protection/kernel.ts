@@ -28,7 +28,7 @@ export function reduceReplayEvent(state: ReplayState, event: SimEvent, _context:
 /**
  * advanceReplay 按防重放流程推进。
  */
-export function advanceReplay(state: ReplayState, event: SimEvent): ReplayState {
+function advanceReplay(state: ReplayState, event: SimEvent): ReplayState {
   const phaseIndex = Math.min(replayPhases.length - 1, state.phaseIndex + 1);
   let next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: replayPhases[phaseIndex].id };
   if (phaseIndex === 2) next = { ...next, accepted: true, executedNonces: Array.from(new Set(next.executedNonces.concat(next.nonce))) };
@@ -39,7 +39,7 @@ export function advanceReplay(state: ReplayState, event: SimEvent): ReplayState 
 /**
  * finalizeReplayState 刷新重放防护指标、检查点和代码追踪。
  */
-export function finalizeReplayState(state: ReplayState): ReplayState {
+function finalizeReplayState(state: ReplayState): ReplayState {
   const protectedNow = state.replayAttempt && state.executedNonces.includes(state.nonce) && !state.accepted;
   return { ...state, phase: replayPhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: protectedNow ? '重放已拒绝' : state.accepted ? '消息已执行' : '等待执行', risk: protectedNow ? 8 : state.accepted ? 15 : 35 }, checkpointValues: { protected: protectedNow }, _trace: { triggeredLines: traceLinesForReplay(state.lastTransition), variables: { nonce: state.nonce, domain: state.domain }, executionPath: `replay-protection/${state.lastTransition}` } };
 }

@@ -7,8 +7,12 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { Network, Plus, Server, Trash2 } from 'lucide-react'
-import { SIM_PACKAGE_STATUS } from '@chaimir/api-client'
-import type { EnvComponent, SimComponent } from '@chaimir/api-client'
+import {
+  PAGINATION_MAX_SIZE,
+  SIM_PACKAGE_STATUS,
+  type EnvComponent,
+  type SimComponent,
+} from '@chaimir/api-client'
 import {
   Badge,
   Button,
@@ -38,9 +42,6 @@ import { useOrchestrationCatalog } from '../../../sandbox/useOrchestrationCatalo
 import { sandboxToolKindLabel } from '../../../../utils/labels/sandbox'
 import { simCategoryLabel } from '../../../../utils/labels/sim'
 import type { ExperimentDraft } from './wizard-state'
-
-/** 仿真包选择器一次取回的条数:后端分页上限 100。 */
-const SIM_PICKER_SIZE = 100
 
 export interface WizardComponentsStepProps {
   draft: ExperimentDraft
@@ -479,7 +480,12 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
   const [formError, setFormError] = useState<string>()
 
   const packages = useAsyncResource(
-    () => api.sim.getPackages({ status: SIM_PACKAGE_STATUS.PUBLISHED, page: 1, size: SIM_PICKER_SIZE }),
+    () =>
+      api.sim.getPackages({
+        status: SIM_PACKAGE_STATUS.PUBLISHED,
+        page: 1,
+        size: PAGINATION_MAX_SIZE,
+      }),
     [],
     () => false,
   )

@@ -7,17 +7,26 @@
 import { cn } from "../../lib/cn";
 
 /**
- * href 协议白名单校验:仅允许相对路径(/ . # ? 开头)与 http:/https: 绝对地址。
- * 防存储型 XSS:后端数据被注入 "javascript:..."(含大小写/前导空白变体)时不得渲染为链接。
+ * href 协议白名单校验:仅允许当前站点的 http(s) 地址。
+ * 防存储型 XSS 与协议相对跳转:后端数据被注入 javascript:、//外站或反斜杠变体时不得渲染为链接。
  */
 function isSafeHref(href: string): boolean {
   const normalized = href.trim();
   if (normalized === "") return false;
-  // 相对路径:无协议部分,浏览器按当前源解析,安全
-  if (/^[/.#?]/.test(normalized)) return true;
-  // 绝对地址:统一小写后仅放行 http:/https: 前缀
-  const lower = normalized.toLowerCase();
-  return lower.startsWith("http://") || lower.startsWith("https://");
+  if (normalized.includes("\\")) return false;
+
+  try {
+    const parsed = new URL(normalized, window.location.origin);
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.username === "" &&
+      parsed.password === "" &&
+      parsed.origin === window.location.origin &&
+      !normalized.startsWith("//")
+    );
+  } catch {
+    return false;
+  }
 }
 
 export interface BreadcrumbItem {

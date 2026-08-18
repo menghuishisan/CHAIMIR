@@ -25,6 +25,8 @@ func taskFromRow(row sqlcgen.TransferTask) Task {
 		UpdatedAt:        timex.FromTimestamptz(row.UpdatedAt),
 		CompletedAt:      timex.FromTimestamptz(row.CompletedAt),
 		NextAttemptAfter: timex.FromTimestamptz(row.NextAttemptAfter),
+		LeaseToken:       row.LeaseToken,
+		LeaseUntil:       timex.FromTimestamptz(row.LeaseUntil),
 	}
 }
 

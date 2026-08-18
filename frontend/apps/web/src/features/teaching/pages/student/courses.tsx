@@ -14,7 +14,6 @@ import {
   Card,
   CardBody,
   CardHeader,
-  CoverImage,
   FilterBar,
   FilterField,
   FormField,
@@ -37,12 +36,12 @@ import { usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDate } from '../../../../utils/formatters'
 import {
   courseStatusLabel,
-  courseStatusTone,
-  courseTypeCover,
   courseTypeLabel,
   teachingDifficultyLabel,
 } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { CourseIdentityCell } from '../../components/CourseIdentityCell'
+import { courseStatusTone } from '../../statusPresentation'
 
 /** 状态筛选项:值为空串表示不过滤(后端 status=0 即不过滤,由调用处转换)。 */
 const STATUS_FILTERS = [
@@ -90,29 +89,7 @@ export default function StudentCoursesPage() {
     {
       key: 'name',
       header: '课程',
-      render: (course) => {
-        const cover = courseTypeCover(course.type)
-        return (
-          <div className="flex min-w-0 items-center gap-3">
-            {/*
-              列表缩略图固定用纸材质加题识,不换取每门课的封面授权:
-              一页课程要换一页授权,而列表接口已按可见性筛过课程,逐行再换一次不产生新的鉴权判断。
-              真实封面在课程详情页显示(见 useCourseCoverSrc)。
-            */}
-            <CoverImage
-              id={course.id}
-              name={course.name}
-              glyph={cover.glyph}
-              accent={cover.accent}
-              className="w-28 shrink-0"
-            />
-            <div className="min-w-0">
-              <div className="truncate font-medium text-ink">{course.name}</div>
-              <div className="truncate text-xs text-ink-sub">{course.semester}</div>
-            </div>
-          </div>
-        )
-      },
+      render: (course) => <CourseIdentityCell course={course} />,
     },
     {
       key: 'type',

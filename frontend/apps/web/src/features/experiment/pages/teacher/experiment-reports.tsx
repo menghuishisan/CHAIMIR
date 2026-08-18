@@ -19,6 +19,7 @@ import {
 import {
   ExperimentCollabMode,
   ExperimentReportStatus,
+  PAGINATION_MAX_SIZE,
   type Class,
   type ClassStudent,
   type Experiment,
@@ -61,15 +62,9 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDateTime, formatScore } from '../../../../utils/formatters'
-import {
-  experimentCollabModeLabel,
-  experimentReportStatusLabel,
-  experimentReportStatusTone,
-} from '../../../../utils/labels/experiment'
+import { experimentCollabModeLabel, experimentReportStatusLabel } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-
-/** 定位单个实验时一次取回的条数:与后端分页上限一致。 */
-const EXPERIMENT_LOOKUP_SIZE = 100
+import { experimentReportStatusTone } from '../../statusPresentation'
 
 /**
  * TeacherExperimentReportsPage 读取实验本体并承载报告批改与分组编排。
@@ -81,7 +76,7 @@ export default function TeacherExperimentReportsPage() {
   const experiment = useAsyncResource(
     () =>
       api.experiment
-        .getExperiments({ page: 1, size: EXPERIMENT_LOOKUP_SIZE })
+        .getExperiments({ page: 1, size: PAGINATION_MAX_SIZE })
         .then((page) => page.list.find((item) => item.id === experimentId)),
     [experimentId],
     (value) => value === undefined,

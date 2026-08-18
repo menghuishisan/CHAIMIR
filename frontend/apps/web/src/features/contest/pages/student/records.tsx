@@ -22,7 +22,8 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatScore } from '../../../../utils/formatters'
-import { contestStatusLabel, contestStatusTone } from '../../../../utils/labels/contest'
+import { contestStatusLabel } from '../../../../utils/labels/contest'
+import { contestStatusTone } from '../../statusPresentation'
 
 /** 已完赛状态:名次已定,可计入最佳成绩统计。 */
 const SETTLED_STATUSES: ReadonlySet<ContestStatus> = new Set([

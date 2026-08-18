@@ -11,6 +11,7 @@ import { Download, FileText, GraduationCap, Users } from 'lucide-react'
 import {
   AccountStatus,
   BaseIdentity,
+  PAGINATION_MAX_SIZE,
   TranscriptScope,
   type Account,
   type Class,
@@ -46,9 +47,6 @@ import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 /** 后端单次批量上限:超出直接拒绝,故界面先挡住。 */
 const BATCH_LIMIT = 200
 
-/** 班级学生一次取回的条数:后端分页上限 100,一个班级不会超过这个量级。 */
-const CLASS_STUDENT_SIZE = 100
-
 /**
  * TranscriptBatchSection 按班级批量生成成绩单。
  */
@@ -74,9 +72,9 @@ export function TranscriptBatchSection() {
             class_id: classId,
             status: AccountStatus.ACTIVE,
             page: 1,
-            size: CLASS_STUDENT_SIZE,
+            size: PAGINATION_MAX_SIZE,
           })
-        : Promise.resolve({ list: [], total: 0, page: 1, size: CLASS_STUDENT_SIZE }),
+        : Promise.resolve({ list: [], total: 0, page: 1, size: PAGINATION_MAX_SIZE }),
     [classId],
     (value) => value.list.length === 0,
   )

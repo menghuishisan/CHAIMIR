@@ -5,7 +5,7 @@ import type { JsonObject, JsonValue, SimInitParams, StageInjectedParam } from '.
 /**
  * paramValue 从初始化参数中读取原始值,并解析 M7 阶段编排注入的 {_source,_value} 契约。
  */
-export function paramValue(params: SimInitParams, name: string): JsonValue | undefined {
+function paramValue(params: SimInitParams, name: string): JsonValue | undefined {
   const value = params[name];
   if (isStageInjectedParam(value)) {
     return value._value;
@@ -16,7 +16,7 @@ export function paramValue(params: SimInitParams, name: string): JsonValue | und
 /**
  * numberParam 读取数值参数并限制到算法声明的安全范围内。
  */
-export function numberParam(params: SimInitParams, name: string, fallback: number, min: number, max: number): number {
+function numberParam(params: SimInitParams, name: string, fallback: number, min: number, max: number): number {
   const value = paramValue(params, name);
   const numeric = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
   return Math.min(max, Math.max(min, numeric));

@@ -34,17 +34,17 @@ import { useAsyncResource } from '../../../../hooks'
 import { formatDate } from '../../../../utils/formatters'
 import {
   courseStatusLabel,
-  courseStatusTone,
   courseTypeLabel,
   courseVisibilityLabel,
   teachingDifficultyLabel,
 } from '../../../../utils/labels/teaching'
-import { CourseFormModal } from './course-form'
+import { courseStatusTone } from '../../statusPresentation'
+import { CourseFormModal } from '../../components/CourseFormModal'
 import { CourseChapters } from './course-chapters'
 import { CourseMembers } from './course-members'
 import { CourseAssignments } from './course-assignments'
 import { CourseBoard } from './course-board'
-import { CourseGrades } from './course-grades'
+import { CourseGrades } from '../../components/CourseGrades'
 
 /**
  * TeacherCourseDetailPage 读取课程大纲并按任务分区呈现管理能力。

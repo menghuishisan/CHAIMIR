@@ -8,12 +8,12 @@ import { useCallback, useMemo, useState } from 'react'
 import { CircleCheck, CircleX, LockOpen, Send } from 'lucide-react'
 import {
   GradeReviewStatus,
+  PAGINATION_MAX_SIZE,
   type Course,
   type GradeReview,
   type Semester,
 } from '@chaimir/api-client'
 import {
-  Badge,
   Breadcrumb,
   Button,
   Callout,
@@ -35,7 +35,6 @@ import {
   SegmentedControl,
   Select,
   Stat,
-  StatusIndicator,
   Table,
   Textarea,
   toast,
@@ -45,12 +44,9 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
-import { gradeReviewStatusLabel, gradeReviewStatusTone } from '../../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { GradeReviewStatusCell } from '../../components/GradeReviewStatusCell'
 import { TranscriptBatchSection } from './transcript-batch'
-
-/** 课程选择器一次取回的条数:后端分页上限 100。 */
-const COURSE_PICKER_SIZE = 100
 
 /** 状态筛选项:值为空串表示不过滤。 */
 const STATUS_FILTERS = [
@@ -102,7 +98,7 @@ export default function SchoolAdminApprovalsPage() {
 
   // 审核记录只回 course_id / semester_id,课程名与学期名在此解析,不把内部编号抛到界面上
   const courses = useAsyncResource(
-    () => api.teaching.getCourses({ page: 1, size: COURSE_PICKER_SIZE }),
+    () => api.teaching.getCourses({ page: 1, size: PAGINATION_MAX_SIZE }),
     [],
     () => false,
   )
@@ -172,15 +168,7 @@ export default function SchoolAdminApprovalsPage() {
     {
       key: 'status',
       header: '状态',
-      render: (review) => (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <StatusIndicator
-            tone={gradeReviewStatusTone(review.status)}
-            label={gradeReviewStatusLabel(review.status)}
-          />
-          {review.is_locked ? <Badge tone="neutral">已锁定</Badge> : null}
-        </div>
-      ),
+      render: (review) => <GradeReviewStatusCell review={review} />,
     },
     {
       key: 'actions',

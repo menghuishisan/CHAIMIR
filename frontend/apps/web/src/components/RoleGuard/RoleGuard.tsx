@@ -14,7 +14,7 @@ import { AppStatusScreen } from '../AppStatusScreen'
 import { ForbiddenPage } from '../StatusPages'
 import { SessionContext } from './session'
 
-export interface RoleGuardProps {
+interface RoleGuardProps {
   allowedRoles: UserRole[]
 }
 

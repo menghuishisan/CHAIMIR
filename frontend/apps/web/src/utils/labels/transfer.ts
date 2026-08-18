@@ -1,6 +1,5 @@
-// transfer labels 文件维护导入导出任务主题、通道和状态文案与语义色。
+// transfer labels 文件维护导入导出任务主题、通道和状态文案。
 
-import type { StatusTone } from '@chaimir/ui'
 import { TRANSFER_CHANNEL, TRANSFER_STATUS, type TransferChannel, type TransferStatus } from '@chaimir/api-client'
 
 /** 主题由各业务模块自行取名,是开放字符串:未登记的主题给通用业务名,不把内部标识抛到界面上。 */
@@ -29,20 +28,6 @@ const TRANSFER_TASK_STATUS_LABELS: Record<TransferStatus, string> = {
 /** transferTaskStatusLabel 返回导入导出任务状态文案。 */
 export function transferTaskStatusLabel(status: TransferStatus): string {
   return TRANSFER_TASK_STATUS_LABELS[status]
-}
-
-/** 状态语义色:失败用独立冷红(danger),完成用玉(success)。 */
-const TRANSFER_TASK_STATUS_TONES: Record<TransferStatus, StatusTone> = {
-  [TRANSFER_STATUS.PENDING]: 'neutral',
-  [TRANSFER_STATUS.RUNNING]: 'info',
-  [TRANSFER_STATUS.RETRYING]: 'warning',
-  [TRANSFER_STATUS.SUCCEEDED]: 'success',
-  [TRANSFER_STATUS.FAILED]: 'danger',
-}
-
-/** transferTaskStatusTone 返回导入导出任务状态语义色。 */
-export function transferTaskStatusTone(status: TransferStatus): StatusTone {
-  return TRANSFER_TASK_STATUS_TONES[status]
 }
 
 const TRANSFER_CHANNEL_LABELS: Record<TransferChannel, string> = {

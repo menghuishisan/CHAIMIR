@@ -84,31 +84,37 @@ type secretPattern struct {
 	replacement string
 }
 
-var sensitiveValuePatterns = []secretPattern{
-	{regexp.MustCompile(`(?i)(password\s*[=:]\s*)([^,\s;]+)`), `${1}***`},
-	{regexp.MustCompile(`(?i)("password"\s*:\s*")([^"]+)(")`), `${1}***${3}`},
-	{regexp.MustCompile(`(?i)(token\s*[=:]\s*)([^,\s;]+)`), `${1}***`},
-	{regexp.MustCompile(`(?i)("token"\s*:\s*")([^"]+)(")`), `${1}***${3}`},
-	{regexp.MustCompile(`(?i)(authorization\s*[=:]\s*)([^,\s;]+(?:\s+[^,\s;]+)?)`), `${1}***`},
-	{regexp.MustCompile(`(?i)("authorization"\s*:\s*")([^"]+)(")`), `${1}***${3}`},
-	{regexp.MustCompile(`(?i)(secret\s*[=:]\s*)([^,\s;]+)`), `${1}***`},
-	{regexp.MustCompile(`(?i)("secret"\s*:\s*")([^"]+)(")`), `${1}***${3}`},
-	{regexp.MustCompile(`(?i)(access[_-]?key\s*[=:]\s*)([^,\s;]+)`), `${1}***`},
-	{regexp.MustCompile(`(?i)("access[_-]?key"\s*:\s*")([^"]+)(")`), `${1}***${3}`},
-	{regexp.MustCompile(`(?i)(postgres(?:ql)?://[^:\s/@]+:)([^@\s]+)(@)`), `${1}***${3}`},
-	{regexp.MustCompile(`(?i)(redis://[^:\s/@]+:)([^@\s]+)(@)`), `${1}***${3}`},
-}
+var (
+	credentialAssignmentPattern = regexp.MustCompile(`(?i)("?([a-z][a-z0-9_-]*)"?\s*[=:]\s*)("[^"\r\n]*"|(?:(?:bearer|basic)\s+)?[^,\s;]+)`)
+	connectionSecretPatterns    = []secretPattern{
+		{regexp.MustCompile(`(?i)(postgres(?:ql)?://[^:\s/@]+:)([^@\s]+)(@)`), `${1}***${3}`},
+		{regexp.MustCompile(`(?i)(redis://[^:\s/@]+:)([^@\s]+)(@)`), `${1}***${3}`},
+	}
+)
 
 var phonePattern = regexp.MustCompile(`\b1[3-9]\d{9}\b`)
 
 // SanitizeError 对日志错误文本做强制脱敏,覆盖 key/value、JSON 和常见连接串凭据形态。
 func SanitizeError(raw string) string {
-	masked := raw
-	for _, pattern := range sensitiveValuePatterns {
+	masked := credentialAssignmentPattern.ReplaceAllStringFunc(raw, redactCredentialAssignment)
+	for _, pattern := range connectionSecretPatterns {
 		masked = pattern.re.ReplaceAllString(masked, pattern.replacement)
 	}
 	masked = phonePattern.ReplaceAllStringFunc(masked, maskPhoneNumber)
 	return masked
+}
+
+// redactCredentialAssignment 使用 privacy 的统一凭据字段口径替换错误文本中的 key/value 值。
+func redactCredentialAssignment(assignment string) string {
+	parts := credentialAssignmentPattern.FindStringSubmatch(assignment)
+	if len(parts) != 4 || !privacy.IsCredentialKey(parts[2]) {
+		return assignment
+	}
+	value := "***"
+	if strings.HasPrefix(parts[3], `"`) {
+		value = `"***"`
+	}
+	return parts[1] + value
 }
 
 // maskPhoneNumber 按文档要求把手机号掩码为 138****1234 形态。
@@ -120,11 +126,10 @@ func maskPhoneNumber(phone string) string {
 	return masked
 }
 
-// redactAttr 在 handler 输出前按字段名兜底脱敏,避免结构化字段绕过字符串规则。
+// redactAttr 在 handler 输出前按字段名兜底脱敏,避免非字符串结构化字段绕过字符串规则。
 func redactAttr(_ []string, attr slog.Attr) slog.Attr {
-	if privacy.IsCredentialKey(attr.Key) && attr.Value.Kind() == slog.KindString {
-		attr.Value = slog.StringValue(SanitizeError(attr.Value.String()))
-		return attr
+	if privacy.IsCredentialKey(attr.Key) {
+		attr.Value = slog.StringValue("***")
 	}
 	return attr
 }

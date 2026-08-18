@@ -25,7 +25,7 @@ func (s *Service) CreateGroup(ctx context.Context, experimentID int64, req Creat
 		if err != nil {
 			return err
 		}
-		if err := ensureTeacherCanManage(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), exp); err != nil {
+		if err := s.ensureTeacherCanManage(ctx, id.AccountID, exp); err != nil {
 			return err
 		}
 		if exp.CollabMode != CollabModeGroup {
@@ -63,7 +63,7 @@ func (s *Service) UpsertGroupMember(ctx context.Context, groupID int64, req Upse
 		if err != nil {
 			return err
 		}
-		if err := ensureTeacherCanManage(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), exp); err != nil {
+		if err := s.ensureTeacherCanManage(ctx, id.AccountID, exp); err != nil {
 			return err
 		}
 		if !roleAllowed(exp.GroupConfig, req.Role) {
@@ -105,7 +105,7 @@ func (s *Service) ListGroups(ctx context.Context, experimentID int64) ([]GroupDT
 		if err != nil {
 			return err
 		}
-		if err := ensureTeacherCanManage(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), exp); err != nil {
+		if err := s.ensureTeacherCanManage(ctx, id.AccountID, exp); err != nil {
 			return err
 		}
 		groups, err = tx.ListGroupsByExperiment(ctx, id.TenantID, experimentID)
@@ -170,7 +170,11 @@ func (s *Service) GetGroup(ctx context.Context, groupID int64) (GroupDTO, error)
 		if err != nil {
 			return err
 		}
-		if exp.AuthorID != id.AccountID && !s.isSchoolAdmin(ctx, id.AccountID) {
+		isSchoolAdmin, err := s.isSchoolAdmin(ctx, id.AccountID)
+		if err != nil {
+			return err
+		}
+		if exp.AuthorID != id.AccountID && !isSchoolAdmin {
 			if _, err := tx.GetGroupMember(ctx, id.TenantID, groupID, id.AccountID); err != nil {
 				return err
 			}

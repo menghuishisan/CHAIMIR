@@ -68,11 +68,11 @@ import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../.
 import { formatDate } from '../../../../utils/formatters'
 import {
   accountStatusLabel,
-  accountStatusTone,
   baseIdentityLabel,
   userRoleLabel,
 } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { accountStatusTone } from '../../statusPresentation'
 import { AccountFormModal } from './account-form'
 import { AccountImportModal } from './account-import'
 import { AccountImportBatches } from './account-batches'

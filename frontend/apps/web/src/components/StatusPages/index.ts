@@ -2,6 +2,4 @@
 
 export { NotFoundPage } from './NotFoundPage'
 export { ForbiddenPage } from './ForbiddenPage'
-export type { ForbiddenPageProps } from './ForbiddenPage'
 export { RoleNotFoundPage } from './RoleNotFoundPage'
-export type { RoleNotFoundPageProps } from './RoleNotFoundPage'

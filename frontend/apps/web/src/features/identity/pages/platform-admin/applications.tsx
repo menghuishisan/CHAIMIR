@@ -32,9 +32,9 @@ import { useAsyncResource } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import {
   applicationStatusLabel,
-  applicationStatusTone,
   schoolTypeLabel,
 } from '../../../../utils/labels/identity'
+import { applicationStatusTone } from '../../statusPresentation'
 
 /** 状态筛选项:值为空串表示不过滤。 */
 const STATUS_FILTERS = [

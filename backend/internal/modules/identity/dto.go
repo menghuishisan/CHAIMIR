@@ -91,6 +91,12 @@ type AccountDTO struct {
 	CreatedAt    string  `json:"created_at,omitempty"`
 }
 
+// AccountCreateResponse 返回已创建账号和仅本次可见的激活码。
+type AccountCreateResponse struct {
+	Account        AccountDTO `json:"account"`
+	ActivationCode string     `json:"activation_code"`
+}
+
 type MeResponse struct {
 	Account AccountDTO `json:"account"`
 }
@@ -167,6 +173,17 @@ type TenantDTO struct {
 	EnableActivationCode bool           `json:"enable_activation_code"`
 	CreatedAt            string         `json:"created_at"`
 	UpdatedAt            string         `json:"updated_at"`
+}
+
+// TenantApprovalResponse 返回审核创建的租户和首个管理员激活码。
+type TenantApprovalResponse struct {
+	Tenant         TenantDTO `json:"tenant"`
+	ActivationCode string    `json:"activation_code"`
+}
+
+// CASLoginURLResponse 返回通过白名单校验的 CAS 跳转地址。
+type CASLoginURLResponse struct {
+	RedirectURL string `json:"redirect_url"`
 }
 
 type TenantConfigRequest struct {
@@ -330,6 +347,13 @@ type SSOConfigRequest struct {
 type LDAPLoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+// TenantLogoUploadRequest 描述 API 层已读取并校验大小后的校徽文件。
+type TenantLogoUploadRequest struct {
+	FileName    string
+	ContentType string
+	Content     []byte
 }
 
 // TenantBrandDTO 是登录页面读取的学校品牌信息。

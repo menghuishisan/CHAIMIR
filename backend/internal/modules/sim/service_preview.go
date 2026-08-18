@@ -120,7 +120,7 @@ func boundedValidationMessage(message string) string {
 // 作者需要知道"改什么",故保留容器给出的协议或装配错误文本;集群细节由适配器在包装时剥离。
 func userFacingPreviewMessage(err error) string {
 	if appErr, ok := apperr.As(err); ok {
-		return appErr.Message
+		return appErr.UserMessage()
 	}
 	return err.Error()
 }

@@ -16,6 +16,7 @@ import {
   YAxis,
 } from "recharts";
 import { useReducedMotion } from "../hooks/useReducedMotion";
+import { InteractiveLegend } from "./InteractiveLegend";
 import { useChartColors, type ChartContext } from "./palette";
 
 /** 折线系列定义 */
@@ -92,13 +93,15 @@ export function TrendLineChart({
           }}
           labelStyle={{ color: colors.ink }}
         />
-        {/* 图例可点:cursor pointer 提示可交互,点击按 dataKey 切换对应系列 */}
         <Legend
-          wrapperStyle={{ fontSize: 12, color: colors.axis, cursor: "pointer" }}
-          iconSize={12}
-          onClick={(item) => {
-            if (typeof item.dataKey === "string") toggleSeries(item.dataKey);
-          }}
+          content={
+            <InteractiveLegend
+              context={context}
+              hiddenKeys={hiddenKeys}
+              onToggle={toggleSeries}
+              series={series}
+            />
+          }
         />
         {series.map((s, index) => (
           <Line

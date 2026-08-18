@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from 'react'
 import { api } from '../../app/api'
+import { errorDiagnostics } from '../../utils/userFacingError'
 
 /**
  * useCourseCoverSrc 把课程封面引用换成可直接作为 img src 的地址。
@@ -29,7 +30,7 @@ export function useCourseCoverSrc(courseId: string | undefined, coverRef: string
         if (active) setSrc(api.storage.streamUrl(grant.token))
       } catch (error) {
         // 封面取不到不该影响课程内容:留空即回落纸材质,失败原因只进控制台供排障。
-        console.error('课程封面授权换取失败', { courseId, error })
+        console.error('课程封面授权换取失败', { courseId, error: errorDiagnostics(error) })
         if (active) setSrc('')
       }
     })()

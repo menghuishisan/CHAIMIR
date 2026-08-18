@@ -6,7 +6,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { Plus, Target, Trash2 } from 'lucide-react'
-import type { CheckpointConfig, ContentItem } from '@chaimir/api-client'
+import { PAGINATION_MAX_SIZE, type CheckpointConfig } from '@chaimir/api-client'
 import {
   Badge,
   Button,
@@ -33,12 +33,9 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
-import { contentTypeLabel } from '../../../../utils/labels/content'
 import { judgerTypeLabel } from '../../../../utils/labels/judge'
+import { toContentItemVersionOptions } from '../../../content/contentItemOptions'
 import type { ExperimentDraft } from './wizard-state'
-
-/** 题目选择器一次取回的条数:后端分页上限 100。 */
-const ITEM_PICKER_SIZE = 100
 
 export interface WizardCheckpointsStepProps {
   draft: ExperimentDraft
@@ -225,7 +222,7 @@ function CheckpointFormModal({
 
   const judgers = useAsyncResource(() => api.judge.getJudgerCatalog(), [], (value) => value.judgers.length === 0)
   const items = useAsyncResource(
-    () => api.content.getItems({ page: 1, size: ITEM_PICKER_SIZE }),
+    () => api.content.getItems({ page: 1, size: PAGINATION_MAX_SIZE }),
     [],
     () => false,
   )
@@ -239,14 +236,7 @@ function CheckpointFormModal({
     [judgers.data],
   )
 
-  const itemOptions = useMemo(
-    () =>
-      (items.data?.list ?? []).map((item: ContentItem) => ({
-        value: `${item.code}|${item.version}`,
-        label: `${item.title} · ${contentTypeLabel(item.type)} · ${item.version}`,
-      })),
-    [items.data],
-  )
+  const itemOptions = useMemo(() => toContentItemVersionOptions(items.data?.list ?? []), [items.data])
 
   const bindOptions = useMemo(
     () => [

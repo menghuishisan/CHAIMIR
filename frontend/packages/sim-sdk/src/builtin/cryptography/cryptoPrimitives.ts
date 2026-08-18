@@ -3,12 +3,12 @@
 import { fnv1aHex } from '../../runtime/deterministic';
 
 export const FIELD_PRIME = 97;
-export const GROUP_GENERATOR = 5;
+const GROUP_GENERATOR = 5;
 
 /**
  * canonicalEncode 将对象字段按字典序编码,避免同义输入得到不同摘要。
  */
-export function canonicalEncode(value: Record<string, string | number | boolean>): string {
+function canonicalEncode(value: Record<string, string | number | boolean>): string {
   return Object.keys(value)
     .sort()
     .map((key) => `${key}=${String(value[key])}`)
@@ -111,7 +111,7 @@ export function partialThresholdSignature(message: string, x: number, shareValue
 /**
  * lagrangeCoefficientAtZero 计算用于门限聚合的零点拉格朗日系数。
  */
-export function lagrangeCoefficientAtZero(x: number, xs: number[]): number {
+function lagrangeCoefficientAtZero(x: number, xs: number[]): number {
   const numerator = xs.filter((other) => other !== x).reduce((acc, other) => (acc * (0 - other + FIELD_PRIME)) % FIELD_PRIME, 1);
   const denominator = xs.filter((other) => other !== x).reduce((acc, other) => (acc * (x - other + FIELD_PRIME)) % FIELD_PRIME, 1);
   return (numerator * inverseMod(denominator)) % FIELD_PRIME;

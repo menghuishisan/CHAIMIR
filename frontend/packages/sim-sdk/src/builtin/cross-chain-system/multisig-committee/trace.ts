@@ -3,7 +3,7 @@
 import { phaseNarrative } from '../../packageTools';
 import { committeePhases } from './model';
 
-export const committeeSource = ['function authorize(message, sigs) {', '  valid = filterActiveSigners(sigs);', '  require(valid.length >= threshold);', '  aggregate(valid);', '  execute(message);', '}'];
+const committeeSource = ['function authorize(message, sigs) {', '  valid = filterActiveSigners(sigs);', '  require(valid.length >= threshold);', '  aggregate(valid);', '  execute(message);', '}'];
 export const committeeNarrative = phaseNarrative(committeePhases, 'committee-authorized');
 export const committeeCodeTrace = { sourceCode: committeeSource.join('\n'), language: 'pseudocode' as const, lineMapping: committeePhases.map((phase, index) => ({ line: Math.min(index + 1, committeeSource.length), triggerCondition: phase.id, annotation: phase.reason, highlightStyle: phase.id === 'authorize' ? ('success' as const) : ('normal' as const) })), variableWatch: [{ name: 'validSignatures', extract: 'state.metrics.validSignatures', format: 'number' as const }] };
 

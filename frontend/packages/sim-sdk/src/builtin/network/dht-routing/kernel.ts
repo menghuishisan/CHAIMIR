@@ -38,7 +38,7 @@ export function reduceDhtEvent(state: DhtState, event: SimEvent, _context: Reduc
 /**
  * advanceDht 按 DHT 查找流程推进一个过程单元。
  */
-export function advanceDht(state: DhtState, event: SimEvent): DhtState {
+function advanceDht(state: DhtState, event: SimEvent): DhtState {
   const phaseIndex = Math.min(dhtPhases.length - 1, state.phaseIndex + 1);
   const next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: dhtPhases[phaseIndex].id };
   if (phaseIndex === 1) return refreshBuckets(next);
@@ -59,7 +59,7 @@ export function lookupFound(state: DhtState): CheckpointResult {
 /**
  * finalizeDhtState 刷新 DHT 指标、消息进度和代码追踪。
  */
-export function finalizeDhtState(state: DhtState): DhtState {
+function finalizeDhtState(state: DhtState): DhtState {
   const polluted = state.shortlist.some((id) => state.peers.find((peer) => peer.id === id)?.polluted === true);
   const shortlist = new Set(state.shortlist);
   return {

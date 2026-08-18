@@ -33,7 +33,7 @@ export function reduceCrossMessageEvent(state: CrossChainMessageState, event: Si
 /**
  * advanceCrossMessage 按跨链消息生命周期推进。
  */
-export function advanceCrossMessage(state: CrossChainMessageState, event: SimEvent): CrossChainMessageState {
+function advanceCrossMessage(state: CrossChainMessageState, event: SimEvent): CrossChainMessageState {
   const phaseIndex = Math.min(crossMessagePhases.length - 1, state.phaseIndex + 1);
   let next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: crossMessagePhases[phaseIndex].id };
   if (phaseIndex === 1) next = { ...next, locked: true, messages: next.messages.concat(message('source', 'relayer', '源链事件', next.tick, false, '源链锁定资产并产生可证明事件。')) };
@@ -46,7 +46,7 @@ export function advanceCrossMessage(state: CrossChainMessageState, event: SimEve
 /**
  * finalizeCrossMessageState 刷新跨链消息指标、检查点和代码追踪。
  */
-export function finalizeCrossMessageState(state: CrossChainMessageState): CrossChainMessageState {
+function finalizeCrossMessageState(state: CrossChainMessageState): CrossChainMessageState {
   const done = state.locked && state.relayed && state.verified && state.executed;
   return { ...state, phase: crossMessagePhases[state.phaseIndex].label, actors: state.actors.map((actor) => ({ ...actor, status: actor.id === 'target' && done ? 'success' : actor.status })), explanation: explain(state.phaseIndex), metrics: { result: done ? '消息已执行' : '等待跨链完成', risk: done ? 8 : state.relayed ? 20 : 55 }, checkpointValues: { done }, _trace: { triggeredLines: traceLinesForCrossMessage(state.lastTransition), variables: { messageId: state.messageId, executed: state.executed }, executionPath: `cross-message/${state.lastTransition}` } };
 }

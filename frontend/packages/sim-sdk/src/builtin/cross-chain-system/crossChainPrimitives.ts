@@ -5,7 +5,7 @@ import { fnv1aHex } from '../../runtime/deterministic';
 /**
  * crossChainDigest 用域分离、吸收和确认三步生成跨链教学摘要。
  */
-export function crossChainDigest(domain: string, fields: Record<string, string | number | boolean>, length = 16): string {
+function crossChainDigest(domain: string, fields: Record<string, string | number | boolean>, length = 16): string {
   const encoded = Object.keys(fields)
     .sort()
     .map((key) => `${key}=${String(fields[key])}`)

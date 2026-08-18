@@ -3,7 +3,6 @@ package teaching
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -100,6 +99,10 @@ type TxStore interface {
 	ListStudentGrades(context.Context, int64, int64) ([]CourseGrade, error)
 	OverrideCourseGrade(context.Context, int64, int64, int64, float64) (CourseGrade, error)
 	SetCourseGradesLock(context.Context, int64, int64, bool) error
+	CreateCourseGradeExportRequest(context.Context, CourseGradeExportRequest) (CourseGradeExportRequest, error)
+	ListDueCourseGradeExportRequests(context.Context, time.Time, int32) ([]CourseGradeExportRequest, error)
+	SetCourseGradeExportRequestNextCheck(context.Context, int64, int64, time.Time) (CourseGradeExportRequest, error)
+	DeleteCourseGradeExportRequest(context.Context, int64, int64) error
 	CreateTeachingGradeEventOutbox(context.Context, int64, int64, int64, int64, string, time.Time) (TeachingGradeEventOutbox, error)
 	ClaimPendingTeachingGradeEventOutbox(context.Context, int32, time.Time) ([]TeachingGradeEventOutbox, error)
 	MarkTeachingGradeEventOutboxPublished(context.Context, int64, int64) (TeachingGradeEventOutbox, error)
@@ -153,4 +156,4 @@ func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxSto
 }
 
 // isNoRows 统一识别未命中错误,让 service 不直接依赖 pgx。
-func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
+func isNoRows(err error) bool { return db.IsNoRows(err) }

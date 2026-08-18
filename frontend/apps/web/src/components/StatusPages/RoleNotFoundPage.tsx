@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router'
 import { Compass } from 'lucide-react'
 import { Button, Empty } from '@chaimir/ui'
 
-export interface RoleNotFoundPageProps {
+interface RoleNotFoundPageProps {
   /** 本角色区的首页落点,由所属区的懒加载壳传入(壳层不查全角色清单,见铁律 2) */
   homePath: string
 }

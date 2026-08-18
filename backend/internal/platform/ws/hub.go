@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"chaimir/pkg/logging"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -159,14 +161,12 @@ func NewHub(policy OriginPolicy, options HubOptions) (*Hub, error) {
 	}, nil
 }
 
-// SendChan 暴露只写发送通道,便于业务层在订阅成功后补发快照。
-func (c *Conn) SendChan() chan<- []byte {
-	return c.send
-}
-
 // ReadJSON 从客户端读取一条 JSON 消息。
 func (c *Conn) ReadJSON(v any) error {
-	return c.socket.ReadJSON(v)
+	if err := c.socket.ReadJSON(v); err != nil {
+		return err
+	}
+	return c.refreshReadDeadline()
 }
 
 // SendJSON 向客户端发送一条 JSON 消息,复用发送队列避免并发写同一连接。
@@ -225,12 +225,14 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, subscribe func(c *Co
 		done:   make(chan struct{}),
 		hub:    h,
 	}
+	if err := conn.initializeReadLifecycle(); err != nil {
+		logging.ErrorContext(r.Context(), "WebSocket 读生命周期初始化失败", errors.Join(err, socket.Close()).Error())
+		return nil
+	}
 	// 第一步:升级成功后立即建立发送队列和订阅容器,避免业务回调期间并发写 socket。
 	if err := subscribe(conn); err != nil {
-		if closeErr := socket.Close(); closeErr != nil {
-			return errors.Join(err, closeErr)
-		}
-		return err
+		logging.ErrorContext(r.Context(), "WebSocket 订阅初始化失败", errors.Join(err, socket.Close()).Error())
+		return nil
 	}
 	// 第二步:写循环负责服务端推送;读循环只用于感知客户端断开并触发清理。
 	go conn.writeLoop()
@@ -239,7 +241,8 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, subscribe func(c *Co
 	close(conn.done)
 	h.Unsubscribe(conn)
 	close(conn.send)
-	return errors.Join(readErr, socket.Close())
+	logConnectionError(r, "WebSocket 连接异常结束", errors.Join(readErr, socket.Close()))
+	return nil
 }
 
 // ServeInteractive 建立由业务层主动处理读循环的交互式连接。
@@ -265,18 +268,29 @@ func (h *Hub) ServeInteractive(w http.ResponseWriter, r *http.Request, handle fu
 		done:   make(chan struct{}),
 		hub:    h,
 	}
+	if err := conn.initializeReadLifecycle(); err != nil {
+		logging.ErrorContext(r.Context(), "WebSocket 交互读生命周期初始化失败", errors.Join(err, socket.Close()).Error())
+		return nil
+	}
 	go conn.writeLoop()
 	go conn.pingLoop()
-	err = handle(conn)
+	handleErr := handle(conn)
 	close(conn.done)
 	h.Unsubscribe(conn)
 	close(conn.send)
 	// 协议升级成功后连接已被 hijack,业务流结束或断开不能再返回给 HTTP handler 写 JSON 响应。
-	// 升级前的错误仍由调用方按统一错误结构返回给客户端。
-	if closeErr := socket.Close(); closeErr != nil && err == nil {
-		return nil
-	}
+	// 升级前的错误仍由调用方按统一错误结构返回给客户端;升级后错误在这里进入结构化日志。
+	logConnectionError(r, "WebSocket 交互连接异常结束", errors.Join(handleErr, socket.Close()))
 	return nil
+}
+
+// logConnectionError 记录升级后的非预期连接错误,正常关闭和客户端断连不作为服务故障上报。
+func logConnectionError(r *http.Request, message string, err error) {
+	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) ||
+		websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
+		return
+	}
+	logging.ErrorContext(r.Context(), message, err.Error())
 }
 
 // Subscribe 把连接加入指定 topic,并维护反向索引供断连时清理。
@@ -369,20 +383,6 @@ func (c *Conn) writeLoop() {
 
 // readLoop 持续读取直到客户端断开;当前固定订阅场景不解析消息体。
 func (c *Conn) readLoop() error {
-	// 统一设置读超时与 pong 续期,确保死连接能被及时回收而不是无限悬挂。
-	c.socket.SetReadLimit(c.hub.options.ReadLimit)
-	if err := c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout)); err != nil {
-		return err
-	}
-	c.socket.SetPongHandler(func(appData string) error {
-		return c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout))
-	})
-	c.socket.SetPingHandler(func(appData string) error {
-		if err := c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout)); err != nil {
-			return err
-		}
-		return c.writeControl(websocket.PongMessage, []byte(appData))
-	})
 	for {
 		if _, _, err := c.socket.ReadMessage(); err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
@@ -390,10 +390,33 @@ func (c *Conn) readLoop() error {
 			}
 			return err
 		}
-		if err := c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout)); err != nil {
+		if err := c.refreshReadDeadline(); err != nil {
 			return err
 		}
 	}
+}
+
+// initializeReadLifecycle 为所有连接统一设置消息上限、空闲超时和控制帧续期。
+func (c *Conn) initializeReadLifecycle() error {
+	c.socket.SetReadLimit(c.hub.options.ReadLimit)
+	if err := c.refreshReadDeadline(); err != nil {
+		return err
+	}
+	c.socket.SetPongHandler(func(string) error {
+		return c.refreshReadDeadline()
+	})
+	c.socket.SetPingHandler(func(appData string) error {
+		if err := c.refreshReadDeadline(); err != nil {
+			return err
+		}
+		return c.writeControl(websocket.PongMessage, []byte(appData))
+	})
+	return nil
+}
+
+// refreshReadDeadline 在收到有效消息或控制帧后续期连接读截止时间。
+func (c *Conn) refreshReadDeadline() error {
+	return c.socket.SetReadDeadline(time.Now().Add(c.hub.options.ReadTimeout))
 }
 
 // pingLoop 定期发送 ping,让对端回 pong 以持续刷新读超时并尽早识别失活连接。
@@ -459,6 +482,9 @@ func (r *connReader) Read(p []byte) (int, error) {
 		}
 		messageType, data, err := r.conn.socket.ReadMessage()
 		if err != nil {
+			return 0, err
+		}
+		if err := r.conn.refreshReadDeadline(); err != nil {
 			return 0, err
 		}
 		if messageType == websocket.TextMessage || messageType == websocket.BinaryMessage {

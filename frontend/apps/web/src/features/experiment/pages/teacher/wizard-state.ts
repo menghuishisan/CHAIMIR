@@ -25,8 +25,6 @@ export const WIZARD_STEPS = [
   { key: 'checkpoints', label: '检查点', description: '判分点与分值' },
 ] as const
 
-export type WizardStepKey = (typeof WIZARD_STEPS)[number]['key']
-
 /** WIZARD_STEP_COUNT 供进度表达与越界夹取共用同一来源。 */
 export const WIZARD_STEP_COUNT = WIZARD_STEPS.length
 

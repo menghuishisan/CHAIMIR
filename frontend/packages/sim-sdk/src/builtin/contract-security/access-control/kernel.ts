@@ -32,7 +32,7 @@ export function reduceAccessEvent(state: AccessState, event: SimEvent, _context:
 /**
  * advanceAccess 按授权防护流程推进一个过程单元。
  */
-export function advanceAccess(state: AccessState, event: SimEvent): AccessState {
+function advanceAccess(state: AccessState, event: SimEvent): AccessState {
   const phaseIndex = Math.min(accessPhases.length - 1, state.phaseIndex + 1);
   let next = { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: accessPhases[phaseIndex].id };
   if (phaseIndex === 2) next = exploit(next);
@@ -44,7 +44,7 @@ export function advanceAccess(state: AccessState, event: SimEvent): AccessState 
 /**
  * finalizeAccessState 刷新权限状态、指标、检查点和代码追踪。
  */
-export function finalizeAccessState(state: AccessState): AccessState {
+function finalizeAccessState(state: AccessState): AccessState {
   const safe = state.protectedFunction && state.unauthorizedBlocked && state.auditLogged;
   return { ...state, phase: accessPhases[state.phaseIndex].label, actors: state.actors.map((actor) => ({ ...actor, status: actor.id === 'user' && state.unauthorizedExecuted ? 'danger' : actor.id === 'config' && safe ? 'success' : actor.status })), explanation: explain(state.phaseIndex), metrics: { result: safe ? '权限已受控' : state.unauthorizedExecuted ? '发生越权' : '等待修复', risk: safe ? 8 : state.unauthorizedExecuted ? 86 : 30 }, checkpointValues: { safe }, _trace: { triggeredLines: traceLinesForAccess(state.lastTransition), variables: { protectedFunction: state.protectedFunction, auditLogged: state.auditLogged }, executionPath: `access-control/${state.lastTransition}` } };
 }

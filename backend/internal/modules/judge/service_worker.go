@@ -329,7 +329,7 @@ func (s *Service) runJudgeCommand(ctx context.Context, task JudgeTask, sandboxID
 	if len(task.InputSnapshot.Command) == 0 {
 		return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid
 	}
-	stdin, err := encodeJSONBytes(map[string]any{
+	stdin, err := jsonx.EncodeLineBytes(map[string]any{
 		"task_id":      task.ID,
 		"source_ref":   task.SourceRef,
 		"problem_ref":  task.ProblemRef,
@@ -503,7 +503,7 @@ func isJudgeTimeout(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
-	if app, ok := apperr.As(err); ok && app.Code == apperr.CodeJudgeTimeout {
+	if app, ok := apperr.As(err); ok && app.UserCode() == apperr.CodeJudgeTimeout {
 		return true
 	}
 	return false
@@ -644,7 +644,7 @@ func decodeCommandResult(stdout []byte, maxBytes int) (JudgeExecutionResult, err
 		return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed
 	}
 	var out JudgeExecutionResult
-	if err := jsonx.DecodeStrict(stdout, &out); err != nil {
+	if err := jsonx.DecodeStrictKnownFields(stdout, &out); err != nil {
 		return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 	}
 	return out, nil

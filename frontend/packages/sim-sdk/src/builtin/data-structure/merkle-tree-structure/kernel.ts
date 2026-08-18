@@ -30,7 +30,7 @@ export function reduceMerkleTreeEvent(state: MerkleTreeState, event: SimEvent, _
 /**
  * advanceMerkleTree 按构树和验证流程推进一个过程单元。
  */
-export function advanceMerkleTree(state: MerkleTreeState, event: SimEvent): MerkleTreeState {
+function advanceMerkleTree(state: MerkleTreeState, event: SimEvent): MerkleTreeState {
   const phaseIndex = Math.min(merkleTreePhases.length - 1, state.phaseIndex + 1);
   return { ...state, phaseIndex, tick: event.source === 'tick' ? state.tick + 1 : state.tick, lastTransition: merkleTreePhases[phaseIndex].id };
 }
@@ -38,7 +38,7 @@ export function advanceMerkleTree(state: MerkleTreeState, event: SimEvent): Merk
 /**
  * finalizeMerkleTreeState 刷新指标、检查点和代码追踪。
  */
-export function finalizeMerkleTreeState(state: MerkleTreeState): MerkleTreeState {
+function finalizeMerkleTreeState(state: MerkleTreeState): MerkleTreeState {
   const valid = state.rootHash === computeMerkleRoot(state.items) && !state.dirtyLeafId;
   return { ...state, phase: merkleTreePhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: valid ? '根摘要有效' : '等待路径重算', risk: valid ? 8 : 62, leaves: state.items.length }, checkpointValues: { rootValid: valid }, _trace: { triggeredLines: traceLinesForMerkleTree(state.lastTransition), variables: { rootHash: state.rootHash, dirtyLeafId: state.dirtyLeafId ?? '' }, executionPath: `merkle-tree/${state.lastTransition}` } };
 }
@@ -54,7 +54,7 @@ export function merkleTreeRootValid(state: MerkleTreeState): CheckpointResult {
 /**
  * computeMerkleRoot 计算四叶子 Merkle 根。
  */
-export function computeMerkleRoot(items: MerkleItem[]): string {
+function computeMerkleRoot(items: MerkleItem[]): string {
   return merkleRootFromHashes(items.map((item) => item.hash));
 }
 
@@ -84,7 +84,7 @@ function rebuildRoot(state: MerkleTreeState): MerkleTreeState {
 /**
  * merkleProofPath 计算叶子到根的节点 ID 路径,与树形视图的内部节点命名保持一致。
  */
-export function merkleProofPath(items: MerkleItem[], targetId?: string): string[] {
+function merkleProofPath(items: MerkleItem[], targetId?: string): string[] {
   let targetIndex = Math.max(0, items.findIndex((item) => item.id === targetId));
   const path = [items[targetIndex]?.id ?? 'mtree-1'];
   let level = items.map((item) => ({ id: item.id, hash: item.hash }));

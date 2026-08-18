@@ -34,10 +34,10 @@ import { formatShortDateTime } from '../../../../utils/formatters'
 import {
   gradeWarningDetailTerm,
   gradeWarningStatusLabel,
-  gradeWarningStatusTone,
   gradeWarningTypeLabel,
 } from '../../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { gradeWarningStatusTone } from '../../statusPresentation'
 
 /**
  * StudentAlertsPage 列出本人学业预警并提供确认。

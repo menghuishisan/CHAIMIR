@@ -51,12 +51,12 @@ import { formatDateTime, formatScore } from '../../../../utils/formatters'
 import {
   contestModeLabel,
   contestStatusLabel,
-  contestStatusTone,
-  isContestLeaderboardFrozen,
   matchModeLabel,
   teamModeLabel,
 } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { isContestLeaderboardFrozen } from '../../rules'
+import { contestStatusTone } from '../../statusPresentation'
 import { ContestTeamCard } from './contest-team'
 
 /** 允许进入答题的赛事状态:进行中与封榜期(封榜只停榜单更新,不停作答)。 */

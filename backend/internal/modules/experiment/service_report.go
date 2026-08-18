@@ -105,7 +105,7 @@ func (s *Service) ListReports(ctx context.Context, experimentID int64, status in
 		if err != nil {
 			return err
 		}
-		if err := ensureTeacherCanManage(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), exp); err != nil {
+		if err := s.ensureTeacherCanManage(ctx, id.AccountID, exp); err != nil {
 			return err
 		}
 		items, total, err = tx.ListReports(ctx, id.TenantID, experimentID, status, page, size)
@@ -150,7 +150,7 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 		if err != nil {
 			return err
 		}
-		if err := ensureTeacherCanManage(id.AccountID, s.isSchoolAdmin(ctx, id.AccountID), exp); err != nil {
+		if err := s.ensureTeacherCanManage(ctx, id.AccountID, exp); err != nil {
 			return err
 		}
 		report, err = tx.GradeReport(ctx, id.TenantID, reportID, req.ManualScore, req.Comment)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -20,7 +21,6 @@ type deliveryConfig struct {
 	retryDelay   time.Duration
 	flushTimeout time.Duration
 	deadPrefix   string
-	deadSubject  string
 	publishFlush bool
 }
 
@@ -47,9 +47,6 @@ func newDeliveryConfig(cfg config.NATSConfig) deliveryConfig {
 
 // deadLetterSubject 生成某个主题对应的死信主题;未配置死信前缀时返回空字符串表示只记日志。
 func (c deliveryConfig) deadLetterSubject(subject string) string {
-	if strings.TrimSpace(c.deadSubject) != "" {
-		return c.deadSubject
-	}
 	if strings.TrimSpace(c.deadPrefix) == "" || strings.TrimSpace(subject) == "" {
 		return ""
 	}
@@ -98,7 +95,7 @@ func (b *natsBus) retryHandle(ctx context.Context, data []byte, handler Handler)
 	attempts := max(b.cfg.retryMax, 1)
 	var lastErr error
 	for attempt := 1; attempt <= attempts; attempt++ {
-		if err := handler(ctx, data); err != nil {
+		if err := invokeHandler(ctx, data, handler); err != nil {
 			lastErr = err
 			if attempt == attempts {
 				break
@@ -118,6 +115,16 @@ func (b *natsBus) retryHandle(ctx context.Context, data []byte, handler Handler)
 		return nil
 	}
 	return lastErr
+}
+
+// invokeHandler 把业务 handler panic 转成普通错误,使其继续进入统一重试和死信链路。
+func invokeHandler(ctx context.Context, data []byte, handler Handler) (err error) {
+	defer func() {
+		if value := recover(); value != nil {
+			err = fmt.Errorf("事件处理器 panic: %v\n%s", value, debug.Stack())
+		}
+	}()
+	return handler(ctx, data)
 }
 
 // publishDeadLetter 把失败事件投递到死信主题,供上层补偿任务或人工处理读取。
@@ -165,12 +172,4 @@ func (b *natsBus) flushContext(ctx context.Context) (context.Context, context.Ca
 		return ctx, func() {}
 	}
 	return context.WithTimeout(ctx, b.cfg.flushTimeout)
-}
-
-// max 返回较大的整数,供重试配置兜底复用。
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

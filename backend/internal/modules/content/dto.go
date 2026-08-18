@@ -3,6 +3,14 @@ package content
 
 import "chaimir/internal/platform/ids"
 
+// UploadAttachmentRequest 是 API 层已读取并校验大小后的题库附件请求。
+type UploadAttachmentRequest struct {
+	ResourceID  string
+	FileName    string
+	ContentType string
+	Content     []byte
+}
+
 // AttachmentUploadDTO 是附件上传后的受控对象引用。
 type AttachmentUploadDTO struct {
 	ObjectRef string `json:"object_ref"`
@@ -86,7 +94,7 @@ type CloneItemRequest struct {
 
 // AttachmentDownloadGrantRequest 是附件短时下载授权请求。
 type AttachmentDownloadGrantRequest struct {
-	ResourceID string `json:"resource_id"`
+	ResourceID ids.ID `json:"resource_id"`
 	ObjectRef  string `json:"object_ref"`
 }
 

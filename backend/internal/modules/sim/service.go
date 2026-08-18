@@ -213,11 +213,11 @@ func (s *Service) loadBundleForExecution(ctx context.Context, session SessionWit
 			logging.ErrorContext(ctx, "关闭仿真包对象读取器失败", closeErr.Error(), slog.String("object_key", ref.Key))
 		}
 	}()
-	data, err := io.ReadAll(io.LimitReader(reader, s.upload.SimBundleMaxBytes+1))
+	data, sizeResult, err := upload.ReadBounded(reader, s.upload.SimBundleMaxBytes)
 	if err != nil {
 		return nil, apperr.ErrSimBundleUnreadable.WithCause(err)
 	}
-	if int64(len(data)) > s.upload.SimBundleMaxBytes {
+	if sizeResult != upload.SizeOK {
 		return nil, apperr.ErrSimBundleUnreadable.WithCause(fmt.Errorf("仿真包归档超过上传上限"))
 	}
 	format, err := bundleFormat(data)

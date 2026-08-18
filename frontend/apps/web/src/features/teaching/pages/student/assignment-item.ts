@@ -49,13 +49,3 @@ export function itemChoices(item: AssignmentItem): string[] {
   }
   return []
 }
-
-/**
- * itemSteps 取实验模板类题目的操作步骤。
- * 用于作业结果页回顾要求,与题面正文并列展示。
- */
-export function itemSteps(item: AssignmentItem): string[] {
-  const steps = item.body?.steps
-  if (!Array.isArray(steps)) return []
-  return steps.filter((step): step is string => typeof step === 'string')
-}

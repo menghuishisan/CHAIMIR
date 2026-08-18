@@ -1,8 +1,5 @@
-// teaching labels 文件维护 M6 教学模块枚举的用户向文案与语义色。
-// 语义色与文案同源:同一个后端枚举的界面表达只在这里登记一次,
-// 避免每个页面各自决定"进行中该用什么颜色"而出现同一状态多种视觉。
+// teaching labels 文件维护 M6 教学模块枚举的用户向文案。
 
-import type { BadgeTone, CoverAccent, StatusTone } from '@chaimir/ui'
 import {
   AssignmentStatus,
   CourseStatus,
@@ -27,22 +24,9 @@ const COURSE_STATUS_LABELS: Record<CourseStatus, string> = {
   [CourseStatus.ARCHIVED]: '已归档',
 }
 
-const COURSE_STATUS_TONES: Record<CourseStatus, StatusTone> = {
-  [CourseStatus.DRAFT]: 'neutral',
-  [CourseStatus.PUBLISHED]: 'info',
-  [CourseStatus.RUNNING]: 'primary',
-  [CourseStatus.ENDED]: 'success',
-  [CourseStatus.ARCHIVED]: 'neutral',
-}
-
 /** courseStatusLabel 返回课程状态文案。 */
 export function courseStatusLabel(status: CourseStatus): string {
   return COURSE_STATUS_LABELS[status]
-}
-
-/** courseStatusTone 返回课程状态语义色。 */
-export function courseStatusTone(status: CourseStatus): StatusTone {
-  return COURSE_STATUS_TONES[status]
 }
 
 const COURSE_TYPE_LABELS: Record<CourseType, string> = {
@@ -55,23 +39,6 @@ const COURSE_TYPE_LABELS: Record<CourseType, string> = {
 /** courseTypeLabel 返回课程类型文案。 */
 export function courseTypeLabel(type: CourseType): string {
   return COURSE_TYPE_LABELS[type]
-}
-
-/**
- * 默认封面的题识与注册线色:与上面的类型文案同源登记,不在页面里各写一遍。
- * 题识取两字(压在封面右侧的大字),四类各有可区分的语义色;
- * 「理论与实验」用朱砂是规范 §1.1 的登记例外(见 docs/总-前端设计规范.md §1.3)。
- */
-const COURSE_TYPE_COVERS: Record<CourseType, { glyph: string; accent: CoverAccent }> = {
-  [CourseType.THEORY]: { glyph: '理论', accent: 'blue' },
-  [CourseType.LAB]: { glyph: '实验', accent: 'jade' },
-  [CourseType.MIXED]: { glyph: '兼修', accent: 'cinnabar' },
-  [CourseType.PROJECT]: { glyph: '项目', accent: 'graphite' },
-}
-
-/** courseTypeCover 返回该课程类型默认封面的题识与语义色。 */
-export function courseTypeCover(type: CourseType): { glyph: string; accent: CoverAccent } {
-  return COURSE_TYPE_COVERS[type]
 }
 
 const DIFFICULTY_LABELS: Record<TeachingDifficulty, string> = {
@@ -105,20 +72,9 @@ const PROGRESS_STATUS_LABELS: Record<ProgressStatus, string> = {
   [ProgressStatus.DONE]: '已完成',
 }
 
-const PROGRESS_STATUS_TONES: Record<ProgressStatus, StatusTone> = {
-  [ProgressStatus.NOT_STARTED]: 'neutral',
-  [ProgressStatus.IN_PROGRESS]: 'info',
-  [ProgressStatus.DONE]: 'success',
-}
-
 /** progressStatusLabel 返回课时学习状态文案。 */
 export function progressStatusLabel(status: ProgressStatus): string {
   return PROGRESS_STATUS_LABELS[status]
-}
-
-/** progressStatusTone 返回课时学习状态语义色。 */
-export function progressStatusTone(status: ProgressStatus): StatusTone {
-  return PROGRESS_STATUS_TONES[status]
 }
 
 const ASSIGNMENT_STATUS_LABELS: Record<AssignmentStatus, string> = {
@@ -148,41 +104,9 @@ const SUBMISSION_STATUS_LABELS: Record<SubmissionStatus, string> = {
   [SubmissionStatus.GRADED]: '已出分',
 }
 
-const SUBMISSION_STATUS_TONES: Record<SubmissionStatus, StatusTone> = {
-  [SubmissionStatus.SUBMITTED]: 'info',
-  [SubmissionStatus.PENDING]: 'warning',
-  [SubmissionStatus.GRADED]: 'success',
-}
-
 /** submissionStatusLabel 返回提交状态文案。 */
 export function submissionStatusLabel(status: SubmissionStatus): string {
   return SUBMISSION_STATUS_LABELS[status]
-}
-
-/** submissionStatusTone 返回提交状态语义色。 */
-export function submissionStatusTone(status: SubmissionStatus): StatusTone {
-  return SUBMISSION_STATUS_TONES[status]
-}
-
-/** ASSIGNMENT_DUE_TONE 是作业截止时间临近程度对应的徽标色。 */
-export const ASSIGNMENT_DUE_TONE: Record<'overdue' | 'urgent' | 'normal', BadgeTone> = {
-  overdue: 'danger',
-  urgent: 'warning',
-  normal: 'neutral',
-}
-
-/**
- * 课时材料形态:视频与附件都把对象引用存在 content_ref 里,
- * 由 content_type 区分投放方式(视频流式续播 / 附件取件)。
- */
-const MATERIAL_CONTENT_TYPES: ReadonlySet<LessonContentType> = new Set([
-  LessonContentType.VIDEO,
-  LessonContentType.ATTACHMENT,
-])
-
-/** isLessonMaterialType 判断课时是否为需要文件投放的形态。 */
-export function isLessonMaterialType(type: LessonContentType): boolean {
-  return MATERIAL_CONTENT_TYPES.has(type)
 }
 
 /**
@@ -212,13 +136,6 @@ export function gradeSourceLabel(source: GradeSource): string {
   return GRADE_SOURCE_LABELS[source]
 }
 
-/** GRADE_SOURCES 供权重表单按登记顺序渲染。 */
-export const GRADE_SOURCES = [
-  GradeSource.ASSIGNMENT,
-  GradeSource.EXPERIMENT,
-  GradeSource.EXAM,
-] as const
-
 const COURSE_VISIBILITY_LABELS: Record<CourseVisibility, string> = {
   [CourseVisibility.PRIVATE]: '仅本校',
   [CourseVisibility.SHARED]: '已共享到课程库',
@@ -238,35 +155,3 @@ const JOIN_MODE_LABELS: Record<JoinMode, string> = {
 export function joinModeLabel(mode: JoinMode): string {
   return JOIN_MODE_LABELS[mode]
 }
-
-/** COURSE_TYPES 供课程表单按登记顺序渲染类型选项。 */
-export const COURSE_TYPES = [
-  CourseType.THEORY,
-  CourseType.LAB,
-  CourseType.MIXED,
-  CourseType.PROJECT,
-] as const
-
-/** TEACHING_DIFFICULTIES 供课程表单渲染难度选项。 */
-export const TEACHING_DIFFICULTIES = [
-  TeachingDifficulty.INTRO,
-  TeachingDifficulty.ADVANCED,
-  TeachingDifficulty.EXPERT,
-  TeachingDifficulty.RESEARCH,
-] as const
-
-/** LATE_POLICIES 供作业表单渲染迟交策略选项。 */
-export const LATE_POLICIES = [
-  LatePolicy.REJECT,
-  LatePolicy.PENALIZE,
-  LatePolicy.NO_PENALTY,
-] as const
-
-/** LESSON_CONTENT_TYPES 供课时表单渲染内容形态选项。 */
-export const LESSON_CONTENT_TYPES = [
-  LessonContentType.VIDEO,
-  LessonContentType.MARKDOWN,
-  LessonContentType.ATTACHMENT,
-  LessonContentType.EXPERIMENT,
-  LessonContentType.SIMULATION,
-] as const

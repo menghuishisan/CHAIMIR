@@ -36,12 +36,12 @@ import { useAsyncResource } from '../../../../hooks'
 import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { formatDuration, formatFileSize, formatShortDateTime } from '../../../../utils/formatters'
 import {
-  isLessonMaterialType,
   lessonContentTypeLabel,
   progressStatusLabel,
-  progressStatusTone,
 } from '../../../../utils/labels/teaching'
-import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { errorDiagnostics, userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { isLessonMaterialType } from '../../rules'
+import { progressStatusTone } from '../../statusPresentation'
 
 /** LessonView 是课时页所需的一次性读取结果:课时本体 + 本人在该课时的进度。 */
 interface LessonView {
@@ -305,7 +305,7 @@ function LessonVideo({
         console.error('课时视频播放位置回写失败', {
           operation: 'teaching.lesson.reportVideoPosition',
           reason: 'progress-report-failed',
-          error,
+          error: errorDiagnostics(error),
         })
       }
     },

@@ -3,8 +3,8 @@ package admin
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"time"
 
 	"chaimir/internal/modules/admin/internal/sqlcgen"
 	"chaimir/internal/platform/db"
@@ -24,6 +24,8 @@ type Store interface {
 	PlatformTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 	// TenantTx 在租户事务中访问 M9 租户级表。
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
+	// PrivilegedTx 在受控后台任务中跨租户扫描 M9 自有请求表。
+	PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 }
 
 // TxStore 定义单事务内的 M9 数据访问能力。
@@ -45,6 +47,10 @@ type TxStore interface {
 	UpsertPlatformStatistics(context.Context, int64, int16, int64, string, map[string]any) (StatisticsDTO, error)
 	CreateBackupRecord(context.Context, int64, BackupRecordCreate) (BackupRecordDTO, error)
 	ListBackupRecords(context.Context, int16, int, int) ([]BackupRecordDTO, int64, error)
+	CreateAuditExportRequest(context.Context, AuditExportRequest) (AuditExportRequest, error)
+	ListDueAuditExportRequests(context.Context, time.Time, int32) ([]AuditExportRequest, error)
+	SetAuditExportRequestNextCheck(context.Context, int64, int64, time.Time) (AuditExportRequest, error)
+	DeleteAuditExportRequest(context.Context, int64, int64) error
 }
 
 // RecordBackupResult 写入受控运维备份任务结果,仅供组合根 cron 命令使用。
@@ -87,5 +93,15 @@ func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Co
 	})
 }
 
+// PrivilegedTx 仅用于 M9 后台 worker 跨租户扫描本模块自有导出请求。
+func (s *store) PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error {
+	if s == nil || s.database == nil {
+		return fmt.Errorf("admin store 未初始化")
+	}
+	return s.database.WithPrivilegedModuleTx(ctx, "admin", func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	})
+}
+
 // isNoRows 统一识别未命中错误。
-func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
+func isNoRows(err error) bool { return db.IsNoRows(err) }
