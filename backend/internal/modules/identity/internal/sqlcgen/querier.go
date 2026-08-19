@@ -18,6 +18,7 @@ type Querier interface {
 	ClassExists(ctx context.Context, arg ClassExistsParams) (bool, error)
 	ClearPasswordFailure(ctx context.Context, arg ClearPasswordFailureParams) error
 	CountActiveRoleAccounts(ctx context.Context, arg CountActiveRoleAccountsParams) (int64, error)
+	CountClassStudents(ctx context.Context, arg CountClassStudentsParams) (int64, error)
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (Account, error)
 	CreateAccountProfile(ctx context.Context, arg CreateAccountProfileParams) error
 	CreateAccountRole(ctx context.Context, arg CreateAccountRoleParams) error
@@ -75,7 +76,7 @@ type Querier interface {
 	MarkImportPreviewSubmitted(ctx context.Context, arg MarkImportPreviewSubmittedParams) (int64, error)
 	MarkSMSCodeUsed(ctx context.Context, arg MarkSMSCodeUsedParams) error
 	MarkTenantProvisionOutboxFailed(ctx context.Context, arg MarkTenantProvisionOutboxFailedParams) (TenantProvisionOutbox, error)
-	MarkTenantProvisionOutboxPublished(ctx context.Context, id int64) (TenantProvisionOutbox, error)
+	MarkTenantProvisionOutboxPublished(ctx context.Context, arg MarkTenantProvisionOutboxPublishedParams) (TenantProvisionOutbox, error)
 	PlatformStats(ctx context.Context) (PlatformStatsRow, error)
 	PromoteClassStudentProfiles(ctx context.Context, arg PromoteClassStudentProfilesParams) error
 	PromoteClasses(ctx context.Context, arg PromoteClassesParams) (int64, error)

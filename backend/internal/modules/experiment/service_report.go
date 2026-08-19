@@ -142,7 +142,7 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 		if err != nil {
 			return err
 		}
-		inst, err = tx.GetInstance(ctx, id.TenantID, current.InstanceID)
+		inst, err = tx.GetInstanceForUpdate(ctx, id.TenantID, current.InstanceID)
 		if err != nil {
 			return err
 		}
@@ -157,16 +157,20 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 		if err != nil {
 			return err
 		}
-		if inst.Status != InstanceStatusFinished {
+		if inst.Status != InstanceStatusFinished && inst.Status != InstanceStatusRecycled {
 			return nil
 		}
 		score, err := tx.SumScores(ctx, id.TenantID, inst.ID)
 		if err != nil {
 			return err
 		}
-		inst, err = tx.UpdateInstanceScore(ctx, id.TenantID, inst.ID, score)
+		var changed bool
+		inst, changed, err = tx.UpdateInstanceScoreIfChanged(ctx, id.TenantID, inst.ID, score)
 		if err != nil {
 			return err
+		}
+		if !changed {
+			return nil
 		}
 		shouldPublish = true
 		return s.enqueueExperimentScoreOutbox(ctx, tx, inst)

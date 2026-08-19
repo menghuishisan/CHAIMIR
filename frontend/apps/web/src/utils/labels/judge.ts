@@ -11,9 +11,7 @@ const TASK_STATUS_LABELS: Record<JudgeTaskStatus, string> = {
   [JUDGE_TASK_STATUS.QUEUED]: '排队中',
   [JUDGE_TASK_STATUS.JUDGING]: '判题中',
   [JUDGE_TASK_STATUS.DONE]: '已完成',
-  [JUDGE_TASK_STATUS.TIMEOUT]: '判题超时',
   [JUDGE_TASK_STATUS.FAILED]: '判题失败',
-  [JUDGE_TASK_STATUS.ERROR]: '判题出错',
   [JUDGE_TASK_STATUS.CANCELLED]: '已取消',
 }
 

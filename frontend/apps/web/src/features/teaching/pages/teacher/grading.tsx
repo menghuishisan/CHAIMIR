@@ -14,7 +14,6 @@ import { useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { CheckSquare, ClipboardCheck, RefreshCw, RotateCcw } from 'lucide-react'
 import {
-  PAGINATION_MAX_SIZE,
   SubmissionStatus,
   type Assignment,
   type Course,
@@ -79,16 +78,14 @@ export default function TeacherGradingPage() {
   const assignmentId = searchParams.get('assignment') ?? ''
   const [courseId, setCourseId] = useState<string>('')
 
-  const courses = useAsyncResource(
-    () => api.teaching.getCourses({ role: 'teacher', page: 1, size: PAGINATION_MAX_SIZE }),
-    [],
-    () => false,
-  )
+  const courses = usePagedResource<Course>((params) => api.teaching.getCourses({ role: 'teacher', ...params }), [])
 
-  const assignments = useAsyncResource(
-    () => (courseId ? api.teaching.listCourseAssignments(courseId) : Promise.resolve([])),
+  const assignments = usePagedResource<Assignment>(
+    (params) =>
+      courseId
+        ? api.teaching.listCourseAssignments(courseId, params)
+        : Promise.resolve({ list: [] as Assignment[], total: 0, page: params.page, size: params.size }),
     [courseId],
-    () => false,
   )
 
   const courseOptions = useMemo(
@@ -97,7 +94,7 @@ export default function TeacherGradingPage() {
   )
 
   const assignmentOptions = useMemo(
-    () => (assignments.data ?? []).map((item: Assignment) => ({ value: item.id, label: item.title })),
+    () => (assignments.data?.list ?? []).map((item: Assignment) => ({ value: item.id, label: item.title })),
     [assignments.data],
   )
 
@@ -114,36 +111,69 @@ export default function TeacherGradingPage() {
         <Card>
           <CardHeader title="选择要批改的作业" description="先选课程,再选课程下的作业。" />
           <CardBody>
+            {courses.status === 'error' ? (
+              <Callout tone="danger" title="课程目录暂时读不到">
+                <Button variant="outline" size="sm" onClick={courses.reload}>重新加载课程</Button>
+              </Callout>
+            ) : null}
+            {assignments.status === 'error' ? (
+              <Callout tone="danger" title="作业目录暂时读不到">
+                <Button variant="outline" size="sm" onClick={assignments.reload}>重新加载作业</Button>
+              </Callout>
+            ) : null}
             <div className="grid gap-4 sm:grid-cols-2">
-              <FormField label="课程" htmlFor="grading-course">
-                <Select
-                  id="grading-course"
-                  options={courseOptions}
-                  value={courseId}
-                  placeholder={courseOptions.length > 0 ? '选择课程' : '暂无课程'}
-                  disabled={courseOptions.length === 0}
-                  onValueChange={(value) => {
-                    setCourseId(value)
+              <div className="flex flex-col gap-3">
+                <FormField label="课程" htmlFor="grading-course">
+                  <Select
+                    id="grading-course"
+                    options={courseOptions}
+                    value={courseId}
+                    placeholder={courseOptions.length > 0 ? '选择课程' : '暂无课程'}
+                    disabled={courseOptions.length === 0 || courses.status !== 'success'}
+                    onValueChange={(value) => {
+                      setCourseId(value)
+                      setSearchParams({})
+                    }}
+                  />
+                </FormField>
+                <Pagination
+                  page={courses.page}
+                  pageSize={courses.pageSize}
+                  total={courses.total}
+                  onPageChange={(page) => {
+                    setCourseId('')
                     setSearchParams({})
+                    courses.setPage(page)
                   }}
                 />
-              </FormField>
-              <FormField label="作业" htmlFor="grading-assignment">
-                <Select
-                  id="grading-assignment"
-                  options={assignmentOptions}
-                  value={assignmentId}
-                  placeholder={
-                    courseId === ''
-                      ? '请先选择课程'
-                      : assignmentOptions.length > 0
-                        ? '选择作业'
-                        : '该课程暂无作业'
-                  }
-                  disabled={assignmentOptions.length === 0}
-                  onValueChange={(value) => setSearchParams({ assignment: value })}
+              </div>
+              <div className="flex flex-col gap-3">
+                <FormField label="作业" htmlFor="grading-assignment">
+                  <Select
+                    id="grading-assignment"
+                    options={assignmentOptions}
+                    value={assignmentId}
+                    placeholder={
+                      courseId === ''
+                        ? '请先选择课程'
+                        : assignmentOptions.length > 0
+                          ? '选择作业'
+                          : '该课程暂无作业'
+                    }
+                    disabled={assignmentOptions.length === 0 || assignments.status !== 'success'}
+                    onValueChange={(value) => setSearchParams({ assignment: value })}
+                  />
+                </FormField>
+                <Pagination
+                  page={assignments.page}
+                  pageSize={assignments.pageSize}
+                  total={assignments.total}
+                  onPageChange={(page) => {
+                    setSearchParams({})
+                    assignments.setPage(page)
+                  }}
                 />
-              </FormField>
+              </div>
             </div>
           </CardBody>
         </Card>

@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS notification (
     title VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
     link VARCHAR(255) NULL,
+    source_ref VARCHAR(128) NULL,
     is_read BOOLEAN NOT NULL DEFAULT false,
     read_at TIMESTAMPTZ NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -13,6 +14,7 @@ CREATE TABLE IF NOT EXISTS notification (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notification_inbox ON notification(tenant_id, receiver_id, is_read, created_at DESC) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_notification_receiver_source ON notification(tenant_id, receiver_id, source_ref) WHERE source_ref IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS notification_template (
     id BIGINT PRIMARY KEY,

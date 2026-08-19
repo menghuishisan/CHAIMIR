@@ -21,7 +21,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { usePagedResource } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
@@ -46,10 +46,7 @@ export function CourseDiscussion({ courseId }: CourseDiscussionProps) {
  * CourseAnnouncements 展示课程公告,置顶公告排在前面(后端已按置顶与时间排序)。
  */
 function CourseAnnouncements({ courseId }: CourseDiscussionProps) {
-  const announcements = useAsyncResource(
-    () => api.teaching.listAnnouncements(courseId),
-    [courseId],
-  )
+	const announcements = usePagedResource<TeachingAnnouncement>((params) => api.teaching.listAnnouncements(courseId, params), [courseId])
 
   return (
     <PageSection title="课程公告" description="老师发布的课程通知。">
@@ -60,12 +57,13 @@ function CourseAnnouncements({ courseId }: CourseDiscussionProps) {
         emptyDescription="老师发布课程公告后会显示在这里。"
         skeleton={<Skeleton variant="line" lines={3} />}
       >
-        {(list) => (
+        {(page) => (
           <div className="flex flex-col gap-3">
-            {list.map((item) => (
-              <AnnouncementItem key={item.id} announcement={item} />
-            ))}
-          </div>
+			{page.list.map((item) => (
+				<AnnouncementItem key={item.id} announcement={item} />
+			))}
+			<Pagination page={announcements.page} pageSize={announcements.pageSize} total={announcements.total} onPageChange={announcements.setPage} />
+			</div>
         )}
       </ResourceState>
     </PageSection>

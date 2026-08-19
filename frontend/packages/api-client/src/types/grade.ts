@@ -1,6 +1,12 @@
 // ===== M11 Grade 模块 =====
 
-import type { GradeAppealStatus, GradeReviewStatus, GradeWarningStatus, GradeWarningType, TranscriptScope } from '../constants/grade'
+import type {
+  GradeAppealStatus,
+  GradeReviewStatus,
+  GradeWarningStatus,
+  GradeWarningType,
+  TranscriptScope,
+} from '../constants/grade'
 import type { SnowflakeID } from './common'
 
 export interface LevelRule {
@@ -88,6 +94,20 @@ export interface GradeSummary {
   cumulative_gpa: number
   course_grades: CourseGrade[]
   computed_at: string
+}
+
+/** StudentGradePage 是学生成绩页的分页课程明细和同范围 GPA 汇总。 */
+export interface StudentGradePage {
+  student_id: SnowflakeID
+  semester_id?: SnowflakeID
+  total_credits: number
+  gpa: number
+  cumulative_gpa: number
+  computed_at: string
+  list: CourseGrade[]
+  total: number
+  page: number
+  size: number
 }
 
 export interface GradeAppeal {

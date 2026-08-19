@@ -36,6 +36,7 @@ type AnnouncementDTO struct {
 
 // SendRequest 是内部通知发送请求。
 type SendRequest struct {
+	RequestID string            `json:"request_id,omitempty"`
 	TenantID  ids.ID            `json:"tenant_id"`
 	Type      string            `json:"type"`
 	Receivers []int64           `json:"receivers"`

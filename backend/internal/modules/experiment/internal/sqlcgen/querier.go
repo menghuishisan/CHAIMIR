@@ -56,7 +56,8 @@ type Querier interface {
 	SumReportScores(ctx context.Context, arg SumReportScoresParams) (float64, error)
 	TouchExperimentInstance(ctx context.Context, arg TouchExperimentInstanceParams) (TouchExperimentInstanceRow, error)
 	UpdateExperiment(ctx context.Context, arg UpdateExperimentParams) (Experiment, error)
-	UpdateExperimentInstanceScore(ctx context.Context, arg UpdateExperimentInstanceScoreParams) (UpdateExperimentInstanceScoreRow, error)
+	// 仅在总分真正变化时写入,让重复 M3 事件不能生成新的得分 outbox 修订版。
+	UpdateExperimentInstanceScoreIfChanged(ctx context.Context, arg UpdateExperimentInstanceScoreIfChangedParams) (UpdateExperimentInstanceScoreIfChangedRow, error)
 	UpdateInstanceResources(ctx context.Context, arg UpdateInstanceResourcesParams) (UpdateInstanceResourcesRow, error)
 	UpsertCheckpointResult(ctx context.Context, arg UpsertCheckpointResultParams) (UpsertCheckpointResultRow, error)
 	UpsertExperimentReport(ctx context.Context, arg UpsertExperimentReportParams) (UpsertExperimentReportRow, error)

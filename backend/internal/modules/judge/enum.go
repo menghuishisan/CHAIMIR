@@ -46,14 +46,10 @@ const (
 	JudgeTaskStatusJudging int16 = 2
 	// JudgeTaskStatusDone 表示任务完成。
 	JudgeTaskStatusDone int16 = 3
-	// JudgeTaskStatusTimeout 表示任务发生超时中间态。
-	JudgeTaskStatusTimeout int16 = 4
 	// JudgeTaskStatusFailed 表示任务系统性失败终态。
-	JudgeTaskStatusFailed int16 = 5
-	// JudgeTaskStatusError 表示任务发生系统性错误中间态。
-	JudgeTaskStatusError int16 = 6
+	JudgeTaskStatusFailed int16 = 4
 	// JudgeTaskStatusCancelled 表示任务已取消。
-	JudgeTaskStatusCancelled int16 = 7
+	JudgeTaskStatusCancelled int16 = 5
 )
 
 const (
@@ -61,17 +57,8 @@ const (
 	TaskStateAll = ""
 	// TaskStateActive 表示排队中与执行中的任务(status 1、2)。
 	TaskStateActive = "active"
-	// TaskStateAbnormal 表示需要人工介入的任务:超时、失败与出错(status 4、5、6)。
+	// TaskStateAbnormal 表示需要人工介入的失败任务(status 4)。
 	TaskStateAbnormal = "abnormal"
-)
-
-const (
-	// JudgeOutboxPending 表示终态事件待发布。
-	JudgeOutboxPending int16 = 1
-	// JudgeOutboxPublished 表示终态事件已发布。
-	JudgeOutboxPublished int16 = 2
-	// JudgeOutboxFailed 表示终态事件发布失败待重试。
-	JudgeOutboxFailed int16 = 3
 )
 
 const (

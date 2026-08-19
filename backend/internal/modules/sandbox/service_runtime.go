@@ -3,6 +3,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -231,7 +232,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	}
 	status := RuntimeSelftestPassed
 	runtimeStatus := RuntimeStatusAvailable
-	detail, encodeErr := jsonBytes(map[string]any{"result": "passed", "namespace": sb.Namespace})
+	detail, encodeErr := jsonBytes(map[string]any{"result": "passed"})
 	if encodeErr != nil {
 		return RuntimeSelftestResponse{}, apperr.ErrSandboxSelftestFailed.WithCause(encodeErr)
 	}
@@ -258,7 +259,11 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	if auditErr := s.writeAuditFromContext(ctx, 0, "sandbox.runtime.selftest", "runtime", runtimeID, map[string]any{"status": status}); auditErr != nil {
 		return RuntimeSelftestResponse{}, auditErr
 	}
-	resp := RuntimeSelftestResponse{RuntimeID: ids.ID(runtimeID), SelftestStatus: updated.SelftestStatus, RuntimeStatus: updated.Status, Detail: updated.SelftestDetail}
+	publicDetail, detailErr := runtimeSelftestPublicDetail(updated.SelftestDetail)
+	if detailErr != nil {
+		return RuntimeSelftestResponse{}, apperr.ErrSandboxSelftestFailed.WithCause(detailErr)
+	}
+	resp := RuntimeSelftestResponse{RuntimeID: ids.ID(runtimeID), SelftestStatus: updated.SelftestStatus, RuntimeStatus: updated.Status, Detail: publicDetail}
 	if err != nil {
 		return resp, apperr.ErrSandboxSelftestFailed.WithCause(err)
 	}
@@ -273,6 +278,16 @@ func traceIDFromLogContext(ctx context.Context) string {
 		}
 	}
 	return ""
+}
+
+// runtimeSelftestPublicDetail 只向平台界面输出稳定的自检状态和报障编号。
+// 持久化明细可能包含历史编排信息，因此不能作为 HTTP JSON 原样透传。
+func runtimeSelftestPublicDetail(raw json.RawMessage) (RuntimeSelftestDetail, error) {
+	var stored RuntimeSelftestDetail
+	if err := jsonx.DecodeStrict(raw, &stored); err != nil {
+		return RuntimeSelftestDetail{}, err
+	}
+	return stored, nil
 }
 
 // runRuntimeCapabilitySelftest 用标准 L2 能力执行 reset/deploy/query/reset 自检闭环。
@@ -325,7 +340,11 @@ func (s *Service) GetRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	}); err != nil {
 		return RuntimeSelftestResponse{}, err
 	}
-	return RuntimeSelftestResponse{RuntimeID: ids.ID(runtime.ID), SelftestStatus: runtime.SelftestStatus, RuntimeStatus: runtime.Status, Detail: runtime.SelftestDetail}, nil
+	publicDetail, err := runtimeSelftestPublicDetail(runtime.SelftestDetail)
+	if err != nil {
+		return RuntimeSelftestResponse{}, apperr.ErrSandboxSelftestFailed.WithCause(err)
+	}
+	return RuntimeSelftestResponse{RuntimeID: ids.ID(runtime.ID), SelftestStatus: runtime.SelftestStatus, RuntimeStatus: runtime.Status, Detail: publicDetail}, nil
 }
 
 // PrepullRuntimeImage 触发 DaemonSet 全节点预拉取并以真实节点状态更新数据库。
@@ -410,7 +429,7 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 	if err != nil {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(err)
 	}
-	return PrepullResponse{ImageID: ids.ID(imageID), PrepullStatus: status, DesiredNodes: result.DesiredNodes, ReadyNodes: result.ReadyNodes, DaemonSet: result.DaemonSet, ImageCount: len(imageURLs), Images: imageURLs}, nil
+	return PrepullResponse{ImageID: ids.ID(imageID), PrepullStatus: status, DesiredNodes: result.DesiredNodes, ReadyNodes: result.ReadyNodes, ImageCount: len(imageURLs)}, nil
 }
 
 // prepullImageSpecsForRuntime 汇总运行时默认工作负载会用到的不可变镜像和最小自检命令。
@@ -575,9 +594,7 @@ func (s *Service) GetRuntimeImagePrepull(ctx context.Context, runtimeID, imageID
 	}
 	resp.DesiredNodes = detail.DesiredNodes
 	resp.ReadyNodes = detail.ReadyNodes
-	resp.DaemonSet = detail.DaemonSet
 	resp.ImageCount = detail.ImageCount
-	resp.Images = detail.Images
 	return resp, nil
 }
 

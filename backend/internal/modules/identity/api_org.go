@@ -185,8 +185,12 @@ func (a orgAPI) listClassStudents(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.ListClassStudentsForViewer(c.Request.Context(), classID)
-	httpx.Write(c, out, err)
+	page, size, ok := httpx.Page(c)
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListClassStudentsForViewer(c.Request.Context(), classID, page, size)
+	httpx.WritePage(c, out, total, p, s, err)
 }
 
 // createClass 绑定创建班级请求。

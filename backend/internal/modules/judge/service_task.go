@@ -16,7 +16,7 @@ import (
 )
 
 // ListTasks 按租户分页查询判题任务,供教师和学校管理员查看队列与人工评分项。
-// state 取运维分组(空串不筛 / active 排队与执行中 / abnormal 超时失败出错),非法值按不筛处理前先拒绝。
+// state 取运维分组(空串不筛 / active 排队与执行中 / abnormal 判题失败),非法值按不筛处理前先拒绝。
 func (s *Service) ListTasks(ctx context.Context, tenantID, accountID int64, sourceRef string, pendingManual bool, state string, page, size int) ([]JudgeTaskDTO, int64, int, int, error) {
 	if tenantID <= 0 || accountID <= 0 {
 		return nil, 0, 0, 0, apperr.ErrJudgeSubmitInvalid
@@ -199,7 +199,7 @@ func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID in
 		if err != nil {
 			return apperr.ErrJudgeTaskPersistFailed.WithCause(err)
 		}
-		task, err = tx.CompleteJudgeTask(ctx, tenantID, taskID)
+		task, err = tx.CompleteManualJudgeTask(ctx, tenantID, taskID)
 		if err != nil {
 			return apperr.ErrJudgeTaskPersistFailed.WithCause(err)
 		}
@@ -284,7 +284,7 @@ func progressStage(status int16) string {
 	switch status {
 	case JudgeTaskStatusDone:
 		return ProgressStageDone
-	case JudgeTaskStatusFailed, JudgeTaskStatusCancelled, JudgeTaskStatusError, JudgeTaskStatusTimeout:
+	case JudgeTaskStatusFailed, JudgeTaskStatusCancelled:
 		return ProgressStageFailed
 	case JudgeTaskStatusJudging:
 		return ProgressStageJudging
@@ -298,10 +298,8 @@ func progressMessage(status int16) string {
 	switch status {
 	case JudgeTaskStatusDone:
 		return "判题任务已完成"
-	case JudgeTaskStatusFailed, JudgeTaskStatusError:
+	case JudgeTaskStatusFailed:
 		return "判题任务执行失败"
-	case JudgeTaskStatusTimeout:
-		return "判题任务执行超时"
 	case JudgeTaskStatusCancelled:
 		return "判题任务已取消"
 	case JudgeTaskStatusJudging:

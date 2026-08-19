@@ -161,25 +161,26 @@ type BootstrapConfig struct {
 
 // IdentityConfig 描述身份模块的安全和网络运行边界。
 type IdentityConfig struct {
-	ActivationCodeTTLHours       int
-	SSONetworkTimeoutSeconds     int
-	SSOCASResponseMaxBytes       int64
-	SSOAllowedServiceOrigins     []string
-	PasswordMaxFailedCount       int
-	PasswordLockMinutes          int
-	SMSResendSeconds             int
-	SMSDailyLimit                int
-	SMSCodeTTLMinutes            int
-	SMSVerifyMaxAttempts         int
-	AuthRateWindowSeconds        int
-	AuthRateMax                  int
-	ApplicationRateWindowSeconds int
-	ApplicationRateMax           int
-	ImportMaxRows                int
-	ImportPreviewTTLHours        int
-	TenantProvisionOutboxPollMs  int
-	TenantProvisionOutboxBatch   int
-	TenantProvisionOutboxStaleMs int
+	ActivationCodeTTLHours           int
+	SSONetworkTimeoutSeconds         int
+	SSOCASResponseMaxBytes           int64
+	SSOAllowedServiceOrigins         []string
+	PasswordMaxFailedCount           int
+	PasswordLockMinutes              int
+	SMSResendSeconds                 int
+	SMSDailyLimit                    int
+	SMSCodeTTLMinutes                int
+	SMSVerifyMaxAttempts             int
+	AuthRateWindowSeconds            int
+	AuthRateMax                      int
+	ApplicationRateWindowSeconds     int
+	ApplicationRateMax               int
+	ImportMaxRows                    int
+	ImportPreviewTTLHours            int
+	TenantProvisionOutboxPollMs      int
+	TenantProvisionOutboxBatch       int
+	TenantProvisionOutboxStaleMs     int
+	TenantProvisionOutboxMaxAttempts int
 }
 
 // SMSConfig 描述短信网关接入边界。
@@ -231,6 +232,9 @@ type ContestConfig struct {
 	MatchmakerBatchSize              int
 	SubmitRateLimitSeconds           int
 	FailedCooldownSeconds            int
+	MatchmakerLeaseDurationMs        int
+	AutoArchiveLeaseDurationMs       int
+	MatchmakerMaxAttempts            int
 	BattleELOInitialScore            float64
 	BattleELOKFactor                 float64
 }
@@ -252,9 +256,12 @@ type TeachingConfig struct {
 	CourseStatusPollIntervalSeconds int
 	JudgeOutboxBatchSize            int
 	JudgeOutboxPollIntervalMs       int
+	JudgeOutboxStaleMs              int
 	GradeEventOutboxBatchSize       int
 	GradeEventOutboxPollMs          int
 	GradeEventOutboxStaleMs         int
+	JudgeOutboxMaxAttempts          int
+	GradeEventOutboxMaxAttempts     int
 	GradeExportBatchSize            int
 	GradeExportWorkerBatchSize      int
 	GradeExportWorkerPollMs         int
@@ -269,6 +276,7 @@ type ExperimentConfig struct {
 	ScoreOutboxBatchSize       int
 	ScoreOutboxPollMs          int
 	ScoreOutboxStaleMs         int
+	ScoreOutboxMaxAttempts     int
 }
 
 // GradeConfig 描述成绩中心申诉和成绩单签名边界。
@@ -280,6 +288,7 @@ type GradeConfig struct {
 	LockOutboxBatchSize    int
 	LockOutboxPollMs       int
 	LockOutboxStaleMs      int
+	LockOutboxMaxAttempts  int
 }
 
 // AdminConfig 描述管理后台统计快照与受控备份任务边界。
@@ -338,6 +347,7 @@ type SandboxConfig struct {
 	RecycleOutboxBatchSize        int
 	RecycleOutboxPollMs           int
 	RecycleOutboxStaleMs          int
+	RecycleOutboxMaxAttempts      int
 	TenantDefaultMaxConcurrent    int32
 	TenantDefaultMaxCPU           int32
 	TenantDefaultMaxMemoryMB      int32
@@ -423,11 +433,15 @@ type JudgeConfig struct {
 	InputArchiveMaxFiles         int
 	InputArchiveMaxUnpackedBytes int64
 	SimilarityDefaultThreshold   float64
+	TaskLeaseDurationMs          int
+	OutboxLeaseDurationMs        int
+	OutboxMaxAttempts            int
 }
 
 // MonitoringConfig 描述外接监控面板入口。
 type MonitoringConfig struct {
-	PanelsJSON string
+	PanelsJSON          string
+	AllowedPanelOrigins []string
 }
 
 // SnowflakeConfig 描述雪花 ID 节点编号。
@@ -610,25 +624,26 @@ func Load() (*Config, error) {
 		PlatformAdminPassword: os.Getenv("BOOTSTRAP_PLATFORM_ADMIN_PASSWORD"),
 	}
 	c.Identity = IdentityConfig{
-		ActivationCodeTTLHours:       reqInt("IDENTITY_ACTIVATION_CODE_TTL_HOURS"),
-		SSONetworkTimeoutSeconds:     reqInt("IDENTITY_SSO_NETWORK_TIMEOUT_SECONDS"),
-		SSOCASResponseMaxBytes:       reqInt64("IDENTITY_SSO_CAS_RESPONSE_MAX_BYTES"),
-		SSOAllowedServiceOrigins:     getCSV("IDENTITY_SSO_ALLOWED_SERVICE_ORIGINS"),
-		PasswordMaxFailedCount:       reqInt("IDENTITY_PASSWORD_MAX_FAILED_COUNT"),
-		PasswordLockMinutes:          reqInt("IDENTITY_PASSWORD_LOCK_MINUTES"),
-		SMSResendSeconds:             reqInt("IDENTITY_SMS_RESEND_SECONDS"),
-		SMSDailyLimit:                reqInt("IDENTITY_SMS_DAILY_LIMIT"),
-		SMSCodeTTLMinutes:            reqInt("IDENTITY_SMS_CODE_TTL_MINUTES"),
-		SMSVerifyMaxAttempts:         reqInt("IDENTITY_SMS_VERIFY_MAX_ATTEMPTS"),
-		AuthRateWindowSeconds:        reqInt("IDENTITY_AUTH_RATE_WINDOW_SECONDS"),
-		AuthRateMax:                  reqInt("IDENTITY_AUTH_RATE_MAX"),
-		ApplicationRateWindowSeconds: reqInt("IDENTITY_APPLICATION_RATE_WINDOW_SECONDS"),
-		ApplicationRateMax:           reqInt("IDENTITY_APPLICATION_RATE_MAX"),
-		ImportMaxRows:                reqInt("IDENTITY_IMPORT_MAX_ROWS"),
-		ImportPreviewTTLHours:        reqInt("IDENTITY_IMPORT_PREVIEW_TTL_HOURS"),
-		TenantProvisionOutboxPollMs:  reqInt("IDENTITY_TENANT_PROVISION_OUTBOX_POLL_INTERVAL_MS"),
-		TenantProvisionOutboxBatch:   reqInt("IDENTITY_TENANT_PROVISION_OUTBOX_BATCH_SIZE"),
-		TenantProvisionOutboxStaleMs: reqInt("IDENTITY_TENANT_PROVISION_OUTBOX_STALE_INTERVAL_MS"),
+		ActivationCodeTTLHours:           reqInt("IDENTITY_ACTIVATION_CODE_TTL_HOURS"),
+		SSONetworkTimeoutSeconds:         reqInt("IDENTITY_SSO_NETWORK_TIMEOUT_SECONDS"),
+		SSOCASResponseMaxBytes:           reqInt64("IDENTITY_SSO_CAS_RESPONSE_MAX_BYTES"),
+		SSOAllowedServiceOrigins:         getCSV("IDENTITY_SSO_ALLOWED_SERVICE_ORIGINS"),
+		PasswordMaxFailedCount:           reqInt("IDENTITY_PASSWORD_MAX_FAILED_COUNT"),
+		PasswordLockMinutes:              reqInt("IDENTITY_PASSWORD_LOCK_MINUTES"),
+		SMSResendSeconds:                 reqInt("IDENTITY_SMS_RESEND_SECONDS"),
+		SMSDailyLimit:                    reqInt("IDENTITY_SMS_DAILY_LIMIT"),
+		SMSCodeTTLMinutes:                reqInt("IDENTITY_SMS_CODE_TTL_MINUTES"),
+		SMSVerifyMaxAttempts:             reqInt("IDENTITY_SMS_VERIFY_MAX_ATTEMPTS"),
+		AuthRateWindowSeconds:            reqInt("IDENTITY_AUTH_RATE_WINDOW_SECONDS"),
+		AuthRateMax:                      reqInt("IDENTITY_AUTH_RATE_MAX"),
+		ApplicationRateWindowSeconds:     reqInt("IDENTITY_APPLICATION_RATE_WINDOW_SECONDS"),
+		ApplicationRateMax:               reqInt("IDENTITY_APPLICATION_RATE_MAX"),
+		ImportMaxRows:                    reqInt("IDENTITY_IMPORT_MAX_ROWS"),
+		ImportPreviewTTLHours:            reqInt("IDENTITY_IMPORT_PREVIEW_TTL_HOURS"),
+		TenantProvisionOutboxPollMs:      reqInt("IDENTITY_TENANT_PROVISION_OUTBOX_POLL_INTERVAL_MS"),
+		TenantProvisionOutboxBatch:       reqInt("IDENTITY_TENANT_PROVISION_OUTBOX_BATCH_SIZE"),
+		TenantProvisionOutboxStaleMs:     reqInt("IDENTITY_TENANT_PROVISION_OUTBOX_STALE_INTERVAL_MS"),
+		TenantProvisionOutboxMaxAttempts: reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 	}
 	clusterCIDRs, clusterCIDRsErr := parseCIDRPrefixes(os.Getenv("SMS_HTTP_CLUSTER_CIDRS"))
 	if clusterCIDRsErr != nil {
@@ -670,6 +685,8 @@ func Load() (*Config, error) {
 		PreviewPollIntervalSeconds:     reqInt("SIM_PREVIEW_POLL_INTERVAL_SECONDS"),
 		PreviewBatchSize:               reqInt("SIM_PREVIEW_BATCH_SIZE"),
 		PreviewFrameCount:              reqInt("SIM_PREVIEW_FRAME_COUNT"),
+		PreviewLeaseDurationMs:         reqInt("SIM_PREVIEW_LEASE_DURATION_MS"),
+		PreviewMaxAttempts:             reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 	}
 	c.Transfer = TransferConfig{
 		TaskMaxAttempts:     reqInt("TRANSFER_TASK_MAX_ATTEMPTS"),
@@ -686,6 +703,9 @@ func Load() (*Config, error) {
 		MatchmakerBatchSize:              reqInt("CONTEST_MATCHMAKER_BATCH_SIZE"),
 		SubmitRateLimitSeconds:           reqInt("CONTEST_SUBMIT_RATE_LIMIT_SECONDS"),
 		FailedCooldownSeconds:            reqInt("CONTEST_FAILED_COOLDOWN_SECONDS"),
+		MatchmakerLeaseDurationMs:        reqInt("CONTEST_MATCHMAKER_LEASE_DURATION_MS"),
+		AutoArchiveLeaseDurationMs:       reqInt("CONTEST_AUTO_ARCHIVE_LEASE_DURATION_MS"),
+		MatchmakerMaxAttempts:            reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 		BattleELOInitialScore:            reqFloat64("CONTEST_BATTLE_ELO_INITIAL_SCORE"),
 		BattleELOKFactor:                 reqFloat64("CONTEST_BATTLE_ELO_K_FACTOR"),
 	}
@@ -703,9 +723,12 @@ func Load() (*Config, error) {
 		CourseStatusPollIntervalSeconds: reqInt("TEACHING_COURSE_STATUS_POLL_INTERVAL_SECONDS"),
 		JudgeOutboxBatchSize:            reqInt("TEACHING_JUDGE_OUTBOX_BATCH_SIZE"),
 		JudgeOutboxPollIntervalMs:       reqInt("TEACHING_JUDGE_OUTBOX_POLL_INTERVAL_MS"),
+		JudgeOutboxStaleMs:              reqInt("TEACHING_JUDGE_OUTBOX_STALE_INTERVAL_MS"),
 		GradeEventOutboxBatchSize:       reqInt("TEACHING_GRADE_EVENT_OUTBOX_BATCH_SIZE"),
 		GradeEventOutboxPollMs:          reqInt("TEACHING_GRADE_EVENT_OUTBOX_POLL_INTERVAL_MS"),
 		GradeEventOutboxStaleMs:         reqInt("TEACHING_GRADE_EVENT_OUTBOX_STALE_INTERVAL_MS"),
+		JudgeOutboxMaxAttempts:          reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
+		GradeEventOutboxMaxAttempts:     reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 		GradeExportBatchSize:            reqInt("TEACHING_GRADE_EXPORT_BATCH_SIZE"),
 		GradeExportWorkerBatchSize:      reqInt("TEACHING_GRADE_EXPORT_WORKER_BATCH_SIZE"),
 		GradeExportWorkerPollMs:         reqInt("TEACHING_GRADE_EXPORT_WORKER_POLL_INTERVAL_MS"),
@@ -718,6 +741,7 @@ func Load() (*Config, error) {
 		ScoreOutboxBatchSize:       reqInt("EXPERIMENT_SCORE_OUTBOX_BATCH_SIZE"),
 		ScoreOutboxPollMs:          reqInt("EXPERIMENT_SCORE_OUTBOX_POLL_INTERVAL_MS"),
 		ScoreOutboxStaleMs:         reqInt("EXPERIMENT_SCORE_OUTBOX_STALE_INTERVAL_MS"),
+		ScoreOutboxMaxAttempts:     reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 	}
 	c.Grade = GradeConfig{
 		AppealWindowDays:       reqInt("GRADE_APPEAL_WINDOW_DAYS"),
@@ -727,6 +751,7 @@ func Load() (*Config, error) {
 		LockOutboxBatchSize:    reqInt("GRADE_LOCK_OUTBOX_BATCH_SIZE"),
 		LockOutboxPollMs:       reqInt("GRADE_LOCK_OUTBOX_POLL_INTERVAL_MS"),
 		LockOutboxStaleMs:      reqInt("GRADE_LOCK_OUTBOX_STALE_INTERVAL_MS"),
+		LockOutboxMaxAttempts:  reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 	}
 	c.Admin = AdminConfig{
 		StatisticsSnapshotIntervalSeconds: reqInt("ADMIN_STATISTICS_SNAPSHOT_INTERVAL_SECONDS"),
@@ -780,6 +805,7 @@ func Load() (*Config, error) {
 		RecycleOutboxBatchSize:        reqInt("SANDBOX_RECYCLE_OUTBOX_BATCH_SIZE"),
 		RecycleOutboxPollMs:           reqInt("SANDBOX_RECYCLE_OUTBOX_POLL_INTERVAL_MS"),
 		RecycleOutboxStaleMs:          reqInt("SANDBOX_RECYCLE_OUTBOX_STALE_INTERVAL_MS"),
+		RecycleOutboxMaxAttempts:      reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 		TenantDefaultMaxConcurrent:    reqInt32("SANDBOX_TENANT_DEFAULT_MAX_CONCURRENT"),
 		TenantDefaultMaxCPU:           reqInt32("SANDBOX_TENANT_DEFAULT_MAX_CPU"),
 		TenantDefaultMaxMemoryMB:      reqInt32("SANDBOX_TENANT_DEFAULT_MAX_MEMORY_MB"),
@@ -808,9 +834,13 @@ func Load() (*Config, error) {
 		InputArchiveMaxFiles:         reqInt("JUDGE_INPUT_ARCHIVE_MAX_FILES"),
 		InputArchiveMaxUnpackedBytes: reqInt64("JUDGE_INPUT_ARCHIVE_MAX_UNPACKED_BYTES"),
 		SimilarityDefaultThreshold:   reqFloat64("JUDGE_SIMILARITY_DEFAULT_THRESHOLD"),
+		TaskLeaseDurationMs:          reqInt("JUDGE_TASK_LEASE_DURATION_MS"),
+		OutboxLeaseDurationMs:        reqInt("JUDGE_OUTBOX_LEASE_DURATION_MS"),
+		OutboxMaxAttempts:            reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 	}
 	c.Monitoring = MonitoringConfig{
-		PanelsJSON: req("MONITORING_PANELS_JSON"),
+		PanelsJSON:          req("MONITORING_PANELS_JSON"),
+		AllowedPanelOrigins: getCSV("MONITORING_ALLOWED_PANEL_ORIGINS"),
 	}
 	c.Snowflake = SnowflakeConfig{
 		NodeID:     reqInt64("SNOWFLAKE_NODE_ID"),
@@ -823,6 +853,14 @@ func Load() (*Config, error) {
 	}
 	if c.Postgres.Port < 1 || c.Postgres.Port > 65535 {
 		errs = append(errs, "POSTGRES_PORT 必须在 1 到 65535 之间")
+	}
+	if len(c.Monitoring.AllowedPanelOrigins) == 0 {
+		errs = append(errs, "MONITORING_ALLOWED_PANEL_ORIGINS 至少配置一个 HTTPS origin")
+	}
+	for _, origin := range c.Monitoring.AllowedPanelOrigins {
+		if !validOrigin(origin) || !strings.HasPrefix(strings.ToLower(origin), "https://") {
+			errs = append(errs, "MONITORING_ALLOWED_PANEL_ORIGINS 只能包含 HTTPS origin")
+		}
 	}
 	if c.Redis.Port < 1 || c.Redis.Port > 65535 {
 		errs = append(errs, "REDIS_PORT 必须在 1 到 65535 之间")
@@ -971,6 +1009,12 @@ func Load() (*Config, error) {
 	if c.SimBackend.PreviewFrameCount <= 0 {
 		errs = append(errs, "SIM_PREVIEW_FRAME_COUNT 必须大于 0")
 	}
+	if c.SimBackend.PreviewLeaseDurationMs <= 0 {
+		errs = append(errs, "SIM_PREVIEW_LEASE_DURATION_MS 必须大于 0")
+	}
+	if c.SimBackend.PreviewMaxAttempts <= 0 {
+		errs = append(errs, "ASYNC_OUTBOX_MAX_ATTEMPTS 必须大于 0")
+	}
 	if c.Upload.VirusScanRequired && strings.TrimSpace(c.Upload.VirusScanAddress) == "" {
 		errs = append(errs, "UPLOAD_VIRUS_SCAN_REQUIRED=true 时必须设置 UPLOAD_VIRUS_SCAN_ADDRESS")
 	}
@@ -1006,6 +1050,15 @@ func Load() (*Config, error) {
 	}
 	if c.Contest.FailedCooldownSeconds <= 0 {
 		errs = append(errs, "CONTEST_FAILED_COOLDOWN_SECONDS 必须大于 0")
+	}
+	if c.Contest.MatchmakerLeaseDurationMs <= 0 {
+		errs = append(errs, "CONTEST_MATCHMAKER_LEASE_DURATION_MS 必须大于 0")
+	}
+	if c.Contest.AutoArchiveLeaseDurationMs <= 0 {
+		errs = append(errs, "CONTEST_AUTO_ARCHIVE_LEASE_DURATION_MS 必须大于 0")
+	}
+	if c.Contest.MatchmakerMaxAttempts <= 0 {
+		errs = append(errs, "ASYNC_OUTBOX_MAX_ATTEMPTS 必须大于 0")
 	}
 	if c.Contest.BattleELOInitialScore <= 0 {
 		errs = append(errs, "CONTEST_BATTLE_ELO_INITIAL_SCORE 必须大于 0")
@@ -1046,6 +1099,9 @@ func Load() (*Config, error) {
 	if c.Teaching.JudgeOutboxPollIntervalMs <= 0 {
 		errs = append(errs, "TEACHING_JUDGE_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
 	}
+	if c.Teaching.JudgeOutboxStaleMs <= 0 {
+		errs = append(errs, "TEACHING_JUDGE_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
+	}
 	if c.Teaching.GradeEventOutboxBatchSize <= 0 {
 		errs = append(errs, "TEACHING_GRADE_EVENT_OUTBOX_BATCH_SIZE 必须大于 0")
 	}
@@ -1054,6 +1110,9 @@ func Load() (*Config, error) {
 	}
 	if c.Teaching.GradeEventOutboxStaleMs <= 0 {
 		errs = append(errs, "TEACHING_GRADE_EVENT_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
+	}
+	if c.Teaching.JudgeOutboxMaxAttempts <= 0 || c.Teaching.GradeEventOutboxMaxAttempts <= 0 {
+		errs = append(errs, "ASYNC_OUTBOX_MAX_ATTEMPTS 必须大于 0")
 	}
 	if c.Teaching.GradeExportBatchSize <= 0 {
 		errs = append(errs, "TEACHING_GRADE_EXPORT_BATCH_SIZE 必须大于 0")
@@ -1085,6 +1144,9 @@ func Load() (*Config, error) {
 	if c.Experiment.ScoreOutboxStaleMs <= 0 {
 		errs = append(errs, "EXPERIMENT_SCORE_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
 	}
+	if c.Experiment.ScoreOutboxMaxAttempts <= 0 {
+		errs = append(errs, "ASYNC_OUTBOX_MAX_ATTEMPTS 必须大于 0")
+	}
 	if c.Grade.AppealWindowDays <= 0 {
 		errs = append(errs, "GRADE_APPEAL_WINDOW_DAYS 必须大于 0")
 	}
@@ -1102,6 +1164,9 @@ func Load() (*Config, error) {
 	}
 	if c.Grade.LockOutboxStaleMs <= 0 {
 		errs = append(errs, "GRADE_LOCK_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
+	}
+	if c.Grade.LockOutboxMaxAttempts <= 0 {
+		errs = append(errs, "ASYNC_OUTBOX_MAX_ATTEMPTS 必须大于 0")
 	}
 	if c.Judge.QueuePollIntervalMs <= 0 {
 		errs = append(errs, "JUDGE_QUEUE_POLL_INTERVAL_MS 必须大于 0")
@@ -1135,6 +1200,15 @@ func Load() (*Config, error) {
 	}
 	if c.Judge.SimilarityDefaultThreshold <= 0 || c.Judge.SimilarityDefaultThreshold >= 1 {
 		errs = append(errs, "JUDGE_SIMILARITY_DEFAULT_THRESHOLD 必须大于 0 且小于 1")
+	}
+	if c.Judge.TaskLeaseDurationMs <= 0 {
+		errs = append(errs, "JUDGE_TASK_LEASE_DURATION_MS 必须大于 0")
+	}
+	if c.Judge.OutboxLeaseDurationMs <= 0 {
+		errs = append(errs, "JUDGE_OUTBOX_LEASE_DURATION_MS 必须大于 0")
+	}
+	if c.Judge.OutboxMaxAttempts <= 0 {
+		errs = append(errs, "ASYNC_OUTBOX_MAX_ATTEMPTS 必须大于 0")
 	}
 	if c.Admin.StatisticsSnapshotIntervalSeconds <= 0 {
 		errs = append(errs, "ADMIN_STATISTICS_SNAPSHOT_INTERVAL_SECONDS 必须大于 0")
@@ -1211,6 +1285,9 @@ func Load() (*Config, error) {
 	if c.Sandbox.RecycleOutboxStaleMs <= 0 {
 		errs = append(errs, "SANDBOX_RECYCLE_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
 	}
+	if c.Sandbox.RecycleOutboxMaxAttempts <= 0 {
+		errs = append(errs, "ASYNC_OUTBOX_MAX_ATTEMPTS 必须大于 0")
+	}
 	if c.Sandbox.TenantDefaultMaxConcurrent <= 0 || c.Sandbox.TenantDefaultMaxCPU <= 0 || c.Sandbox.TenantDefaultMaxMemoryMB <= 0 || c.Sandbox.TenantDefaultIdleTimeoutMin <= 0 || c.Sandbox.TenantDefaultMaxLifetimeMin <= 0 || c.Sandbox.TenantDefaultMaxKeepaliveMin < 0 || c.Sandbox.TenantDefaultSnapshotMin < 0 {
 		errs = append(errs, "SANDBOX_TENANT_DEFAULT_* 配额必须满足数据库正数与非负约束")
 	}
@@ -1245,7 +1322,7 @@ func Load() (*Config, error) {
 	if c.Identity.SSOCASResponseMaxBytes <= 0 {
 		errs = append(errs, "IDENTITY_SSO_CAS_RESPONSE_MAX_BYTES 必须大于 0")
 	}
-	if c.Identity.TenantProvisionOutboxPollMs <= 0 || c.Identity.TenantProvisionOutboxBatch <= 0 || c.Identity.TenantProvisionOutboxStaleMs <= 0 {
+	if c.Identity.TenantProvisionOutboxPollMs <= 0 || c.Identity.TenantProvisionOutboxBatch <= 0 || c.Identity.TenantProvisionOutboxStaleMs <= 0 || c.Identity.TenantProvisionOutboxMaxAttempts <= 0 {
 		errs = append(errs, "IDENTITY_TENANT_PROVISION_OUTBOX_* 必须全部大于 0")
 	}
 	if c.Identity.AuthRateWindowSeconds <= 0 || c.Identity.AuthRateMax <= 0 {

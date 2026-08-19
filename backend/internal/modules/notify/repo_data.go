@@ -30,6 +30,7 @@ type notificationRecord struct {
 	Title      string
 	Content    string
 	Link       string
+	SourceRef  string
 }
 
 // GetNotificationTemplate 查询通知模板。
@@ -54,6 +55,15 @@ func (t *txStore) ListNotificationTemplates(ctx context.Context) ([]notification
 	return out, nil
 }
 
+// CountNotificationsBySource 统计同一业务事件已写入的收件人,供重投幂等判断使用。
+func (t *txStore) CountNotificationsBySource(ctx context.Context, tenantID int64, sourceRef string, receiverIDs []int64) (int64, error) {
+	return t.q.CountNotificationsBySource(ctx, sqlcgen.CountNotificationsBySourceParams{
+		TenantID:    tenantID,
+		SourceRef:   pgtypex.Text(sourceRef),
+		ReceiverIds: receiverIDs,
+	})
+}
+
 // CreateNotifications 批量写入站内信。
 func (t *txStore) CreateNotifications(ctx context.Context, records []notificationRecord) error {
 	now := timex.Now()
@@ -66,6 +76,7 @@ func (t *txStore) CreateNotifications(ctx context.Context, records []notificatio
 			Title:      item.Title,
 			Content:    item.Content,
 			Link:       pgtypex.Text(item.Link),
+			SourceRef:  pgtypex.Text(item.SourceRef),
 			IsRead:     false,
 			CreatedAt:  timex.RequiredTimestamptz(now),
 		}); err != nil {

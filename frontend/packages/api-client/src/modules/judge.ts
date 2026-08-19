@@ -77,7 +77,7 @@ export class JudgeApi {
   async getTasks(params?: {
     source_ref?: string
     pending_manual?: boolean
-    /** 运维分组:省略=不筛、active=排队与执行中、abnormal=超时/失败/出错。筛选与 total 同口径 */
+    /** 运维分组:省略=不筛、active=排队与执行中、abnormal=判题失败。筛选与 total 同口径 */
     state?: JudgeTaskState
     page?: number
     size?: number

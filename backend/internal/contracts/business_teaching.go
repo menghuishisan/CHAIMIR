@@ -44,8 +44,8 @@ type TeachingReadService interface {
 	IsCourseMember(ctx context.Context, tenantID, courseID, studentID int64) (bool, error)
 	// ListCourseGrades 读取单课程成绩,供 M11 GPA 聚合与审核流程使用。
 	ListCourseGrades(ctx context.Context, tenantID, courseID int64) ([]TeachingCourseGrade, error)
-	// ListStudentGrades 读取某学生的单课程成绩集合,供 M11 学期与累计 GPA 聚合。
-	ListStudentGrades(ctx context.Context, tenantID, studentID int64) ([]TeachingCourseGrade, error)
+	// ListStudentGrades 读取某学生指定学期的分页成绩,供 M11 流式 GPA 聚合和浏览器明细页使用。
+	ListStudentGrades(ctx context.Context, tenantID, studentID int64, semester string, page, size int) ([]TeachingCourseGrade, int64, error)
 	// Stats 读取租户级教学统计,供 M9 学校看板聚合。
 	Stats(ctx context.Context, tenantID int64) (TeachingStats, error)
 }

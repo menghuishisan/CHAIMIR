@@ -55,8 +55,12 @@ CREATE TABLE IF NOT EXISTS sim_package_review (
     result SMALLINT NOT NULL CHECK (result IN (1, 2, 3)),
     comment VARCHAR(500),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    preview_attempt_count INT NOT NULL DEFAULT 0 CHECK (preview_attempt_count >= 0),
+    preview_lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    preview_lease_until TIMESTAMPTZ
 );
+CREATE INDEX IF NOT EXISTS idx_sim_package_review_preview_lease ON sim_package_review(result, preview_lease_until) WHERE result = 1;
 
 CREATE TABLE IF NOT EXISTS sim_session (
     id BIGINT PRIMARY KEY,

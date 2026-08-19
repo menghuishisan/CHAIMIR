@@ -590,10 +590,12 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
 
   const classes = useAsyncResource(() => api.identity.listClasses(), [], () => false)
 
-  const students = useAsyncResource(
-    () => (classId === '' ? Promise.resolve<ClassStudent[]>([]) : api.identity.listClassStudents(classId)),
+  const students = usePagedResource<ClassStudent>(
+    (params) =>
+      classId === ''
+        ? Promise.resolve({ list: [] as ClassStudent[], total: 0, page: params.page, size: params.size })
+        : api.identity.listClassStudents(classId, params),
     [classId],
-    (value) => (value ?? []).length === 0,
   )
 
   const classOptions = useMemo(
@@ -603,7 +605,7 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
 
   const studentOptions = useMemo(
     () =>
-      (students.data ?? []).map((student) => ({
+      (students.data?.list ?? []).map((student) => ({
         value: student.id,
         label: student.no ? `${student.name} · ${student.no}` : student.name,
       })),
@@ -682,15 +684,18 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
                 emptyDescription="换一个班级,或联系学校管理员核对班级名单。"
               >
                 {() => (
-                  <FormField label="学生" htmlFor="member-student" required>
-                    <Select
-                      id="member-student"
-                      options={studentOptions}
-                      value={studentId}
-                      placeholder="选择学生"
-                      onValueChange={setStudentId}
-                    />
-                  </FormField>
+                  <div className="flex flex-col gap-3">
+                    <FormField label="学生" htmlFor="member-student" required>
+                      <Select
+                        id="member-student"
+                        options={studentOptions}
+                        value={studentId}
+                        placeholder="选择学生"
+                        onValueChange={setStudentId}
+                      />
+                    </FormField>
+                    <Pagination page={students.page} pageSize={students.pageSize} total={students.total} onPageChange={students.setPage} />
+                  </div>
                 )}
               </ResourceState>
             )}

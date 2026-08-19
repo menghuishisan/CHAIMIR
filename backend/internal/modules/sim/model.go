@@ -10,25 +10,28 @@ import (
 // Compute 与 Entry 按 AuthorType 派生:平台内置 → 浏览器执行、无入口模块;
 // 教师/第三方 → 隔离容器执行、必须有入口模块与运行能力(见 docs/04-仿真可视化引擎/02-架构设计.md §8)。
 type Package struct {
-	ID                int64
-	Code              string
-	Version           string
-	Name              string
-	Category          string
-	Compute           int16
-	ScaleLimit        map[string]any
-	BundleKey         string
-	BundleHash        string
-	Entry             string
-	BackendAdapter    string
-	BackendConfig     map[string]any
-	InteractionSchema InteractionSchema
-	CodeTrace         CodeTraceAudit
-	AuthorType        int16
-	AuthorID          int64
-	Status            int16
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID                  int64
+	Code                string
+	Version             string
+	Name                string
+	Category            string
+	Compute             int16
+	ScaleLimit          map[string]any
+	BundleKey           string
+	BundleHash          string
+	Entry               string
+	BackendAdapter      string
+	BackendConfig       map[string]any
+	InteractionSchema   InteractionSchema
+	CodeTrace           CodeTraceAudit
+	AuthorType          int16
+	AuthorID            int64
+	Status              int16
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	PreviewReviewID     int64
+	PreviewLeaseToken   string
+	PreviewAttemptCount int32
 }
 
 // Review 是仿真包接入审核记录。

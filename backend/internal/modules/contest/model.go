@@ -109,6 +109,18 @@ type BattleMatch struct {
 	Status       int16
 	MatchedAt    time.Time
 	FinishedAt   time.Time
+	LeaseToken   string
+	LeaseUntil   time.Time
+	AttemptCount int32
+}
+
+// ContestArchiveClaim 是归档 worker 独占收尾阶段的内部租约,不属于公开赛事 DTO。
+type ContestArchiveClaim struct {
+	ID                int64
+	TenantID          int64
+	CreatedAt         time.Time
+	ArchiveLeaseToken string
+	ArchiveLeaseUntil time.Time
 }
 
 // BattleScoreDelta 是对局结算领域模型,数据库 JSONB 编解码由 row_convert 统一处理。

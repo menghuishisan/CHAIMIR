@@ -189,7 +189,10 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
 
   /** sendCommand 发出一条 Worker 命令并把失败原因记为页面错误态。 */
   const sendCommand = useCallback((command: Promise<void>) => {
-    void command.catch((commandError: Error) => setError(commandError.message))
+    void command.catch((commandError: unknown) => {
+      console.error('仿真命令执行失败', { operation: 'sim.student.command', error: errorDiagnostics(commandError) })
+      setError('仿真运行失败,请重新进入后重试。')
+    })
   }, [])
 
   // Worker 与「这个场景 + 这个种子」同生共死:换种子即重新装配,得到一条新的确定性过程
@@ -211,7 +214,11 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
       },
       onError: (message) => {
         if (!active) return
-        setError(message)
+        console.error('仿真运行时报告错误', {
+          operation: 'sim.student.runtime',
+          error: errorDiagnostics(message),
+        })
+        setError('仿真运行失败,请重新进入后重试。')
       },
     })
     setClient(runtime)

@@ -36,7 +36,7 @@
     operationId: teachingIssueCourseCoverAccess
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/courses/join:
   post:
@@ -268,7 +268,7 @@
     operationId: teachingListCourseAssignments
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [teaching]
@@ -417,7 +417,7 @@
     operationId: teachingListAnnouncements
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [teaching]
@@ -472,7 +472,7 @@
     operationId: teachingListGrades
     x-chaimir-audience: teacher-or-internal
     security: [{ bearerAuth: [] }, { serviceAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/courses/{id}/grades/compute:
   post:

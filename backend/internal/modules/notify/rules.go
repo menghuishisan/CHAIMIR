@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
 	"chaimir/pkg/apperr"
 )
@@ -113,9 +114,13 @@ func businessTopicTenantID(topic string) int64 {
 
 // validateSendRequest 校验内部通知发送请求。
 func validateSendRequest(req SendRequest) (SendRequest, error) {
+	req.RequestID = strings.TrimSpace(req.RequestID)
 	req.Type = strings.TrimSpace(req.Type)
 	req.Link = strings.TrimSpace(req.Link)
 	if req.TenantID <= 0 || req.Type == "" || len(req.Receivers) == 0 {
+		return SendRequest{}, apperr.ErrNotifyRequestInvalid
+	}
+	if req.RequestID != "" && !auth.ValidSourceRef(req.RequestID) {
 		return SendRequest{}, apperr.ErrNotifyRequestInvalid
 	}
 	if req.Link != "" && !linkPattern.MatchString(req.Link) {

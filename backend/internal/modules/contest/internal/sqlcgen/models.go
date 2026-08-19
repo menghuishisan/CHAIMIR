@@ -38,6 +38,9 @@ type BattleMatch struct {
 	Status       int16              `json:"status"`
 	MatchedAt    pgtype.Timestamptz `json:"matched_at"`
 	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
+	LeaseToken   string             `json:"lease_token"`
+	LeaseUntil   pgtype.Timestamptz `json:"lease_until"`
+	AttemptCount int32              `json:"attempt_count"`
 }
 
 type CheatRecord struct {
@@ -53,23 +56,25 @@ type CheatRecord struct {
 }
 
 type Contest struct {
-	ID            int64              `json:"id"`
-	TenantID      int64              `json:"tenant_id"`
-	OrganizerID   int64              `json:"organizer_id"`
-	Name          string             `json:"name"`
-	Mode          int16              `json:"mode"`
-	MatchMode     pgtype.Int2        `json:"match_mode"`
-	TeamMode      int16              `json:"team_mode"`
-	SignupStart   pgtype.Timestamptz `json:"signup_start"`
-	SignupEnd     pgtype.Timestamptz `json:"signup_end"`
-	StartAt       pgtype.Timestamptz `json:"start_at"`
-	EndAt         pgtype.Timestamptz `json:"end_at"`
-	FreezeMinutes int32              `json:"freeze_minutes"`
-	Rules         []byte             `json:"rules"`
-	Status        int16              `json:"status"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	OrganizerID       int64              `json:"organizer_id"`
+	Name              string             `json:"name"`
+	Mode              int16              `json:"mode"`
+	MatchMode         pgtype.Int2        `json:"match_mode"`
+	TeamMode          int16              `json:"team_mode"`
+	SignupStart       pgtype.Timestamptz `json:"signup_start"`
+	SignupEnd         pgtype.Timestamptz `json:"signup_end"`
+	StartAt           pgtype.Timestamptz `json:"start_at"`
+	EndAt             pgtype.Timestamptz `json:"end_at"`
+	FreezeMinutes     int32              `json:"freeze_minutes"`
+	Rules             []byte             `json:"rules"`
+	Status            int16              `json:"status"`
+	ArchiveLeaseToken string             `json:"archive_lease_token"`
+	ArchiveLeaseUntil pgtype.Timestamptz `json:"archive_lease_until"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt         pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type ContestLadderSnapshot struct {

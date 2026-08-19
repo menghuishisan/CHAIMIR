@@ -118,7 +118,6 @@ export interface SandboxRuntime extends Omit<SandboxRuntimeRequest, 'status'> {
   id: SnowflakeID
   status: RuntimeStatus
   selftest_status: RuntimeSelftestStatus
-  selftest_detail?: Record<string, unknown>
 }
 
 export interface SandboxRuntimeImageRequest {
@@ -135,7 +134,6 @@ export interface SandboxRuntimeImage extends SandboxRuntimeImageRequest {
   status: RuntimeImageStatus
   prepulled: boolean
   prepull_status: ImagePrepullStatus
-  prepull_detail?: Record<string, unknown>
   prepulled_at?: string
 }
 
@@ -211,14 +209,19 @@ export interface SandboxPrepullStatus {
   prepull_status: ImagePrepullStatus
   desired_nodes: number
   ready_nodes: number
-  daemonset: string
   image_count: number
-  images: string[]
 }
 
 export interface SandboxRuntimeSelftestStatus {
   runtime_id: SnowflakeID
   selftest_status: RuntimeSelftestStatus
   runtime_status: RuntimeStatus
-  detail: Record<string, unknown>
+  detail: SandboxRuntimeSelftestDetail
+}
+
+/** SandboxRuntimeSelftestDetail 是可展示的自检摘要,不含命名空间或编排明细。 */
+export interface SandboxRuntimeSelftestDetail {
+  result?: string
+  stage?: string
+  trace_id?: string
 }

@@ -9,6 +9,7 @@ import (
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // packageFromRow 转换平台级仿真包行。
@@ -52,38 +53,46 @@ func packageFromRow(row sqlcgen.SimPackage) (Package, error) {
 	}, nil
 }
 
-// reviewFromRow 转换审核记录并解析审核报告。
-func reviewFromRow(row sqlcgen.SimPackageReview) (Review, error) {
-	report, err := reportFromJSON(row.PreviewReport)
+// packageFromPreviewRow 转换带审核租约的预览认领行。
+func packageFromPreviewRow(row sqlcgen.ClaimSimPackagesForPreviewRow) (Package, error) {
+	pkg, err := packageFromRow(sqlcgen.SimPackage{
+		ID: row.ID, Code: row.Code, Version: row.Version, Name: row.Name, Category: row.Category,
+		Compute: row.Compute, ScaleLimit: row.ScaleLimit, BundleKey: row.BundleKey, BundleHash: row.BundleHash,
+		Entry: row.Entry, BackendAdapter: row.BackendAdapter, BackendConfig: row.BackendConfig,
+		InteractionSchema: row.InteractionSchema, CodeTrace: row.CodeTrace, AuthorType: row.AuthorType,
+		AuthorID: row.AuthorID, Status: row.Status, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+	})
 	if err != nil {
-		return Review{}, apperr.ErrSimReviewDataCorrupt.WithCause(fmt.Errorf("审核记录 %d 的预览报告数据异常: %w", row.ID, err))
+		return Package{}, err
+	}
+	pkg.PreviewReviewID = row.ReviewID
+	pkg.PreviewLeaseToken = row.PreviewLeaseToken
+	pkg.PreviewAttemptCount = row.PreviewAttemptCount
+	return pkg, nil
+}
+
+// reviewFromFields 转换审核记录并解析审核报告。
+func reviewFromFields(id, packageID, submitterID int64, previewReport []byte, reviewerID pgtype.Int8, result int16, comment pgtype.Text, createdAt, updatedAt pgtype.Timestamptz) (Review, error) {
+	report, err := reportFromJSON(previewReport)
+	if err != nil {
+		return Review{}, apperr.ErrSimReviewDataCorrupt.WithCause(fmt.Errorf("审核记录 %d 的预览报告数据异常: %w", id, err))
 	}
 	return Review{
-		ID:            row.ID,
-		PackageID:     row.PackageID,
-		SubmitterID:   row.SubmitterID,
+		ID:            id,
+		PackageID:     packageID,
+		SubmitterID:   submitterID,
 		PreviewReport: report,
-		ReviewerID:    pgtypex.Int8Value(row.ReviewerID),
-		Result:        row.Result,
-		Comment:       pgtypex.TextValue(row.Comment),
-		CreatedAt:     timex.FromTimestamptz(row.CreatedAt),
-		UpdatedAt:     timex.FromTimestamptz(row.UpdatedAt),
+		ReviewerID:    pgtypex.Int8Value(reviewerID),
+		Result:        result,
+		Comment:       pgtypex.TextValue(comment),
+		CreatedAt:     timex.FromTimestamptz(createdAt),
+		UpdatedAt:     timex.FromTimestamptz(updatedAt),
 	}, nil
 }
 
 // reviewInfoFromRow 转换带包摘要的审核列表行。
 func reviewInfoFromRow(row sqlcgen.ListSimReviewsRow) (ReviewInfo, error) {
-	review, err := reviewFromRow(sqlcgen.SimPackageReview{
-		ID:            row.ID,
-		PackageID:     row.PackageID,
-		SubmitterID:   row.SubmitterID,
-		PreviewReport: row.PreviewReport,
-		ReviewerID:    row.ReviewerID,
-		Result:        row.Result,
-		Comment:       row.Comment,
-		CreatedAt:     row.CreatedAt,
-		UpdatedAt:     row.UpdatedAt,
-	})
+	review, err := reviewFromFields(row.ID, row.PackageID, row.SubmitterID, row.PreviewReport, row.ReviewerID, row.Result, row.Comment, row.CreatedAt, row.UpdatedAt)
 	if err != nil {
 		return ReviewInfo{}, err
 	}

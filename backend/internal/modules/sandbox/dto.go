@@ -52,23 +52,21 @@ type RuntimeResponse struct {
 	CapabilityImpl string          `json:"capability_impl"`
 	PluginRef      string          `json:"plugin_ref"`
 	SelftestStatus int16           `json:"selftest_status"`
-	SelftestDetail json.RawMessage `json:"selftest_detail,omitempty"`
 	Status         int16           `json:"status"`
 }
 
 // RuntimeImageResponse 是运行时镜像接口的稳定输出 DTO。
 type RuntimeImageResponse struct {
-	ID            ids.ID          `json:"id"`
-	RuntimeID     ids.ID          `json:"runtime_id"`
-	ImageURL      string          `json:"image_url"`
-	Version       string          `json:"version"`
-	Status        int16           `json:"status"`
-	Prepulled     bool            `json:"prepulled"`
-	PrepullStatus int16           `json:"prepull_status"`
-	PrepullDetail json.RawMessage `json:"prepull_detail,omitempty"`
-	PrepulledAt   string          `json:"prepulled_at,omitempty"`
-	GenesisBaked  bool            `json:"genesis_baked"`
-	IsDefault     bool            `json:"is_default"`
+	ID            ids.ID `json:"id"`
+	RuntimeID     ids.ID `json:"runtime_id"`
+	ImageURL      string `json:"image_url"`
+	Version       string `json:"version"`
+	Status        int16  `json:"status"`
+	Prepulled     bool   `json:"prepulled"`
+	PrepullStatus int16  `json:"prepull_status"`
+	PrepulledAt   string `json:"prepulled_at,omitempty"`
+	GenesisBaked  bool   `json:"genesis_baked"`
+	IsDefault     bool   `json:"is_default"`
 }
 
 // ToolResponse 是沙箱工具管理接口的稳定输出 DTO。
@@ -175,21 +173,26 @@ type QuotaRequest struct {
 
 // PrepullResponse 描述镜像预拉取状态响应。
 type PrepullResponse struct {
-	ImageID       ids.ID   `json:"image_id"`
-	PrepullStatus int16    `json:"prepull_status"`
-	DesiredNodes  int32    `json:"desired_nodes"`
-	ReadyNodes    int32    `json:"ready_nodes"`
-	DaemonSet     string   `json:"daemonset"`
-	ImageCount    int      `json:"image_count"`
-	Images        []string `json:"images"`
+	ImageID       ids.ID `json:"image_id"`
+	PrepullStatus int16  `json:"prepull_status"`
+	DesiredNodes  int32  `json:"desired_nodes"`
+	ReadyNodes    int32  `json:"ready_nodes"`
+	ImageCount    int    `json:"image_count"`
+}
+
+// RuntimeSelftestDetail 是平台界面可读取的接入自检摘要,不包含编排资源标识。
+type RuntimeSelftestDetail struct {
+	Result  string `json:"result,omitempty"`
+	Stage   string `json:"stage,omitempty"`
+	TraceID string `json:"trace_id,omitempty"`
 }
 
 // RuntimeSelftestResponse 描述运行时接入即测的当前结果。
 type RuntimeSelftestResponse struct {
-	RuntimeID      ids.ID          `json:"runtime_id"`
-	SelftestStatus int16           `json:"selftest_status"`
-	RuntimeStatus  int16           `json:"runtime_status"`
-	Detail         json.RawMessage `json:"detail"`
+	RuntimeID      ids.ID                `json:"runtime_id"`
+	SelftestStatus int16                 `json:"selftest_status"`
+	RuntimeStatus  int16                 `json:"runtime_status"`
+	Detail         RuntimeSelftestDetail `json:"detail"`
 }
 
 // SandboxResponse 描述用户侧可见的沙箱状态,不暴露 Kubernetes Namespace 等内部资源名。

@@ -113,9 +113,12 @@ CREATE TABLE IF NOT EXISTS sandbox_recycle_outbox (
     last_error VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until TIMESTAMPTZ,
     CONSTRAINT chk_sandbox_recycle_outbox_status CHECK (status IN (1,2,3,4)),
     FOREIGN KEY (tenant_id, sandbox_id) REFERENCES sandbox(tenant_id, id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_sandbox_recycle_outbox_lease ON sandbox_recycle_outbox(status, lease_until) WHERE status = 2;
 
 CREATE TABLE IF NOT EXISTS tenant_quota (
     tenant_id BIGINT PRIMARY KEY REFERENCES tenant(id),
@@ -136,6 +139,11 @@ CREATE INDEX IF NOT EXISTS idx_sandbox_tenant_status ON sandbox(tenant_id, statu
 CREATE INDEX IF NOT EXISTS idx_sandbox_tenant_owner ON sandbox(tenant_id, owner_account_id);
 CREATE INDEX IF NOT EXISTS idx_sandbox_last_active ON sandbox(last_active_at);
 CREATE INDEX IF NOT EXISTS idx_sandbox_source_ref ON sandbox(tenant_id, source_ref);
+-- M8 对局来源是单场对局的稳定生命周期键;同一场未销毁对局不得重复创建沙箱。
+-- 其他业务来源(例如多组件实验)允许拥有多个沙箱,故只对 battle 来源施加局部唯一约束。
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sandbox_battle_source_active
+ON sandbox(tenant_id, source_ref)
+WHERE source_ref LIKE 'contest:____:battle:%' AND status <> 5;
 CREATE INDEX IF NOT EXISTS idx_sandbox_snapshot_expire ON sandbox(snapshot_expire_at);
 CREATE INDEX IF NOT EXISTS idx_sandbox_event_tenant_sandbox_created ON sandbox_event(tenant_id, sandbox_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_sandbox_recycle_outbox_status ON sandbox_recycle_outbox(status, created_at ASC);

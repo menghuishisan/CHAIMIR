@@ -21,7 +21,7 @@ import { useAsyncResource } from '../../hooks'
 import { formatShortDateTime } from '../../utils/formatters'
 import { TRANSFER_ACTIVE_STATUSES } from '../../utils/transfer'
 import { transferTaskStatusLabel, transferTaskSubjectLabel } from '../../utils/labels/transfer'
-import { transferTaskStatusTone } from '../../features/transfer/statusPresentation'
+import { transferTaskStatusTone } from '../../utils/transfer'
 
 /** 下拉内展示的任务条数:面板是「最近」摘要,全量在任务中心页 */
 const RECENT_SIZE = 5

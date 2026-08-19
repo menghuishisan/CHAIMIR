@@ -12,11 +12,7 @@ export function isJudgeTaskActive(status: JudgeTaskStatus): boolean {
   return ACTIVE_TASK_STATUSES.has(status)
 }
 
-const ABNORMAL_TASK_STATUSES: ReadonlySet<JudgeTaskStatus> = new Set([
-  JUDGE_TASK_STATUS.FAILED,
-  JUDGE_TASK_STATUS.TIMEOUT,
-  JUDGE_TASK_STATUS.ERROR,
-])
+const ABNORMAL_TASK_STATUSES: ReadonlySet<JudgeTaskStatus> = new Set([JUDGE_TASK_STATUS.FAILED])
 
 /** isJudgeTaskAbnormal 判断判题任务是否需要教师介入。 */
 export function isJudgeTaskAbnormal(status: JudgeTaskStatus): boolean {

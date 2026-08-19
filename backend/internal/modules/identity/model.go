@@ -33,6 +33,8 @@ type TenantProvisionOutbox struct {
 	LastError     string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	LeaseToken    string
+	LeaseUntil    time.Time
 }
 
 // TenantApplication 是学校入驻申请的领域快照。

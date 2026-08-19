@@ -29,6 +29,7 @@ import {
   ModalHeader,
   ModalTitle,
   PageSection,
+  Pagination,
   Select,
   Skeleton,
   Table,
@@ -37,7 +38,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
-import { useAsyncResource } from '../../../hooks'
+import { useAsyncResource, usePagedResource } from '../../../hooks'
 import { formatScore, formatShortDateTime } from '../../../utils/formatters'
 import { gradeSourceLabel } from '../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
@@ -57,7 +58,7 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
   const [actionError, setActionError] = useState<string>()
 
   const weights = useAsyncResource(() => api.teaching.listGradeWeights(courseId), [courseId], () => false)
-  const grades = useAsyncResource(() => api.teaching.listGrades(courseId), [courseId])
+  const grades = usePagedResource<TeachingCourseGrade>((params) => api.teaching.listGrades(courseId, params), [courseId])
 
   /** computeGrades 按权重重算全班成绩。 */
   const computeGrades = useCallback(async () => {
@@ -191,7 +192,7 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
 
       <PageSection
         title="全班成绩"
-        description={`共 ${grades.data?.length ?? 0} 名学生。调分只影响总评,不改变各项得分。`}
+        description={`共 ${grades.data?.total ?? 0} 名学生。调分只影响总评,不改变各项得分。`}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" leftIcon={Calculator} loading={working} onClick={() => void computeGrades()}>
@@ -213,7 +214,12 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
             emptyDescription="配置权重后点「按权重计算」生成全班成绩。"
             skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
           >
-            {(list) => <Table columns={columns} data={list} rowKey={(grade) => grade.student_id} />}
+            {(page) => (
+              <div className="flex flex-col gap-4">
+                <Table columns={columns} data={page.list} rowKey={(grade) => grade.student_id} />
+                <Pagination page={grades.page} pageSize={grades.pageSize} total={grades.total} onPageChange={grades.setPage} />
+              </div>
+            )}
           </ResourceState>
         </div>
       </PageSection>
@@ -270,10 +276,7 @@ function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModa
   const [working, setWorking] = useState(false)
 
   // 作业选项:权重的 source_ref 指向具体作业,教师从清单里选而不是手填编号
-  const assignmentList = useAsyncResource(
-    () => api.teaching.listCourseAssignments(courseId),
-    [courseId],
-  )
+  const assignmentList = usePagedResource<Assignment>((params) => api.teaching.listCourseAssignments(courseId, params), [courseId])
 
   const total = rows.reduce((sum, row) => sum + row.weight, 0)
 
@@ -301,7 +304,7 @@ function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModa
 
   const assignmentOptions = useMemo(
     () =>
-      (assignmentList.data ?? []).map((item: Assignment) => ({
+      (assignmentList.data?.list ?? []).map((item: Assignment) => ({
         value: item.id,
         label: item.title,
       })),
@@ -333,17 +336,34 @@ function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModa
                 />
               </FormField>
               {row.source_type === GradeSource.ASSIGNMENT ? (
-                <FormField label="对应作业" htmlFor={`weight-ref-${index}`} className="mb-0 min-w-48 flex-1">
-                  <Select
-                    id={`weight-ref-${index}`}
-                    size="sm"
-                    options={assignmentOptions}
-                    value={row.source_ref}
-                    placeholder={assignmentOptions.length > 0 ? '选择作业' : '课程暂无作业'}
-                    disabled={assignmentOptions.length === 0}
-                    onValueChange={(value) => updateRow(index, { source_ref: value })}
-                  />
-                </FormField>
+                <ResourceState
+                  resource={assignmentList}
+                  emptyIcon={Send}
+                  emptyTitle="课程还没有作业"
+                  emptyDescription="先创建作业,再把它纳入成绩权重。"
+                  skeleton={<Skeleton variant="line" lines={1} />}
+                >
+                  {() => (
+                    <div className="flex min-w-48 flex-1 flex-col gap-2">
+                      <FormField label="对应作业" htmlFor={`weight-ref-${index}`} className="mb-0">
+                        <Select
+                          id={`weight-ref-${index}`}
+                          size="sm"
+                          options={assignmentOptions}
+                          value={row.source_ref}
+                          placeholder="选择作业"
+                          onValueChange={(value) => updateRow(index, { source_ref: value })}
+                        />
+                      </FormField>
+                      <Pagination
+                        page={assignmentList.page}
+                        pageSize={assignmentList.pageSize}
+                        total={assignmentList.total}
+                        onPageChange={assignmentList.setPage}
+                      />
+                    </div>
+                  )}
+                </ResourceState>
               ) : (
                 <FormField
                   label="来源说明"

@@ -445,7 +445,7 @@ func (s *Service) StudentSummary(ctx context.Context, studentID int64) (GradeSum
 	if cached, ok := s.readSummaryCache(ctx, cacheKey); ok {
 		return cached, nil
 	}
-	grades, err := s.teaching.ListStudentGrades(ctx, id.TenantID, studentID)
+	grades, err := s.listAllStudentGrades(ctx, id.TenantID, studentID)
 	if err != nil {
 		return GradeSummaryDTO{}, apperr.ErrGradeAggregationFailed.WithCause(err)
 	}
@@ -463,6 +463,21 @@ func (s *Service) StudentSummary(ctx context.Context, studentID int64) (GradeSum
 	return out, nil
 }
 
+// listAllStudentGrades 以平台分页上限分批读取 M6 成绩契约,避免聚合层一次接收无界数组。
+func (s *Service) listAllStudentGrades(ctx context.Context, tenantID, studentID int64) ([]contracts.TeachingCourseGrade, error) {
+	grades := make([]contracts.TeachingCourseGrade, 0)
+	for page := 1; ; page++ {
+		batch, _, err := s.teaching.ListStudentGrades(ctx, tenantID, studentID, "", page, pagex.MaximumSize())
+		if err != nil {
+			return nil, err
+		}
+		grades = append(grades, batch...)
+		if len(batch) < pagex.MaximumSize() {
+			return grades, nil
+		}
+	}
+}
+
 // StudentGrades 查询学生实时课程成绩明细并计算指定学期或全部 GPA。
 func (s *Service) StudentGrades(ctx context.Context, studentID, semesterID int64) (GradeSummaryDTO, error) {
 	id, studentID, err := s.normalizeReadableStudent(ctx, studentID)
@@ -473,7 +488,7 @@ func (s *Service) StudentGrades(ctx context.Context, studentID, semesterID int64
 	if cached, ok := s.readSummaryCache(ctx, cacheKey); ok {
 		return cached, nil
 	}
-	grades, err := s.teaching.ListStudentGrades(ctx, id.TenantID, studentID)
+	grades, err := s.listAllStudentGrades(ctx, id.TenantID, studentID)
 	if err != nil {
 		return GradeSummaryDTO{}, apperr.ErrGradeAggregationFailed.WithCause(err)
 	}
@@ -496,6 +511,95 @@ func (s *Service) StudentGrades(ctx context.Context, studentID, semesterID int64
 	out := GradeSummaryDTO{StudentID: ids.ID(studentID), SemesterID: ids.ID(semesterID), GPA: gpa, CumulativeGPA: gpa, TotalCredits: credits, CourseGrades: inputs, ComputedAt: timex.Now()}
 	s.writeSummaryCache(ctx, cacheKey, out)
 	return out, nil
+}
+
+// StudentGradePage 查询学生当前范围的 GPA 汇总和一页课程成绩明细。
+// 该浏览器路径只保留请求页与标量摘要;成绩单等服务端产物走独立的完整读取路径。
+func (s *Service) StudentGradePage(ctx context.Context, studentID, semesterID int64, page, size int) (StudentGradePageDTO, error) {
+	id, studentID, err := s.normalizeReadableStudent(ctx, studentID)
+	if err != nil {
+		return StudentGradePageDTO{}, err
+	}
+	page, size = pagex.Normalize(page, size)
+	semesterName := ""
+	if semesterID > 0 {
+		semester, err := s.getSemester(ctx, id.TenantID, semesterID)
+		if err != nil {
+			return StudentGradePageDTO{}, err
+		}
+		semesterName = semester.Name
+	}
+	cacheKey := s.gradeAggregateCacheKey(id.TenantID, studentID, semesterID)
+	aggregate, ok := s.readGradeAggregateCache(ctx, cacheKey)
+	if !ok {
+		aggregate, err = s.aggregateStudentGradePage(ctx, id.TenantID, studentID, semesterName, semesterID)
+		if err != nil {
+			return StudentGradePageDTO{}, err
+		}
+		s.writeGradeAggregateCache(ctx, cacheKey, aggregate)
+	}
+	grades, _, err := s.teaching.ListStudentGrades(ctx, id.TenantID, studentID, semesterName, page, size)
+	if err != nil {
+		return StudentGradePageDTO{}, apperr.ErrGradeAggregationFailed.WithCause(err)
+	}
+	list := courseInputs(grades)
+	return StudentGradePageDTO{
+		StudentID:     aggregate.StudentID,
+		SemesterID:    aggregate.SemesterID,
+		TotalCredits:  aggregate.TotalCredits,
+		GPA:           aggregate.GPA,
+		CumulativeGPA: aggregate.CumulativeGPA,
+		ComputedAt:    aggregate.ComputedAt,
+		List:          list,
+		Total:         aggregate.Total,
+		Page:          page,
+		Size:          size,
+	}, nil
+}
+
+// aggregateStudentGradePage 按 M6 分页契约流式累计 GPA 标量,内存占用只与单批大小相关。
+func (s *Service) aggregateStudentGradePage(ctx context.Context, tenantID, studentID int64, semesterName string, semesterID int64) (StudentGradeAggregateDTO, error) {
+	cfg, err := s.defaultConfig(ctx, tenantID)
+	if err != nil {
+		return StudentGradeAggregateDTO{}, err
+	}
+	if err := validateGPAMapping(cfg.Mapping); err != nil {
+		return StudentGradeAggregateDTO{}, apperr.ErrGradeConfigInvalid
+	}
+	ordered := orderedMapping(cfg.Mapping)
+	var weighted, credits float64
+	var total int64
+	for page := 1; ; page++ {
+		batch, batchTotal, err := s.teaching.ListStudentGrades(ctx, tenantID, studentID, semesterName, page, pagex.MaximumSize())
+		if err != nil {
+			return StudentGradeAggregateDTO{}, apperr.ErrGradeAggregationFailed.WithCause(err)
+		}
+		if page == 1 {
+			total = batchTotal
+		}
+		for _, row := range batch {
+			if row.Credits <= 0 {
+				continue
+			}
+			point, ok := gpaPointForScore(row.FinalTotal, ordered)
+			if !ok {
+				return StudentGradeAggregateDTO{}, apperr.ErrGradeConfigInvalid
+			}
+			weighted += point * row.Credits
+			credits += row.Credits
+		}
+		if len(batch) < pagex.MaximumSize() {
+			break
+		}
+	}
+	gpa := float64(0)
+	if credits > 0 {
+		gpa = round3(weighted / credits)
+	}
+	return StudentGradeAggregateDTO{
+		StudentID: ids.ID(studentID), SemesterID: ids.ID(semesterID), TotalCredits: credits,
+		GPA: gpa, CumulativeGPA: gpa, ComputedAt: timex.Now(), Total: total,
+	}, nil
 }
 
 // StudentGPA 查询学生已落库的学期与累计 GPA 聚合结果。
@@ -982,7 +1086,7 @@ func (s *Service) recomputeStudent(ctx context.Context, tenantID, studentID, sem
 
 // recomputeStudentWarnings 重算学生 GPA 并返回本次新建的预警数量。
 func (s *Service) recomputeStudentWarnings(ctx context.Context, tenantID, studentID, semesterID int64) (int, error) {
-	grades, err := s.teaching.ListStudentGrades(ctx, tenantID, studentID)
+	grades, err := s.listAllStudentGrades(ctx, tenantID, studentID)
 	if err != nil {
 		return 0, apperr.ErrGradeAggregationFailed.WithCause(err)
 	}
@@ -1030,6 +1134,11 @@ func (s *Service) summaryCacheKey(tenantID, studentID, semesterID int64) string 
 	return "tenant:" + ids.Format(tenantID) + ":grade:summary:" + ids.Format(studentID) + ":" + ids.Format(semesterID)
 }
 
+// gradeAggregateCacheKey 为浏览器分页摘要使用独立缓存命名空间,避免和成绩单明细缓存互相解码。
+func (s *Service) gradeAggregateCacheKey(tenantID, studentID, semesterID int64) string {
+	return "tenant:" + ids.Format(tenantID) + ":grade:aggregate:" + ids.Format(studentID) + ":" + ids.Format(semesterID)
+}
+
 // readSummaryCache 读取成绩概览缓存;缓存失败显式记录后回源,不向用户暴露 Redis 细节。
 func (s *Service) readSummaryCache(ctx context.Context, key string) (GradeSummaryDTO, bool) {
 	data, ok, err := s.cache.GetBytes(ctx, key)
@@ -1063,11 +1172,45 @@ func (s *Service) writeSummaryCache(ctx context.Context, key string, summary Gra
 	}
 }
 
+// readGradeAggregateCache 读取浏览器成绩页的标量缓存,不会反序列化课程明细。
+func (s *Service) readGradeAggregateCache(ctx context.Context, key string) (StudentGradeAggregateDTO, bool) {
+	data, ok, err := s.cache.GetBytes(ctx, key)
+	if err != nil {
+		logging.ErrorContext(ctx, "grade aggregate cache read failed", err.Error(), slog.String("cache_key", key))
+		return StudentGradeAggregateDTO{}, false
+	}
+	if !ok {
+		return StudentGradeAggregateDTO{}, false
+	}
+	var out StudentGradeAggregateDTO
+	if err := jsonx.DecodeStrictKnownFields(data, &out); err != nil {
+		logging.ErrorContext(ctx, "grade aggregate cache decode failed", err.Error(), slog.String("cache_key", key))
+		if delErr := s.cache.Delete(ctx, key); delErr != nil {
+			logging.ErrorContext(ctx, "grade aggregate cache delete corrupt value failed", delErr.Error(), slog.String("cache_key", key))
+		}
+		return StudentGradeAggregateDTO{}, false
+	}
+	return out, true
+}
+
+// writeGradeAggregateCache 写入浏览器成绩页标量摘要,禁止把课程明细写入 Redis。
+func (s *Service) writeGradeAggregateCache(ctx context.Context, key string, aggregate StudentGradeAggregateDTO) {
+	data, err := jsonx.AnyBytes(aggregate, apperr.ErrGradeAggregationFailed)
+	if err != nil {
+		logging.ErrorContext(ctx, "grade aggregate cache encode failed", err.Error(), slog.String("cache_key", key))
+		return
+	}
+	if err := s.cache.SetBytes(ctx, key, data, time.Duration(s.cfg.SummaryCacheTTLSeconds)*time.Second); err != nil {
+		logging.ErrorContext(ctx, "grade aggregate cache write failed", err.Error(), slog.String("cache_key", key))
+	}
+}
+
 // invalidateSummaryCache 删除学生全量和指定学期成绩概览缓存,用于成绩变更、审核和申诉状态变化。
 func (s *Service) invalidateSummaryCache(ctx context.Context, tenantID, studentID, semesterID int64) {
-	keys := []string{s.summaryCacheKey(tenantID, studentID, 0)}
+	keys := []string{s.summaryCacheKey(tenantID, studentID, 0), s.gradeAggregateCacheKey(tenantID, studentID, 0)}
 	if semesterID > 0 {
 		keys = append(keys, s.summaryCacheKey(tenantID, studentID, semesterID))
+		keys = append(keys, s.gradeAggregateCacheKey(tenantID, studentID, semesterID))
 	}
 	for _, key := range keys {
 		if err := s.cache.Delete(ctx, key); err != nil {
@@ -1186,11 +1329,17 @@ func (s *Service) RunLockOutboxOnce(ctx context.Context) error {
 	if !ok || limit <= 0 {
 		return apperr.ErrGradeEventPublishFailed
 	}
-	staleBefore := timex.Now().Add(-time.Duration(s.cfg.LockOutboxStaleMs) * time.Millisecond)
+	now := timex.Now()
+	staleBefore := now
+	leaseUntil := now.Add(time.Duration(s.cfg.LockOutboxStaleMs) * time.Millisecond)
 	var items []GradeLockOutbox
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, err = tx.ClaimPendingGradeLockOutbox(ctx, limit, staleBefore)
+		maxAttempts, ok := intx.Int32(s.cfg.LockOutboxMaxAttempts)
+		if !ok || maxAttempts <= 0 {
+			return apperr.ErrGradeEventPublishFailed
+		}
+		items, err = tx.ClaimPendingGradeLockOutbox(ctx, limit, maxAttempts, staleBefore, leaseUntil)
 		if err != nil {
 			return apperr.ErrGradeEventPublishFailed.WithCause(err)
 		}
@@ -1198,12 +1347,16 @@ func (s *Service) RunLockOutboxOnce(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	var firstErr error
 	for _, item := range items {
 		if err := s.publishLockOutboxItem(ctx, item); err != nil {
-			return err
+			logging.ErrorContext(ctx, "grade lock outbox publish failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("review_id", item.ReviewID), slog.Int64("outbox_id", item.ID))
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // publishLockOutboxItem 发布单条锁定事件并按结果回写 outbox 状态。
@@ -1220,7 +1373,7 @@ func (s *Service) publishLockOutboxItem(ctx context.Context, item GradeLockOutbo
 // markLockOutboxPublished 用特权事务标记锁定事件投递成功。
 func (s *Service) markLockOutboxPublished(ctx context.Context, item GradeLockOutbox) error {
 	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.MarkGradeLockOutboxPublished(ctx, item.TenantID, item.ID)
+		_, err := tx.MarkGradeLockOutboxPublished(ctx, item.TenantID, item.ID, item.LeaseToken)
 		if err != nil {
 			return apperr.ErrGradeEventPublishFailed.WithCause(err)
 		}
@@ -1231,7 +1384,7 @@ func (s *Service) markLockOutboxPublished(ctx context.Context, item GradeLockOut
 // recordLockOutboxFailure 记录锁定事件投递失败并保留脱敏原因供后台重试。
 func (s *Service) recordLockOutboxFailure(ctx context.Context, item GradeLockOutbox, cause error) {
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.MarkGradeLockOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()))
+		_, err := tx.MarkGradeLockOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()), item.LeaseToken)
 		return err
 	}); err != nil {
 		logging.ErrorContext(ctx, "grade lock outbox failure mark failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("review_id", item.ReviewID), slog.Int64("outbox_id", item.ID))

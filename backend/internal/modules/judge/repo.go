@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"chaimir/internal/modules/judge/internal/sqlcgen"
 	"chaimir/internal/platform/db"
@@ -42,17 +43,19 @@ type TxStore interface {
 	ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, state string, limit, offset int32) ([]JudgeTaskInfo, int64, error)
 	CancelQueuedJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error)
 	ResetJudgeTaskForRejudge(ctx context.Context, tenantID, taskID int64, snapshot JudgeInputSnapshot) (JudgeTask, error)
-	DequeueJudgeTasks(ctx context.Context, limit int32) ([]JudgeTask, error)
-	CompleteJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error)
-	MarkJudgeTaskTimeout(ctx context.Context, tenantID, taskID int64, reason string) (JudgeTask, error)
-	MarkJudgeTaskError(ctx context.Context, tenantID, taskID int64, reason string) (JudgeTask, error)
-	RetryJudgeTask(ctx context.Context, tenantID, taskID int64, reason string) (JudgeTask, error)
-	FailJudgeTask(ctx context.Context, tenantID, taskID int64, reason string) (JudgeTask, error)
+	DequeueJudgeTasks(ctx context.Context, limit int32, staleBefore, leaseUntil time.Time, leaseToken string) ([]JudgeTask, error)
+	FailExpiredJudgeTasks(ctx context.Context, limit int32, staleBefore time.Time) ([]JudgeTask, error)
+	RenewJudgeTaskLease(ctx context.Context, tenantID, taskID int64, leaseToken string, leaseUntil time.Time) (bool, error)
+	CompleteJudgeTask(ctx context.Context, tenantID, taskID int64, leaseToken string) (JudgeTask, error)
+	RetryJudgeTask(ctx context.Context, tenantID, taskID int64, reason, leaseToken string) (JudgeTask, error)
+	FailJudgeTask(ctx context.Context, tenantID, taskID int64, reason, leaseToken string) (JudgeTask, error)
+	CompleteManualJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error)
 	UpsertJudgeResult(ctx context.Context, result JudgeResult) (JudgeResult, error)
 	CreateOutbox(ctx context.Context, id int64, tenantID, taskID int64, subject string, payload any) (JudgeEventOutbox, error)
-	ListPendingOutbox(ctx context.Context, limit int32) ([]JudgeEventOutbox, error)
-	MarkOutboxPublished(ctx context.Context, tenantID, id int64) (JudgeEventOutbox, error)
-	MarkOutboxFailed(ctx context.Context, tenantID, id int64, reason string) (JudgeEventOutbox, error)
+	ClaimPendingOutbox(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time, leaseToken string) ([]JudgeEventOutbox, error)
+	ExhaustExpiredEventOutbox(ctx context.Context, maxAttempts int32, staleBefore time.Time) (int64, error)
+	MarkOutboxPublished(ctx context.Context, tenantID, id int64, leaseToken string) (JudgeEventOutbox, error)
+	MarkOutboxFailed(ctx context.Context, tenantID, id int64, reason, leaseToken string) (JudgeEventOutbox, error)
 	CreateFingerprint(ctx context.Context, fp SubmissionFingerprint) (SubmissionFingerprint, error)
 	FindExactFingerprints(ctx context.Context, tenantID int64, problemRef, codeHash string) ([]SubmissionFingerprint, error)
 	ListFingerprintsForProblem(ctx context.Context, tenantID int64, problemRef, excludeSourceRef string) ([]SubmissionFingerprint, error)
@@ -264,7 +267,7 @@ func (s *txStore) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, te
 }
 
 // ListJudgeTasks 查询任务分页列表。
-// state 取运维分组(空串不筛 / active 排队与执行中 / abnormal 超时失败出错),
+// state 取运维分组(空串不筛 / active 排队与执行中 / abnormal 失败),
 // 总数按同一条件计,与列表同口径。
 func (s *txStore) ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, state string, limit, offset int32) ([]JudgeTaskInfo, int64, error) {
 	rows, err := s.q.ListJudgeTasks(ctx, sqlcgen.ListJudgeTasksParams{TenantID: tenantID, Column2: sourceRef, Column3: pendingManual, Column4: sourceOwnerID, State: state, PageLimit: limit, PageOffset: offset})
@@ -302,35 +305,37 @@ func (s *txStore) ResetJudgeTaskForRejudge(ctx context.Context, tenantID, taskID
 }
 
 // DequeueJudgeTasks 跨租户领取队列任务。
-func (s *txStore) DequeueJudgeTasks(ctx context.Context, limit int32) ([]JudgeTask, error) {
-	rows, err := s.q.DequeueJudgeTasks(ctx, limit)
+func (s *txStore) DequeueJudgeTasks(ctx context.Context, limit int32, staleBefore, leaseUntil time.Time, leaseToken string) ([]JudgeTask, error) {
+	rows, err := s.q.DequeueJudgeTasks(ctx, sqlcgen.DequeueJudgeTasksParams{LeaseToken: leaseToken, LeaseUntil: timex.RequiredTimestamptz(leaseUntil), StaleBefore: timex.RequiredTimestamptz(staleBefore), Limit: limit})
 	if err != nil {
 		return nil, err
 	}
 	return tasksFromRows(rows)
 }
 
+// FailExpiredJudgeTasks 终止已耗尽重试次数的过期执行租约,避免任务永久停留 judging。
+func (s *txStore) FailExpiredJudgeTasks(ctx context.Context, limit int32, staleBefore time.Time) ([]JudgeTask, error) {
+	rows, err := s.q.FailExpiredJudgeTasks(ctx, sqlcgen.FailExpiredJudgeTasksParams{PageLimit: limit, StaleBefore: timex.RequiredTimestamptz(staleBefore)})
+	if err != nil {
+		return nil, err
+	}
+	return tasksFromRows(rows)
+}
+
+// RenewJudgeTaskLease 延长当前 worker 的执行租约,未命中表示租约已被收回或任务已终态。
+func (s *txStore) RenewJudgeTaskLease(ctx context.Context, tenantID, taskID int64, leaseToken string, leaseUntil time.Time) (bool, error) {
+	updated, err := s.q.RenewJudgeTaskLease(ctx, sqlcgen.RenewJudgeTaskLeaseParams{
+		TenantID:   tenantID,
+		ID:         taskID,
+		LeaseToken: leaseToken,
+		LeaseUntil: timex.RequiredTimestamptz(leaseUntil),
+	})
+	return updated > 0, err
+}
+
 // CompleteJudgeTask 标记任务完成。
-func (s *txStore) CompleteJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error) {
-	row, err := s.q.CompleteJudgeTask(ctx, sqlcgen.CompleteJudgeTaskParams{TenantID: tenantID, ID: taskID})
-	if err != nil {
-		return JudgeTask{}, err
-	}
-	return taskFromRow(row)
-}
-
-// MarkJudgeTaskTimeout 标记任务进入超时中间态。
-func (s *txStore) MarkJudgeTaskTimeout(ctx context.Context, tenantID, taskID int64, reason string) (JudgeTask, error) {
-	row, err := s.q.MarkJudgeTaskTimeout(ctx, sqlcgen.MarkJudgeTaskTimeoutParams{TenantID: tenantID, ID: taskID, LastError: pgtypex.Text(reason)})
-	if err != nil {
-		return JudgeTask{}, err
-	}
-	return taskFromRow(row)
-}
-
-// MarkJudgeTaskError 标记任务进入系统错误中间态。
-func (s *txStore) MarkJudgeTaskError(ctx context.Context, tenantID, taskID int64, reason string) (JudgeTask, error) {
-	row, err := s.q.MarkJudgeTaskError(ctx, sqlcgen.MarkJudgeTaskErrorParams{TenantID: tenantID, ID: taskID, LastError: pgtypex.Text(reason)})
+func (s *txStore) CompleteJudgeTask(ctx context.Context, tenantID, taskID int64, leaseToken string) (JudgeTask, error) {
+	row, err := s.q.CompleteJudgeTask(ctx, sqlcgen.CompleteJudgeTaskParams{TenantID: tenantID, ID: taskID, LeaseToken: leaseToken})
 	if err != nil {
 		return JudgeTask{}, err
 	}
@@ -338,8 +343,8 @@ func (s *txStore) MarkJudgeTaskError(ctx context.Context, tenantID, taskID int64
 }
 
 // RetryJudgeTask 标记任务重试入队。
-func (s *txStore) RetryJudgeTask(ctx context.Context, tenantID, taskID int64, reason string) (JudgeTask, error) {
-	row, err := s.q.RetryJudgeTask(ctx, sqlcgen.RetryJudgeTaskParams{TenantID: tenantID, ID: taskID, LastError: pgtypex.Text(reason)})
+func (s *txStore) RetryJudgeTask(ctx context.Context, tenantID, taskID int64, reason, leaseToken string) (JudgeTask, error) {
+	row, err := s.q.RetryJudgeTask(ctx, sqlcgen.RetryJudgeTaskParams{TenantID: tenantID, ID: taskID, LastError: pgtypex.Text(reason), LeaseToken: leaseToken})
 	if err != nil {
 		return JudgeTask{}, err
 	}
@@ -347,8 +352,17 @@ func (s *txStore) RetryJudgeTask(ctx context.Context, tenantID, taskID int64, re
 }
 
 // FailJudgeTask 标记任务失败终态。
-func (s *txStore) FailJudgeTask(ctx context.Context, tenantID, taskID int64, reason string) (JudgeTask, error) {
-	row, err := s.q.FailJudgeTask(ctx, sqlcgen.FailJudgeTaskParams{TenantID: tenantID, ID: taskID, LastError: pgtypex.Text(reason)})
+func (s *txStore) FailJudgeTask(ctx context.Context, tenantID, taskID int64, reason, leaseToken string) (JudgeTask, error) {
+	row, err := s.q.FailJudgeTask(ctx, sqlcgen.FailJudgeTaskParams{TenantID: tenantID, ID: taskID, LastError: pgtypex.Text(reason), LeaseToken: leaseToken})
+	if err != nil {
+		return JudgeTask{}, err
+	}
+	return taskFromRow(row)
+}
+
+// CompleteManualJudgeTask 由人工评分路径在无 worker 租约时完成任务。
+func (s *txStore) CompleteManualJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error) {
+	row, err := s.q.CompleteManualJudgeTask(ctx, sqlcgen.CompleteManualJudgeTaskParams{TenantID: tenantID, ID: taskID})
 	if err != nil {
 		return JudgeTask{}, err
 	}
@@ -414,9 +428,9 @@ func (s *txStore) CreateOutbox(ctx context.Context, id int64, tenantID, taskID i
 	return outboxFromRow(row), nil
 }
 
-// ListPendingOutbox 查询待发布事件。
-func (s *txStore) ListPendingOutbox(ctx context.Context, limit int32) ([]JudgeEventOutbox, error) {
-	rows, err := s.q.ListPendingJudgeOutbox(ctx, limit)
+// ClaimPendingOutbox 原子领取待发布事件并写入租约。
+func (s *txStore) ClaimPendingOutbox(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time, leaseToken string) ([]JudgeEventOutbox, error) {
+	rows, err := s.q.ClaimPendingJudgeOutbox(ctx, sqlcgen.ClaimPendingJudgeOutboxParams{PageLimit: limit, MaxAttempts: maxAttempts, StaleBefore: timex.RequiredTimestamptz(staleBefore), LeaseUntil: timex.RequiredTimestamptz(leaseUntil), LeaseToken: leaseToken})
 	if err != nil {
 		return nil, err
 	}
@@ -427,9 +441,14 @@ func (s *txStore) ListPendingOutbox(ctx context.Context, limit int32) ([]JudgeEv
 	return out, nil
 }
 
+// ExhaustExpiredEventOutbox 将耗尽发布次数的过期事件置为失败终态。
+func (s *txStore) ExhaustExpiredEventOutbox(ctx context.Context, maxAttempts int32, staleBefore time.Time) (int64, error) {
+	return s.q.ExhaustExpiredJudgeEventOutbox(ctx, sqlcgen.ExhaustExpiredJudgeEventOutboxParams{MaxAttempts: maxAttempts, StaleBefore: timex.RequiredTimestamptz(staleBefore)})
+}
+
 // MarkOutboxPublished 标记 outbox 发布成功。
-func (s *txStore) MarkOutboxPublished(ctx context.Context, tenantID, id int64) (JudgeEventOutbox, error) {
-	row, err := s.q.MarkJudgeOutboxPublished(ctx, sqlcgen.MarkJudgeOutboxPublishedParams{TenantID: tenantID, ID: id})
+func (s *txStore) MarkOutboxPublished(ctx context.Context, tenantID, id int64, leaseToken string) (JudgeEventOutbox, error) {
+	row, err := s.q.MarkJudgeOutboxPublished(ctx, sqlcgen.MarkJudgeOutboxPublishedParams{TenantID: tenantID, ID: id, LeaseToken: leaseToken})
 	if err != nil {
 		return JudgeEventOutbox{}, err
 	}
@@ -437,8 +456,8 @@ func (s *txStore) MarkOutboxPublished(ctx context.Context, tenantID, id int64) (
 }
 
 // MarkOutboxFailed 标记 outbox 发布失败。
-func (s *txStore) MarkOutboxFailed(ctx context.Context, tenantID, id int64, reason string) (JudgeEventOutbox, error) {
-	row, err := s.q.MarkJudgeOutboxFailed(ctx, sqlcgen.MarkJudgeOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason)})
+func (s *txStore) MarkOutboxFailed(ctx context.Context, tenantID, id int64, reason, leaseToken string) (JudgeEventOutbox, error) {
+	row, err := s.q.MarkJudgeOutboxFailed(ctx, sqlcgen.MarkJudgeOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason), LeaseToken: leaseToken})
 	if err != nil {
 		return JudgeEventOutbox{}, err
 	}

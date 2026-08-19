@@ -18,8 +18,8 @@ type Querier interface {
 	// 四项审核门禁中 determinism_check 与 worker_preview 只能由隔离预览产出,
 	// 没有这个认领查询就没有生产者,教师提交的包会永久停在待审(见 docs/04-仿真可视化引擎/06-业务流程与状态机.md §4)。
 	// FOR UPDATE SKIP LOCKED:多副本部署时各副本认领互不重复,也不互相阻塞。
-	ClaimSimPackagesForPreview(ctx context.Context, limit int32) ([]SimPackage, error)
-	CompleteSimReview(ctx context.Context, arg CompleteSimReviewParams) (SimPackageReview, error)
+	ClaimSimPackagesForPreview(ctx context.Context, arg ClaimSimPackagesForPreviewParams) ([]ClaimSimPackagesForPreviewRow, error)
+	CompleteSimReview(ctx context.Context, arg CompleteSimReviewParams) (CompleteSimReviewRow, error)
 	// 统计本租户当前占用集群资源的隔离执行会话数,供并发闸门
 	// SIM_BACKEND_MAX_CONCURRENT_SESSIONS_PER_TENANT 使用。
 	// 一个隔离会话一个 Pod,没有这道闸门循环建会话可耗尽节点;浏览器执行的会话不占集群资源故不计入。
@@ -28,15 +28,17 @@ type Querier interface {
 	CountSimReviews(ctx context.Context, dollar_1 int16) (int64, error)
 	CreateSimAction(ctx context.Context, arg CreateSimActionParams) (SimActionLog, error)
 	CreateSimPackage(ctx context.Context, arg CreateSimPackageParams) (SimPackage, error)
-	CreateSimPackageReview(ctx context.Context, arg CreateSimPackageReviewParams) (SimPackageReview, error)
+	CreateSimPackageReview(ctx context.Context, arg CreateSimPackageReviewParams) (CreateSimPackageReviewRow, error)
 	CreateSimSession(ctx context.Context, arg CreateSimSessionParams) (SimSession, error)
 	CreateSimShare(ctx context.Context, arg CreateSimShareParams) (SimShare, error)
+	// worker 在最后一次预览中崩溃时没有机会写报告;租约过期后由下一轮收敛为明确的终态门禁。
+	ExhaustSimPreviewAttempts(ctx context.Context, arg ExhaustSimPreviewAttemptsParams) ([]ExhaustSimPreviewAttemptsRow, error)
 	GetLastSimAction(ctx context.Context, arg GetLastSimActionParams) (SimActionLog, error)
-	GetLatestSimReviewForPackage(ctx context.Context, packageID int64) (SimPackageReview, error)
+	GetLatestSimReviewForPackage(ctx context.Context, packageID int64) (GetLatestSimReviewForPackageRow, error)
 	GetSimActionBySeq(ctx context.Context, arg GetSimActionBySeqParams) (SimActionLog, error)
 	GetSimPackageByCodeVersion(ctx context.Context, arg GetSimPackageByCodeVersionParams) (SimPackage, error)
 	GetSimPackageByID(ctx context.Context, id int64) (SimPackage, error)
-	GetSimReviewByID(ctx context.Context, id int64) (SimPackageReview, error)
+	GetSimReviewByID(ctx context.Context, id int64) (GetSimReviewByIDRow, error)
 	GetSimSession(ctx context.Context, arg GetSimSessionParams) (SimSession, error)
 	GetSimSessionWithPackage(ctx context.Context, arg GetSimSessionWithPackageParams) (GetSimSessionWithPackageRow, error)
 	GetSimShareByCode(ctx context.Context, code string) (SimShare, error)
@@ -44,7 +46,9 @@ type Querier interface {
 	ListSimPackageVersions(ctx context.Context, code string) ([]SimPackage, error)
 	ListSimPackages(ctx context.Context, arg ListSimPackagesParams) ([]SimPackage, error)
 	ListSimReviews(ctx context.Context, arg ListSimReviewsParams) ([]ListSimReviewsRow, error)
-	MergeSimValidationReport(ctx context.Context, arg MergeSimValidationReportParams) (SimPackageReview, error)
+	MergeSimValidationReport(ctx context.Context, arg MergeSimValidationReportParams) (MergeSimValidationReportRow, error)
+	// 基础设施异常不等同于包校验失败:释放仍由本 worker 持有的租约,交给下一轮重试。
+	ReleaseSimPreviewLease(ctx context.Context, arg ReleaseSimPreviewLeaseParams) (int64, error)
 	// 更新草稿或被退回的包。compute、backend_adapter 与 author_type 不在可更新列中:
 	// 它们由服务端按作者类型派生,更新一个包不改变它的作者,也就不该改变执行位置与运行能力。
 	UpdateSimPackageDraft(ctx context.Context, arg UpdateSimPackageDraftParams) (SimPackage, error)

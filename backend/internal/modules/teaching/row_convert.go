@@ -114,11 +114,15 @@ func submissionFromRow(row sqlcgen.Submission) (Submission, error) {
 
 // outboxFromRow 转换自动判题 outbox 行并解析额外输入。
 func outboxFromRow(row sqlcgen.SubmissionJudgeOutbox) (JudgeOutbox, error) {
-	extra, err := decodeMap(row.ExtraInput)
+	return outboxFromValues(row.ID, row.TenantID, row.SubmissionID, row.AssignmentItemID, row.AssignmentID, row.SourceOwnerID, row.SourceCourseID, row.SourceScope, row.StudentID, row.ItemCode, row.ItemVersion, row.JudgerCode, row.CodeStorageKey, row.CodeHash, row.ExtraInput, row.SourceRef, row.Status, row.RetryCount, row.LastError, row.Score, row.CompletedAt, row.CreatedAt, row.UpdatedAt, row.LeaseToken, row.LeaseUntil)
+}
+
+func outboxFromValues(id, tenantID, submissionID, assignmentItemID, assignmentID, sourceOwnerID, sourceCourseID int64, sourceScope string, studentID int64, itemCode, itemVersion, judgerCode, codeStorageKey, codeHash string, extraInput []byte, sourceRef string, status int16, retryCount int32, lastError pgtype.Text, score pgtype.Int4, completedAt, createdAt, updatedAt pgtype.Timestamptz, leaseToken string, leaseUntil pgtype.Timestamptz) (JudgeOutbox, error) {
+	extra, err := decodeMap(extraInput)
 	if err != nil {
 		return JudgeOutbox{}, err
 	}
-	return JudgeOutbox{ID: row.ID, TenantID: row.TenantID, SubmissionID: row.SubmissionID, AssignmentItemID: row.AssignmentItemID, AssignmentID: row.AssignmentID, SourceOwnerID: row.SourceOwnerID, SourceCourseID: row.SourceCourseID, SourceScope: row.SourceScope, StudentID: row.StudentID, ItemCode: row.ItemCode, ItemVersion: row.ItemVersion, JudgerCode: row.JudgerCode, CodeStorageKey: row.CodeStorageKey, CodeHash: row.CodeHash, ExtraInput: extra, SourceRef: row.SourceRef, Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), Score: pgtypex.Int4Value(row.Score), CompletedAt: timex.FromTimestamptz(row.CompletedAt), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}, nil
+	return JudgeOutbox{ID: id, TenantID: tenantID, SubmissionID: submissionID, AssignmentItemID: assignmentItemID, AssignmentID: assignmentID, SourceOwnerID: sourceOwnerID, SourceCourseID: sourceCourseID, SourceScope: sourceScope, StudentID: studentID, ItemCode: itemCode, ItemVersion: itemVersion, JudgerCode: judgerCode, CodeStorageKey: codeStorageKey, CodeHash: codeHash, ExtraInput: extra, SourceRef: sourceRef, Status: status, RetryCount: retryCount, LastError: pgtypex.TextValue(lastError), Score: pgtypex.Int4Value(score), CompletedAt: timex.FromTimestamptz(completedAt), CreatedAt: timex.FromTimestamptz(createdAt), UpdatedAt: timex.FromTimestamptz(updatedAt), LeaseToken: leaseToken, LeaseUntil: timex.FromTimestamptz(leaseUntil)}, nil
 }
 
 // draftFromRow 转换作答草稿行并解析草稿 JSON。
@@ -191,8 +195,8 @@ func courseGradeExportRequestFromRow(row sqlcgen.CourseGradeExportRequest) Cours
 }
 
 // teachingGradeEventOutbox 转换成绩变更事件 outbox 行。
-func teachingGradeEventOutbox(row sqlcgen.TeachingGradeEventOutbox) TeachingGradeEventOutbox {
-	return TeachingGradeEventOutbox{ID: row.ID, TenantID: row.TenantID, CourseID: row.CourseID, StudentID: row.StudentID, TraceID: row.TraceID, EventUpdatedAt: timex.FromTimestamptz(row.EventUpdatedAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
+func teachingGradeEventOutboxFromFields(id, tenantID, courseID, studentID int64, traceID string, eventUpdatedAt, createdAt, updatedAt pgtype.Timestamptz, status int16, retryCount int32, lastError pgtype.Text, leaseToken string, leaseUntil pgtype.Timestamptz) TeachingGradeEventOutbox {
+	return TeachingGradeEventOutbox{ID: id, TenantID: tenantID, CourseID: courseID, StudentID: studentID, TraceID: traceID, EventUpdatedAt: timex.FromTimestamptz(eventUpdatedAt), Status: status, RetryCount: retryCount, LastError: pgtypex.TextValue(lastError), CreatedAt: timex.FromTimestamptz(createdAt), UpdatedAt: timex.FromTimestamptz(updatedAt), LeaseToken: leaseToken, LeaseUntil: timex.FromTimestamptz(leaseUntil)}
 }
 
 // encodeMap 将 JSON 对象编码为 JSONB 参数。

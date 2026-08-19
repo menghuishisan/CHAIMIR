@@ -51,18 +51,6 @@ type SimPackage struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
-type SimPackageReview struct {
-	ID            int64              `json:"id"`
-	PackageID     int64              `json:"package_id"`
-	SubmitterID   int64              `json:"submitter_id"`
-	PreviewReport []byte             `json:"preview_report"`
-	ReviewerID    pgtype.Int8        `json:"reviewer_id"`
-	Result        int16              `json:"result"`
-	Comment       pgtype.Text        `json:"comment"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-}
-
 type SimSession struct {
 	ID             int64              `json:"id"`
 	TenantID       int64              `json:"tenant_id"`

@@ -83,7 +83,18 @@ func battleMatchFromRow(row sqlcgen.BattleMatch) (BattleMatch, error) {
 	if err != nil {
 		return BattleMatch{}, err
 	}
-	return BattleMatch{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ProblemID: row.ProblemID, EntryAID: row.EntryAID, EntryBID: row.EntryBID, SourceRef: row.SourceRef, SandboxRef: pgtypex.TextValue(row.SandboxRef), JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Result: pgtypex.Int2Value(row.Result), ScoreDelta: delta, ReplayRef: pgtypex.TextValue(row.ReplayRef), Status: row.Status, MatchedAt: timex.FromTimestamptz(row.MatchedAt), FinishedAt: timex.FromTimestamptz(row.FinishedAt)}, nil
+	return BattleMatch{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ProblemID: row.ProblemID, EntryAID: row.EntryAID, EntryBID: row.EntryBID, SourceRef: row.SourceRef, SandboxRef: pgtypex.TextValue(row.SandboxRef), JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Result: pgtypex.Int2Value(row.Result), ScoreDelta: delta, ReplayRef: pgtypex.TextValue(row.ReplayRef), Status: row.Status, MatchedAt: timex.FromTimestamptz(row.MatchedAt), FinishedAt: timex.FromTimestamptz(row.FinishedAt), LeaseToken: row.LeaseToken, LeaseUntil: timex.FromTimestamptz(row.LeaseUntil), AttemptCount: row.AttemptCount}, nil
+}
+
+// battleMatchFromReplayRow 转换回放时间窗行,与普通对局转换共享同一 JSONB 校验。
+func battleMatchFromReplayRow(row sqlcgen.ListBattleReplayMatchesForTeamRow) (BattleMatch, error) {
+	return battleMatchFromRow(sqlcgen.BattleMatch{
+		ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ProblemID: row.ProblemID,
+		EntryAID: row.EntryAID, EntryBID: row.EntryBID, SourceRef: row.SourceRef,
+		SandboxRef: row.SandboxRef, JudgeTaskRef: row.JudgeTaskRef, Result: row.Result,
+		ScoreDelta: row.ScoreDelta, ReplayRef: row.ReplayRef, Status: row.Status,
+		MatchedAt: row.MatchedAt, FinishedAt: row.FinishedAt,
+	})
 }
 
 // ladderFromRow 转换排行榜行。

@@ -4,9 +4,7 @@ export const JUDGE_TASK_STATUS = {
   QUEUED: 'queued',
   JUDGING: 'judging',
   DONE: 'done',
-  TIMEOUT: 'timeout',
   FAILED: 'failed',
-  ERROR: 'error',
   CANCELLED: 'cancelled',
 } as const
 
@@ -15,7 +13,7 @@ export type JudgeTaskStatus = (typeof JUDGE_TASK_STATUS)[keyof typeof JUDGE_TASK
 /**
  * 判题任务的运维分组:与后端 judge enum.go 的 TaskState* 一一对应。
  * 一个分组覆盖多个状态,故列表筛选与计数用它而不是单个 status
- * (「需要处理」= 超时 + 失败 + 出错,分三次查会既慢又难对齐口径)。
+ * (「需要处理」= 失败,由服务端统一计数和筛选)。
  */
 export const JUDGE_TASK_STATE = {
   ACTIVE: 'active',

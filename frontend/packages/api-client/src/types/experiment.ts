@@ -11,6 +11,7 @@ import type {
   ExperimentValidationLevel,
 } from '../constants/experiment'
 import type { SandboxToolKind, SandboxToolStatus } from '../constants/sandbox'
+import type { SimCompute } from '../constants/sim'
 
 export interface Experiment {
   id: SnowflakeID
@@ -217,7 +218,7 @@ export interface SimSessionRef {
   session_id: SnowflakeID
   package_code: string
   version: string
-  bundle_ref: string
+  compute: SimCompute
 }
 
 export interface CheckpointResult {

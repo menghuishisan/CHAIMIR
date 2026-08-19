@@ -10,6 +10,7 @@ import (
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -36,8 +37,12 @@ func (t *txStore) CreateTenantProvisionOutbox(ctx context.Context, item TenantPr
 }
 
 // ClaimTenantProvisionOutbox 跨租户领取待发布或超时的初始化事件。
-func (t *txStore) ClaimTenantProvisionOutbox(ctx context.Context, limit int32, staleBefore time.Time) ([]TenantProvisionOutbox, error) {
-	rows, err := t.q.ClaimTenantProvisionOutbox(ctx, sqlcgen.ClaimTenantProvisionOutboxParams{StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit})
+func (t *txStore) ClaimTenantProvisionOutbox(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time) ([]TenantProvisionOutbox, error) {
+	leaseToken, err := pkgcrypto.RandomToken(48)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := t.q.ClaimTenantProvisionOutbox(ctx, sqlcgen.ClaimTenantProvisionOutboxParams{LeaseToken: leaseToken, LeaseUntil: timex.RequiredTimestamptz(leaseUntil), StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit, MaxAttempts: maxAttempts})
 	if err != nil {
 		return nil, err
 	}
@@ -49,8 +54,8 @@ func (t *txStore) ClaimTenantProvisionOutbox(ctx context.Context, limit int32, s
 }
 
 // MarkTenantProvisionOutboxPublished 标记初始化事件已经发布。
-func (t *txStore) MarkTenantProvisionOutboxPublished(ctx context.Context, id int64) (TenantProvisionOutbox, error) {
-	row, err := t.q.MarkTenantProvisionOutboxPublished(ctx, id)
+func (t *txStore) MarkTenantProvisionOutboxPublished(ctx context.Context, id int64, leaseToken string) (TenantProvisionOutbox, error) {
+	row, err := t.q.MarkTenantProvisionOutboxPublished(ctx, sqlcgen.MarkTenantProvisionOutboxPublishedParams{ID: id, LeaseToken: leaseToken})
 	if err != nil {
 		return TenantProvisionOutbox{}, err
 	}
@@ -58,8 +63,8 @@ func (t *txStore) MarkTenantProvisionOutboxPublished(ctx context.Context, id int
 }
 
 // MarkTenantProvisionOutboxFailed 记录初始化事件发布失败原因供后续重试。
-func (t *txStore) MarkTenantProvisionOutboxFailed(ctx context.Context, id int64, lastError string) (TenantProvisionOutbox, error) {
-	row, err := t.q.MarkTenantProvisionOutboxFailed(ctx, sqlcgen.MarkTenantProvisionOutboxFailedParams{ID: id, LastError: pgtypex.Text(lastError)})
+func (t *txStore) MarkTenantProvisionOutboxFailed(ctx context.Context, id int64, lastError, leaseToken string) (TenantProvisionOutbox, error) {
+	row, err := t.q.MarkTenantProvisionOutboxFailed(ctx, sqlcgen.MarkTenantProvisionOutboxFailedParams{ID: id, LastError: pgtypex.Text(lastError), LeaseToken: leaseToken})
 	if err != nil {
 		return TenantProvisionOutbox{}, err
 	}
@@ -487,10 +492,15 @@ func (t *txStore) ListAccounts(ctx context.Context, query AccountQuery) ([]Accou
 // ListClassStudents 读取指定班级的在校学生摘要。
 // 只返回跨模块契约需要的字段(编号、姓名、学号、身份、状态),
 // 不带手机号密文与密码哈希 —— 契约调用方不需要,也不该经此拿到。
-func (t *txStore) ListClassStudents(ctx context.Context, tenantID, classID int64) ([]Account, error) {
-	rows, err := t.q.ListClassStudents(ctx, sqlcgen.ListClassStudentsParams{TenantID: tenantID, OrgID: classID})
+func (t *txStore) ListClassStudents(ctx context.Context, tenantID, classID int64, page, size int) ([]Account, int64, error) {
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := t.q.ListClassStudents(ctx, sqlcgen.ListClassStudentsParams{TenantID: tenantID, OrgID: classID, PageLimit: limit, PageOffset: offset})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	total, err := t.q.CountClassStudents(ctx, sqlcgen.CountClassStudentsParams{TenantID: tenantID, OrgID: classID})
+	if err != nil {
+		return nil, 0, err
 	}
 	out := make([]Account, 0, len(rows))
 	for _, row := range rows {
@@ -504,7 +514,7 @@ func (t *txStore) ListClassStudents(ctx context.Context, tenantID, classID int64
 			OrgID:        classID,
 		})
 	}
-	return out, nil
+	return out, total, nil
 }
 
 // UpdateAccountEditable 更新账号可编辑字段并返回最新账号快照。

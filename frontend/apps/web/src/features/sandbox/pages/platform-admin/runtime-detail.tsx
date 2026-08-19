@@ -23,10 +23,11 @@ import {
 import {
   ImagePrepullStatus,
   RuntimeImageStatus,
-  RuntimeSelftestStatus,
-  RuntimeStatus,
-  type SandboxRuntime,
-  type SandboxRuntimeImage,
+	RuntimeSelftestStatus,
+	RuntimeStatus,
+	type SandboxRuntime,
+	type SandboxRuntimeImage,
+	type SandboxRuntimeSelftestDetail,
 } from '@chaimir/api-client'
 import {
   Badge,
@@ -671,7 +672,7 @@ interface SelftestSectionProps {
  * 前置不满足时按后端条件说明缺什么,不让人点了才看到失败。
  */
 function SelftestSection({ runtime, images, onDone }: SelftestSectionProps) {
-  const [detail, setDetail] = useState<Record<string, unknown>>()
+	const [detail, setDetail] = useState<SandboxRuntimeSelftestDetail>()
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
@@ -805,7 +806,10 @@ function digestFromImageUrl(imageUrl: string): string {
 
 /** 自检分步的用户向名称:未登记的键给通用名,不把内部标识抛到界面上。 */
 const SELFTEST_STEP_LABELS: Record<string, string> = {
-  workspace: '工作区读写',
+	result: '自检结果',
+	stage: '失败阶段',
+	trace_id: '报障编号',
+	workspace: '工作区读写',
   terminal: '终端接入',
   deploy: '合约部署',
   tx: '发起交易',

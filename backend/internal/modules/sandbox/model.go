@@ -140,6 +140,8 @@ type SandboxRecycleOutbox struct {
 	LastError      string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	LeaseToken     string
+	LeaseUntil     time.Time
 }
 
 // CreateSandboxInputModel 是 service 传入规则层的本模块创建校验模型。

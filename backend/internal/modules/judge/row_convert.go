@@ -61,6 +61,8 @@ func taskFromRow(row sqlcgen.JudgeTask) (JudgeTask, error) {
 		LastError:        pgtypex.TextValue(row.LastError),
 		CreatedAt:        timex.FromTimestamptz(row.CreatedAt),
 		UpdatedAt:        timex.FromTimestamptz(row.UpdatedAt),
+		LeaseToken:       row.LeaseToken,
+		LeaseUntil:       timex.FromTimestamptz(row.LeaseUntil),
 	}, nil
 }
 
@@ -93,6 +95,8 @@ func taskInfoFromJoined(row sqlcgen.GetJudgeTaskWithResultRow) (JudgeTaskInfo, e
 		LastError:        row.LastError,
 		CreatedAt:        row.CreatedAt,
 		UpdatedAt:        row.UpdatedAt,
+		LeaseToken:       row.LeaseToken,
+		LeaseUntil:       row.LeaseUntil,
 	})
 	if err != nil {
 		return JudgeTaskInfo{}, err
@@ -160,11 +164,11 @@ func fingerprintFromRow(row sqlcgen.SubmissionFingerprint) (SubmissionFingerprin
 
 // outboxFromRow 转换 sqlc outbox 模型,避免 service 直接依赖生成类型。
 func outboxFromRow(row sqlcgen.JudgeEventOutbox) JudgeEventOutbox {
-	return outboxFromFields(row.ID, row.TenantID, row.TaskID, row.Subject, row.Payload, row.Status, row.RetryCount, row.NextAttemptAt, row.LastError, row.CreatedAt, row.UpdatedAt)
+	return outboxFromFields(row.ID, row.TenantID, row.TaskID, row.Subject, row.Payload, row.Status, row.RetryCount, row.NextAttemptAt, row.LastError, row.CreatedAt, row.UpdatedAt, row.LeaseUntil, row.LeaseToken)
 }
 
 // outboxFromFields 汇总 outbox 行字段,避免业务层依赖 sqlc 临时类型。
-func outboxFromFields(id, tenantID, taskID int64, subject string, payload []byte, status int16, retryCount int32, nextAttemptAt pgtype.Timestamptz, lastError pgtype.Text, createdAt, updatedAt pgtype.Timestamptz) JudgeEventOutbox {
+func outboxFromFields(id, tenantID, taskID int64, subject string, payload []byte, status int16, retryCount int32, nextAttemptAt pgtype.Timestamptz, lastError pgtype.Text, createdAt, updatedAt, leaseUntil pgtype.Timestamptz, leaseToken string) JudgeEventOutbox {
 	return JudgeEventOutbox{
 		ID:            id,
 		TenantID:      tenantID,
@@ -177,6 +181,8 @@ func outboxFromFields(id, tenantID, taskID int64, subject string, payload []byte
 		LastError:     pgtypex.TextValue(lastError),
 		CreatedAt:     timex.FromTimestamptz(createdAt),
 		UpdatedAt:     timex.FromTimestamptz(updatedAt),
+		LeaseToken:    leaseToken,
+		LeaseUntil:    timex.FromTimestamptz(leaseUntil),
 	}
 }
 

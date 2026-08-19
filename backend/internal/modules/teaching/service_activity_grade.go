@@ -19,6 +19,7 @@ import (
 	"chaimir/internal/platform/transfer"
 	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
 
 	"github.com/xuri/excelize/v2"
@@ -277,27 +278,29 @@ func (s *Service) CreateAnnouncement(ctx context.Context, courseID int64, req An
 }
 
 // ListAnnouncements 查询课程公告。
-func (s *Service) ListAnnouncements(ctx context.Context, courseID int64) ([]AnnouncementDTO, error) {
+func (s *Service) ListAnnouncements(ctx context.Context, courseID int64, page, size int) ([]AnnouncementDTO, int64, int, int, error) {
+	page, size = pagex.Normalize(page, size)
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	var items []Announcement
+	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		if err := s.ensureCourseReadable(ctx, tx, id.TenantID, courseID, id.AccountID); err != nil {
 			return err
 		}
 		var err error
-		items, err = tx.ListAnnouncements(ctx, id.TenantID, courseID)
+		items, total, err = tx.ListAnnouncements(ctx, id.TenantID, courseID, page, size)
 		return err
 	}); err != nil {
-		return nil, mapCourseError(err)
+		return nil, 0, page, size, mapCourseError(err)
 	}
 	out := make([]AnnouncementDTO, 0, len(items))
 	for _, item := range items {
 		out = append(out, announcementDTO(item))
 	}
-	return out, nil
+	return out, total, page, size, nil
 }
 
 // PinAnnouncement 设置公告置顶。
@@ -482,12 +485,14 @@ func (s *Service) ComputeCourseGrades(ctx context.Context, courseID int64) ([]Gr
 }
 
 // ListGrades 查询课程成绩。
-func (s *Service) ListGrades(ctx context.Context, courseID int64) ([]GradeDTO, error) {
+func (s *Service) ListGrades(ctx context.Context, courseID int64, page, size int) ([]GradeDTO, int64, int, int, error) {
+	page, size = pagex.Normalize(page, size)
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	var grades []CourseGrade
+	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		course, err := tx.GetCourse(ctx, id.TenantID, courseID)
 		if err != nil {
@@ -496,20 +501,20 @@ func (s *Service) ListGrades(ctx context.Context, courseID int64) ([]GradeDTO, e
 		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
 			return err
 		}
-		maxRows, ok := intx.Int32(s.cfg.CourseGradesMaxRows)
-		if !ok || maxRows <= 0 {
-			return apperr.ErrTeachingGradeInvalid
+		limit, offset := pagex.LimitOffset(page, size)
+		grades, err = tx.ListCourseGrades(ctx, id.TenantID, courseID, limit, offset)
+		if err == nil {
+			total, err = tx.CountCourseGrades(ctx, id.TenantID, courseID)
 		}
-		grades, err = tx.ListCourseGrades(ctx, id.TenantID, courseID, maxRows, 0)
 		return err
 	}); err != nil {
-		return nil, mapGradeError(err)
+		return nil, 0, page, size, mapGradeError(err)
 	}
 	out := make([]GradeDTO, 0, len(grades))
 	for _, grade := range grades {
 		out = append(out, gradeDTO(grade))
 	}
-	return out, nil
+	return out, total, page, size, nil
 }
 
 // OverrideGrade 手动调整单课程成绩。
@@ -834,11 +839,20 @@ func (s *Service) RunTeachingGradeEventOutboxOnce(ctx context.Context) error {
 	if !ok || limit <= 0 {
 		return apperr.ErrTeachingGradeEventPublishFailed
 	}
-	staleBefore := timex.Now().Add(-time.Duration(s.cfg.GradeEventOutboxStaleMs) * time.Millisecond)
+	staleBefore := timex.Now()
 	var items []TeachingGradeEventOutbox
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, err = tx.ClaimPendingTeachingGradeEventOutbox(ctx, limit, staleBefore)
+		leaseToken, tokenErr := pkgcrypto.RandomToken(48)
+		if tokenErr != nil {
+			return tokenErr
+		}
+		leaseUntil := staleBefore.Add(time.Duration(s.cfg.GradeEventOutboxStaleMs) * time.Millisecond)
+		maxAttempts, maxErr := intx.Int32(s.cfg.GradeEventOutboxMaxAttempts)
+		if !maxErr || maxAttempts <= 0 {
+			return apperr.ErrTeachingGradeEventPublishFailed
+		}
+		items, err = tx.ClaimPendingTeachingGradeEventOutbox(ctx, limit, maxAttempts, staleBefore, leaseToken, leaseUntil)
 		if err != nil {
 			return apperr.ErrTeachingGradeEventPublishFailed.WithCause(err)
 		}
@@ -846,12 +860,16 @@ func (s *Service) RunTeachingGradeEventOutboxOnce(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	var firstErr error
 	for _, item := range items {
 		if err := s.publishGradeEventOutboxItem(ctx, item); err != nil {
-			return err
+			logging.ErrorContext(ctx, "teaching grade outbox publish failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("course_id", item.CourseID), slog.Int64("student_id", item.StudentID), slog.Int64("outbox_id", item.ID))
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // publishGradeEventOutboxItem 发布单条成绩事件并按结果回写 outbox 状态。
@@ -868,7 +886,7 @@ func (s *Service) publishGradeEventOutboxItem(ctx context.Context, item Teaching
 // markTeachingGradeEventOutboxPublished 标记成绩事件发布成功。
 func (s *Service) markTeachingGradeEventOutboxPublished(ctx context.Context, item TeachingGradeEventOutbox) error {
 	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.MarkTeachingGradeEventOutboxPublished(ctx, item.TenantID, item.ID)
+		_, err := tx.MarkTeachingGradeEventOutboxPublished(ctx, item.TenantID, item.ID, item.LeaseToken)
 		if err != nil {
 			return apperr.ErrTeachingGradeEventPublishFailed.WithCause(err)
 		}
@@ -879,7 +897,7 @@ func (s *Service) markTeachingGradeEventOutboxPublished(ctx context.Context, ite
 // recordTeachingGradeEventOutboxFailure 记录成绩事件发布失败并等待后台重试。
 func (s *Service) recordTeachingGradeEventOutboxFailure(ctx context.Context, item TeachingGradeEventOutbox, cause error) {
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.MarkTeachingGradeEventOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()))
+		_, err := tx.MarkTeachingGradeEventOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()), item.LeaseToken)
 		return err
 	}); err != nil {
 		logging.ErrorContext(ctx, "teaching grade event outbox failure mark failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("course_id", item.CourseID), slog.Int64("student_id", item.StudentID), slog.Int64("outbox_id", item.ID))

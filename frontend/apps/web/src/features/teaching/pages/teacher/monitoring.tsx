@@ -91,36 +91,36 @@ export default function TeacherMonitoringPage() {
         size: MONITOR_SIZE,
       }),
     [judgeFilter],
-    () => false,
+    () => false
   )
   // 对局监控要的是「正在打的赛事」,按状态向服务端取,而不是在最近 30 场里挑
   const runningContestsResource = useAsyncResource(
     () => api.contest.getContests({ status: ContestStatus.RUNNING, page: 1, size: MONITOR_SIZE }),
     [],
-    () => false,
+    () => false
   )
   const frozenContestsResource = useAsyncResource(
     () => api.contest.getContests({ status: ContestStatus.FROZEN, page: 1, size: MONITOR_SIZE }),
     [],
-    () => false,
+    () => false
   )
 
   // 指标带取服务端全量口径:队列积压多少条不能由最近 30 条推断
   const activeTaskCount = useResourceTotal(
     (params) => api.judge.getTasks({ state: JUDGE_TASK_STATE.ACTIVE, ...params }),
-    [],
+    []
   )
   const abnormalTaskCount = useResourceTotal(
     (params) => api.judge.getTasks({ state: JUDGE_TASK_STATE.ABNORMAL, ...params }),
-    [],
+    []
   )
   const runningContestCount = useResourceTotal(
     (params) => api.contest.getContests({ status: ContestStatus.RUNNING, ...params }),
-    [],
+    []
   )
   const frozenContestCount = useResourceTotal(
     (params) => api.contest.getContests({ status: ContestStatus.FROZEN, ...params }),
-    [],
+    []
   )
   const liveContestCount =
     runningContestCount === undefined || frozenContestCount === undefined
@@ -132,7 +132,7 @@ export default function TeacherMonitoringPage() {
       ...(runningContestsResource.data?.list ?? []),
       ...(frozenContestsResource.data?.list ?? []),
     ],
-    [frozenContestsResource.data, runningContestsResource.data],
+    [frozenContestsResource.data, runningContestsResource.data]
   )
 
   const refreshAll = useCallback(() => {
@@ -172,7 +172,7 @@ export default function TeacherMonitoringPage() {
             label="判题需要处理"
             value={abnormalTaskCount ?? '—'}
             icon={RotateCcw}
-            hint={abnormalTaskCount === 0 ? '暂无异常' : '失败、超时或出错'}
+            hint={abnormalTaskCount === 0 ? '暂无异常' : '判题失败'}
           />
           <Stat label="进行中竞赛" value={liveContestCount ?? '—'} icon={Swords} hint="含封榜中" />
         </div>
@@ -190,17 +190,16 @@ export default function TeacherMonitoringPage() {
       <BattleMonitorSection contests={runningContests} />
 
       {detailTask ? (
-        <JudgeTaskDetailModal
-          task={detailTask}
-          onClose={() => setDetailTask(undefined)}
-        />
+        <JudgeTaskDetailModal task={detailTask} onClose={() => setDetailTask(undefined)} />
       ) : null}
     </PageScaffold>
   )
 }
 
 interface JudgeMonitorSectionProps {
-  tasks: ReturnType<typeof useAsyncResource<{ list: JudgeTask[]; total: number; page: number; size: number }>>
+  tasks: ReturnType<
+    typeof useAsyncResource<{ list: JudgeTask[]; total: number; page: number; size: number }>
+  >
   filter: string
   onFilterChange: (filter: string) => void
   onOpenDetail: (task: JudgeTask) => void
@@ -296,7 +295,7 @@ function JudgeMonitorSection({
   return (
     <PageSection
       title="判题任务"
-      description={`按提交时间从新到旧,最多列出最近 ${MONITOR_SIZE} 条。失败、超时或出错的任务可以重判,重判会用原始提交重新执行。`}
+      description={`按提交时间从新到旧,最多列出最近 ${MONITOR_SIZE} 条。判题失败的任务可以重判,重判会用原始提交重新执行。`}
     >
       <div className="flex flex-col gap-4">
         <FilterBar label="判题任务筛选">
@@ -351,7 +350,11 @@ interface JudgeTaskDetailModalProps {
  * 只呈现用例名、期望说明与提示。
  */
 function JudgeTaskDetailModal({ task, onClose }: JudgeTaskDetailModalProps) {
-  const detail = useAsyncResource(() => api.judge.getTask(task.task_id), [task.task_id], () => false)
+  const detail = useAsyncResource(
+    () => api.judge.getTask(task.task_id),
+    [task.task_id],
+    () => false
+  )
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -490,7 +493,7 @@ function ExperimentMonitorSection() {
   const experiments = useAsyncResource(
     () => api.experiment.getExperiments({ page: 1, size: MONITOR_SIZE }),
     [],
-    () => false,
+    () => false
   )
 
   return (
@@ -544,7 +547,7 @@ function BattleMonitorSection({ contests }: { contests: Contest[] }) {
         ? api.contest.listBattleMatches(activeContestId, { page: 1, size: MONITOR_SIZE })
         : Promise.resolve({ list: [], total: 0, page: 1, size: MONITOR_SIZE }),
     [activeContestId],
-    (value) => value.list.length === 0,
+    (value) => value.list.length === 0
   )
 
   const columns: TableColumn<BattleMatch>[] = [

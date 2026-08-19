@@ -4,7 +4,9 @@
 // 后端分页信封的 total 与 size 无关(docs/总-API接口总览.md §2),
 // 因此这里只要一页 size=1 就能拿到准确总数,不必把整表拉回浏览器再数。
 
+import { useEffect } from 'react'
 import type { DependencyList } from 'react'
+import { toast } from '@chaimir/ui'
 import type { PaginatedResponse } from '@chaimir/api-client'
 import { useAsyncResource } from './useAsyncResource'
 
@@ -21,5 +23,16 @@ export function useResourceTotal(
 ): number | undefined {
   // isEmpty 恒为 false:这里只关心 total,空列表不是需要渲染空态的资源
   const resource = useAsyncResource(() => loader(COUNT_PROBE), deps, () => false)
+  useEffect(() => {
+    if (resource.status !== 'error') return
+    console.error('指标总数读取失败', {
+      operation: 'web.resource-total.load',
+      kind: resource.error?.constructor.name ?? 'unknown',
+    })
+    toast.error('统计数据暂时无法读取,请稍后重试。', {
+      id: 'resource-total-error',
+      action: { label: '重试', onClick: resource.reload },
+    })
+  }, [resource.error, resource.reload, resource.status])
   return resource.data ? resource.data.total : undefined
 }

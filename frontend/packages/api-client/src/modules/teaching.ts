@@ -279,8 +279,8 @@ export class TeachingApi {
    * 服务端按身份分视角：授课教师得到含草稿的全量，课程内学生只得到已发布作业。
    * 这是学生取得作业编号的唯一入口（课程大纲只含章节课时），响应为作业外壳不含题面。
    */
-  async listCourseAssignments(courseId: string): Promise<Assignment[]> {
-    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/assignments`)
+  async listCourseAssignments(courseId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<Assignment>> {
+    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/assignments`, params)
   }
 
   /**
@@ -401,8 +401,8 @@ export class TeachingApi {
   /**
    * 查询课程公告。
    */
-  async listAnnouncements(courseId: string): Promise<TeachingAnnouncement[]> {
-    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/announcements`)
+  async listAnnouncements(courseId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<TeachingAnnouncement>> {
+    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/announcements`, params)
   }
 
   /**
@@ -459,8 +459,8 @@ export class TeachingApi {
   /**
    * 查询课程成绩汇总。后端按课程成绩契约返回完整数组,不分页。
    */
-  async listGrades(courseId: string): Promise<TeachingCourseGrade[]> {
-    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/grades`)
+  async listGrades(courseId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<TeachingCourseGrade>> {
+    return this.client.get(`/teaching/courses/${encodePathSegment(courseId)}/grades`, params)
   }
 
   /**

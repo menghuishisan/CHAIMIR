@@ -105,11 +105,11 @@
 /api/v1/grade-center/students/{id}/grades:
   get:
     tags: [grade]
-    summary: 学生学期成绩
+    summary: 学生学期成绩与分页课程明细
     operationId: gradeStudentGrades
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: semester, in: query, schema: { type: string } }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: semester, in: query, schema: { type: string } }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/grade-center/students/{id}/gpa:
   get:

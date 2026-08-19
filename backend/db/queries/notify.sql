@@ -9,11 +9,20 @@ FROM notification_template
 ORDER BY type;
 
 -- name: CreateNotification :exec
-INSERT INTO notification (id, tenant_id, receiver_id, type, title, content, link, is_read, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+INSERT INTO notification (id, tenant_id, receiver_id, type, title, content, link, source_ref, is_read, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (tenant_id, receiver_id, source_ref) WHERE source_ref IS NOT NULL DO NOTHING;
+
+-- name: CountNotificationsBySource :one
+-- 业务事件重投时先识别已持久化的同一收件人集合,避免重复投递被限流当作失败。
+SELECT COUNT(*)
+FROM notification
+WHERE tenant_id = $1
+  AND source_ref = $2
+  AND receiver_id = ANY(sqlc.arg(receiver_ids)::bigint[]);
 
 -- name: ListNotifications :many
-SELECT id, tenant_id, receiver_id, type, title, content, link, is_read, read_at, created_at, deleted_at
+SELECT id, tenant_id, receiver_id, type, title, content, link, source_ref, is_read, read_at, created_at, deleted_at
 FROM notification
 WHERE receiver_id = $1
   AND deleted_at IS NULL
@@ -37,7 +46,7 @@ WHERE receiver_id = $1 AND is_read = false AND deleted_at IS NULL;
 UPDATE notification
 SET is_read = true, read_at = now()
 WHERE id = $1 AND receiver_id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, receiver_id, type, title, content, link, is_read, read_at, created_at, deleted_at;
+RETURNING id, tenant_id, receiver_id, type, title, content, link, source_ref, is_read, read_at, created_at, deleted_at;
 
 -- name: MarkAllNotificationsRead :exec
 UPDATE notification
@@ -48,7 +57,7 @@ WHERE receiver_id = $1 AND is_read = false AND deleted_at IS NULL;
 UPDATE notification
 SET deleted_at = now()
 WHERE id = $1 AND receiver_id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, receiver_id, type, title, content, link, is_read, read_at, created_at, deleted_at;
+RETURNING id, tenant_id, receiver_id, type, title, content, link, source_ref, is_read, read_at, created_at, deleted_at;
 
 -- name: DeleteExpiredNotifications :exec
 UPDATE notification

@@ -24,6 +24,7 @@ type Notification struct {
 	Title      string             `json:"title"`
 	Content    string             `json:"content"`
 	Link       pgtype.Text        `json:"link"`
+	SourceRef  pgtype.Text        `json:"source_ref"`
 	IsRead     bool               `json:"is_read"`
 	ReadAt     pgtype.Timestamptz `json:"read_at"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`

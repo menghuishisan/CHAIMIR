@@ -13,6 +13,7 @@ import (
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 )
 
 // ListContests 查询当前租户竞赛列表。
@@ -261,22 +262,21 @@ func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSn
 	}); err != nil {
 		return ResultSnapshotDTO{}, err
 	}
-	if err := s.recycleContestSandboxes(ctx, id.TenantID, contest.ID, contest.CreatedAt, "contest_archive"); err != nil {
-		return ResultSnapshotDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+	leaseToken, err := pkgcrypto.RandomToken(48)
+	if err != nil {
+		return ResultSnapshotDTO{}, apperr.ErrContestStateInvalid.WithCause(err)
 	}
-	var snapshot LadderSnapshot
+	leaseUntil := time.Now().Add(time.Duration(s.cfg.AutoArchiveLeaseDurationMs) * time.Millisecond)
+	var claim ContestArchiveClaim
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		ranks, _, err := tx.ListLadder(ctx, id.TenantID, contestID, 1, 1000)
-		if err != nil {
-			return err
-		}
-		snapshot, err = s.saveLadderSnapshot(ctx, tx, id.TenantID, contestID, ContestStatusArchived, ranks)
-		if err != nil {
-			return err
-		}
-		_, err = tx.SetContestStatus(ctx, id.TenantID, contestID, ContestStatusArchived)
+		var err error
+		claim, err = tx.ClaimManualArchiveContest(ctx, id.TenantID, contestID, time.Now(), leaseUntil, leaseToken)
 		return err
 	}); err != nil {
+		return ResultSnapshotDTO{}, err
+	}
+	snapshot, err := s.archiveContestSystem(ctx, claim, "contest_archive")
+	if err != nil {
 		return ResultSnapshotDTO{}, err
 	}
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.archive", auditTargetContest, contestID, map[string]any{"snapshot_id": snapshot.ID}); err != nil {
@@ -287,39 +287,65 @@ func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSn
 
 // RunAutoArchiveOnce 执行一次竞赛自动收尾扫描,供统一 background runner 调用。
 func (s *Service) RunAutoArchiveOnce(ctx context.Context) error {
-	var items []Contest
+	var items []ContestArchiveClaim
+	leaseToken, err := pkgcrypto.RandomToken(48)
+	if err != nil {
+		return apperr.ErrContestStateInvalid.WithCause(err)
+	}
+	staleBefore := time.Now()
+	leaseUntil := staleBefore.Add(time.Duration(s.cfg.AutoArchiveLeaseDurationMs) * time.Millisecond)
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, err = tx.ClaimAutoArchiveContests(ctx, s.cfg.MatchmakerBatchSize)
+		items, err = tx.ClaimAutoArchiveContests(ctx, s.cfg.MatchmakerBatchSize, staleBefore, leaseUntil, leaseToken)
 		return err
 	}); err != nil {
 		return err
 	}
 	for _, item := range items {
-		if _, err := s.archiveContestSystem(ctx, item); err != nil {
+		if _, err := s.archiveContestSystem(ctx, item, "contest_auto_archive"); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// archiveContestSystem 执行后台归档,复用人工归档的快照与回收规则。
-func (s *Service) archiveContestSystem(ctx context.Context, item Contest) (LadderSnapshot, error) {
-	if err := s.recycleContestSandboxes(ctx, item.TenantID, item.ID, item.CreatedAt, "contest_auto_archive"); err != nil {
+// archiveContestSystem 执行归档,复用人工与自动归档的快照、回收和租约屏障。
+func (s *Service) archiveContestSystem(ctx context.Context, item ContestArchiveClaim, reason string) (LadderSnapshot, error) {
+	if err := s.recycleContestSandboxes(ctx, item.TenantID, item.ID, item.CreatedAt, reason); err != nil {
 		return LadderSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	var snapshot LadderSnapshot
 	if err := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
-		ranks, _, err := tx.ListLadder(ctx, item.TenantID, item.ID, 1, 1000)
-		if err != nil {
-			return err
+		var err error
+		pageSize := s.cfg.MatchmakerBatchSize
+		if pageSize <= 0 {
+			return apperr.ErrContestStateInvalid
+		}
+		page := 1
+		var ranks []LadderRank
+		for {
+			batch, total, err := tx.ListLadder(ctx, item.TenantID, item.ID, page, pageSize)
+			if err != nil {
+				return err
+			}
+			ranks = append(ranks, batch...)
+			if int64(len(ranks)) >= total {
+				break
+			}
+			page++
 		}
 		snapshot, err = s.saveLadderSnapshot(ctx, tx, item.TenantID, item.ID, ContestStatusArchived, ranks)
 		if err != nil {
 			return err
 		}
-		_, err = tx.SetContestStatus(ctx, item.TenantID, item.ID, ContestStatusArchived)
-		return err
+		affected, err := tx.CompleteAutoArchiveContest(ctx, item.TenantID, item.ID, item.ArchiveLeaseToken)
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			return apperr.ErrContestStateInvalid
+		}
+		return nil
 	}); err != nil {
 		return LadderSnapshot{}, err
 	}

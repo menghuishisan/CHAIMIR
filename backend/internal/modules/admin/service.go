@@ -784,7 +784,7 @@ func (s *Service) MonitoringPanels(ctx context.Context) ([]MonitoringPanel, erro
 	if _, err := requirePlatform(ctx); err != nil {
 		return nil, err
 	}
-	return ParseMonitoringPanels(s.monitoring.PanelsJSON)
+	return ParseMonitoringPanels(s.monitoring.PanelsJSON, s.monitoring.AllowedPanelOrigins)
 }
 
 // ListBackups 查询备份记录;status 传 0 表示不按结果过滤。

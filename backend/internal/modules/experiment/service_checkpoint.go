@@ -106,7 +106,7 @@ func (s *Service) HandleJudgeCompleted(ctx context.Context, event contracts.Judg
 		if err != nil {
 			return err
 		}
-		inst, err = tx.GetInstance(ctx, event.TenantID, result.InstanceID)
+		inst, err = tx.GetInstanceForUpdate(ctx, event.TenantID, result.InstanceID)
 		if err != nil {
 			return err
 		}
@@ -124,16 +124,20 @@ func (s *Service) HandleJudgeCompleted(ctx context.Context, event contracts.Judg
 		if _, err = tx.UpsertCheckpoint(ctx, CheckpointResult{ID: result.ID, TenantID: event.TenantID, InstanceID: result.InstanceID, CheckpointID: result.CheckpointID, JudgeTaskRef: ids.Format(event.TaskID), Passed: task.Result.Passed, Score: scaledCheckpointScore(cp.Score, task.Result.Score, task.Result.MaxScore), DetailRef: task.Result.ResultRef, BindingOutput: result.BindingOutput}); err != nil {
 			return err
 		}
-		if inst.Status != InstanceStatusFinished {
+		if inst.Status != InstanceStatusFinished && inst.Status != InstanceStatusRecycled {
 			return nil
 		}
 		score, err := tx.SumScores(ctx, event.TenantID, inst.ID)
 		if err != nil {
 			return err
 		}
-		scored, err = tx.UpdateInstanceScore(ctx, event.TenantID, inst.ID, score)
+		var changed bool
+		scored, changed, err = tx.UpdateInstanceScoreIfChanged(ctx, event.TenantID, inst.ID, score)
 		if err != nil {
 			return err
+		}
+		if !changed {
+			return nil
 		}
 		shouldPublish = true
 		return s.enqueueExperimentScoreOutbox(ctx, tx, scored)
@@ -158,7 +162,7 @@ func (s *Service) HandleJudgeFailed(ctx context.Context, event contracts.JudgeFa
 		if err != nil {
 			return err
 		}
-		inst, err := tx.GetInstance(ctx, event.TenantID, result.InstanceID)
+		inst, err := tx.GetInstanceForUpdate(ctx, event.TenantID, result.InstanceID)
 		if err != nil {
 			return err
 		}
@@ -168,16 +172,20 @@ func (s *Service) HandleJudgeFailed(ctx context.Context, event contracts.JudgeFa
 		if _, err = tx.UpsertCheckpoint(ctx, CheckpointResult{ID: result.ID, TenantID: event.TenantID, InstanceID: result.InstanceID, CheckpointID: result.CheckpointID, JudgeTaskRef: ids.Format(event.TaskID), Passed: false, Score: 0, DetailRef: "judge_failed"}); err != nil {
 			return err
 		}
-		if inst.Status != InstanceStatusFinished {
+		if inst.Status != InstanceStatusFinished && inst.Status != InstanceStatusRecycled {
 			return nil
 		}
 		score, err := tx.SumScores(ctx, event.TenantID, inst.ID)
 		if err != nil {
 			return err
 		}
-		scored, err = tx.UpdateInstanceScore(ctx, event.TenantID, inst.ID, score)
+		var changed bool
+		scored, changed, err = tx.UpdateInstanceScoreIfChanged(ctx, event.TenantID, inst.ID, score)
 		if err != nil {
 			return err
+		}
+		if !changed {
+			return nil
 		}
 		shouldPublish = true
 		return s.enqueueExperimentScoreOutbox(ctx, tx, scored)

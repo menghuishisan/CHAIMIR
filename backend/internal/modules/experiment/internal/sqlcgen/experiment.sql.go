@@ -12,26 +12,43 @@ import (
 )
 
 const claimPendingExperimentScoreOutbox = `-- name: ClaimPendingExperimentScoreOutbox :many
-UPDATE experiment_score_outbox
-SET status = 2, retry_count = retry_count + 1, updated_at = now()
-WHERE id IN (
-    SELECT id
-    FROM experiment_score_outbox
-    WHERE status IN (1, 4) OR (status = 2 AND updated_at <= $1::timestamptz)
-    ORDER BY created_at ASC, id ASC
-    LIMIT $2
+WITH exhausted AS (
+    UPDATE experiment_score_outbox AS expired
+    SET status = 4, last_error = 'score lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
+    WHERE expired.status = 2 AND expired.lease_until <= $3::timestamptz AND expired.retry_count >= $4
+    RETURNING expired.id
+), candidates AS (
+    SELECT o.id
+    FROM experiment_score_outbox o
+    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= $3::timestamptz))
+      AND o.retry_count < $4
+    ORDER BY o.created_at ASC, o.id ASC
+    LIMIT $5
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
+UPDATE experiment_score_outbox AS outbox
+SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = $1, lease_until = $2::timestamptz
+FROM candidates
+WHERE outbox.id = candidates.id
+RETURNING outbox.id, outbox.tenant_id, outbox.experiment_id, outbox.instance_id, outbox.student_id, outbox.score, outbox.score_revision, outbox.trace_id, outbox.scored_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
 `
 
 type ClaimPendingExperimentScoreOutboxParams struct {
+	LeaseToken  string             `json:"lease_token"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
 	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	MaxAttempts int32              `json:"max_attempts"`
 	PageLimit   int32              `json:"page_limit"`
 }
 
 func (q *Queries) ClaimPendingExperimentScoreOutbox(ctx context.Context, arg ClaimPendingExperimentScoreOutboxParams) ([]ExperimentScoreOutbox, error) {
-	rows, err := q.db.Query(ctx, claimPendingExperimentScoreOutbox, arg.StaleBefore, arg.PageLimit)
+	rows, err := q.db.Query(ctx, claimPendingExperimentScoreOutbox,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+		arg.StaleBefore,
+		arg.MaxAttempts,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -46,6 +63,7 @@ func (q *Queries) ClaimPendingExperimentScoreOutbox(ctx context.Context, arg Cla
 			&i.InstanceID,
 			&i.StudentID,
 			&i.Score,
+			&i.ScoreRevision,
 			&i.TraceID,
 			&i.ScoredAt,
 			&i.Status,
@@ -53,6 +71,8 @@ func (q *Queries) ClaimPendingExperimentScoreOutbox(ctx context.Context, arg Cla
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -333,9 +353,15 @@ func (q *Queries) CreateExperimentInstance(ctx context.Context, arg CreateExperi
 }
 
 const createExperimentScoreOutbox = `-- name: CreateExperimentScoreOutbox :one
-INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6::text::numeric, $7, $8, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
+WITH next_revision AS (
+    SELECT COALESCE(MAX(score_revision), 0) + 1 AS score_revision
+    FROM experiment_score_outbox
+    WHERE tenant_id = $2 AND instance_id = $4
+)
+INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+SELECT $1, $2, $3, $4, $5, $6::text::numeric, next_revision.score_revision, $7, $8, 1, 0, NULL, now(), now(), '', NULL
+FROM next_revision
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CreateExperimentScoreOutboxParams struct {
@@ -368,6 +394,7 @@ func (q *Queries) CreateExperimentScoreOutbox(ctx context.Context, arg CreateExp
 		&i.InstanceID,
 		&i.StudentID,
 		&i.Score,
+		&i.ScoreRevision,
 		&i.TraceID,
 		&i.ScoredAt,
 		&i.Status,
@@ -375,6 +402,8 @@ func (q *Queries) CreateExperimentScoreOutbox(ctx context.Context, arg CreateExp
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
@@ -1429,19 +1458,25 @@ func (q *Queries) LockInstanceCreation(ctx context.Context, lockKey int64) error
 
 const markExperimentScoreOutboxFailed = `-- name: MarkExperimentScoreOutboxFailed :one
 UPDATE experiment_score_outbox
-SET status = 4, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
+SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkExperimentScoreOutboxFailedParams struct {
-	TenantID  int64       `json:"tenant_id"`
-	ID        int64       `json:"id"`
-	LastError pgtype.Text `json:"last_error"`
+	TenantID   int64       `json:"tenant_id"`
+	ID         int64       `json:"id"`
+	LastError  pgtype.Text `json:"last_error"`
+	LeaseToken string      `json:"lease_token"`
 }
 
 func (q *Queries) MarkExperimentScoreOutboxFailed(ctx context.Context, arg MarkExperimentScoreOutboxFailedParams) (ExperimentScoreOutbox, error) {
-	row := q.db.QueryRow(ctx, markExperimentScoreOutboxFailed, arg.TenantID, arg.ID, arg.LastError)
+	row := q.db.QueryRow(ctx, markExperimentScoreOutboxFailed,
+		arg.TenantID,
+		arg.ID,
+		arg.LastError,
+		arg.LeaseToken,
+	)
 	var i ExperimentScoreOutbox
 	err := row.Scan(
 		&i.ID,
@@ -1450,6 +1485,7 @@ func (q *Queries) MarkExperimentScoreOutboxFailed(ctx context.Context, arg MarkE
 		&i.InstanceID,
 		&i.StudentID,
 		&i.Score,
+		&i.ScoreRevision,
 		&i.TraceID,
 		&i.ScoredAt,
 		&i.Status,
@@ -1457,24 +1493,27 @@ func (q *Queries) MarkExperimentScoreOutboxFailed(ctx context.Context, arg MarkE
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
 
 const markExperimentScoreOutboxPublished = `-- name: MarkExperimentScoreOutboxPublished :one
 UPDATE experiment_score_outbox
-SET status = 3, last_error = NULL, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at
+SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkExperimentScoreOutboxPublishedParams struct {
-	TenantID int64 `json:"tenant_id"`
-	ID       int64 `json:"id"`
+	TenantID   int64  `json:"tenant_id"`
+	ID         int64  `json:"id"`
+	LeaseToken string `json:"lease_token"`
 }
 
 func (q *Queries) MarkExperimentScoreOutboxPublished(ctx context.Context, arg MarkExperimentScoreOutboxPublishedParams) (ExperimentScoreOutbox, error) {
-	row := q.db.QueryRow(ctx, markExperimentScoreOutboxPublished, arg.TenantID, arg.ID)
+	row := q.db.QueryRow(ctx, markExperimentScoreOutboxPublished, arg.TenantID, arg.ID, arg.LeaseToken)
 	var i ExperimentScoreOutbox
 	err := row.Scan(
 		&i.ID,
@@ -1483,6 +1522,7 @@ func (q *Queries) MarkExperimentScoreOutboxPublished(ctx context.Context, arg Ma
 		&i.InstanceID,
 		&i.StudentID,
 		&i.Score,
+		&i.ScoreRevision,
 		&i.TraceID,
 		&i.ScoredAt,
 		&i.Status,
@@ -1490,6 +1530,8 @@ func (q *Queries) MarkExperimentScoreOutboxPublished(ctx context.Context, arg Ma
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
@@ -1738,21 +1780,23 @@ func (q *Queries) UpdateExperiment(ctx context.Context, arg UpdateExperimentPara
 	return i, err
 }
 
-const updateExperimentInstanceScore = `-- name: UpdateExperimentInstanceScore :one
+const updateExperimentInstanceScoreIfChanged = `-- name: UpdateExperimentInstanceScoreIfChanged :one
 UPDATE experiment_instance
 SET score = $3::text::numeric,
     last_active_at = now()
-WHERE tenant_id = $1 AND id = $2
+WHERE tenant_id = $1
+  AND id = $2
+  AND score IS DISTINCT FROM $3::text::numeric
 RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 `
 
-type UpdateExperimentInstanceScoreParams struct {
+type UpdateExperimentInstanceScoreIfChangedParams struct {
 	TenantID int64  `json:"tenant_id"`
 	ID       int64  `json:"id"`
 	Column3  string `json:"column_3"`
 }
 
-type UpdateExperimentInstanceScoreRow struct {
+type UpdateExperimentInstanceScoreIfChangedRow struct {
 	ID             int64              `json:"id"`
 	TenantID       int64              `json:"tenant_id"`
 	ExperimentID   int64              `json:"experiment_id"`
@@ -1768,9 +1812,10 @@ type UpdateExperimentInstanceScoreRow struct {
 	LastActiveAt   pgtype.Timestamptz `json:"last_active_at"`
 }
 
-func (q *Queries) UpdateExperimentInstanceScore(ctx context.Context, arg UpdateExperimentInstanceScoreParams) (UpdateExperimentInstanceScoreRow, error) {
-	row := q.db.QueryRow(ctx, updateExperimentInstanceScore, arg.TenantID, arg.ID, arg.Column3)
-	var i UpdateExperimentInstanceScoreRow
+// 仅在总分真正变化时写入,让重复 M3 事件不能生成新的得分 outbox 修订版。
+func (q *Queries) UpdateExperimentInstanceScoreIfChanged(ctx context.Context, arg UpdateExperimentInstanceScoreIfChangedParams) (UpdateExperimentInstanceScoreIfChangedRow, error) {
+	row := q.db.QueryRow(ctx, updateExperimentInstanceScoreIfChanged, arg.TenantID, arg.ID, arg.Column3)
+	var i UpdateExperimentInstanceScoreIfChangedRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,

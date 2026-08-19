@@ -14,6 +14,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/config"
+	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/response"
@@ -189,7 +190,18 @@ func (s *Service) createSandboxContract(ctx context.Context, req contracts.Sandb
 		return contracts.SandboxInfo{}, err
 	}
 	var plan CreateSandboxPlan
+	var existingID int64
 	if err := s.store.TenantTx(ctx, input.TenantID, func(ctx context.Context, tx TxStore) error {
+		if isBattleMatchSourceRef(input.SourceRef) {
+			items, err := tx.ListSandboxesBySourceRef(ctx, input.TenantID, input.SourceRef)
+			if err != nil {
+				return apperr.ErrSandboxCreateFailed.WithCause(err)
+			}
+			if len(items) > 0 {
+				existingID = items[0].ID
+				return nil
+			}
+		}
 		resolved, err := s.resolveSandboxCreateDependencies(ctx, tx, input, true)
 		if err != nil {
 			return err
@@ -216,7 +228,13 @@ func (s *Service) createSandboxContract(ctx context.Context, req contracts.Sandb
 		plan.Sandbox.Status = SandboxStatusCreating
 		return nil
 	}); err != nil {
+		if isBattleMatchSourceRef(input.SourceRef) && db.IsUniqueViolation(err) {
+			return s.infoByBattleSourceRef(ctx, input.TenantID, input.SourceRef)
+		}
 		return contracts.SandboxInfo{}, err
+	}
+	if existingID > 0 {
+		return s.info(ctx, input.TenantID, existingID)
 	}
 	if err := s.writeSystemAudit(ctx, input.TenantID, "sandbox.create", "sandbox", plan.Sandbox.ID, map[string]any{"source_ref": input.SourceRef}); err != nil {
 		s.cleanupCreatedSandboxAfterAuditFailure(ctx, plan.Sandbox, err)
@@ -225,6 +243,37 @@ func (s *Service) createSandboxContract(ctx context.Context, req contracts.Sandb
 	s.startAsync(ctx, plan)
 	s.broadcastProgress(ctx, input.TenantID, plan.Sandbox.ID, SandboxPhaseAllocating, SandboxStatusCreating, response.TraceFromContext(ctx))
 	return s.info(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID)
+}
+
+// isBattleMatchSourceRef 识别 M8 单场对局的稳定来源键,其余来源不施加单例限制。
+func isBattleMatchSourceRef(sourceRef string) bool {
+	parts := strings.Split(strings.TrimSpace(sourceRef), ":")
+	if len(parts) != 4 || parts[0] != "contest" || len(parts[1]) != 4 || parts[2] != "battle" {
+		return false
+	}
+	for _, ch := range parts[1] {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+	_, ok := ids.Parse(parts[3])
+	return ok
+}
+
+// infoByBattleSourceRef 处理并发创建的唯一索引竞争,返回同一场对局已经创建的沙箱。
+func (s *Service) infoByBattleSourceRef(ctx context.Context, tenantID int64, sourceRef string) (contracts.SandboxInfo, error) {
+	var items []Sandbox
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, err = tx.ListSandboxesBySourceRef(ctx, tenantID, sourceRef)
+		return err
+	}); err != nil {
+		return contracts.SandboxInfo{}, apperr.ErrSandboxCreateFailed.WithCause(err)
+	}
+	if len(items) != 1 {
+		return contracts.SandboxInfo{}, apperr.ErrSandboxCreateFailed
+	}
+	return s.info(ctx, tenantID, items[0].ID)
 }
 
 // resolveSandboxCreateDependencies 用同一套规则服务发布前校验和真实创建,避免 M7 与 M2 对运行时/工具可用性判断分叉。

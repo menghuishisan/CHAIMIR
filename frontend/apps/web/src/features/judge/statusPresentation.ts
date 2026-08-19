@@ -7,9 +7,7 @@ const TASK_STATUS_TONES: Record<JudgeTaskStatus, StatusTone> = {
   [JUDGE_TASK_STATUS.QUEUED]: 'neutral',
   [JUDGE_TASK_STATUS.JUDGING]: 'info',
   [JUDGE_TASK_STATUS.DONE]: 'success',
-  [JUDGE_TASK_STATUS.TIMEOUT]: 'warning',
   [JUDGE_TASK_STATUS.FAILED]: 'danger',
-  [JUDGE_TASK_STATUS.ERROR]: 'danger',
   [JUDGE_TASK_STATUS.CANCELLED]: 'neutral',
 }
 

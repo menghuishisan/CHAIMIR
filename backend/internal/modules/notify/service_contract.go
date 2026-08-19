@@ -16,7 +16,7 @@ import (
 
 // Send 渲染模板并按接收人偏好写入站内信。
 func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) error {
-	input, err := validateSendRequest(SendRequest{TenantID: ids.ID(req.TenantID), Type: req.Type, Receivers: req.Receivers, Params: req.Params, Link: req.Link})
+	input, err := validateSendRequest(SendRequest{RequestID: req.RequestID, TenantID: ids.ID(req.TenantID), Type: req.Type, Receivers: req.Receivers, Params: req.Params, Link: req.Link})
 	if err != nil {
 		return err
 	}
@@ -42,11 +42,20 @@ func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) err
 			if !enabled {
 				continue
 			}
-			rows = append(rows, notificationRecord{ID: s.ids.Generate(), TenantID: input.TenantID.Int64(), ReceiverID: receiverID, Type: input.Type, Title: title, Content: content, Link: input.Link})
+			rows = append(rows, notificationRecord{ID: s.ids.Generate(), TenantID: input.TenantID.Int64(), ReceiverID: receiverID, Type: input.Type, Title: title, Content: content, Link: input.Link, SourceRef: input.RequestID})
 			delivered = append(delivered, receiverID)
 		}
 		if len(rows) == 0 {
 			return nil
+		}
+		if input.RequestID != "" {
+			persisted, err := tx.CountNotificationsBySource(ctx, input.TenantID.Int64(), input.RequestID, receiverIDs(rows))
+			if err != nil {
+				return apperr.ErrNotifySendFailed.WithCause(err)
+			}
+			if persisted == int64(len(rows)) {
+				return nil
+			}
 		}
 		if err := s.checkRateLimit(ctx, input.TenantID.Int64(), input.Type); err != nil {
 			return err
@@ -62,6 +71,15 @@ func (s *Service) Send(ctx context.Context, req contracts.NotifySendRequest) err
 		}
 	}
 	return nil
+}
+
+// receiverIDs 取待投递记录的收件人,用于业务事件的幂等持久化检查。
+func receiverIDs(records []notificationRecord) []int64 {
+	ids := make([]int64, 0, len(records))
+	for _, record := range records {
+		ids = append(ids, record.ReceiverID)
+	}
+	return ids
 }
 
 // Push 向统一 WebSocket topic 推送业务实时消息。

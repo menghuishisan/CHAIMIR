@@ -67,6 +67,8 @@ const (
 	CodeExperimentProgressUnavailable = "74006"
 	// CodeExperimentReportRequired 表示实验要求先提交报告才能完成。
 	CodeExperimentReportRequired = "74007"
+	// CodeExperimentJudgePending 表示已触发的检查点仍在判分。
+	CodeExperimentJudgePending = "74008"
 )
 
 var (
@@ -126,4 +128,6 @@ var (
 	ErrExperimentProgressUnavailable = New(CodeExperimentProgressUnavailable, "实验进度暂时无法订阅")
 	// ErrExperimentReportRequired 表示实验要求先提交报告才能完成。
 	ErrExperimentReportRequired = New(CodeExperimentReportRequired, "请先提交实验报告")
+	// ErrExperimentJudgePending 表示检查点仍在判分,完成操作必须等待终态得分。
+	ErrExperimentJudgePending = New(CodeExperimentJudgePending, "检查点仍在判分,请稍后刷新后完成实验")
 )

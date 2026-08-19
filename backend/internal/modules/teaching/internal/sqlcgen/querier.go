@@ -12,15 +12,19 @@ import (
 
 type Querier interface {
 	ClaimJudgeOutbox(ctx context.Context, arg ClaimJudgeOutboxParams) ([]SubmissionJudgeOutbox, error)
-	ClaimJudgeOutboxAcrossTenants(ctx context.Context, limit int32) ([]SubmissionJudgeOutbox, error)
+	ClaimJudgeOutboxAcrossTenants(ctx context.Context, arg ClaimJudgeOutboxAcrossTenantsParams) ([]SubmissionJudgeOutbox, error)
 	ClaimPendingTeachingGradeEventOutbox(ctx context.Context, arg ClaimPendingTeachingGradeEventOutboxParams) ([]TeachingGradeEventOutbox, error)
 	CompleteJudgeOutbox(ctx context.Context, arg CompleteJudgeOutboxParams) (SubmissionJudgeOutbox, error)
 	CountAssignmentSubmissions(ctx context.Context, arg CountAssignmentSubmissionsParams) (int64, error)
+	CountAssignmentsByCourse(ctx context.Context, arg CountAssignmentsByCourseParams) (int64, error)
+	CountCourseAnnouncements(ctx context.Context, arg CountCourseAnnouncementsParams) (int64, error)
+	CountCourseGrades(ctx context.Context, arg CountCourseGradesParams) (int64, error)
 	CountCourseLessons(ctx context.Context, arg CountCourseLessonsParams) (int64, error)
 	CountCourseMembers(ctx context.Context, arg CountCourseMembersParams) (int64, error)
 	CountDiscussionPosts(ctx context.Context, arg CountDiscussionPostsParams) (int64, error)
 	CountStudentAttempts(ctx context.Context, arg CountStudentAttemptsParams) (int64, error)
 	CountStudentCourses(ctx context.Context, arg CountStudentCoursesParams) (int64, error)
+	CountStudentGrades(ctx context.Context, arg CountStudentGradesParams) (int64, error)
 	CountSubmissionsByAssignment(ctx context.Context, arg CountSubmissionsByAssignmentParams) (int64, error)
 	CountTeacherCourses(ctx context.Context, arg CountTeacherCoursesParams) (int64, error)
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (Announcement, error)
@@ -41,6 +45,8 @@ type Querier interface {
 	DeleteCourseMember(ctx context.Context, arg DeleteCourseMemberParams) error
 	DeleteGradeWeights(ctx context.Context, arg DeleteGradeWeightsParams) error
 	DeleteSubmissionDraft(ctx context.Context, arg DeleteSubmissionDraftParams) error
+	ExhaustExpiredJudgeOutbox(ctx context.Context, arg ExhaustExpiredJudgeOutboxParams) (int64, error)
+	ExhaustExpiredJudgeOutboxAcrossTenants(ctx context.Context, arg ExhaustExpiredJudgeOutboxAcrossTenantsParams) (int64, error)
 	GetAssignment(ctx context.Context, arg GetAssignmentParams) (Assignment, error)
 	GetChapter(ctx context.Context, arg GetChapterParams) (Chapter, error)
 	GetCloneableCourseByID(ctx context.Context, arg GetCloneableCourseByIDParams) (GetCloneableCourseByIDRow, error)

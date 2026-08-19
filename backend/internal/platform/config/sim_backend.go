@@ -49,7 +49,9 @@ type SimBackendConfig struct {
 	// PreviewBatchSize 是单次认领的待审包数量上限。
 	PreviewBatchSize int
 	// PreviewFrameCount 是隔离预览渲制的样例教学帧数量,供平台管理员判断算法实现是否正确。
-	PreviewFrameCount int
+	PreviewFrameCount      int
+	PreviewLeaseDurationMs int
+	PreviewMaxAttempts     int
 }
 
 // imageAttestationAllows 确保 M4 只执行供应链证明中已签名且扫描通过的精确 digest 镜像。

@@ -51,23 +51,23 @@ WITH inserted AS (
     )
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 0, $17, NULL, now(), now())
     ON CONFLICT (tenant_id, source_ref, problem_ref) DO NOTHING
-    RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+    RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 )
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM inserted
 UNION ALL
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $2 AND source_ref = $4 AND problem_ref = $9 AND NOT EXISTS (SELECT 1 FROM inserted)
 LIMIT 1;
 
 -- name: GetJudgeTask :one
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND id = $2;
 
 -- name: GetJudgeTaskBySourceRef :one
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND source_ref = $2 AND problem_ref = $3;
 
@@ -75,7 +75,7 @@ WHERE tenant_id = $1 AND source_ref = $2 AND problem_ref = $3;
 SELECT
     t.id, t.tenant_id, t.judger_id, t.source_ref, t.source_owner_id, t.source_course_id, t.source_scope,
     t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
-    t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at,
+    t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until,
     COALESCE(r.id, 0)::bigint AS result_id,
     COALESCE(r.version, 0)::int AS result_version,
     COALESCE(r.passed, false)::boolean AS passed,
@@ -97,13 +97,13 @@ LEFT JOIN LATERAL (
 WHERE t.tenant_id = $1 AND t.id = $2;
 
 -- name: ListJudgeTasksBySourceRef :many
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND source_ref = $2
 ORDER BY created_at DESC, id DESC;
 
 -- name: ListRecentJudgeTasksBySubmitterProblem :many
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND submitter_id = $2 AND problem_ref = $3 AND created_at >= now() - make_interval(secs => $4::int)
 ORDER BY created_at DESC, id DESC;
@@ -112,7 +112,7 @@ ORDER BY created_at DESC, id DESC;
 SELECT
     t.id, t.tenant_id, t.judger_id, t.source_ref, t.source_owner_id, t.source_course_id, t.source_scope,
     t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
-    t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at,
+    t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until,
     COALESCE(r.id, 0)::bigint AS result_id,
     COALESCE(r.version, 0)::int AS result_version,
     COALESCE(r.passed, false)::boolean AS passed,
@@ -136,10 +136,10 @@ WHERE t.tenant_id = $1
   AND ($2::text = '' OR t.source_ref = $2)
   AND ($3::boolean = false OR (t.status = 2 AND j.type = 6))
   AND ($4::bigint = 0 OR t.source_owner_id = $4 OR t.submitter_id = $4)
-  -- state 取运维分组:active=排队/执行中(1,2),abnormal=超时/失败/出错(4,5,6),空串不筛
+  -- state 取运维分组:active=排队/执行中(1,2),abnormal=失败(4),空串不筛
   AND (sqlc.arg(state)::text = ''
        OR (sqlc.arg(state)::text = 'active' AND t.status IN (1, 2))
-       OR (sqlc.arg(state)::text = 'abnormal' AND t.status IN (4, 5, 6)))
+       OR (sqlc.arg(state)::text = 'abnormal' AND t.status = 4))
 ORDER BY t.created_at DESC, t.id DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
@@ -154,13 +154,13 @@ WHERE judge_task.tenant_id = $1
   -- state 与列表逐字同口径,否则指标带与分页会自相矛盾
   AND (sqlc.arg(state)::text = ''
        OR (sqlc.arg(state)::text = 'active' AND judge_task.status IN (1, 2))
-       OR (sqlc.arg(state)::text = 'abnormal' AND judge_task.status IN (4, 5, 6)));
+       OR (sqlc.arg(state)::text = 'abnormal' AND judge_task.status = 4));
 
 -- name: CancelQueuedJudgeTask :one
 UPDATE judge_task
-SET status = 7, updated_at = now()
+SET status = 5, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 1
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at;
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: ResetJudgeTaskForRejudge :one
 UPDATE judge_task
@@ -169,51 +169,81 @@ SET status = 1,
     input_snapshot = $3,
     last_error = NULL,
     updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND status IN (3, 5)
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at;
+WHERE tenant_id = $1 AND id = $2 AND status IN (3, 4)
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: DequeueJudgeTasks :many
 UPDATE judge_task t
-SET status = 2, updated_at = now()
+SET status = 2,
+    retry_count = t.retry_count + CASE WHEN t.status = 2 THEN 1 ELSE 0 END,
+    updated_at = now(),
+    lease_token = sqlc.arg(lease_token),
+    lease_until = sqlc.arg(lease_until)::timestamptz
 WHERE t.id IN (
     SELECT id
     FROM judge_task
     WHERE status = 1
+       OR (status = 2
+           AND lease_until <= sqlc.arg(stale_before)::timestamptz
+           AND retry_count < max_retries)
     ORDER BY priority DESC, created_at ASC, id ASC
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at;
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+
+-- name: FailExpiredJudgeTasks :many
+UPDATE judge_task t
+SET status = 4,
+    last_error = 'worker lease expired after retry limit',
+    updated_at = now(),
+    lease_token = '',
+    lease_until = NULL
+WHERE t.id IN (
+    SELECT id
+    FROM judge_task
+    WHERE status = 2
+      AND lease_until <= sqlc.arg(stale_before)::timestamptz
+      AND retry_count >= max_retries
+    ORDER BY priority DESC, created_at ASC, id ASC
+    LIMIT sqlc.arg(page_limit)::int
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: CompleteJudgeTask :one
 UPDATE judge_task
-SET status = 3, last_error = NULL, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at;
+SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+
+-- name: RenewJudgeTaskLease :execrows
+-- 执行期心跳仅允许当前持有者延长未过期租约,避免长时判题被另一 worker 重领。
+UPDATE judge_task
+SET lease_until = sqlc.arg(lease_until)::timestamptz, updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND status = 2
+  AND lease_token = $3
+  AND lease_until > now();
 
 -- name: RetryJudgeTask :one
 UPDATE judge_task
-SET status = 1, retry_count = retry_count + 1, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at;
-
--- name: MarkJudgeTaskTimeout :one
-UPDATE judge_task
-SET status = 4, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at;
-
--- name: MarkJudgeTaskError :one
-UPDATE judge_task
-SET status = 6, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at;
+SET status = 1, retry_count = retry_count + 1, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: FailJudgeTask :one
 UPDATE judge_task
-SET status = 5, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at;
+SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+
+-- name: CompleteManualJudgeTask :one
+UPDATE judge_task
+SET status = 3, last_error = NULL, updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = '' AND lease_until IS NULL
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: UpsertJudgeResult :one
 INSERT INTO judge_result (id, task_id, tenant_id, version, passed, score, max_score, details, replay_trace, judge_sandbox_ref, judged_at, is_rejudge)
@@ -225,32 +255,53 @@ VALUES (
 RETURNING id, task_id, tenant_id, version, passed, score, max_score, details, replay_trace, judge_sandbox_ref, judged_at, is_rejudge;
 
 -- name: CreateJudgeOutbox :one
-INSERT INTO judge_event_outbox (id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at;
+INSERT INTO judge_event_outbox (id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
 
--- name: ListPendingJudgeOutbox :many
-SELECT id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at
-FROM judge_event_outbox
-WHERE status IN (1, 3) AND next_attempt_at <= now()
-ORDER BY next_attempt_at ASC, created_at ASC, id ASC
-LIMIT $1;
+-- name: ClaimPendingJudgeOutbox :many
+UPDATE judge_event_outbox
+SET status = 2,
+    retry_count = retry_count + 1,
+    updated_at = now(),
+    lease_token = sqlc.arg(lease_token),
+    lease_until = sqlc.arg(lease_until)::timestamptz
+WHERE id IN (
+    SELECT id FROM judge_event_outbox
+    WHERE (((status IN (1, 4) AND next_attempt_at <= now())
+        OR (status = 2 AND lease_until <= sqlc.arg(stale_before)::timestamptz))
+      AND retry_count < sqlc.arg(max_attempts)::int)
+    ORDER BY next_attempt_at ASC, created_at ASC, id ASC
+    LIMIT sqlc.arg(page_limit)::int
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
+
+-- name: ExhaustExpiredJudgeEventOutbox :execrows
+UPDATE judge_event_outbox
+SET status = 4,
+    last_error = 'event lease expired after retry limit',
+    updated_at = now(),
+    lease_token = '',
+    lease_until = NULL
+WHERE status = 2
+  AND lease_until <= sqlc.arg(stale_before)::timestamptz
+  AND retry_count >= sqlc.arg(max_attempts)::int;
 
 -- name: MarkJudgeOutboxPublished :one
 UPDATE judge_event_outbox
-SET status = 2, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at;
+SET status = 3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: MarkJudgeOutboxFailed :one
 UPDATE judge_event_outbox
-SET status = 3,
-    retry_count = retry_count + 1,
-    next_attempt_at = now() + (LEAST(300, power(2, LEAST(retry_count + 1, 8))::int) || ' seconds')::interval,
+SET status = 4,
+    next_attempt_at = now() + (LEAST(300, power(2, LEAST(retry_count, 8))::int) || ' seconds')::interval,
     last_error = $3,
-    updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at;
+    updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: CreateSubmissionFingerprint :one
 INSERT INTO submission_fingerprint (id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector, created_at)

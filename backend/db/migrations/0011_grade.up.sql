@@ -54,9 +54,12 @@ CREATE TABLE IF NOT EXISTS grade_lock_outbox (
     last_error VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until TIMESTAMPTZ,
     CONSTRAINT chk_grade_lock_outbox_status CHECK (status IN (1,2,3,4)),
     FOREIGN KEY (tenant_id, review_id) REFERENCES grade_review(tenant_id, id)
 );
+CREATE INDEX IF NOT EXISTS idx_grade_lock_outbox_lease ON grade_lock_outbox(status, lease_until) WHERE status = 2;
 
 CREATE INDEX IF NOT EXISTS idx_grade_lock_outbox_status ON grade_lock_outbox(status, created_at ASC);
 

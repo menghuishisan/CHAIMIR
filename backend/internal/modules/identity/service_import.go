@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"path/filepath"
 	"strconv"
@@ -144,9 +146,6 @@ func (s *Service) PreviewAccountImport(ctx context.Context, req ImportPreviewReq
 	// 解析后再进入租户内校验,确保文件格式问题和业务唯一性问题分别给出用户向错误。
 	if err := s.applyAccountImportOpeningRules(ctx, id.TenantID, rows, results); err != nil {
 		return ImportPreviewResponse{}, err
-	}
-	if len(rows) > s.cfg.ImportMaxRows {
-		return ImportPreviewResponse{}, apperr.ErrIdentityImportTooManyRows
 	}
 	// 预览结果必须服务端持久化,保证刷新页面或换设备后仍能继续提交同一批次。
 	rowsJSON, err := jsonx.AnyBytes(rows, apperr.ErrInternal)
@@ -414,21 +413,31 @@ func (s *Service) parseImportFile(ctx context.Context, raw []byte, fileName, con
 	}
 	switch upload.CSVOrXLSXKind(fileName, contentType, raw) {
 	case upload.KindCSV:
-		return s.parseImportCSV(raw, targetType)
+		return s.parseImportCSV(raw, targetType, s.cfg.ImportMaxRows)
 	case upload.KindXLSX:
-		return s.parseImportXLSX(raw, targetType)
+		return s.parseImportXLSX(raw, targetType, s.cfg.ImportMaxRows)
 	default:
 		return nil, nil, apperr.ErrIdentityImportUnsupportedFile
 	}
 }
 
 // parseImportCSV 解析账号导入 CSV,首行必须为表头。
-func (s *Service) parseImportCSV(raw []byte, targetType int16) ([]importRow, []ImportRowResult, error) {
+func (s *Service) parseImportCSV(raw []byte, targetType int16, maxRows int) ([]importRow, []ImportRowResult, error) {
 	reader := csv.NewReader(strings.NewReader(string(raw)))
 	reader.TrimLeadingSpace = true
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid
+	records := make([][]string, 0, min(maxRows+2, 128))
+	for {
+		record, err := reader.Read()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid
+		}
+		records = append(records, record)
+		if len(records) > maxRows+1 {
+			return nil, nil, apperr.ErrIdentityImportTooManyRows
+		}
 	}
 	if len(records) < 2 {
 		return nil, nil, apperr.ErrIdentityImportEmpty
@@ -437,7 +446,7 @@ func (s *Service) parseImportCSV(raw []byte, targetType int16) ([]importRow, []I
 }
 
 // parseImportXLSX 解析账号导入 Excel,只读取模板工作表或首个工作表。
-func (s *Service) parseImportXLSX(raw []byte, targetType int16) ([]importRow, []ImportRowResult, error) {
+func (s *Service) parseImportXLSX(raw []byte, targetType int16, maxRows int) ([]importRow, []ImportRowResult, error) {
 	workbook, err := excelize.OpenReader(bytes.NewReader(raw))
 	if err != nil {
 		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
@@ -453,14 +462,44 @@ func (s *Service) parseImportXLSX(raw []byte, targetType int16) ([]importRow, []
 		}
 		sheet = sheets[0]
 	}
-	records, err := workbook.GetRows(sheet)
+	rowsIter, err := workbook.Rows(sheet)
 	if err != nil {
 		if closeErr := workbook.Close(); closeErr != nil {
 			return nil, nil, apperr.ErrInternal.WithCause(closeErr)
 		}
 		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
 	}
-	if err := workbook.Close(); err != nil {
+	resourcesClosed := false
+	closeResources := func() error {
+		if resourcesClosed {
+			return nil
+		}
+		resourcesClosed = true
+		if closeErr := rowsIter.Close(); closeErr != nil {
+			slog.Warn("账号导入工作簿行迭代器关闭失败", slog.String("error", logging.SanitizeError(closeErr.Error())))
+		}
+		return workbook.Close()
+	}
+	defer func() {
+		if closeErr := closeResources(); closeErr != nil {
+			slog.Warn("账号导入工作簿关闭失败", slog.String("error", logging.SanitizeError(closeErr.Error())))
+		}
+	}()
+	records := make([][]string, 0, min(maxRows+2, 128))
+	for rowsIter.Next() {
+		record, err := rowsIter.Columns()
+		if err != nil {
+			return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
+		}
+		records = append(records, record)
+		if len(records) > maxRows+1 {
+			return nil, nil, apperr.ErrIdentityImportTooManyRows
+		}
+	}
+	if err := rowsIter.Error(); err != nil {
+		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
+	}
+	if err := closeResources(); err != nil {
 		return nil, nil, apperr.ErrInternal.WithCause(err)
 	}
 	if len(records) < 2 {

@@ -277,34 +277,42 @@ VALUES ($1, $2, $3, $4, $5, now())
 RETURNING id, tenant_id, sandbox_id, event_type, detail, created_at;
 
 -- name: CreateSandboxRecycleOutbox :one
-INSERT INTO sandbox_recycle_outbox (id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at;
+INSERT INTO sandbox_recycle_outbox (id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 0, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: ClaimPendingSandboxRecycleOutbox :many
-UPDATE sandbox_recycle_outbox
-SET status = 2, retry_count = retry_count + 1, updated_at = now()
-WHERE id IN (
-    SELECT id
-    FROM sandbox_recycle_outbox
-    WHERE status IN (1, 4) OR (status = 2 AND updated_at <= @stale_before::timestamptz)
-    ORDER BY created_at ASC, id ASC
+WITH exhausted AS (
+    UPDATE sandbox_recycle_outbox AS expired
+    SET status = 4, last_error = 'recycle lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
+    WHERE expired.status = 2 AND expired.lease_until <= @stale_before::timestamptz AND expired.retry_count >= @max_attempts
+    RETURNING expired.id
+), candidates AS (
+    SELECT o.id
+    FROM sandbox_recycle_outbox o
+    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= @stale_before::timestamptz))
+      AND o.retry_count < @max_attempts
+    ORDER BY o.created_at ASC, o.id ASC
     LIMIT @page_limit
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at;
+UPDATE sandbox_recycle_outbox AS outbox
+SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = @lease_token, lease_until = @lease_until::timestamptz
+FROM candidates
+WHERE outbox.id = candidates.id
+RETURNING outbox.id, outbox.tenant_id, outbox.sandbox_id, outbox.source_ref, outbox.owner_account_id, outbox.reason, outbox.trace_id, outbox.recycled_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
 
 -- name: MarkSandboxRecycleOutboxPublished :one
 UPDATE sandbox_recycle_outbox
-SET status = 3, last_error = NULL, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at;
+SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id) AND status = 2 AND lease_token = sqlc.arg(lease_token) AND lease_until > now()
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: MarkSandboxRecycleOutboxFailed :one
 UPDATE sandbox_recycle_outbox
-SET status = 4, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at;
+SET status = 4, last_error = sqlc.arg(last_error), updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id) AND status = 2 AND lease_token = sqlc.arg(lease_token) AND lease_until > now()
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: StatsByTenant :one
 SELECT

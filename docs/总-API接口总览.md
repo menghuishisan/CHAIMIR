@@ -79,7 +79,7 @@
 - `/auth/browser-ticket`:为浏览器 Web 工具代理签发短时路径前缀绑定入口票据。
 - `/platform/applications`、`/platform/tenants`:入驻审核、租户管理 `[平台管理员]`。
 - `/tenant/config`、`/tenant/sso`:租户配置。`POST /tenant/logo` 上传校徽(multipart,**上传即生效**,同一请求内落 `logo_ref` 并返回新的配置视图),`DELETE /tenant/logo` 移除;`PATCH /tenant/config` 不接受 `logo_ref`。`GET /tenant/brand` 是**免鉴权且无参数**的品牌读取口,返回 `{ display_name, logo_image }`,仅 `deploy_mode=school` 下有内容 —— SaaS 登录页面对未确定租户,本无校徽可显示,而带 `tenant_code` 的公开端点会成为廉价的租户枚举通道。校徽以 data URI 内联下发而不签发投放授权:登录页没有会话,授权绑不到账号(详见 M1 接口设计 §4)。
-- `/org/*`:院系/专业/班级。读对教师/学校管理员开放,写只对学校管理员开放;`GET /org/classes/{id}/students` 是教师侧挑选学生的唯一入口,只出编号/姓名/学号。
+- `/org/*`:院系/专业/班级。读对教师/学校管理员开放,写只对学校管理员开放;`GET /org/classes/{id}/students?page=&size=` 是教师侧挑选学生的唯一入口,只出编号/姓名/学号并返回 `{list,total,page,size}`。
 - `/accounts/*`:账号导入(预览+提交)、增改停用、授予管理员。**只对学校管理员开放** —— 它是账号目录(带手机号掩码、状态、角色),业务模块与教师端取学生一律走 `/org/classes/{id}/students` 或 `contracts.IdentityService`。
 - `/me/*`:个人中心。`GET /me`、`POST /me/password`、`GET /me/sessions` 对租户账号与平台管理员都开放(平台身份走独立分支,只返回姓名/状态/角色);`POST /me/phone` 只对租户账号开放,平台账号无手机号字段。
 - 审计:M1 只持有并写入 `audit_log`,不注册查询路由;对外查询与导出统一在 M9 `/admin/audit`、`/admin/audit/export`。
@@ -144,9 +144,9 @@
 - `/courses/*`:课程 CRUD/发布/克隆/共享/邀请码。`POST /courses/cover` 上传封面(multipart,返回 `object_ref`,不绑课程 id —— 先落上传教师的暂存位,随创建/编辑课程提交后由服务端搬到该课程正式位);`POST /courses/{id}/cover/access` 换取封面投放授权(`mode=stream`)。封面只对能看到该课程的人可见,不设公开路径;课程列表缩略图用平台纸材质,不逐行换授权。
 - `/chapters`、`/lessons`:章节课时**写入口**(课时关联 M7 实验/M4 仿真);只读一律走 `GET /courses/{id}/outline`,它一次返回课程 + 章节 + 课时 + 本人进度,不再另设章节/课时列表接口。`POST /lessons/{id}/material` 上传视频或附件、`POST /lessons/{id}/material/access` 换取投放授权(视频 `mode=stream` 可续播,附件 `mode=download` 一次性取件)。
 - `/courses/join`、`/members`:选课成员。`POST /courses/{id}/members/batch` 的粒度是一个班级(请求体 `{ class_id }`),学生由 M6 经 `contracts.IdentityService.ListClassStudents` 解析;成员响应带 `student_name`/`student_no`,客户端不再另取账号目录。
-- `/assignments/*`、`/submissions/*`:作业/提交/批改(判题调 M3)。`GET /courses/{id}/assignments` 与 `GET /assignments/{id}/submissions` 师生同路由按身份分视角:授课教师见含草稿全量与全班提交,课程内学生只见已发布作业与本人提交 —— 这两条是学生取得作业编号与提交编号的唯一入口。
-- `/posts`、`/announcements`、`/review`:讨论/公告/评价。
-- `/courses/{id}/grades/*`:单课程成绩;`/grades` 只读契约供 M11 聚合;M6 改分后发布 `teaching.grade.updated` 事件。
+- `/assignments/*`、`/submissions/*`:作业/提交/批改(判题调 M3)。`GET /courses/{id}/assignments?page=&size=` 与 `GET /assignments/{id}/submissions` 师生同路由按身份分视角:授课教师见含草稿全量与全班提交,课程内学生只见已发布作业与本人提交;列表统一返回 `{list,total,page,size}` —— 这两条是学生取得作业编号与提交编号的唯一入口。
+- `/posts`、`/announcements`、`/review`:讨论/公告/评价。`GET /courses/{id}/announcements?page=&size=` 返回分页信封。
+- `/courses/{id}/grades/*`:单课程成绩;`GET /courses/{id}/grades?page=&size=` 返回分页信封,`/grades` 只读契约供 M11 聚合;M6 改分后发布 `teaching.grade.updated` 事件。
 
 ### M7 实验 `/api/v1/experiment`
 - `/experiments/*`:配置/校验/发布。
@@ -162,7 +162,7 @@
 - `/student/contests`、`/student/contests/{id}`:学生可发现的非草稿赛事列表与单条读取(门槛与列表一致)。
 - `/signup`、`/contests/{id}/join-team`、`/teams/*`:报名组队。加入队伍只按邀请码(队伍编号对学生是内部标识,不进请求)。
 - `/problems/{pid}/env`、`/submit`:解题赛(环境调 M2、判题调 M3)。
-- `/battle/entry`、`/battle/matches`、`/matches/{id}/replay`、`/ladder`:对抗赛/回放/天梯。`GET /contests/{id}/battle/matches` 师生同路由按身份分视角:赛事组织者与学校管理员见本赛事全部对局(实时监控),其余账号见本队对局(时空回溯器);回放取件仍限参赛队伍成员。
+- `/battle/entry`、`/battle/matches`、`/battle/replay-window`、`/matches/{id}/replay`、`/ladder`:对抗赛/回放/天梯。`GET /contests/{id}/battle/entries?page=&size=` 与 `GET /contests/{id}/battle/matches` 都返回分页信封;matches 师生同路由按身份分视角:赛事组织者与学校管理员见本赛事全部对局(实时监控),其余账号见本队对局;学生回放使用 `GET /contests/{id}/battle/replay-window?page=&size=`，由服务端提供已完成总量、处理中数量、窗口前检查点和窗口内有序事件，不能用通用列表页切片重算全场状态;回放取件仍限参赛队伍成员。
 - `/my/contest-records`、`/result-snapshot`:个人战绩。
 - `/cheat-*`:防作弊。
 - `/vuln-sources/*`、`/vuln-problems/*`:租户漏洞源与漏洞题转化 `[出题教师/学校管理员]`(finalize 调 M5 system-import)。
@@ -185,7 +185,7 @@
 - `POST /announcements`:发布公告 `[平台管理员/学校管理员]`;`GET /announcements`:公告列表 `[租户用户/平台管理员]`;`POST /announcements/{id}/read`:标记已读 `[租户用户]`。
 
 ### M11 成绩中心 `/api/v1/grade-center`
-- `/level-configs`、`/semesters`:等级映射/学期。
+- `/level-configs`、`/semesters`:等级映射/学期。`GET /students/{id}/grades?semester=&page=&size=` 返回包含当前范围 GPA 摘要和 `{list,total,page,size}` 的分页课程成绩明细。
 - `/reviews/*`:成绩审核(approve 锁定/unlock 解锁);审核流程在 M11,单课程写保护投影由 M6 自管。
 - `/students/{id}/grades`、`/gpa`、`/recompute`:GPA 聚合(只读 M6)。
 - `/appeals/*`:申诉(accept 走解锁→改 M6→重算→重锁)。

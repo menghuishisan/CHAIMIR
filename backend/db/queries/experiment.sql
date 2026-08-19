@@ -163,11 +163,14 @@ SET status = 4,
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
 
--- name: UpdateExperimentInstanceScore :one
+-- name: UpdateExperimentInstanceScoreIfChanged :one
+-- 仅在总分真正变化时写入,让重复 M3 事件不能生成新的得分 outbox 修订版。
 UPDATE experiment_instance
 SET score = $3::text::numeric,
     last_active_at = now()
-WHERE tenant_id = $1 AND id = $2
+WHERE tenant_id = $1
+  AND id = $2
+  AND score IS DISTINCT FROM $3::text::numeric
 RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
 
 -- name: TouchExperimentInstance :one
@@ -292,31 +295,45 @@ FROM experiment e
 WHERE e.tenant_id = $1 AND e.deleted_at IS NULL AND ($2::bigint = 0 OR e.course_id = $2);
 
 -- name: CreateExperimentScoreOutbox :one
-INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6::text::numeric, $7, $8, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
+WITH next_revision AS (
+    SELECT COALESCE(MAX(score_revision), 0) + 1 AS score_revision
+    FROM experiment_score_outbox
+    WHERE tenant_id = $2 AND instance_id = $4
+)
+INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+SELECT $1, $2, $3, $4, $5, $6::text::numeric, next_revision.score_revision, $7, $8, 1, 0, NULL, now(), now(), '', NULL
+FROM next_revision
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: ClaimPendingExperimentScoreOutbox :many
-UPDATE experiment_score_outbox
-SET status = 2, retry_count = retry_count + 1, updated_at = now()
-WHERE id IN (
-    SELECT id
-    FROM experiment_score_outbox
-    WHERE status IN (1, 4) OR (status = 2 AND updated_at <= @stale_before::timestamptz)
-    ORDER BY created_at ASC, id ASC
+WITH exhausted AS (
+    UPDATE experiment_score_outbox AS expired
+    SET status = 4, last_error = 'score lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
+    WHERE expired.status = 2 AND expired.lease_until <= @stale_before::timestamptz AND expired.retry_count >= @max_attempts
+    RETURNING expired.id
+), candidates AS (
+    SELECT o.id
+    FROM experiment_score_outbox o
+    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= @stale_before::timestamptz))
+      AND o.retry_count < @max_attempts
+    ORDER BY o.created_at ASC, o.id ASC
     LIMIT @page_limit
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
+UPDATE experiment_score_outbox AS outbox
+SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = @lease_token, lease_until = @lease_until::timestamptz
+FROM candidates
+WHERE outbox.id = candidates.id
+RETURNING outbox.id, outbox.tenant_id, outbox.experiment_id, outbox.instance_id, outbox.student_id, outbox.score, outbox.score_revision, outbox.trace_id, outbox.scored_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
 
 -- name: MarkExperimentScoreOutboxPublished :one
 UPDATE experiment_score_outbox
-SET status = 3, last_error = NULL, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
+SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: MarkExperimentScoreOutboxFailed :one
 UPDATE experiment_score_outbox
-SET status = 4, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at;
+SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
+RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;

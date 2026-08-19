@@ -106,7 +106,9 @@ type Service struct {
 	// previewFrameCount 是隔离预览渲制的样例帧数量,供平台管理员判断算法实现是否正确。
 	previewFrameCount int
 	// previewBatchSize 是隔离预览任务单轮认领的待审包数量上限。
-	previewBatchSize int
+	previewBatchSize       int
+	previewLeaseDurationMs int
+	previewMaxAttempts     int
 	// maxIsolatedSessionsPerTenant 是单租户同时活跃的隔离执行会话上限;一个会话一个 Pod。
 	maxIsolatedSessionsPerTenant int
 }
@@ -181,6 +183,8 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		backends: deps.BackendAdapters, packageRunnerCode: runnerCode,
 		previewFrameCount:            deps.SimBackend.PreviewFrameCount,
 		previewBatchSize:             deps.SimBackend.PreviewBatchSize,
+		previewLeaseDurationMs:       deps.SimBackend.PreviewLeaseDurationMs,
+		previewMaxAttempts:           deps.SimBackend.PreviewMaxAttempts,
 		maxIsolatedSessionsPerTenant: deps.SimBackend.MaxConcurrentSessionsPerTenant,
 	}, nil
 }

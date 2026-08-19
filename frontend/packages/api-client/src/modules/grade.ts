@@ -2,7 +2,12 @@
 // 对应后端 M11 模块的当前接口。
 
 import { ApiClient, encodePathSegment } from '../client'
-import type { GradeAppealStatus, GradeReviewStatus, GradeWarningStatus, TranscriptScope } from '../constants/grade'
+import type {
+  GradeAppealStatus,
+  GradeReviewStatus,
+  GradeWarningStatus,
+  TranscriptScope,
+} from '../constants/grade'
 import type { PaginatedResponse, SnowflakeID } from '../types/common'
 import type {
   GradeAppeal,
@@ -10,6 +15,7 @@ import type {
   GradeReviewRequest,
   GradeReview,
   GradeSummary,
+  StudentGradePage,
   GradeTranscript,
   GradeWarning,
   LevelConfig,
@@ -77,12 +83,20 @@ export class GradeApi {
   /**
    * 查询成绩审核列表。
    */
-  async listReviews(params?: { status?: GradeReviewStatus; page?: number; size?: number }): Promise<PaginatedResponse<GradeReview>> {
+  async listReviews(params?: {
+    status?: GradeReviewStatus
+    page?: number
+    size?: number
+  }): Promise<PaginatedResponse<GradeReview>> {
     return this.client.get('/grade-center/reviews', params)
   }
 
   /** listOwnReviews 查询当前教师本人提交的成绩审核记录。 */
-  async listOwnReviews(params?: { status?: GradeReviewStatus; page?: number; size?: number }): Promise<PaginatedResponse<GradeReview>> {
+  async listOwnReviews(params?: {
+    status?: GradeReviewStatus
+    page?: number
+    size?: number
+  }): Promise<PaginatedResponse<GradeReview>> {
     return this.client.get('/grade-center/reviews/mine', params)
   }
 
@@ -110,8 +124,11 @@ export class GradeApi {
   /**
    * 查询学生课程成绩明细与 GPA 汇总。
    */
-  async studentGrades(studentId: string, semester?: string): Promise<GradeSummary> {
-    return this.client.get(`/grade-center/students/${encodePathSegment(studentId)}/grades`, semester ? { semester } : undefined)
+  async studentGrades(
+    studentId: string,
+    params: { semester?: string; page?: number; size?: number } = {}
+  ): Promise<StudentGradePage> {
+    return this.client.get(`/grade-center/students/${encodePathSegment(studentId)}/grades`, params)
   }
 
   /**
@@ -124,8 +141,14 @@ export class GradeApi {
   /**
    * 管理员触发指定学生的 GPA 重算。
    */
-  async recomputeStudentGrade(studentId: string, data: { semester_id: string }): Promise<GradeSummary> {
-    return this.client.post(`/grade-center/students/${encodePathSegment(studentId)}/recompute`, data)
+  async recomputeStudentGrade(
+    studentId: string,
+    data: { semester_id: string }
+  ): Promise<GradeSummary> {
+    return this.client.post(
+      `/grade-center/students/${encodePathSegment(studentId)}/recompute`,
+      data
+    )
   }
 
   /**
@@ -138,7 +161,11 @@ export class GradeApi {
   /**
    * 教师或管理员查询成绩申诉列表。
    */
-  async listAppeals(params?: { status?: GradeAppealStatus; page?: number; size?: number }): Promise<PaginatedResponse<GradeAppeal>> {
+  async listAppeals(params?: {
+    status?: GradeAppealStatus
+    page?: number
+    size?: number
+  }): Promise<PaginatedResponse<GradeAppeal>> {
     return this.client.get('/grade-center/appeals', params)
   }
 
@@ -192,7 +219,10 @@ export class GradeApi {
   /**
    * 管理员触发学业预警扫描。
    */
-  async scanWarnings(data: { student_id?: string; semester_id?: string }): Promise<WarningScanResult> {
+  async scanWarnings(data: {
+    student_id?: string
+    semester_id?: string
+  }): Promise<WarningScanResult> {
     return this.client.post('/grade-center/warnings/scan', data)
   }
 
@@ -206,7 +236,11 @@ export class GradeApi {
   /**
    * 批量生成成绩单记录。
    */
-  async generateTranscriptBatch(data: { student_ids: SnowflakeID[]; scope: TranscriptScope; semester_id?: SnowflakeID }): Promise<GradeTranscript[]> {
+  async generateTranscriptBatch(data: {
+    student_ids: SnowflakeID[]
+    scope: TranscriptScope
+    semester_id?: SnowflakeID
+  }): Promise<GradeTranscript[]> {
     return this.client.post('/grade-center/transcripts/batch', data)
   }
 

@@ -119,7 +119,7 @@ func quotaFromRow(row sqlcgen.TenantQuotum) TenantQuota {
 
 // sandboxRecycleOutbox 把 sqlc 回收 outbox 行转换为内部模型。
 func sandboxRecycleOutbox(row sqlcgen.SandboxRecycleOutbox) SandboxRecycleOutbox {
-	return SandboxRecycleOutbox{ID: row.ID, TenantID: row.TenantID, SandboxID: row.SandboxID, SourceRef: row.SourceRef, OwnerAccountID: row.OwnerAccountID, Reason: row.Reason, TraceID: row.TraceID, RecycledAt: timex.FromTimestamptz(row.RecycledAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}
+	return SandboxRecycleOutbox{ID: row.ID, TenantID: row.TenantID, SandboxID: row.SandboxID, SourceRef: row.SourceRef, OwnerAccountID: row.OwnerAccountID, Reason: row.Reason, TraceID: row.TraceID, RecycledAt: timex.FromTimestamptz(row.RecycledAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt), LeaseToken: row.LeaseToken, LeaseUntil: timex.FromTimestamptz(row.LeaseUntil)}
 }
 
 // sandboxToolFromRow 把沙箱工具联查行转换为内部 SandboxTool 模型。

@@ -11,12 +11,13 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Download, FileText, GraduationCap, Layers, MessageSquareWarning } from 'lucide-react'
 import {
-  PAGINATION_MAX_SIZE,
+  PAGINATION_DEFAULT_SIZE,
   TranscriptScope,
   type Course,
   type CourseGrade,
   type GradeSummary,
   type Semester,
+  type StudentGradePage,
 } from '@chaimir/api-client'
 import {
   Breadcrumb,
@@ -35,6 +36,7 @@ import {
   PageHeader,
   PageScaffold,
   PageSection,
+  Pagination,
   SegmentedControl,
   Select,
   Stat,
@@ -55,7 +57,7 @@ import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 /** GradeView 是成绩中心一次读齐的数据。 */
 interface GradeView {
   semesters: Semester[]
-  summary: GradeSummary
+  summary: StudentGradePage
   history: GradeSummary[]
   /** 课程编号 → 课程档案,用于把成绩行显示成课程名而不是内部编号 */
   courses: Map<string, Course>
@@ -68,22 +70,31 @@ export default function StudentGradesPage() {
   const { me } = useSession()
   const studentId = me.account.id
   const [semesterId, setSemesterId] = useState<string>('')
+  const [page, setPage] = useState(1)
 
   const view = useAsyncResource<GradeView>(
-    () =>
-      Promise.all([
+    async () => {
+      const [semesters, summary, history] = await Promise.all([
         api.grade.listSemesters(),
-        api.grade.studentGrades(studentId, semesterId || undefined),
+        api.grade.studentGrades(studentId, {
+          semester: semesterId || undefined,
+          page,
+          size: PAGINATION_DEFAULT_SIZE,
+        }),
         api.grade.studentGPA(studentId),
-        api.teaching.getCourses({ role: 'student', page: 1, size: PAGINATION_MAX_SIZE }),
-      ]).then(([semesters, summary, history, courses]) => ({
+      ])
+      const outlines = await Promise.all(
+        summary.list.map((grade) => api.teaching.getCourseOutline(grade.course_id))
+      )
+      return {
         semesters,
         summary,
         history,
-        courses: new Map(courses.list.map((course) => [course.id, course])),
-      })),
-    [semesterId, studentId],
-    () => false,
+        courses: new Map(outlines.map((outline) => [outline.course.id, outline.course])),
+      }
+    },
+    [page, semesterId, studentId],
+    () => false
   )
 
   return (
@@ -106,7 +117,12 @@ export default function StudentGradesPage() {
             studentId={studentId}
             view={data}
             semesterId={semesterId}
-            onSemesterChange={setSemesterId}
+            page={page}
+            onSemesterChange={(nextSemesterId) => {
+              setSemesterId(nextSemesterId)
+              setPage(1)
+            }}
+            onPageChange={setPage}
           />
         )}
       </ResourceState>
@@ -118,13 +134,22 @@ interface GradeContentProps {
   studentId: string
   view: GradeView
   semesterId: string
+  page: number
   onSemesterChange: (semesterId: string) => void
+  onPageChange: (page: number) => void
 }
 
 /**
  * GradeContent 渲染指标带、成绩明细与右侧动作区。
  */
-function GradeContent({ studentId, view, semesterId, onSemesterChange }: GradeContentProps) {
+function GradeContent({
+  studentId,
+  view,
+  semesterId,
+  page,
+  onSemesterChange,
+  onPageChange,
+}: GradeContentProps) {
   const { semesters, summary, history, courses } = view
 
   // 学期筛选:空串表示全部学期(后端 semester 参数缺省即不按学期过滤)
@@ -133,7 +158,7 @@ function GradeContent({ studentId, view, semesterId, onSemesterChange }: GradeCo
       { value: '', label: '全部学期' },
       ...semesters.map((semester) => ({ value: semester.id, label: semester.name })),
     ],
-    [semesters],
+    [semesters]
   )
 
   const columns: TableColumn<CourseGrade>[] = [
@@ -144,7 +169,9 @@ function GradeContent({ studentId, view, semesterId, onSemesterChange }: GradeCo
         const course = courses.get(grade.course_id)
         return (
           <div className="min-w-0">
-            <div className="truncate font-medium text-ink">{course ? course.name : '已结束的课程'}</div>
+            <div className="truncate font-medium text-ink">
+              {course ? course.name : '已结束的课程'}
+            </div>
             {course ? <div className="truncate text-xs text-ink-sub">{course.semester}</div> : null}
           </div>
         )
@@ -174,7 +201,7 @@ function GradeContent({ studentId, view, semesterId, onSemesterChange }: GradeCo
           />
           <Stat label="累计绩点" value={formatGpa(summary.cumulative_gpa)} icon={GraduationCap} />
           <Stat label="已修学分" value={summary.total_credits} icon={Layers} />
-          <Stat label="课程数" value={summary.course_grades.length} icon={FileText} />
+          <Stat label="课程数" value={summary.total} icon={FileText} />
         </div>
       </PageSection>
 
@@ -182,13 +209,13 @@ function GradeContent({ studentId, view, semesterId, onSemesterChange }: GradeCo
         rail={
           <div className="flex flex-col gap-4">
             <TranscriptCard studentId={studentId} semesters={semesters} />
-            <AppealCard grades={summary.course_grades} courses={courses} />
+            <AppealCard grades={summary.list} courses={courses} />
           </div>
         }
       >
         <PageSection
           title="课程成绩"
-          description={`共 ${summary.course_grades.length} 门课程 · 统计时间 ${formatDateTime(summary.computed_at)}`}
+          description={`共 ${summary.total} 门课程 · 统计时间 ${formatDateTime(summary.computed_at)}`}
         >
           <div className="flex flex-col gap-4">
             <FilterBar label="课程成绩筛选">
@@ -205,7 +232,7 @@ function GradeContent({ studentId, view, semesterId, onSemesterChange }: GradeCo
 
             <Table
               columns={columns}
-              data={summary.course_grades}
+              data={summary.list}
               rowKey={(grade) => grade.course_id}
               empty={
                 <Empty
@@ -214,6 +241,12 @@ function GradeContent({ studentId, view, semesterId, onSemesterChange }: GradeCo
                   description="换个学期看看,或等课程成绩审核通过后再来。"
                 />
               }
+            />
+            <Pagination
+              page={page}
+              pageSize={summary.size}
+              total={summary.total}
+              onPageChange={onPageChange}
             />
           </div>
         </PageSection>
@@ -242,7 +275,7 @@ interface SemesterGpaListProps {
 function SemesterGpaList({ history, semesters }: SemesterGpaListProps) {
   const semesterName = useMemo(
     () => new Map(semesters.map((semester) => [semester.id, semester.name])),
-    [semesters],
+    [semesters]
   )
 
   const rows = useMemo(
@@ -254,7 +287,7 @@ function SemesterGpaList({ history, semesters }: SemesterGpaListProps) {
         gpa: Number(item.gpa.toFixed(2)),
         credits: item.total_credits,
       })),
-    [history, semesterName],
+    [history, semesterName]
   )
 
   const best = rows.reduce((top, row) => (row.gpa > top.gpa ? row : top), rows[0])
@@ -334,8 +367,14 @@ function TranscriptCard({ studentId, semesters }: TranscriptCardProps) {
             aria-label="成绩单范围"
             size="sm"
             options={[
-              { value: String(TranscriptScope.FULL), label: transcriptScopeLabel(TranscriptScope.FULL) },
-              { value: String(TranscriptScope.SEMESTER), label: transcriptScopeLabel(TranscriptScope.SEMESTER) },
+              {
+                value: String(TranscriptScope.FULL),
+                label: transcriptScopeLabel(TranscriptScope.FULL),
+              },
+              {
+                value: String(TranscriptScope.SEMESTER),
+                label: transcriptScopeLabel(TranscriptScope.SEMESTER),
+              },
             ]}
             value={scope}
             onValueChange={(value) => {
@@ -358,7 +397,12 @@ function TranscriptCard({ studentId, semesters }: TranscriptCardProps) {
 
         {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
-        <Button variant="primary" leftIcon={Download} loading={working} onClick={() => void generateAndDownload()}>
+        <Button
+          variant="primary"
+          leftIcon={Download}
+          loading={working}
+          onClick={() => void generateAndDownload()}
+        >
           生成并下载
         </Button>
       </CardBody>
@@ -395,7 +439,7 @@ function AppealCard({ grades, courses }: AppealCardProps) {
             : `已结束的课程 · 总评 ${formatScore(grade.final_total)}`,
         }
       }),
-    [courses, grades],
+    [courses, grades]
   )
 
   const submit = useCallback(
@@ -421,7 +465,7 @@ function AppealCard({ grades, courses }: AppealCardProps) {
         setSubmitting(false)
       }
     },
-    [courseId, reason],
+    [courseId, reason]
   )
 
   if (submitted) {

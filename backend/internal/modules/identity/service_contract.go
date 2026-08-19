@@ -70,7 +70,7 @@ func (s *Service) BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]c
 
 // ListClassStudents 读取指定班级的在校学生摘要,实现 M6 按班级批量选课所需的契约。
 // 走租户事务(RLS 生效)并显式传 tenant_id:调用方是同租户业务模块,不需要跨租户视角。
-func (s *Service) ListClassStudents(ctx context.Context, tenantID, classID int64) ([]contracts.AccountInfo, error) {
+func (s *Service) ListClassStudents(ctx context.Context, tenantID, classID int64, page, size int) ([]contracts.AccountInfo, error) {
 	if tenantID <= 0 || classID <= 0 {
 		return nil, apperr.ErrIdentityOrgInvalidInput
 	}
@@ -86,7 +86,7 @@ func (s *Service) ListClassStudents(ctx context.Context, tenantID, classID int64
 		if !exists {
 			return apperr.ErrIdentityOrgInvalidInput
 		}
-		students, err = tx.ListClassStudents(ctx, tenantID, classID)
+		students, _, err = tx.ListClassStudents(ctx, tenantID, classID, page, size)
 		return err
 	}); err != nil {
 		if appErr, ok := apperr.As(err); ok {

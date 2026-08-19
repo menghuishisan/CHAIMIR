@@ -208,7 +208,16 @@ WHERE tenant_id = $1
   AND course_id = $2
   AND deleted_at IS NULL
   AND (sqlc.arg(published_only)::boolean = false OR status = 2)
-ORDER BY due_at DESC, id DESC;
+ORDER BY due_at DESC, id DESC
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountAssignmentsByCourse :one
+SELECT count(*)
+FROM assignment
+WHERE tenant_id = $1
+  AND course_id = $2
+  AND deleted_at IS NULL
+  AND (sqlc.arg(published_only)::boolean = false OR status = 2);
 
 -- name: UpdateAssignment :one
 UPDATE assignment
@@ -265,7 +274,7 @@ JOIN submission_judge_outbox o ON o.tenant_id = s.tenant_id AND o.submission_id 
 WHERE o.tenant_id = $1 AND o.source_ref = $2;
 
 -- name: ListJudgeOutboxBySubmission :many
-SELECT id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at
+SELECT id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
 FROM submission_judge_outbox
 WHERE tenant_id = $1 AND submission_id = $2
 ORDER BY id ASC;
@@ -310,57 +319,91 @@ WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at;
 
 -- name: CreateJudgeOutbox :one
-INSERT INTO submission_judge_outbox (id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 1, 0, NULL, NULL, NULL, now(), now())
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
+INSERT INTO submission_judge_outbox (id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 1, 0, NULL, NULL, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: ClaimJudgeOutbox :many
 UPDATE submission_judge_outbox
-SET status = 2, updated_at = now()
+SET status = 2, retry_count = retry_count + 1, updated_at = now(), lease_token = @lease_token, lease_until = @lease_until::timestamptz
 WHERE id IN (
     SELECT o.id FROM submission_judge_outbox o
-    WHERE o.tenant_id = $1 AND o.status = 1
+    WHERE o.tenant_id = $1
+      AND (o.status = 1 OR (o.status = 2 AND o.lease_until <= @stale_before::timestamptz))
+      AND o.retry_count < @max_attempts
     ORDER BY o.created_at ASC
     LIMIT $2
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: ClaimJudgeOutboxAcrossTenants :many
 UPDATE submission_judge_outbox
-SET status = 2, updated_at = now()
+SET status = 2, retry_count = retry_count + 1, updated_at = now(), lease_token = @lease_token, lease_until = @lease_until::timestamptz
 WHERE id IN (
     SELECT o.id FROM submission_judge_outbox o
-    WHERE o.status = 1
+    WHERE (o.status = 1 OR (o.status = 2 AND o.lease_until <= @stale_before::timestamptz))
+      AND o.retry_count < @max_attempts
     ORDER BY o.created_at ASC
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: CompleteJudgeOutbox :one
 UPDATE submission_judge_outbox
-SET status = 3, last_error = NULL, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
+SET status = 3,
+    last_error = CASE WHEN status = 2 THEN NULL ELSE last_error END,
+    updated_at = now(),
+    lease_token = '',
+    lease_until = NULL
+WHERE (tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now())
+   OR (tenant_id = $1 AND id = $2 AND status = 3)
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: RetryJudgeOutbox :one
 UPDATE submission_judge_outbox
-SET status = 1, retry_count = retry_count + 1, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
+SET status = CASE WHEN retry_count >= @max_attempts THEN 4 ELSE 1 END,
+    last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+
+-- name: ExhaustExpiredJudgeOutbox :execrows
+UPDATE submission_judge_outbox
+SET status = 4,
+    last_error = 'dispatch lease expired after retry limit',
+    updated_at = now(),
+    lease_token = '',
+    lease_until = NULL
+WHERE tenant_id = $1
+  AND status = 2
+  AND lease_until <= @stale_before::timestamptz
+  AND retry_count >= @max_attempts;
+
+-- name: ExhaustExpiredJudgeOutboxAcrossTenants :execrows
+UPDATE submission_judge_outbox
+SET status = 4,
+    last_error = 'dispatch lease expired after retry limit',
+    updated_at = now(),
+    lease_token = '',
+    lease_until = NULL
+WHERE status = 2
+  AND lease_until <= @stale_before::timestamptz
+  AND retry_count >= @max_attempts;
 
 -- name: MarkJudgeOutboxResult :one
 UPDATE submission_judge_outbox
-SET score = $3, last_error = NULL, completed_at = $4, updated_at = now()
-WHERE tenant_id = $1 AND source_ref = $2
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
+SET score = $3, last_error = NULL, completed_at = $4, status = 3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND source_ref = $2 AND status IN (2, 3, 4)
+  AND (completed_at IS NULL OR (completed_at = $4 AND score = $3))
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: MarkJudgeOutboxFailedResult :one
 UPDATE submission_judge_outbox
-SET last_error = $3, completed_at = $4, updated_at = now()
-WHERE tenant_id = $1 AND source_ref = $2
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at;
+SET last_error = $3, completed_at = $4, status = 3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND source_ref = $2 AND status IN (2, 3, 4)
+  AND (completed_at IS NULL OR (completed_at = $4 AND last_error = $3))
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: UpsertSubmissionDraft :one
 INSERT INTO submission_draft (id, tenant_id, assignment_id, student_id, content, updated_at)
@@ -454,7 +497,13 @@ RETURNING id, tenant_id, course_id, title, content, is_pinned, created_at, delet
 SELECT id, tenant_id, course_id, title, content, is_pinned, created_at, deleted_at
 FROM announcement
 WHERE tenant_id = $1 AND course_id = $2 AND deleted_at IS NULL
-ORDER BY is_pinned DESC, created_at DESC, id DESC;
+ORDER BY is_pinned DESC, created_at DESC, id DESC
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountCourseAnnouncements :one
+SELECT count(*)
+FROM announcement
+WHERE tenant_id = $1 AND course_id = $2 AND deleted_at IS NULL;
 
 -- name: PinAnnouncement :one
 UPDATE announcement
@@ -504,12 +553,24 @@ WHERE g.tenant_id = $1 AND g.course_id = $2
 ORDER BY g.student_id ASC
 LIMIT $3 OFFSET $4;
 
+-- name: CountCourseGrades :one
+SELECT count(*)
+FROM course_grade
+WHERE tenant_id = $1 AND course_id = $2;
+
 -- name: ListStudentGrades :many
 SELECT g.id, g.tenant_id, g.course_id, c.semester, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, g.is_locked, g.updated_at, c.credits::float8 AS credits
 FROM course_grade g
 JOIN course c ON c.tenant_id = g.tenant_id AND c.id = g.course_id
-WHERE g.tenant_id = $1 AND g.student_id = $2
-ORDER BY c.semester DESC, g.course_id ASC;
+WHERE g.tenant_id = $1 AND g.student_id = $2 AND (sqlc.arg(semester)::text = '' OR c.semester = sqlc.arg(semester)::text)
+ORDER BY c.semester DESC, g.course_id ASC
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountStudentGrades :one
+SELECT count(*)
+FROM course_grade g
+JOIN course c ON c.tenant_id = g.tenant_id AND c.id = g.course_id
+WHERE g.tenant_id = $1 AND g.student_id = $2 AND (sqlc.arg(semester)::text = '' OR c.semester = sqlc.arg(semester)::text);
 
 -- name: OverrideCourseGrade :one
 UPDATE course_grade
@@ -523,34 +584,42 @@ SET is_locked = $3, updated_at = now()
 WHERE tenant_id = $1 AND course_id = $2;
 
 -- name: CreateTeachingGradeEventOutbox :one
-INSERT INTO teaching_grade_event_outbox (id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at;
+INSERT INTO teaching_grade_event_outbox (id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, $6, 1, 0, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: ClaimPendingTeachingGradeEventOutbox :many
-UPDATE teaching_grade_event_outbox
-SET status = 4, retry_count = retry_count + 1, updated_at = now()
-WHERE id IN (
-    SELECT id
-    FROM teaching_grade_event_outbox
-    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= @stale_before::timestamptz)
-    ORDER BY created_at ASC, id ASC
+WITH exhausted AS (
+    UPDATE teaching_grade_event_outbox AS expired
+    SET status = 4, last_error = 'grade event lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
+    WHERE expired.status = 2 AND expired.lease_until <= @stale_before::timestamptz AND expired.retry_count >= @max_attempts
+    RETURNING expired.id
+), candidates AS (
+    SELECT o.id
+    FROM teaching_grade_event_outbox o
+    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= @stale_before::timestamptz))
+      AND o.retry_count < @max_attempts
+    ORDER BY o.created_at ASC, o.id ASC
     LIMIT @page_limit
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at;
+UPDATE teaching_grade_event_outbox AS outbox
+SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = @lease_token, lease_until = @lease_until::timestamptz
+FROM candidates
+WHERE outbox.id = candidates.id
+RETURNING outbox.id, outbox.tenant_id, outbox.course_id, outbox.student_id, outbox.trace_id, outbox.event_updated_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
 
 -- name: MarkTeachingGradeEventOutboxPublished :one
 UPDATE teaching_grade_event_outbox
-SET status = 2, last_error = NULL, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at;
+SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: MarkTeachingGradeEventOutboxFailed :one
 UPDATE teaching_grade_event_outbox
-SET status = 3, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at;
+SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: TeachingStats :one
 SELECT

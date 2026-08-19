@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
@@ -13,6 +14,7 @@ import (
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 )
 
 // CreateAssignment 创建作业草稿并锁定 M5 题目版本。
@@ -143,31 +145,37 @@ func (s *Service) PublishAssignment(ctx context.Context, assignmentID int64) (As
 // ListCourseAssignments 查询课程作业清单。
 // 这是学生取得 assignment_id 的唯一入口:作业详情、草稿和提交都以该编号为参数,
 // 而课程大纲只含章节课时。授课教师看到含草稿的全量,课程成员只看到已发布作业。
-func (s *Service) ListCourseAssignments(ctx context.Context, courseID int64) ([]AssignmentDTO, error) {
+func (s *Service) ListCourseAssignments(ctx context.Context, courseID int64, page, size int) ([]AssignmentDTO, int64, int, int, error) {
+	page, size = pagex.Normalize(page, size)
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	var assignments []Assignment
+	var assignmentTotal int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		isTeacher, err := s.courseReadAccess(ctx, tx, id.TenantID, courseID, id.AccountID)
 		if err != nil {
 			return err
 		}
-		assignments, err = tx.ListAssignmentsByCourse(ctx, id.TenantID, courseID, !isTeacher)
+		var total int64
+		assignments, total, err = tx.ListAssignmentsByCourse(ctx, id.TenantID, courseID, !isTeacher, page, size)
+		if err == nil {
+			assignmentTotal = total
+		}
 		return err
 	}); err != nil {
-		return nil, mapAssignmentError(err)
+		return nil, 0, page, size, mapAssignmentError(err)
 	}
 	out := make([]AssignmentDTO, 0, len(assignments))
 	for _, assignment := range assignments {
 		dto, err := assignmentDTO(assignment)
 		if err != nil {
-			return nil, mapAssignmentError(err)
+			return nil, 0, page, size, mapAssignmentError(err)
 		}
 		out = append(out, dto)
 	}
-	return out, nil
+	return out, assignmentTotal, page, size, nil
 }
 
 // GetAssignmentForStudent 读取作业详情并从 M5 展开题面。
@@ -477,6 +485,21 @@ func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error 
 	if !ok || batchSize <= 0 {
 		return apperr.ErrTeachingJudgeOutboxInvalid
 	}
+	now := timex.Now()
+	leaseDuration := time.Duration(s.cfg.JudgeOutboxStaleMs) * time.Millisecond
+	if leaseDuration <= 0 {
+		return apperr.ErrTeachingJudgeOutboxInvalid
+	}
+	leaseToken, err := pkgcrypto.RandomToken(48)
+	if err != nil {
+		return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(err)
+	}
+	staleBefore := now
+	leaseUntil := now.Add(leaseDuration)
+	maxAttempts, ok := intx.Int32(s.cfg.JudgeOutboxMaxAttempts)
+	if !ok || maxAttempts <= 0 {
+		return apperr.ErrTeachingJudgeOutboxInvalid
+	}
 	var outboxes []JudgeOutbox
 	claim := s.store.TenantTx
 	if tenantID <= 0 {
@@ -487,10 +510,16 @@ func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error 
 	if err := claim(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		if tenantID > 0 {
-			outboxes, err = tx.ClaimJudgeOutbox(ctx, tenantID, batchSize)
+			if _, err = tx.ExhaustExpiredJudgeOutbox(ctx, tenantID, maxAttempts, staleBefore); err != nil {
+				return err
+			}
+			outboxes, err = tx.ClaimJudgeOutbox(ctx, tenantID, batchSize, maxAttempts, staleBefore, leaseToken, leaseUntil)
 			return err
 		}
-		outboxes, err = tx.ClaimJudgeOutboxAcrossTenants(ctx, batchSize)
+		if _, err = tx.ExhaustExpiredJudgeOutboxAcrossTenants(ctx, maxAttempts, staleBefore); err != nil {
+			return err
+		}
+		outboxes, err = tx.ClaimJudgeOutboxAcrossTenants(ctx, batchSize, maxAttempts, staleBefore, leaseToken, leaseUntil)
 		return err
 	}); err != nil {
 		return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(err)
@@ -499,7 +528,7 @@ func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error 
 		info, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: item.TenantID, JudgerCode: item.JudgerCode, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, CodeStorageKey: item.CodeStorageKey, CodeHash: item.CodeHash, SubmitterID: item.StudentID, SourceRef: item.SourceRef, SourceOwnerID: item.SourceOwnerID, SourceCourseID: item.SourceCourseID, SourceScope: item.SourceScope, SandboxMode: contracts.JudgeSandboxModeFresh, ExtraInput: item.ExtraInput, Priority: 5})
 		if err != nil {
 			if retryErr := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
-				_, retryErr := tx.RetryJudgeOutbox(ctx, item.TenantID, item.ID, safeStoredError(ctx, err))
+				_, retryErr := tx.RetryJudgeOutbox(ctx, item.TenantID, item.ID, maxAttempts, safeStoredError(ctx, err), item.LeaseToken)
 				return retryErr
 			}); retryErr != nil {
 				return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(retryErr)
@@ -510,7 +539,7 @@ func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error 
 			if _, err := tx.UpdateSubmissionJudgeRef(ctx, item.TenantID, item.SubmissionID, ids.Format(info.TaskID)); err != nil {
 				return err
 			}
-			_, err := tx.CompleteJudgeOutbox(ctx, item.TenantID, item.ID)
+			_, err := tx.CompleteJudgeOutbox(ctx, item.TenantID, item.ID, item.LeaseToken)
 			return err
 		}); err != nil {
 			return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(err)
@@ -587,7 +616,7 @@ func aggregateCompletedAutoScore(outboxes []JudgeOutbox) (int32, bool) {
 	}
 	var total int32
 	for _, outbox := range outboxes {
-		if outbox.CompletedAt.IsZero() || outbox.LastError != "" {
+		if outbox.CompletedAt.IsZero() {
 			return 0, false
 		}
 		total += outbox.Score

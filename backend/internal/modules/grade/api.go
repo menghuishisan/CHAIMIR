@@ -172,7 +172,11 @@ func (a gradeAPI) studentGrades(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.StudentGrades(c.Request.Context(), id, semesterID)
+	page, size, ok := httpx.Page(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.StudentGradePage(c.Request.Context(), id, semesterID, page, size)
 	httpx.Write(c, out, err)
 }
 

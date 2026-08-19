@@ -486,6 +486,8 @@ paths:
     $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/battle/entry'
   /api/v1/contest/contests/{id}/battle/entries:
     $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/battle/entries'
+  /api/v1/contest/contests/{id}/battle/replay-window:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/battle/replay-window'
   /api/v1/contest/contests/{id}/battle/matches:
     $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/battle/matches'
   /api/v1/contest/contests/{id}/ladder:

@@ -10,6 +10,7 @@ import (
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
+	pkgcrypto "chaimir/pkg/crypto"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -60,9 +61,9 @@ type TxStore interface {
 	UpdateSandboxToolStatus(ctx context.Context, tenantID, sandboxID int64, tool Tool, endpoint string, status int16) (SandboxTool, error)
 	CreateSandboxEvent(ctx context.Context, id, tenantID, sandboxID int64, typ string, detail []byte) error
 	CreateSandboxRecycleOutbox(context.Context, int64, Sandbox, string, string, time.Time) (SandboxRecycleOutbox, error)
-	ClaimPendingSandboxRecycleOutbox(context.Context, int32, time.Time) ([]SandboxRecycleOutbox, error)
-	MarkSandboxRecycleOutboxPublished(context.Context, int64, int64) (SandboxRecycleOutbox, error)
-	MarkSandboxRecycleOutboxFailed(context.Context, int64, int64, string) (SandboxRecycleOutbox, error)
+	ClaimPendingSandboxRecycleOutbox(context.Context, int32, int32, time.Time, time.Time) ([]SandboxRecycleOutbox, error)
+	MarkSandboxRecycleOutboxPublished(context.Context, int64, int64, string) (SandboxRecycleOutbox, error)
+	MarkSandboxRecycleOutboxFailed(context.Context, int64, int64, string, string) (SandboxRecycleOutbox, error)
 	StatsByTenant(ctx context.Context, tenantID int64) (TenantQuota, int64, error)
 }
 
@@ -635,8 +636,12 @@ func (s *txStore) CreateSandboxRecycleOutbox(ctx context.Context, id int64, sb S
 }
 
 // ClaimPendingSandboxRecycleOutbox 跨租户领取待发布或失败待重试的回收事件。
-func (s *txStore) ClaimPendingSandboxRecycleOutbox(ctx context.Context, limit int32, staleBefore time.Time) ([]SandboxRecycleOutbox, error) {
-	rows, err := s.q.ClaimPendingSandboxRecycleOutbox(ctx, sqlcgen.ClaimPendingSandboxRecycleOutboxParams{StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit})
+func (s *txStore) ClaimPendingSandboxRecycleOutbox(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time) ([]SandboxRecycleOutbox, error) {
+	leaseToken, err := pkgcrypto.RandomToken(48)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.q.ClaimPendingSandboxRecycleOutbox(ctx, sqlcgen.ClaimPendingSandboxRecycleOutboxParams{LeaseToken: leaseToken, LeaseUntil: timex.RequiredTimestamptz(leaseUntil), StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit, MaxAttempts: maxAttempts})
 	if err != nil {
 		return nil, err
 	}
@@ -648,8 +653,8 @@ func (s *txStore) ClaimPendingSandboxRecycleOutbox(ctx context.Context, limit in
 }
 
 // MarkSandboxRecycleOutboxPublished 标记回收事件发布成功。
-func (s *txStore) MarkSandboxRecycleOutboxPublished(ctx context.Context, tenantID, id int64) (SandboxRecycleOutbox, error) {
-	row, err := s.q.MarkSandboxRecycleOutboxPublished(ctx, sqlcgen.MarkSandboxRecycleOutboxPublishedParams{TenantID: tenantID, ID: id})
+func (s *txStore) MarkSandboxRecycleOutboxPublished(ctx context.Context, tenantID, id int64, leaseToken string) (SandboxRecycleOutbox, error) {
+	row, err := s.q.MarkSandboxRecycleOutboxPublished(ctx, sqlcgen.MarkSandboxRecycleOutboxPublishedParams{TenantID: tenantID, ID: id, LeaseToken: leaseToken})
 	if err != nil {
 		return SandboxRecycleOutbox{}, err
 	}
@@ -657,8 +662,8 @@ func (s *txStore) MarkSandboxRecycleOutboxPublished(ctx context.Context, tenantI
 }
 
 // MarkSandboxRecycleOutboxFailed 标记回收事件发布失败并保留脱敏原因。
-func (s *txStore) MarkSandboxRecycleOutboxFailed(ctx context.Context, tenantID, id int64, reason string) (SandboxRecycleOutbox, error) {
-	row, err := s.q.MarkSandboxRecycleOutboxFailed(ctx, sqlcgen.MarkSandboxRecycleOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason)})
+func (s *txStore) MarkSandboxRecycleOutboxFailed(ctx context.Context, tenantID, id int64, reason, leaseToken string) (SandboxRecycleOutbox, error) {
+	row, err := s.q.MarkSandboxRecycleOutboxFailed(ctx, sqlcgen.MarkSandboxRecycleOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason), LeaseToken: leaseToken})
 	if err != nil {
 		return SandboxRecycleOutbox{}, err
 	}

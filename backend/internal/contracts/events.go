@@ -65,13 +65,15 @@ type SandboxRecycledEvent struct {
 
 // ExperimentScoredEvent 是实验实例得分落定后的事件载荷。
 type ExperimentScoredEvent struct {
-	TenantID     int64     `json:"tenant_id"`
-	TraceID      string    `json:"trace_id"`
-	ExperimentID int64     `json:"experiment_id"`
-	InstanceID   int64     `json:"instance_id"`
-	StudentID    int64     `json:"student_id"`
-	Score        float64   `json:"score"`
-	ScoredAt     time.Time `json:"scored_at"`
+	EventID        string    `json:"event_id"`
+	TenantID       int64     `json:"tenant_id"`
+	TraceID        string    `json:"trace_id"`
+	ExperimentID   int64     `json:"experiment_id"`
+	ExperimentName string    `json:"experiment_name"`
+	InstanceID     int64     `json:"instance_id"`
+	StudentID      int64     `json:"student_id"`
+	Score          float64   `json:"score"`
+	ScoredAt       time.Time `json:"scored_at"`
 }
 
 // TeachingCourseEndedEvent 是课程结束或归档后的事件载荷。
@@ -127,6 +129,7 @@ type TenantProvisionedEvent struct {
 
 // NotifySendRequestedEvent 是业务模块经事件总线异步请求 M10 写站内信的唯一载荷。
 type NotifySendRequestedEvent struct {
+	RequestID string            `json:"request_id,omitempty"`
 	TenantID  int64             `json:"tenant_id"`
 	TraceID   string            `json:"trace_id"`
 	Type      string            `json:"type"`

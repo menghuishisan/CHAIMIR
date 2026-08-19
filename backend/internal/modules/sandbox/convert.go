@@ -110,7 +110,6 @@ func runtimeResponseFromModel(item Runtime) (RuntimeResponse, error) {
 		CapabilityImpl: item.CapabilityImpl,
 		PluginRef:      item.PluginRef,
 		SelftestStatus: item.SelftestStatus,
-		SelftestDetail: item.SelftestDetail,
 		Status:         item.Status,
 	}, nil
 }
@@ -138,7 +137,6 @@ func runtimeImageResponseFromModel(item RuntimeImage) RuntimeImageResponse {
 		Status:        item.Status,
 		Prepulled:     item.Prepulled,
 		PrepullStatus: item.PrepullStatus,
-		PrepullDetail: item.PrepullDetail,
 		PrepulledAt:   timex.RFC3339OrEmpty(item.PrepulledAt),
 		GenesisBaked:  item.GenesisBaked,
 		IsDefault:     item.IsDefault,

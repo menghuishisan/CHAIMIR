@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"path/filepath"
 	"strconv"
@@ -23,6 +25,7 @@ import (
 
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
+	"chaimir/internal/platform/pagex"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -258,20 +261,34 @@ func (s *Service) ListClassesForViewer(ctx context.Context, majorID int64) ([]Cl
 // 组织结构本就对教师只读开放(`/org/classes`),班内学生名录是同一维度的下一层;
 // 账号目录 `/accounts` 仍只对学校管理员开放,教师拿不到全校账号与其手机号、状态、角色。
 // 实现直接复用契约方法,租户边界取自服务端会话 —— 同一份查询不写两遍。
-func (s *Service) ListClassStudentsForViewer(ctx context.Context, classID int64) ([]ClassStudentDTO, error) {
+func (s *Service) ListClassStudentsForViewer(ctx context.Context, classID int64, page, size int) ([]ClassStudentDTO, int64, int, int, error) {
+	page, size = pagex.Normalize(page, size)
 	id, err := requireTenantAnyRole(ctx, s, contracts.RoleTeacher, contracts.RoleSchoolAdmin)
 	if err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
-	students, err := s.ListClassStudents(ctx, id.TenantID, classID)
+	var students []Account
+	var total int64
+	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var exists bool
+		exists, err = tx.ClassExists(ctx, id.TenantID, classID)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return apperr.ErrIdentityOrgInvalidInput
+		}
+		students, total, err = tx.ListClassStudents(ctx, id.TenantID, classID, page, size)
+		return err
+	})
 	if err != nil {
-		return nil, err
+		return nil, 0, page, size, err
 	}
 	out := make([]ClassStudentDTO, 0, len(students))
 	for _, student := range students {
-		out = append(out, ClassStudentDTO{ID: ids.ID(student.AccountID), Name: student.Name, No: student.No})
+		out = append(out, ClassStudentDTO{ID: ids.ID(student.ID), Name: student.Name, No: student.No})
 	}
-	return out, nil
+	return out, total, page, size, nil
 }
 
 // CreateClassByAdmin 创建班级并绑定专业和入学年份。
@@ -382,9 +399,6 @@ func (s *Service) PreviewOrgImportByAdmin(ctx context.Context, req ImportPreview
 	rows, results, err := s.parseOrgImportFile(ctx, req.Content, req.FileName, req.ContentType)
 	if err != nil {
 		return ImportPreviewResponse{}, err
-	}
-	if len(rows) > s.cfg.ImportMaxRows {
-		return ImportPreviewResponse{}, apperr.ErrIdentityImportTooManyRows
 	}
 	previewID := s.ids.Generate()
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -586,21 +600,31 @@ func (s *Service) parseOrgImportFile(ctx context.Context, raw []byte, fileName, 
 	}
 	switch upload.CSVOrXLSXKind(fileName, contentType, raw) {
 	case upload.KindCSV:
-		return parseOrgImportCSV(raw)
+		return parseOrgImportCSV(raw, s.cfg.ImportMaxRows)
 	case upload.KindXLSX:
-		return parseOrgImportXLSX(raw)
+		return parseOrgImportXLSX(raw, s.cfg.ImportMaxRows)
 	default:
 		return nil, nil, apperr.ErrIdentityImportUnsupportedFile
 	}
 }
 
 // parseOrgImportCSV 解析组织导入 CSV,表头后每行格式为 kind,name,code_or_parent_id,enrollment_year。
-func parseOrgImportCSV(raw []byte) ([]orgImportRow, []ImportRowResult, error) {
+func parseOrgImportCSV(raw []byte, maxRows int) ([]orgImportRow, []ImportRowResult, error) {
 	reader := csv.NewReader(strings.NewReader(string(raw)))
 	reader.TrimLeadingSpace = true
-	records, err := reader.ReadAll()
-	if err != nil {
-		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid
+	records := make([][]string, 0, min(maxRows+2, 128))
+	for {
+		record, err := reader.Read()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid
+		}
+		records = append(records, record)
+		if len(records) > maxRows+1 {
+			return nil, nil, apperr.ErrIdentityImportTooManyRows
+		}
 	}
 	if len(records) < 2 {
 		return nil, nil, apperr.ErrIdentityImportEmpty
@@ -609,7 +633,7 @@ func parseOrgImportCSV(raw []byte) ([]orgImportRow, []ImportRowResult, error) {
 }
 
 // parseOrgImportXLSX 解析组织导入 Excel,只读取模板工作表或首个工作表。
-func parseOrgImportXLSX(raw []byte) ([]orgImportRow, []ImportRowResult, error) {
+func parseOrgImportXLSX(raw []byte, maxRows int) ([]orgImportRow, []ImportRowResult, error) {
 	workbook, err := excelize.OpenReader(bytes.NewReader(raw))
 	if err != nil {
 		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
@@ -625,14 +649,44 @@ func parseOrgImportXLSX(raw []byte) ([]orgImportRow, []ImportRowResult, error) {
 		}
 		sheet = sheets[0]
 	}
-	records, err := workbook.GetRows(sheet)
+	rowsIter, err := workbook.Rows(sheet)
 	if err != nil {
 		if closeErr := workbook.Close(); closeErr != nil {
 			return nil, nil, apperr.ErrInternal.WithCause(closeErr)
 		}
 		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
 	}
-	if err := workbook.Close(); err != nil {
+	resourcesClosed := false
+	closeResources := func() error {
+		if resourcesClosed {
+			return nil
+		}
+		resourcesClosed = true
+		if closeErr := rowsIter.Close(); closeErr != nil {
+			slog.Warn("组织导入工作簿行迭代器关闭失败", slog.String("error", logging.SanitizeError(closeErr.Error())))
+		}
+		return workbook.Close()
+	}
+	defer func() {
+		if closeErr := closeResources(); closeErr != nil {
+			slog.Warn("组织导入工作簿关闭失败", slog.String("error", logging.SanitizeError(closeErr.Error())))
+		}
+	}()
+	records := make([][]string, 0, min(maxRows+2, 128))
+	for rowsIter.Next() {
+		record, err := rowsIter.Columns()
+		if err != nil {
+			return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
+		}
+		records = append(records, record)
+		if len(records) > maxRows+1 {
+			return nil, nil, apperr.ErrIdentityImportTooManyRows
+		}
+	}
+	if err := rowsIter.Error(); err != nil {
+		return nil, nil, apperr.ErrIdentityImportCSVFormatInvalid.WithCause(err)
+	}
+	if err := closeResources(); err != nil {
 		return nil, nil, apperr.ErrInternal.WithCause(err)
 	}
 	if len(records) < 2 {

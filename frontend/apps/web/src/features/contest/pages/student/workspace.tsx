@@ -11,14 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import {
-  History,
-  LoaderCircle,
-  Send,
-  Swords,
-  Trophy,
-  TriangleAlert,
-} from 'lucide-react'
+import { History, LoaderCircle, Send, Swords, Trophy, TriangleAlert } from 'lucide-react'
 import {
   BattleRole,
   ContestStatus,
@@ -33,6 +26,7 @@ import {
   Button,
   ChainProgress,
   Input,
+  Pagination,
   WorkbenchShell,
   WorkbenchTopbar,
   toast,
@@ -41,7 +35,7 @@ import { api } from '../../../../app/api'
 import { AppStatusScreen } from '../../../../components/AppStatusScreen'
 import { SandboxIdeWorkspace } from '../../../sandbox/components/SandboxIdeWorkspace'
 import { useSession } from '../../../../components/RoleGuard'
-import { useAsyncResource, useTicketedWebSocket } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, useTicketedWebSocket } from '../../../../hooks'
 import { useImmersive } from '../../../../layouts/immersive/context'
 import { readString, readStringArray } from '../../jsonReaders'
 import { formatDateTime } from '../../../../utils/formatters'
@@ -73,7 +67,7 @@ export default function StudentContestWorkspacePage() {
   const contest = useAsyncResource(
     () => api.contest.getStudentContest(contestId),
     [contestId],
-    () => false,
+    () => false
   )
   const problems = useAsyncResource(() => api.contest.getProblems(contestId), [contestId])
 
@@ -142,7 +136,7 @@ function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
 
   const problem = useMemo(
     () => problems.find((item) => item.id === problemId) ?? problems[0],
-    [problemId, problems],
+    [problemId, problems]
   )
 
   const spec = useMemo(() => problemSpec(problem), [problem])
@@ -155,14 +149,17 @@ function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
         size: CONTEST_LADDER_PREVIEW_SIZE,
       }),
     [contest.id],
-    () => false,
+    () => false
   )
 
   // 榜单实时更新:订阅本场比赛的榜单 topic(经 M10 统一业务 WS,短时票据建连)。
   // 推送只当刷新信号 —— 榜单本身回接口读,推送内容不用来改本地状态。
   const ladderTopic = useMemo(
-    () => (me.account.tenant_id ? api.contest.getLeaderboardTopic(me.account.tenant_id, contest.id) : undefined),
-    [contest.id, me.account.tenant_id],
+    () =>
+      me.account.tenant_id
+        ? api.contest.getLeaderboardTopic(me.account.tenant_id, contest.id)
+        : undefined,
+    [contest.id, me.account.tenant_id]
   )
   const ladderSocket = useTicketedWebSocket({
     url: ladderTopic ? api.eventWebSocketUrl() : undefined,
@@ -177,10 +174,12 @@ function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
     },
   })
 
-  const entries = useAsyncResource(
-    () => (spec.kind === 'battle' ? api.contest.listBattleEntries(contest.id) : Promise.resolve([])),
-    [contest.id, spec.kind],
-    () => false,
+  const entries = usePagedResource<BattleEntry>(
+    (params) =>
+      spec.kind === 'battle'
+        ? api.contest.listBattleEntries(contest.id, params)
+        : Promise.resolve({ list: [], total: 0, page: params.page, size: params.size }),
+    [contest.id, spec.kind]
   )
 
   // 换题即换环境:上一题的沙箱与代码引用对这一题没有意义
@@ -333,9 +332,7 @@ function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
           answer={answer}
           onAnswerChange={setAnswer}
           onCreateEnv={() => void createEnv()}
-          onSaved={(result) =>
-            setCodeRef({ key: result.code_storage_key, hash: result.code_hash })
-          }
+          onSaved={(result) => setCodeRef({ key: result.code_storage_key, hash: result.code_hash })}
         />
       }
       right={
@@ -345,7 +342,15 @@ function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
             <BattlePanel
               role={role}
               onRoleChange={setRole}
-              entries={entries.data ?? []}
+              entries={entries.data?.list ?? []}
+              entryStatus={entries.status}
+              entryError={entries.error?.message}
+              entryTraceId={entries.error?.traceId}
+              onEntryRetry={entries.reload}
+              entryPage={entries.page}
+              entryPageSize={entries.pageSize}
+              entryTotal={entries.total}
+              onEntryPageChange={entries.setPage}
               onOpenReplay={() => navigate(`/student/contests/${contest.id}/replay`)}
             />
           ) : (
@@ -363,7 +368,9 @@ function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
           <div className="flex min-w-0 flex-col">
             <span className="flex flex-wrap items-center gap-2 text-xs text-on-dark-sub">
-              <Badge onDark tone={answerable ? 'jade' : 'neutral'}>{contestStatusLabel(contest.status)}</Badge>
+              <Badge onDark tone={answerable ? 'jade' : 'neutral'}>
+                {contestStatusLabel(contest.status)}
+              </Badge>
               <span className="font-mono tabular-nums">本题 {problem.score} 分</span>
               {codeRef ? <span>代码已保存</span> : null}
             </span>
@@ -613,6 +620,14 @@ interface BattlePanelProps {
   role: BattleRole
   onRoleChange: (role: BattleRole) => void
   entries: BattleEntry[]
+  entryStatus: 'loading' | 'success' | 'empty' | 'error'
+  entryError?: string
+  entryTraceId?: string
+  onEntryRetry: () => void
+  entryPage: number
+  entryPageSize: number
+  entryTotal: number
+  onEntryPageChange: (page: number) => void
   onOpenReplay: () => void
 }
 
@@ -620,7 +635,20 @@ interface BattlePanelProps {
  * BattlePanel 承载参战角色选择与参战历史。
  * 只有最新一版参战物生效(后端按版本号取 is_active),历史版本留档便于对照。
  */
-function BattlePanel({ role, onRoleChange, entries, onOpenReplay }: BattlePanelProps) {
+function BattlePanel({
+  role,
+  onRoleChange,
+  entries,
+  entryStatus,
+  entryError,
+  entryTraceId,
+  onEntryRetry,
+  entryPage,
+  entryPageSize,
+  entryTotal,
+  onEntryPageChange,
+  onOpenReplay,
+}: BattlePanelProps) {
   return (
     <section className="flex flex-col gap-3 border-b border-dark-line p-4">
       <h2 className="text-sm font-medium text-on-dark">参战</h2>
@@ -646,22 +674,48 @@ function BattlePanel({ role, onRoleChange, entries, onOpenReplay }: BattlePanelP
 
       <div className="flex flex-col gap-2">
         <span className="text-xs text-on-dark-sub">参战历史</span>
-        {entries.length === 0 ? (
+        {entryStatus === 'loading' ? (
+          <p className="text-xs text-on-dark-sub">正在读取参战历史...</p>
+        ) : entryStatus === 'error' ? (
+          <div className="flex flex-col gap-2 rounded-md border border-danger bg-danger-bg p-3">
+            <p className="text-xs text-on-dark">
+              {entryError ?? '参战历史暂时读不到,请稍后重试。'}
+            </p>
+            {entryTraceId ? (
+              <p className="font-mono text-xs text-on-dark-faint">报障编号: {entryTraceId}</p>
+            ) : null}
+            <Button variant="on-dark" size="sm" onClick={onEntryRetry}>
+              重新加载
+            </Button>
+          </div>
+        ) : entryStatus === 'empty' ? (
           <p className="text-xs text-on-dark-sub">还没有提交过参战物。</p>
         ) : (
-          <ul className="flex flex-col gap-1">
-            {entries.map((entry) => (
-              <li
-                key={entry.id}
-                className="flex items-center justify-between gap-2 rounded-md border border-dark-line bg-dark-surface px-2 py-1.5"
-              >
-                <span className="min-w-0 truncate text-xs text-on-dark">
-                  第 {entry.version_no} 版 · {battleRoleLabel(entry.role)}
-                </span>
-                {entry.is_active ? <Badge onDark tone="jade">生效中</Badge> : null}
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="flex flex-col gap-1">
+              {entries.map((entry) => (
+                <li
+                  key={entry.id}
+                  className="flex items-center justify-between gap-2 rounded-md border border-dark-line bg-dark-surface px-2 py-1.5"
+                >
+                  <span className="min-w-0 truncate text-xs text-on-dark">
+                    第 {entry.version_no} 版 · {battleRoleLabel(entry.role)}
+                  </span>
+                  {entry.is_active ? (
+                    <Badge onDark tone="jade">
+                      生效中
+                    </Badge>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            <Pagination
+              page={entryPage}
+              pageSize={entryPageSize}
+              total={entryTotal}
+              onPageChange={onEntryPageChange}
+            />
+          </>
         )}
         <Button variant="on-dark" size="sm" leftIcon={History} onClick={onOpenReplay}>
           看对局回放
@@ -690,9 +744,13 @@ function LadderPanel({ ranks, live, frozen }: LadderPanelProps) {
         <Trophy aria-hidden="true" className="size-4 text-accent" />
         <h2 className="text-sm font-medium text-on-dark">天梯前列</h2>
         {frozen ? (
-          <Badge onDark tone="warning">封榜中</Badge>
+          <Badge onDark tone="warning">
+            封榜中
+          </Badge>
         ) : live ? (
-          <Badge onDark tone="jade">实时</Badge>
+          <Badge onDark tone="jade">
+            实时
+          </Badge>
         ) : null}
       </div>
       {ranks.length === 0 ? (

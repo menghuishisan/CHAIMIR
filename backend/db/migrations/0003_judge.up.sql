@@ -29,12 +29,14 @@ CREATE TABLE IF NOT EXISTS judge_task (
     sandbox_mode SMALLINT NOT NULL CHECK (sandbox_mode IN (1, 2)),
     target_sandbox_ref VARCHAR(64),
     priority SMALLINT NOT NULL DEFAULT 1,
-    status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4, 5, 6, 7)),
+    status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4, 5)),
     retry_count INT NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
     max_retries INT NOT NULL DEFAULT 0 CHECK (max_retries >= 0),
     last_error VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until TIMESTAMPTZ,
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, source_ref, problem_ref),
     FOREIGN KEY (tenant_id, submitter_id) REFERENCES account(tenant_id, id)
@@ -63,12 +65,14 @@ CREATE TABLE IF NOT EXISTS judge_event_outbox (
     task_id BIGINT NOT NULL,
     subject VARCHAR(128) NOT NULL,
     payload JSONB NOT NULL,
-    status SMALLINT NOT NULL CHECK (status IN (1, 2, 3)),
+    status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4)),
     retry_count INT NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
     next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_error VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until TIMESTAMPTZ,
     FOREIGN KEY (tenant_id, task_id) REFERENCES judge_task(tenant_id, id) ON DELETE CASCADE
 );
 
@@ -85,6 +89,8 @@ CREATE TABLE IF NOT EXISTS submission_fingerprint (
 );
 
 CREATE INDEX IF NOT EXISTS idx_judger_status ON judger(status, selftest_status);
+CREATE INDEX IF NOT EXISTS idx_judge_task_lease ON judge_task(status, lease_until) WHERE status = 2;
+CREATE INDEX IF NOT EXISTS idx_judge_event_outbox_lease ON judge_event_outbox(status, lease_until) WHERE status = 2;
 CREATE INDEX IF NOT EXISTS idx_judge_task_queue ON judge_task(tenant_id, status, priority DESC, created_at ASC);
 CREATE INDEX IF NOT EXISTS idx_judge_task_submitter ON judge_task(tenant_id, submitter_id);
 CREATE INDEX IF NOT EXISTS idx_judge_task_owner ON judge_task(tenant_id, source_owner_id, source_ref);

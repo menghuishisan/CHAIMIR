@@ -56,6 +56,8 @@ type GradeLockOutbox struct {
 	LastError  pgtype.Text        `json:"last_error"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken string             `json:"lease_token"`
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
 }
 
 type GradeReview struct {

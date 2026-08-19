@@ -512,8 +512,12 @@ func (a teachingAPI) listCourseAssignments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.ListCourseAssignments(c.Request.Context(), id)
-	httpx.Write(c, out, err)
+	page, size, ok := httpx.Page(c)
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListCourseAssignments(c.Request.Context(), id, page, size)
+	httpx.WritePage(c, out, total, p, s, err)
 }
 
 // getAssignment 读取作业详情。
@@ -718,8 +722,12 @@ func (a teachingAPI) listAnnouncements(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.ListAnnouncements(c.Request.Context(), id)
-	httpx.Write(c, out, err)
+	page, size, ok := httpx.Page(c)
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListAnnouncements(c.Request.Context(), id, page, size)
+	httpx.WritePage(c, out, total, p, s, err)
 }
 
 // pinAnnouncement 设置公告置顶。
@@ -786,8 +794,12 @@ func (a teachingAPI) listGrades(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.ListGrades(c.Request.Context(), id)
-	httpx.Write(c, out, err)
+	page, size, ok := httpx.Page(c)
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListGrades(c.Request.Context(), id, page, size)
+	httpx.WritePage(c, out, total, p, s, err)
 }
 
 // overrideGrade 绑定教师手动调分请求。

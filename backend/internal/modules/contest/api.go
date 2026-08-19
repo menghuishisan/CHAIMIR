@@ -80,6 +80,7 @@ func (a contestAPI) registerStudentRoutes(g gin.IRouter) {
 	g.GET("/submissions/:id", a.getSubmission)
 	g.POST("/contests/:id/battle/entry", a.submitBattleEntry)
 	g.GET("/contests/:id/battle/entries", a.listBattleEntries)
+	g.GET("/contests/:id/battle/replay-window", a.getBattleReplayWindow)
 	g.GET("/matches/:id/replay", a.getBattleReplay)
 	g.POST("/matches/:id/replay/download-grant", a.issueBattleReplayDownloadGrant)
 	g.GET("/my/contest-records", a.myRecords)
@@ -358,8 +359,12 @@ func (a contestAPI) listBattleEntries(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.ListBattleEntries(c.Request.Context(), id)
-	httpx.Write(c, out, err)
+	page, size, ok := httpx.Page(c)
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListBattleEntries(c.Request.Context(), id, page, size)
+	httpx.WritePage(c, out, total, p, s, err)
 }
 
 // listBattleMatches 查询对局历史。
@@ -374,6 +379,20 @@ func (a contestAPI) listBattleMatches(c *gin.Context) {
 	}
 	out, total, p, s, err := a.svc.ListBattleMatches(c.Request.Context(), id, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
+}
+
+// getBattleReplayWindow 返回按完成时间排序的回放时间窗和服务端检查点。
+func (a contestAPI) getBattleReplayWindow(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	page, size, ok := httpx.Page(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetBattleReplayWindow(c.Request.Context(), id, page, size)
+	httpx.Write(c, out, err)
 }
 
 // getBattleReplay 读取回放引用。

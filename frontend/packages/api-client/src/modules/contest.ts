@@ -9,6 +9,7 @@ import type {
   BattleMatch,
   BattleReplayRef,
   BattleReplayDownloadGrant,
+  BattleReplayWindow,
   CheatRecord,
   CheatRecordRequest,
   CheatSuspect,
@@ -45,7 +46,11 @@ export class ContestApi {
   /**
    * 获取竞赛列表。
    */
-  async getContests(params?: { status?: ContestStatus; page?: number; size?: number }): Promise<PaginatedResponse<Contest>> {
+  async getContests(params?: {
+    status?: ContestStatus
+    page?: number
+    size?: number
+  }): Promise<PaginatedResponse<Contest>> {
     return this.client.get('/contest/contests', params)
   }
 
@@ -172,14 +177,24 @@ export class ContestApi {
    * 创建解题赛实操环境。
    */
   async createEnv(contestId: string, problemId: string, data: EnvRequest): Promise<EnvSummary> {
-    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/problems/${encodePathSegment(problemId)}/env`, data)
+    return this.client.post(
+      `/contest/contests/${encodePathSegment(contestId)}/problems/${encodePathSegment(problemId)}/env`,
+      data
+    )
   }
 
   /**
    * 提交解题赛答案或代码引用。
    */
-  async submitSolve(contestId: string, problemId: string, data: ContestSubmitRequest): Promise<ContestSubmission> {
-    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/problems/${encodePathSegment(problemId)}/submit`, data)
+  async submitSolve(
+    contestId: string,
+    problemId: string,
+    data: ContestSubmitRequest
+  ): Promise<ContestSubmission> {
+    return this.client.post(
+      `/contest/contests/${encodePathSegment(contestId)}/problems/${encodePathSegment(problemId)}/submit`,
+      data
+    )
   }
 
   /**
@@ -199,15 +214,38 @@ export class ContestApi {
   /**
    * 查询当前队伍参战历史。
    */
-  async listBattleEntries(contestId: string): Promise<BattleEntry[]> {
-    return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/battle/entries`)
+  async listBattleEntries(
+    contestId: string,
+    params?: { page?: number; size?: number }
+  ): Promise<PaginatedResponse<BattleEntry>> {
+    return this.client.get(
+      `/contest/contests/${encodePathSegment(contestId)}/battle/entries`,
+      params
+    )
   }
 
   /**
    * 查询当前队伍对局列表。
    */
-  async listBattleMatches(contestId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<BattleMatch>> {
-    return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/battle/matches`, params)
+  async listBattleMatches(
+    contestId: string,
+    params?: { page?: number; size?: number }
+  ): Promise<PaginatedResponse<BattleMatch>> {
+    return this.client.get(
+      `/contest/contests/${encodePathSegment(contestId)}/battle/matches`,
+      params
+    )
+  }
+
+  /** 获取回放专用的已完成对局时间窗和服务端检查点。 */
+  async getBattleReplayWindow(
+    contestId: string,
+    params?: { page?: number; size?: number }
+  ): Promise<BattleReplayWindow> {
+    return this.client.get(
+      `/contest/contests/${encodePathSegment(contestId)}/battle/replay-window`,
+      params
+    )
   }
 
   /**
@@ -225,7 +263,10 @@ export class ContestApi {
   /**
    * 获取排行榜。
    */
-  async getLadder(contestId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<LadderRank>> {
+  async getLadder(
+    contestId: string,
+    params?: { page?: number; size?: number }
+  ): Promise<PaginatedResponse<LadderRank>> {
     return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/ladder`, params)
   }
 
@@ -248,16 +289,30 @@ export class ContestApi {
    */
   async listCheatSuspects(
     contestId: string,
-    params: { problem_id: SnowflakeID; code_hash?: string; exclude_source_ref?: string; threshold?: number }
+    params: {
+      problem_id: SnowflakeID
+      code_hash?: string
+      exclude_source_ref?: string
+      threshold?: number
+    }
   ): Promise<CheatSuspect[]> {
-    return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/cheat-suspects`, params)
+    return this.client.get(
+      `/contest/contests/${encodePathSegment(contestId)}/cheat-suspects`,
+      params
+    )
   }
 
   /**
    * 查询违规处理记录。
    */
-  async listCheatRecords(contestId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<CheatRecord>> {
-    return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/cheat-records`, params)
+  async listCheatRecords(
+    contestId: string,
+    params?: { page?: number; size?: number }
+  ): Promise<PaginatedResponse<CheatRecord>> {
+    return this.client.get(
+      `/contest/contests/${encodePathSegment(contestId)}/cheat-records`,
+      params
+    )
   }
 
   /**
@@ -301,7 +356,12 @@ export class ContestApi {
   /**
    * 查询漏洞题草稿。
    */
-  async listVulnProblems(params?: { source_id?: SnowflakeID; status?: VulnProblemStatus; page?: number; size?: number }): Promise<PaginatedResponse<VulnProblem>> {
+  async listVulnProblems(params?: {
+    source_id?: SnowflakeID
+    status?: VulnProblemStatus
+    page?: number
+    size?: number
+  }): Promise<PaginatedResponse<VulnProblem>> {
     return this.client.get('/contest/vuln-problems', params)
   }
 
@@ -317,8 +377,14 @@ export class ContestApi {
   /**
    * 执行漏洞题预验证。
    */
-  async prevalidateVulnProblem(problemId: string, data: VulnPrevalidateRequest): Promise<VulnProblem> {
-    return this.client.post(`/contest/vuln-problems/${encodePathSegment(problemId)}/prevalidate`, data)
+  async prevalidateVulnProblem(
+    problemId: string,
+    data: VulnPrevalidateRequest
+  ): Promise<VulnProblem> {
+    return this.client.post(
+      `/contest/vuln-problems/${encodePathSegment(problemId)}/prevalidate`,
+      data
+    )
   }
 
   /**

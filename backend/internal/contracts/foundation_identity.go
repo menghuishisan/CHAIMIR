@@ -57,7 +57,7 @@ type IdentityService interface {
 	// ListClassStudents 读取指定班级的在校学生摘要,供 M6 按班级批量选课使用。
 	// 班级是组织维度,教师可读(`/org/classes` 就在教师组);而账号目录 `/accounts` 是
 	// 学校管理员能力,故按班级取学生走本契约,不把账号目录放开给业务模块或教师端。
-	ListClassStudents(ctx context.Context, tenantID, classID int64) ([]AccountInfo, error)
+	ListClassStudents(ctx context.Context, tenantID, classID int64, page, size int) ([]AccountInfo, error)
 }
 
 // IdentityTenantReadService 是 M1 对 M9 等聚合层开放的租户只读契约。

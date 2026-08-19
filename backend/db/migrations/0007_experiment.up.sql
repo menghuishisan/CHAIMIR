@@ -104,6 +104,7 @@ CREATE TABLE IF NOT EXISTS experiment_score_outbox (
     instance_id BIGINT NOT NULL,
     student_id BIGINT NOT NULL,
     score NUMERIC(5,2) NOT NULL,
+    score_revision INT NOT NULL CHECK (score_revision > 0),
     trace_id VARCHAR(128) NOT NULL,
     scored_at TIMESTAMPTZ NOT NULL,
     status SMALLINT NOT NULL DEFAULT 1,
@@ -111,9 +112,13 @@ CREATE TABLE IF NOT EXISTS experiment_score_outbox (
     last_error VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until TIMESTAMPTZ,
     CONSTRAINT chk_experiment_score_outbox_status CHECK (status IN (1,2,3,4)),
+    UNIQUE (tenant_id, instance_id, score_revision),
     FOREIGN KEY (tenant_id, instance_id) REFERENCES experiment_instance(tenant_id, id)
 );
+CREATE INDEX IF NOT EXISTS idx_experiment_score_outbox_lease ON experiment_score_outbox(status, lease_until) WHERE status = 2;
 
 CREATE INDEX IF NOT EXISTS idx_experiment_course_status ON experiment(tenant_id, course_id, status) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_experiment_author ON experiment(tenant_id, author_id) WHERE deleted_at IS NULL;

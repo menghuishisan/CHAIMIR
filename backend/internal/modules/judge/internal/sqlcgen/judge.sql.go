@@ -13,9 +13,9 @@ import (
 
 const cancelQueuedJudgeTask = `-- name: CancelQueuedJudgeTask :one
 UPDATE judge_task
-SET status = 7, updated_at = now()
+SET status = 5, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 1
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CancelQueuedJudgeTaskParams struct {
@@ -48,24 +48,94 @@ func (q *Queries) CancelQueuedJudgeTask(ctx context.Context, arg CancelQueuedJud
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
 
+const claimPendingJudgeOutbox = `-- name: ClaimPendingJudgeOutbox :many
+UPDATE judge_event_outbox
+SET status = 2,
+    retry_count = retry_count + 1,
+    updated_at = now(),
+    lease_token = $1,
+    lease_until = $2::timestamptz
+WHERE id IN (
+    SELECT id FROM judge_event_outbox
+    WHERE (((status IN (1, 4) AND next_attempt_at <= now())
+        OR (status = 2 AND lease_until <= $3::timestamptz))
+      AND retry_count < $4::int)
+    ORDER BY next_attempt_at ASC, created_at ASC, id ASC
+    LIMIT $5::int
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until
+`
+
+type ClaimPendingJudgeOutboxParams struct {
+	LeaseToken  string             `json:"lease_token"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	MaxAttempts int32              `json:"max_attempts"`
+	PageLimit   int32              `json:"page_limit"`
+}
+
+func (q *Queries) ClaimPendingJudgeOutbox(ctx context.Context, arg ClaimPendingJudgeOutboxParams) ([]JudgeEventOutbox, error) {
+	rows, err := q.db.Query(ctx, claimPendingJudgeOutbox,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+		arg.StaleBefore,
+		arg.MaxAttempts,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []JudgeEventOutbox{}
+	for rows.Next() {
+		var i JudgeEventOutbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.TaskID,
+			&i.Subject,
+			&i.Payload,
+			&i.Status,
+			&i.RetryCount,
+			&i.NextAttemptAt,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const completeJudgeTask = `-- name: CompleteJudgeTask :one
 UPDATE judge_task
-SET status = 3, last_error = NULL, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CompleteJudgeTaskParams struct {
-	TenantID int64 `json:"tenant_id"`
-	ID       int64 `json:"id"`
+	TenantID   int64  `json:"tenant_id"`
+	ID         int64  `json:"id"`
+	LeaseToken string `json:"lease_token"`
 }
 
 func (q *Queries) CompleteJudgeTask(ctx context.Context, arg CompleteJudgeTaskParams) (JudgeTask, error) {
-	row := q.db.QueryRow(ctx, completeJudgeTask, arg.TenantID, arg.ID)
+	row := q.db.QueryRow(ctx, completeJudgeTask, arg.TenantID, arg.ID, arg.LeaseToken)
 	var i JudgeTask
 	err := row.Scan(
 		&i.ID,
@@ -89,6 +159,51 @@ func (q *Queries) CompleteJudgeTask(ctx context.Context, arg CompleteJudgeTaskPa
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+	)
+	return i, err
+}
+
+const completeManualJudgeTask = `-- name: CompleteManualJudgeTask :one
+UPDATE judge_task
+SET status = 3, last_error = NULL, updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = '' AND lease_until IS NULL
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+`
+
+type CompleteManualJudgeTaskParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) CompleteManualJudgeTask(ctx context.Context, arg CompleteManualJudgeTaskParams) (JudgeTask, error) {
+	row := q.db.QueryRow(ctx, completeManualJudgeTask, arg.TenantID, arg.ID)
+	var i JudgeTask
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.JudgerID,
+		&i.SourceRef,
+		&i.SourceOwnerID,
+		&i.SourceCourseID,
+		&i.SourceScope,
+		&i.SubmitterID,
+		&i.ProblemRef,
+		&i.CodeStorageKey,
+		&i.CodeHash,
+		&i.InputSnapshot,
+		&i.SandboxMode,
+		&i.TargetSandboxRef,
+		&i.Priority,
+		&i.Status,
+		&i.RetryCount,
+		&i.MaxRetries,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
@@ -104,7 +219,7 @@ WHERE judge_task.tenant_id = $1
   -- state 与列表逐字同口径,否则指标带与分页会自相矛盾
   AND ($5::text = ''
        OR ($5::text = 'active' AND judge_task.status IN (1, 2))
-       OR ($5::text = 'abnormal' AND judge_task.status IN (4, 5, 6)))
+       OR ($5::text = 'abnormal' AND judge_task.status = 4))
 `
 
 type CountJudgeTasksParams struct {
@@ -129,9 +244,9 @@ func (q *Queries) CountJudgeTasks(ctx context.Context, arg CountJudgeTasksParams
 }
 
 const createJudgeOutbox = `-- name: CreateJudgeOutbox :one
-INSERT INTO judge_event_outbox (id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at
+INSERT INTO judge_event_outbox (id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CreateJudgeOutboxParams struct {
@@ -163,6 +278,8 @@ func (q *Queries) CreateJudgeOutbox(ctx context.Context, arg CreateJudgeOutboxPa
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
@@ -177,12 +294,12 @@ WITH inserted AS (
     )
     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 0, $17, NULL, now(), now())
     ON CONFLICT (tenant_id, source_ref, problem_ref) DO NOTHING
-    RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+    RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 )
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM inserted
 UNION ALL
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $2 AND source_ref = $4 AND problem_ref = $9 AND NOT EXISTS (SELECT 1 FROM inserted)
 LIMIT 1
@@ -230,6 +347,8 @@ type CreateJudgeTaskRow struct {
 	LastError        pgtype.Text        `json:"last_error"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken       string             `json:"lease_token"`
+	LeaseUntil       pgtype.Timestamptz `json:"lease_until"`
 }
 
 func (q *Queries) CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams) (CreateJudgeTaskRow, error) {
@@ -275,6 +394,8 @@ func (q *Queries) CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
@@ -321,20 +442,39 @@ func (q *Queries) CreateSubmissionFingerprint(ctx context.Context, arg CreateSub
 
 const dequeueJudgeTasks = `-- name: DequeueJudgeTasks :many
 UPDATE judge_task t
-SET status = 2, updated_at = now()
+SET status = 2,
+    retry_count = t.retry_count + CASE WHEN t.status = 2 THEN 1 ELSE 0 END,
+    updated_at = now(),
+    lease_token = $2,
+    lease_until = $3::timestamptz
 WHERE t.id IN (
     SELECT id
     FROM judge_task
     WHERE status = 1
+       OR (status = 2
+           AND lease_until <= $4::timestamptz
+           AND retry_count < max_retries)
     ORDER BY priority DESC, created_at ASC, id ASC
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
-func (q *Queries) DequeueJudgeTasks(ctx context.Context, limit int32) ([]JudgeTask, error) {
-	rows, err := q.db.Query(ctx, dequeueJudgeTasks, limit)
+type DequeueJudgeTasksParams struct {
+	Limit       int32              `json:"limit"`
+	LeaseToken  string             `json:"lease_token"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+}
+
+func (q *Queries) DequeueJudgeTasks(ctx context.Context, arg DequeueJudgeTasksParams) ([]JudgeTask, error) {
+	rows, err := q.db.Query(ctx, dequeueJudgeTasks,
+		arg.Limit,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+		arg.StaleBefore,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -364,6 +504,102 @@ func (q *Queries) DequeueJudgeTasks(ctx context.Context, limit int32) ([]JudgeTa
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const exhaustExpiredJudgeEventOutbox = `-- name: ExhaustExpiredJudgeEventOutbox :execrows
+UPDATE judge_event_outbox
+SET status = 4,
+    last_error = 'event lease expired after retry limit',
+    updated_at = now(),
+    lease_token = '',
+    lease_until = NULL
+WHERE status = 2
+  AND lease_until <= $1::timestamptz
+  AND retry_count >= $2::int
+`
+
+type ExhaustExpiredJudgeEventOutboxParams struct {
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	MaxAttempts int32              `json:"max_attempts"`
+}
+
+func (q *Queries) ExhaustExpiredJudgeEventOutbox(ctx context.Context, arg ExhaustExpiredJudgeEventOutboxParams) (int64, error) {
+	result, err := q.db.Exec(ctx, exhaustExpiredJudgeEventOutbox, arg.StaleBefore, arg.MaxAttempts)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const failExpiredJudgeTasks = `-- name: FailExpiredJudgeTasks :many
+UPDATE judge_task t
+SET status = 4,
+    last_error = 'worker lease expired after retry limit',
+    updated_at = now(),
+    lease_token = '',
+    lease_until = NULL
+WHERE t.id IN (
+    SELECT id
+    FROM judge_task
+    WHERE status = 2
+      AND lease_until <= $1::timestamptz
+      AND retry_count >= max_retries
+    ORDER BY priority DESC, created_at ASC, id ASC
+    LIMIT $2::int
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+`
+
+type FailExpiredJudgeTasksParams struct {
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	PageLimit   int32              `json:"page_limit"`
+}
+
+func (q *Queries) FailExpiredJudgeTasks(ctx context.Context, arg FailExpiredJudgeTasksParams) ([]JudgeTask, error) {
+	rows, err := q.db.Query(ctx, failExpiredJudgeTasks, arg.StaleBefore, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []JudgeTask{}
+	for rows.Next() {
+		var i JudgeTask
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.JudgerID,
+			&i.SourceRef,
+			&i.SourceOwnerID,
+			&i.SourceCourseID,
+			&i.SourceScope,
+			&i.SubmitterID,
+			&i.ProblemRef,
+			&i.CodeStorageKey,
+			&i.CodeHash,
+			&i.InputSnapshot,
+			&i.SandboxMode,
+			&i.TargetSandboxRef,
+			&i.Priority,
+			&i.Status,
+			&i.RetryCount,
+			&i.MaxRetries,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -377,19 +613,25 @@ func (q *Queries) DequeueJudgeTasks(ctx context.Context, limit int32) ([]JudgeTa
 
 const failJudgeTask = `-- name: FailJudgeTask :one
 UPDATE judge_task
-SET status = 5, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type FailJudgeTaskParams struct {
-	TenantID  int64       `json:"tenant_id"`
-	ID        int64       `json:"id"`
-	LastError pgtype.Text `json:"last_error"`
+	TenantID   int64       `json:"tenant_id"`
+	ID         int64       `json:"id"`
+	LastError  pgtype.Text `json:"last_error"`
+	LeaseToken string      `json:"lease_token"`
 }
 
 func (q *Queries) FailJudgeTask(ctx context.Context, arg FailJudgeTaskParams) (JudgeTask, error) {
-	row := q.db.QueryRow(ctx, failJudgeTask, arg.TenantID, arg.ID, arg.LastError)
+	row := q.db.QueryRow(ctx, failJudgeTask,
+		arg.TenantID,
+		arg.ID,
+		arg.LastError,
+		arg.LeaseToken,
+	)
 	var i JudgeTask
 	err := row.Scan(
 		&i.ID,
@@ -413,6 +655,8 @@ func (q *Queries) FailJudgeTask(ctx context.Context, arg FailJudgeTaskParams) (J
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
@@ -460,7 +704,7 @@ func (q *Queries) FindExactFingerprints(ctx context.Context, arg FindExactFinger
 }
 
 const getJudgeTask = `-- name: GetJudgeTask :one
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND id = $2
 `
@@ -495,12 +739,14 @@ func (q *Queries) GetJudgeTask(ctx context.Context, arg GetJudgeTaskParams) (Jud
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
 
 const getJudgeTaskBySourceRef = `-- name: GetJudgeTaskBySourceRef :one
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND source_ref = $2 AND problem_ref = $3
 `
@@ -536,6 +782,8 @@ func (q *Queries) GetJudgeTaskBySourceRef(ctx context.Context, arg GetJudgeTaskB
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
@@ -544,7 +792,7 @@ const getJudgeTaskWithResult = `-- name: GetJudgeTaskWithResult :one
 SELECT
     t.id, t.tenant_id, t.judger_id, t.source_ref, t.source_owner_id, t.source_course_id, t.source_scope,
     t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
-    t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at,
+    t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until,
     COALESCE(r.id, 0)::bigint AS result_id,
     COALESCE(r.version, 0)::int AS result_version,
     COALESCE(r.passed, false)::boolean AS passed,
@@ -593,6 +841,8 @@ type GetJudgeTaskWithResultRow struct {
 	LastError        pgtype.Text        `json:"last_error"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken       string             `json:"lease_token"`
+	LeaseUntil       pgtype.Timestamptz `json:"lease_until"`
 	ResultID         int64              `json:"result_id"`
 	ResultVersion    int32              `json:"result_version"`
 	Passed           bool               `json:"passed"`
@@ -630,6 +880,8 @@ func (q *Queries) GetJudgeTaskWithResult(ctx context.Context, arg GetJudgeTaskWi
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 		&i.ResultID,
 		&i.ResultVersion,
 		&i.Passed,
@@ -776,7 +1028,7 @@ const listJudgeTasks = `-- name: ListJudgeTasks :many
 SELECT
     t.id, t.tenant_id, t.judger_id, t.source_ref, t.source_owner_id, t.source_course_id, t.source_scope,
     t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
-    t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at,
+    t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until,
     COALESCE(r.id, 0)::bigint AS result_id,
     COALESCE(r.version, 0)::int AS result_version,
     COALESCE(r.passed, false)::boolean AS passed,
@@ -800,10 +1052,10 @@ WHERE t.tenant_id = $1
   AND ($2::text = '' OR t.source_ref = $2)
   AND ($3::boolean = false OR (t.status = 2 AND j.type = 6))
   AND ($4::bigint = 0 OR t.source_owner_id = $4 OR t.submitter_id = $4)
-  -- state 取运维分组:active=排队/执行中(1,2),abnormal=超时/失败/出错(4,5,6),空串不筛
+  -- state 取运维分组:active=排队/执行中(1,2),abnormal=失败(4),空串不筛
   AND ($5::text = ''
        OR ($5::text = 'active' AND t.status IN (1, 2))
-       OR ($5::text = 'abnormal' AND t.status IN (4, 5, 6)))
+       OR ($5::text = 'abnormal' AND t.status = 4))
 ORDER BY t.created_at DESC, t.id DESC
 LIMIT $7::int OFFSET $6::int
 `
@@ -840,6 +1092,8 @@ type ListJudgeTasksRow struct {
 	LastError        pgtype.Text        `json:"last_error"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken       string             `json:"lease_token"`
+	LeaseUntil       pgtype.Timestamptz `json:"lease_until"`
 	ResultID         int64              `json:"result_id"`
 	ResultVersion    int32              `json:"result_version"`
 	Passed           bool               `json:"passed"`
@@ -891,6 +1145,8 @@ func (q *Queries) ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) 
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
 			&i.ResultID,
 			&i.ResultVersion,
 			&i.Passed,
@@ -913,7 +1169,7 @@ func (q *Queries) ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) 
 }
 
 const listJudgeTasksBySourceRef = `-- name: ListJudgeTasksBySourceRef :many
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND source_ref = $2
 ORDER BY created_at DESC, id DESC
@@ -955,6 +1211,8 @@ func (q *Queries) ListJudgeTasksBySourceRef(ctx context.Context, arg ListJudgeTa
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -1005,48 +1263,8 @@ func (q *Queries) ListJudgers(ctx context.Context) ([]Judger, error) {
 	return items, nil
 }
 
-const listPendingJudgeOutbox = `-- name: ListPendingJudgeOutbox :many
-SELECT id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at
-FROM judge_event_outbox
-WHERE status IN (1, 3) AND next_attempt_at <= now()
-ORDER BY next_attempt_at ASC, created_at ASC, id ASC
-LIMIT $1
-`
-
-func (q *Queries) ListPendingJudgeOutbox(ctx context.Context, limit int32) ([]JudgeEventOutbox, error) {
-	rows, err := q.db.Query(ctx, listPendingJudgeOutbox, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []JudgeEventOutbox{}
-	for rows.Next() {
-		var i JudgeEventOutbox
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.TaskID,
-			&i.Subject,
-			&i.Payload,
-			&i.Status,
-			&i.RetryCount,
-			&i.NextAttemptAt,
-			&i.LastError,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listRecentJudgeTasksBySubmitterProblem = `-- name: ListRecentJudgeTasksBySubmitterProblem :many
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND submitter_id = $2 AND problem_ref = $3 AND created_at >= now() - make_interval(secs => $4::int)
 ORDER BY created_at DESC, id DESC
@@ -1095,6 +1313,8 @@ func (q *Queries) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, ar
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -1108,23 +1328,28 @@ func (q *Queries) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, ar
 
 const markJudgeOutboxFailed = `-- name: MarkJudgeOutboxFailed :one
 UPDATE judge_event_outbox
-SET status = 3,
-    retry_count = retry_count + 1,
-    next_attempt_at = now() + (LEAST(300, power(2, LEAST(retry_count + 1, 8))::int) || ' seconds')::interval,
+SET status = 4,
+    next_attempt_at = now() + (LEAST(300, power(2, LEAST(retry_count, 8))::int) || ' seconds')::interval,
     last_error = $3,
-    updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at
+    updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkJudgeOutboxFailedParams struct {
-	TenantID  int64       `json:"tenant_id"`
-	ID        int64       `json:"id"`
-	LastError pgtype.Text `json:"last_error"`
+	TenantID   int64       `json:"tenant_id"`
+	ID         int64       `json:"id"`
+	LastError  pgtype.Text `json:"last_error"`
+	LeaseToken string      `json:"lease_token"`
 }
 
 func (q *Queries) MarkJudgeOutboxFailed(ctx context.Context, arg MarkJudgeOutboxFailedParams) (JudgeEventOutbox, error) {
-	row := q.db.QueryRow(ctx, markJudgeOutboxFailed, arg.TenantID, arg.ID, arg.LastError)
+	row := q.db.QueryRow(ctx, markJudgeOutboxFailed,
+		arg.TenantID,
+		arg.ID,
+		arg.LastError,
+		arg.LeaseToken,
+	)
 	var i JudgeEventOutbox
 	err := row.Scan(
 		&i.ID,
@@ -1138,24 +1363,27 @@ func (q *Queries) MarkJudgeOutboxFailed(ctx context.Context, arg MarkJudgeOutbox
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
 
 const markJudgeOutboxPublished = `-- name: MarkJudgeOutboxPublished :one
 UPDATE judge_event_outbox
-SET status = 2, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at
+SET status = 3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
+RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkJudgeOutboxPublishedParams struct {
-	TenantID int64 `json:"tenant_id"`
-	ID       int64 `json:"id"`
+	TenantID   int64  `json:"tenant_id"`
+	ID         int64  `json:"id"`
+	LeaseToken string `json:"lease_token"`
 }
 
 func (q *Queries) MarkJudgeOutboxPublished(ctx context.Context, arg MarkJudgeOutboxPublishedParams) (JudgeEventOutbox, error) {
-	row := q.db.QueryRow(ctx, markJudgeOutboxPublished, arg.TenantID, arg.ID)
+	row := q.db.QueryRow(ctx, markJudgeOutboxPublished, arg.TenantID, arg.ID, arg.LeaseToken)
 	var i JudgeEventOutbox
 	err := row.Scan(
 		&i.ID,
@@ -1169,92 +1397,41 @@ func (q *Queries) MarkJudgeOutboxPublished(ctx context.Context, arg MarkJudgeOut
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
 
-const markJudgeTaskError = `-- name: MarkJudgeTaskError :one
+const renewJudgeTaskLease = `-- name: RenewJudgeTaskLease :execrows
 UPDATE judge_task
-SET status = 6, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SET lease_until = $4::timestamptz, updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND status = 2
+  AND lease_token = $3
+  AND lease_until > now()
 `
 
-type MarkJudgeTaskErrorParams struct {
-	TenantID  int64       `json:"tenant_id"`
-	ID        int64       `json:"id"`
-	LastError pgtype.Text `json:"last_error"`
+type RenewJudgeTaskLeaseParams struct {
+	TenantID   int64              `json:"tenant_id"`
+	ID         int64              `json:"id"`
+	LeaseToken string             `json:"lease_token"`
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
 }
 
-func (q *Queries) MarkJudgeTaskError(ctx context.Context, arg MarkJudgeTaskErrorParams) (JudgeTask, error) {
-	row := q.db.QueryRow(ctx, markJudgeTaskError, arg.TenantID, arg.ID, arg.LastError)
-	var i JudgeTask
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.JudgerID,
-		&i.SourceRef,
-		&i.SourceOwnerID,
-		&i.SourceCourseID,
-		&i.SourceScope,
-		&i.SubmitterID,
-		&i.ProblemRef,
-		&i.CodeStorageKey,
-		&i.CodeHash,
-		&i.InputSnapshot,
-		&i.SandboxMode,
-		&i.TargetSandboxRef,
-		&i.Priority,
-		&i.Status,
-		&i.RetryCount,
-		&i.MaxRetries,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.UpdatedAt,
+// 执行期心跳仅允许当前持有者延长未过期租约,避免长时判题被另一 worker 重领。
+func (q *Queries) RenewJudgeTaskLease(ctx context.Context, arg RenewJudgeTaskLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewJudgeTaskLease,
+		arg.TenantID,
+		arg.ID,
+		arg.LeaseToken,
+		arg.LeaseUntil,
 	)
-	return i, err
-}
-
-const markJudgeTaskTimeout = `-- name: MarkJudgeTaskTimeout :one
-UPDATE judge_task
-SET status = 4, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
-`
-
-type MarkJudgeTaskTimeoutParams struct {
-	TenantID  int64       `json:"tenant_id"`
-	ID        int64       `json:"id"`
-	LastError pgtype.Text `json:"last_error"`
-}
-
-func (q *Queries) MarkJudgeTaskTimeout(ctx context.Context, arg MarkJudgeTaskTimeoutParams) (JudgeTask, error) {
-	row := q.db.QueryRow(ctx, markJudgeTaskTimeout, arg.TenantID, arg.ID, arg.LastError)
-	var i JudgeTask
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.JudgerID,
-		&i.SourceRef,
-		&i.SourceOwnerID,
-		&i.SourceCourseID,
-		&i.SourceScope,
-		&i.SubmitterID,
-		&i.ProblemRef,
-		&i.CodeStorageKey,
-		&i.CodeHash,
-		&i.InputSnapshot,
-		&i.SandboxMode,
-		&i.TargetSandboxRef,
-		&i.Priority,
-		&i.Status,
-		&i.RetryCount,
-		&i.MaxRetries,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const resetJudgeTaskForRejudge = `-- name: ResetJudgeTaskForRejudge :one
@@ -1264,8 +1441,8 @@ SET status = 1,
     input_snapshot = $3,
     last_error = NULL,
     updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND status IN (3, 5)
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+WHERE tenant_id = $1 AND id = $2 AND status IN (3, 4)
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type ResetJudgeTaskForRejudgeParams struct {
@@ -1299,25 +1476,33 @@ func (q *Queries) ResetJudgeTaskForRejudge(ctx context.Context, arg ResetJudgeTa
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
 
 const retryJudgeTask = `-- name: RetryJudgeTask :one
 UPDATE judge_task
-SET status = 1, retry_count = retry_count + 1, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at
+SET status = 1, retry_count = retry_count + 1, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type RetryJudgeTaskParams struct {
-	TenantID  int64       `json:"tenant_id"`
-	ID        int64       `json:"id"`
-	LastError pgtype.Text `json:"last_error"`
+	TenantID   int64       `json:"tenant_id"`
+	ID         int64       `json:"id"`
+	LastError  pgtype.Text `json:"last_error"`
+	LeaseToken string      `json:"lease_token"`
 }
 
 func (q *Queries) RetryJudgeTask(ctx context.Context, arg RetryJudgeTaskParams) (JudgeTask, error) {
-	row := q.db.QueryRow(ctx, retryJudgeTask, arg.TenantID, arg.ID, arg.LastError)
+	row := q.db.QueryRow(ctx, retryJudgeTask,
+		arg.TenantID,
+		arg.ID,
+		arg.LastError,
+		arg.LeaseToken,
+	)
 	var i JudgeTask
 	err := row.Scan(
 		&i.ID,
@@ -1341,6 +1526,8 @@ func (q *Queries) RetryJudgeTask(ctx context.Context, arg RetryJudgeTaskParams) 
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }

@@ -139,9 +139,29 @@ WHERE ($1::smallint = 0 OR result = $1);
 
 -- name: MergeSimValidationReport :one
 UPDATE sim_package_review
-SET preview_report = preview_report || $2,
-    updated_at = now()
-WHERE package_id = $1 AND result = 1
+SET preview_report = preview_report || sqlc.arg(preview_report),
+    updated_at = now(), preview_lease_token = '', preview_lease_until = NULL
+WHERE id = sqlc.arg(review_id) AND package_id = sqlc.arg(package_id) AND result = 1
+  AND preview_lease_token = sqlc.arg(lease_token) AND preview_lease_until > now()
+RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at;
+
+-- name: ReleaseSimPreviewLease :execrows
+-- 基础设施异常不等同于包校验失败:释放仍由本 worker 持有的租约,交给下一轮重试。
+UPDATE sim_package_review
+SET preview_lease_token = '', preview_lease_until = NULL, updated_at = now()
+WHERE id = sqlc.arg(review_id) AND package_id = sqlc.arg(package_id) AND result = 1
+  AND preview_lease_token = sqlc.arg(lease_token) AND preview_lease_until > now();
+
+-- name: ExhaustSimPreviewAttempts :many
+-- worker 在最后一次预览中崩溃时没有机会写报告;租约过期后由下一轮收敛为明确的终态门禁。
+UPDATE sim_package_review
+SET preview_report = preview_report || sqlc.arg(preview_report),
+    preview_lease_token = '', preview_lease_until = NULL, updated_at = now()
+WHERE result = 1
+  AND preview_attempt_count >= sqlc.arg(max_attempts)::int
+  AND NOT (preview_report ? 'determinism_check' AND preview_report ? 'worker_preview')
+  AND preview_lease_until IS NOT NULL
+  AND preview_lease_until <= sqlc.arg(stale_before)::timestamptz
 RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at;
 
 -- name: ClaimSimPackagesForPreview :many
@@ -149,17 +169,32 @@ RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, com
 -- 四项审核门禁中 determinism_check 与 worker_preview 只能由隔离预览产出,
 -- 没有这个认领查询就没有生产者,教师提交的包会永久停在待审(见 docs/04-仿真可视化引擎/06-业务流程与状态机.md §4)。
 -- FOR UPDATE SKIP LOCKED:多副本部署时各副本认领互不重复,也不互相阻塞。
-SELECT p.id, p.code, p.version, p.name, p.category, p.compute, p.scale_limit, p.bundle_key, p.bundle_hash, p.entry,
-       p.backend_adapter, p.backend_config, p.interaction_schema, p.code_trace, p.author_type, p.author_id, p.status,
-       p.created_at, p.updated_at
-FROM sim_package p
-JOIN sim_package_review r ON r.package_id = p.id AND r.result = 1
-WHERE p.status = 2
-  AND p.compute = 2
-  AND NOT (r.preview_report ? 'determinism_check' AND r.preview_report ? 'worker_preview')
-ORDER BY r.created_at ASC, p.id ASC
-LIMIT $1
-FOR UPDATE OF p SKIP LOCKED;
+WITH candidates AS (
+    SELECT r.id
+    FROM sim_package_review r
+    JOIN sim_package p ON p.id = r.package_id
+    WHERE r.result = 1
+      AND p.status = 2
+      AND p.compute = 2
+      AND r.preview_attempt_count < sqlc.arg(max_attempts)::int
+      AND NOT (r.preview_report ? 'determinism_check' AND r.preview_report ? 'worker_preview')
+      AND (r.preview_lease_until IS NULL OR r.preview_lease_until <= sqlc.arg(stale_before)::timestamptz)
+    ORDER BY r.created_at ASC, p.id ASC
+    LIMIT sqlc.arg(page_limit)::int
+    FOR UPDATE OF r SKIP LOCKED
+)
+UPDATE sim_package_review r
+SET preview_lease_token = sqlc.arg(lease_token),
+    preview_lease_until = sqlc.arg(lease_until)::timestamptz,
+    preview_attempt_count = r.preview_attempt_count + 1,
+    updated_at = now()
+FROM candidates c
+JOIN sim_package p ON p.id = r.package_id
+WHERE r.id = c.id
+RETURNING p.id, p.code, p.version, p.name, p.category, p.compute, p.scale_limit, p.bundle_key, p.bundle_hash, p.entry,
+          p.backend_adapter, p.backend_config, p.interaction_schema, p.code_trace, p.author_type, p.author_id, p.status,
+          p.created_at, p.updated_at, r.id AS review_id, r.preview_lease_token, r.preview_lease_until,
+          r.preview_attempt_count;
 
 -- name: CompleteSimReview :one
 UPDATE sim_package_review

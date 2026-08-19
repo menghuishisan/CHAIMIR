@@ -39,7 +39,7 @@ import {
 } from '../../../utils/labels/transfer'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
 import { TRANSFER_ACTIVE_STATUSES } from '../../../utils/transfer'
-import { transferTaskStatusTone } from '../statusPresentation'
+import { transferTaskStatusTone } from '../../../utils/transfer'
 
 /** 通道筛选项:值为空串表示不过滤。 */
 const CHANNEL_FILTERS = [

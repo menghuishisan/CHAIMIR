@@ -393,8 +393,8 @@ export class IdentityApi {
    * 教师挑选学生（如给实验小组分配成员）用这一条；账号目录 `/accounts` 是学校管理员能力，
    * 会带手机号掩码、账号状态与角色，教师端不该经它取人。
    */
-  async listClassStudents(classId: string): Promise<ClassStudent[]> {
-    return this.client.get(`/org/classes/${encodePathSegment(classId)}/students`)
+  async listClassStudents(classId: string, params?: { page?: number; size?: number }): Promise<PaginatedResponse<ClassStudent>> {
+    return this.client.get(`/org/classes/${encodePathSegment(classId)}/students`, params)
   }
 
   /**

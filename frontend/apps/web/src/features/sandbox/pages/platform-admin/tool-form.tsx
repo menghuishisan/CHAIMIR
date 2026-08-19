@@ -8,9 +8,9 @@
 // 故表单按类型分叉,只渲染该类型允许的字段 —— 把四类字段并排摊出来,填错的概率高于填对。
 //
 // 容器声明本身是不定长的编排清单(镜像、端口、探针、挂载),键不可枚举,
-// 用文档编辑器并在本地做结构校验;完整 argv 白名单与超时是可枚举的,做成结构化字段。
+// 命令白名单、组件、端口、服务与路由使用字段级控件编辑，保存时由表单状态组装受控声明。
 
-import { useCallback, useId, useMemo, useState } from 'react'
+import { useCallback, useId, useState } from 'react'
 import {
   SandboxToolKind,
   SANDBOX_BUILTIN_ENDPOINT_TEMPLATE_PREFIX,
@@ -19,10 +19,8 @@ import {
   type SandboxToolResourceSpec,
 } from '@chaimir/api-client'
 import {
-  Badge,
   Button,
   Callout,
-  DescriptionList,
   FormField,
   Input,
   Modal,
@@ -34,52 +32,15 @@ import {
   ModalTitle,
   SegmentedControl,
   Select,
-  Textarea,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import {
-  sandboxToolKindLabel,
-  toolStatusLabel,
-} from '../../../../utils/labels/sandbox'
+import { sandboxToolKindLabel, toolStatusLabel } from '../../../../utils/labels/sandbox'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { SANDBOX_TOOL_KINDS, TOOL_STATUSES } from '../../options'
-import { asRecord } from '../../runtimeSpec'
 
 /** 工具编码规则,与后端 codePattern 一致。 */
 const CODE_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/
-
-/** 命令工具的单容器清单骨架:恰好一个组件,不声明端口。 */
-const COMMAND_COMPONENT_TEMPLATE = `[
-  {
-    "name": "compiler",
-    "image_url": "",
-    "command": ["sleep", "infinity"],
-    "mount_workspace": true
-  }
-]`
-
-/** 网页工具的清单骨架:容器 + 服务 + 代理路由三段都必须有。 */
-const WEB_EMBED_TEMPLATE = `{
-  "components": [
-    {
-      "name": "editor",
-      "image_url": "",
-      "ports": [
-        { "name": "http", "container_port": 8080, "service_port": 8080, "protocol": "TCP" }
-      ],
-      "mount_workspace": true
-    }
-  ],
-  "services": [
-    {
-      "name": "editor",
-      "component": "editor",
-      "ports": [{ "name": "http", "port": 8080, "target_port": "http", "protocol": "TCP" }]
-    }
-  ],
-  "routes": [{ "path_prefix": "/", "service": "editor", "port": "http" }]
-}`
 
 export interface ToolFormModalProps {
   onClose: () => void
@@ -101,40 +62,25 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
   const [status, setStatus] = useState(String(ToolStatus.AVAILABLE))
 
   const [builtinEndpoint, setBuiltinEndpoint] = useState(SANDBOX_BUILTIN_ENDPOINT_TEMPLATE_PREFIX)
-  const [allowedArgvText, setAllowedArgvText] = useState('')
+  const [allowedArgv, setAllowedArgv] = useState<string[][]>([['']])
   const [defaultTimeout, setDefaultTimeout] = useState('30')
   const [maxTimeout, setMaxTimeout] = useState('120')
-  const [componentsText, setComponentsText] = useState(COMMAND_COMPONENT_TEMPLATE)
-  const [webSpecText, setWebSpecText] = useState(WEB_EMBED_TEMPLATE)
+  const [componentName, setComponentName] = useState('compiler')
+  const [componentImage, setComponentImage] = useState('')
+  const [componentCommand, setComponentCommand] = useState<string[]>(['sleep'])
+  const [webComponentName, setWebComponentName] = useState('editor')
+  const [webComponentImage, setWebComponentImage] = useState('')
+  const [webPortName, setWebPortName] = useState('http')
+  const [webContainerPort, setWebContainerPort] = useState('8080')
+  const [webServicePort, setWebServicePort] = useState('8080')
+  const [webServiceName, setWebServiceName] = useState('editor')
+  const [webRoutePrefix, setWebRoutePrefix] = useState('/')
 
   const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
 
   const kindValue = Number(kind) as SandboxToolKind
-
-  const allowedArgv = useMemo(() => {
-    const lines = allowedArgvText
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line !== '')
-    const parsed: string[][] = []
-    for (const line of lines) {
-      try {
-        const value: unknown = JSON.parse(line)
-        if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item.trim() === '')) {
-          return { value: [], error: '每行必须是非空字符串组成的 argv JSON 数组' }
-        }
-        parsed.push(value.map((item) => item.trim()))
-      } catch {
-        return { value: [], error: 'argv 白名单每行都必须是合法 JSON 数组' }
-      }
-    }
-    return { value: parsed, error: null }
-  }, [allowedArgvText])
-
-  const componentsParsed = useMemo(() => parseComponents(componentsText), [componentsText])
-  const webParsed = useMemo(() => parseWebEmbedSpec(webSpecText), [webSpecText])
 
   /** buildResourceSpec 按类型只组装该类型允许的字段,其余一律不带。 */
   const buildResourceSpec = useCallback((): SandboxToolResourceSpec => {
@@ -143,15 +89,61 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
         return { builtin_endpoint: builtinEndpoint.trim() }
       case SandboxToolKind.COMMAND:
         return {
-          components: componentsParsed.components,
+          components: [
+            {
+              name: componentName.trim(),
+              image_url: componentImage.trim(),
+              command: componentCommand.map((item) => item.trim()).filter(Boolean),
+              mount_workspace: true,
+            },
+          ],
           command_policy: {
-            allowed_argv: allowedArgv.value,
+            allowed_argv: allowedArgv.map((argv) =>
+              argv.map((item) => item.trim()).filter(Boolean)
+            ),
             default_timeout_seconds: Number(defaultTimeout),
             max_timeout_seconds: Number(maxTimeout),
           },
         }
       case SandboxToolKind.WEB_EMBED:
-        return webParsed.spec ?? {}
+        return {
+          components: [
+            {
+              name: webComponentName.trim(),
+              image_url: webComponentImage.trim(),
+              ports: [
+                {
+                  name: webPortName.trim(),
+                  container_port: Number(webContainerPort),
+                  service_port: Number(webServicePort),
+                  protocol: 'TCP',
+                },
+              ],
+              mount_workspace: true,
+            },
+          ],
+          services: [
+            {
+              name: webServiceName.trim(),
+              component: webComponentName.trim(),
+              ports: [
+                {
+                  name: webPortName.trim(),
+                  port: Number(webServicePort),
+                  target_port: webPortName.trim(),
+                  protocol: 'TCP',
+                },
+              ],
+            },
+          ],
+          routes: [
+            {
+              path_prefix: webRoutePrefix.trim(),
+              service: webServiceName.trim(),
+              port: webPortName.trim(),
+            },
+          ],
+        }
       default:
         // 终端工具不带任何声明:后端对它禁填组件、入口模板、命令策略与网络规则
         return {}
@@ -159,11 +151,19 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
   }, [
     builtinEndpoint,
     allowedArgv,
-    componentsParsed.components,
+    componentCommand,
+    componentImage,
+    componentName,
     defaultTimeout,
     kindValue,
     maxTimeout,
-    webParsed.spec,
+    webComponentImage,
+    webComponentName,
+    webContainerPort,
+    webPortName,
+    webRoutePrefix,
+    webServiceName,
+    webServicePort,
   ])
 
   /** validate 按类型逐项校验,校验口径与后端 validateToolResourceSpecShape 对齐。 */
@@ -177,6 +177,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
       allowedArgv: null,
       timeout: null,
       components: null,
+      command: null,
       webSpec: null,
     }
 
@@ -191,17 +192,18 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
     if (kindValue === SandboxToolKind.COMMAND) {
       const defaultValue = Number(defaultTimeout)
       const maxValue = Number(maxTimeout)
-      const argvList = allowedArgv.value
+      const argvList = allowedArgv.map((argv) => argv.map((item) => item.trim()).filter(Boolean))
       const keys = argvList.map((argv) => argv.join('\u0000'))
       next.allowedArgv =
-        allowedArgv.error ??
-        (argvList.length === 0
+        argvList.length === 0
           ? '至少写一个完整的 argv 白名单'
-          : argvList.some((argv) => argv.some((item) => item.includes('\u0000')))
-            ? 'argv 参数不能包含控制字符'
-            : new Set(keys).size !== keys.length
-              ? '有重复的 argv 白名单,去掉重复项'
-              : null)
+          : argvList.some((argv) => argv.length === 0)
+            ? '每条白名单至少要有一个命令参数'
+            : argvList.some((argv) => argv.some((item) => item.includes('\u0000')))
+              ? 'argv 参数不能包含控制字符'
+              : new Set(keys).size !== keys.length
+                ? '有重复的 argv 白名单,去掉重复项'
+                : null
       next.timeout =
         !Number.isInteger(defaultValue) ||
         !Number.isInteger(maxValue) ||
@@ -211,11 +213,27 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
           : defaultValue > maxValue
             ? '默认超时不能大于最长超时'
             : null
-      next.components = componentsParsed.error ?? null
+      next.components =
+        componentName.trim() === '' || componentImage.trim() === ''
+          ? '请填写执行环境名称和不可变镜像'
+          : null
+      next.command =
+        componentCommand.length === 0 || componentCommand.some((item) => item.trim() === '')
+          ? '请填写完整的启动命令参数'
+          : null
     }
 
     if (kindValue === SandboxToolKind.WEB_EMBED) {
-      next.webSpec = webParsed.error ?? null
+      next.webSpec =
+        webComponentName.trim() === '' ||
+        webComponentImage.trim() === '' ||
+        webPortName.trim() === '' ||
+        Number(webContainerPort) <= 0 ||
+        Number(webServicePort) <= 0 ||
+        webServiceName.trim() === '' ||
+        !webRoutePrefix.startsWith('/')
+          ? '请完整填写组件、端口、服务和代理路由'
+          : null
     }
 
     setErrors(next)
@@ -224,12 +242,20 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
     builtinEndpoint,
     code,
     allowedArgv,
-    componentsParsed.error,
+    componentCommand,
+    componentImage,
+    componentName,
     defaultTimeout,
     kindValue,
     maxTimeout,
     name,
-    webParsed.error,
+    webComponentImage,
+    webComponentName,
+    webContainerPort,
+    webPortName,
+    webRoutePrefix,
+    webServiceName,
+    webServicePort,
   ])
 
   const submit = useCallback(
@@ -262,7 +288,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
         setSubmitting(false)
       }
     },
-    [buildResourceSpec, code, ecoTags, kindValue, name, onSaved, status, validate],
+    [buildResourceSpec, code, ecoTags, kindValue, name, onSaved, status, validate]
   )
 
   return (
@@ -303,7 +329,12 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
               </FormField>
             </div>
 
-            <FormField label="工具类型" htmlFor={`${fieldId}-kind`} required helper={KIND_HINTS[kindValue]}>
+            <FormField
+              label="工具类型"
+              htmlFor={`${fieldId}-kind`}
+              required
+              helper={KIND_HINTS[kindValue]}
+            >
               <Select
                 id={`${fieldId}-kind`}
                 options={SANDBOX_TOOL_KINDS.map((item) => ({
@@ -367,33 +398,112 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
 
             {kindValue === SandboxToolKind.COMMAND ? (
               <>
-                <FormField
-                  label="允许执行的 argv"
-                  htmlFor={`${fieldId}-argv`}
-                  required
-                  error={errors.allowedArgv}
-                  helper={'每行填写一个完整 JSON argv 数组,例如 ["slither","--checklist"]。只允许逐项完全匹配'}
+                <fieldset
+                  className="flex flex-col gap-2"
+                  aria-describedby={
+                    errors.allowedArgv
+                      ? `${fieldId}-allowed-argv-error`
+                      : `${fieldId}-allowed-argv-help`
+                  }
+                  aria-invalid={errors.allowedArgv ? true : undefined}
                 >
-                  <Textarea
-                    id={`${fieldId}-argv`}
-                    className="font-mono text-sm"
-                    value={allowedArgvText}
-                    placeholder={'["slither","--checklist"]\n["slither","--json"]'}
-                    invalid={Boolean(errors.allowedArgv)}
-                    onChange={(event) => setAllowedArgvText(event.target.value)}
-                  />
-                </FormField>
-
-                {allowedArgv.value.length > 0 ? (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-sm text-ink-sub">将放行:</span>
-                    {allowedArgv.value.map((argv) => (
-                      <Badge key={argv.join('\u0000')} tone="jade">
-                        {JSON.stringify(argv)}
-                      </Badge>
+                  <legend className="text-sm font-medium text-ink">
+                    允许执行的命令
+                    <span aria-hidden="true" className="text-seal">
+                      {' '}
+                      *
+                    </span>
+                    <span className="sr-only">必填</span>
+                  </legend>
+                  {!errors.allowedArgv ? (
+                    <p id={`${fieldId}-allowed-argv-help`} className="text-xs text-ink-sub">
+                      每个参数独立填写;平台只会放行与这些完整参数序列完全一致的命令。
+                    </p>
+                  ) : null}
+                  <div className="flex flex-col gap-2">
+                    {allowedArgv.map((argv, rowIndex) => (
+                      <div key={rowIndex} className="flex flex-wrap items-center gap-2">
+                        {argv.map((item, argIndex) => (
+                          <Input
+                            key={argIndex}
+                            aria-label={`第 ${rowIndex + 1} 条命令的第 ${argIndex + 1} 个参数`}
+                            className="min-w-28 flex-1 font-mono text-sm"
+                            value={item}
+                            placeholder={argIndex === 0 ? '命令' : '参数'}
+                            onChange={(event) =>
+                              setAllowedArgv((rows) =>
+                                rows.map((row, index) =>
+                                  index === rowIndex
+                                    ? row.map((value, position) =>
+                                        position === argIndex ? event.target.value : value
+                                      )
+                                    : row
+                                )
+                              )
+                            }
+                          />
+                        ))}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setAllowedArgv((rows) =>
+                              rows.map((row, index) => (index === rowIndex ? [...row, ''] : row))
+                            )
+                          }
+                        >
+                          添加参数
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={argv.length <= 1}
+                          onClick={() =>
+                            setAllowedArgv((rows) =>
+                              rows.map((row, index) =>
+                                index === rowIndex ? row.slice(0, -1) : row
+                              )
+                            )
+                          }
+                        >
+                          移除参数
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={allowedArgv.length <= 1}
+                          onClick={() =>
+                            setAllowedArgv((rows) => rows.filter((_, index) => index !== rowIndex))
+                          }
+                        >
+                          移除此命令
+                        </Button>
+                      </div>
                     ))}
+                    <div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setAllowedArgv((rows) => [...rows, ['']])}
+                      >
+                        添加允许命令
+                      </Button>
+                    </div>
                   </div>
-                ) : null}
+                  {errors.allowedArgv ? (
+                    <p
+                      id={`${fieldId}-allowed-argv-error`}
+                      role="alert"
+                      className="text-xs text-danger"
+                    >
+                      {errors.allowedArgv}
+                    </p>
+                  ) : null}
+                </fieldset>
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <FormField
@@ -429,77 +539,112 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                   </FormField>
                 </div>
 
-                <FormField
-                  label="执行环境配置"
-                  htmlFor={`${fieldId}-components`}
-                  required
-                  error={errors.components}
-                  helper="恰好一个组件。命令工具不对外暴露端口,也不配代理路由"
-                >
-                  <Textarea
-                    id={`${fieldId}-components`}
-                    className="font-mono text-sm"
-                    value={componentsText}
-                    rows={12}
-                    spellCheck={false}
-                    invalid={Boolean(errors.components)}
-                    onChange={(event) => setComponentsText(event.target.value)}
-                  />
-                </FormField>
-
-                {componentsParsed.components.length === 1 ? (
-                  <DescriptionList
-                    dense
-                    columns={2}
-                    items={[
-                      {
-                        term: '组件名称',
-                        description: readComponentField(componentsParsed.components[0], 'name'),
-                        mono: true,
-                      },
-                      {
-                        term: '镜像',
-                        description:
-                          readComponentField(componentsParsed.components[0], 'image_url') || '未填写',
-                        mono: true,
-                      },
-                    ]}
-                  />
-                ) : null}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField
+                    label="执行组件名称"
+                    htmlFor={`${fieldId}-component-name`}
+                    required
+                    error={errors.components}
+                    helper="命令工具只能有一个不开放端口的执行组件。"
+                  >
+                    <Input
+                      id={`${fieldId}-component-name`}
+                      value={componentName}
+                      invalid={Boolean(errors.components)}
+                      onChange={(event) => setComponentName(event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="执行镜像" htmlFor={`${fieldId}-component-image`} required>
+                    <Input
+                      id={`${fieldId}-component-image`}
+                      className="font-mono text-sm"
+                      value={componentImage}
+                      placeholder="registry.chaimir.io/tool/...@sha256:..."
+                      onChange={(event) => setComponentImage(event.target.value)}
+                    />
+                  </FormField>
+                </div>
+                <CommandArgvEditor
+                  value={componentCommand}
+                  error={errors.command}
+                  onChange={setComponentCommand}
+                />
               </>
             ) : null}
 
             {kindValue === SandboxToolKind.WEB_EMBED ? (
               <>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField
+                    label="网页组件名称"
+                    htmlFor={`${fieldId}-web-component`}
+                    required
+                    error={errors.webSpec}
+                  >
+                    <Input
+                      id={`${fieldId}-web-component`}
+                      value={webComponentName}
+                      invalid={Boolean(errors.webSpec)}
+                      onChange={(event) => setWebComponentName(event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="网页组件镜像" htmlFor={`${fieldId}-web-image`} required>
+                    <Input
+                      id={`${fieldId}-web-image`}
+                      className="font-mono text-sm"
+                      value={webComponentImage}
+                      placeholder="registry.chaimir.io/tool/...@sha256:..."
+                      onChange={(event) => setWebComponentImage(event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="组件端口名称" htmlFor={`${fieldId}-web-port`} required>
+                    <Input
+                      id={`${fieldId}-web-port`}
+                      value={webPortName}
+                      onChange={(event) => setWebPortName(event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="组件端口" htmlFor={`${fieldId}-web-container-port`} required>
+                    <Input
+                      id={`${fieldId}-web-container-port`}
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={webContainerPort}
+                      onChange={(event) => setWebContainerPort(event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="服务名称" htmlFor={`${fieldId}-web-service`} required>
+                    <Input
+                      id={`${fieldId}-web-service`}
+                      value={webServiceName}
+                      onChange={(event) => setWebServiceName(event.target.value)}
+                    />
+                  </FormField>
+                  <FormField label="服务端口" htmlFor={`${fieldId}-web-service-port`} required>
+                    <Input
+                      id={`${fieldId}-web-service-port`}
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={webServicePort}
+                      onChange={(event) => setWebServicePort(event.target.value)}
+                    />
+                  </FormField>
+                </div>
                 <FormField
-                  label="网页工具配置"
-                  htmlFor={`${fieldId}-web-spec`}
+                  label="平台代理路径"
+                  htmlFor={`${fieldId}-web-route`}
                   required
-                  error={errors.webSpec}
-                  helper="组件、服务、代理路由三段都要有:平台按路由把工具页面代理进工作台"
+                  helper="必须以 / 开头,由平台在沙箱工具路径下代理。"
                 >
-                  <Textarea
-                    id={`${fieldId}-web-spec`}
+                  <Input
+                    id={`${fieldId}-web-route`}
                     className="font-mono text-sm"
-                    value={webSpecText}
-                    rows={16}
-                    spellCheck={false}
-                    invalid={Boolean(errors.webSpec)}
-                    onChange={(event) => setWebSpecText(event.target.value)}
+                    value={webRoutePrefix}
+                    onChange={(event) => setWebRoutePrefix(event.target.value)}
                   />
                 </FormField>
-
-                {webParsed.summary ? (
-                  <DescriptionList
-                    dense
-                    columns={3}
-                    items={[
-                      { term: '组件', description: `${webParsed.summary.components} 个` },
-                      { term: '服务', description: `${webParsed.summary.services} 个` },
-                      { term: '代理路由', description: `${webParsed.summary.routes} 条` },
-                    ]}
-                  />
-                ) : null}
               </>
             ) : null}
 
@@ -531,80 +676,69 @@ const KIND_HINTS: Record<SandboxToolKind, string> = {
   [SandboxToolKind.COMMAND]: '在白名单内执行命令,要声明一个执行环境与允许的命令',
 }
 
-/** ParsedComponents 是命令工具容器清单的解析结果。 */
-interface ParsedComponents {
-  components: Record<string, unknown>[]
-  error?: string
-}
+function CommandArgvEditor({
+  value,
+  error,
+  onChange,
+}: {
+  value: string[]
+  error?: string | null
+  onChange: (value: string[]) => void
+}) {
+  const fieldId = useId()
+  const helperId = `${fieldId}-helper`
+  const errorId = `${fieldId}-error`
 
-/**
- * parseComponents 解析命令工具的容器清单。
- * 后端要求恰好一个组件且每个容器有名字,这两条能在本地判定,故在此挡住。
- */
-function parseComponents(text: string): ParsedComponents {
-  const trimmed = text.trim()
-  if (trimmed === '') return { components: [], error: '请填写执行环境配置。' }
-
-  let raw: unknown
-  try {
-    raw = JSON.parse(trimmed)
-  } catch {
-    return { components: [], error: '内容不是合法的声明格式,检查是否漏了逗号或引号。' }
-  }
-  if (!Array.isArray(raw)) return { components: [], error: '执行环境配置格式不正确,请按示例填写多个条目。' }
-  if (raw.length !== 1) {
-    return { components: [], error: '命令工具只能声明一个执行环境。' }
-  }
-  const first = asRecord(raw[0])
-  if (!first || typeof first.name !== 'string' || first.name.trim() === '') {
-    return { components: [], error: '组件要有名字(name)。' }
-  }
-  return { components: [first] }
-}
-
-/** ParsedWebEmbed 是网页工具清单的解析结果。 */
-interface ParsedWebEmbed {
-  spec?: SandboxToolResourceSpec
-  summary?: { components: number; services: number; routes: number }
-  error?: string
-}
-
-/**
- * parseWebEmbedSpec 解析网页工具清单。
- * 后端要求组件、服务、代理路由三段都非空,且不能带命令策略;这几条在本地判定。
- */
-function parseWebEmbedSpec(text: string): ParsedWebEmbed {
-  const trimmed = text.trim()
-  if (trimmed === '') return { error: '请填写网页工具配置。' }
-
-  let raw: unknown
-  try {
-    raw = JSON.parse(trimmed)
-  } catch {
-    return { error: '内容不是合法的声明格式,检查是否漏了逗号或引号。' }
-  }
-  const spec = asRecord(raw)
-  if (!spec) return { error: '清单最外层要是一个对象。' }
-
-  const components = Array.isArray(spec.components) ? spec.components : []
-  const services = Array.isArray(spec.services) ? spec.services : []
-  const routes = Array.isArray(spec.routes) ? spec.routes : []
-
-  if (components.length === 0) return { error: '至少要声明一个组件。' }
-  if (services.length === 0) return { error: '至少要声明一个服务,否则平台无法访问环境端口。' }
-  if (routes.length === 0) return { error: '至少要声明一条代理路由,否则工具页面无法嵌入工作台。' }
-  if (spec.command_policy !== undefined) {
-    return { error: '网页工具不能带命令白名单,那是命令工具的字段。' }
-  }
-
-  return {
-    spec: spec as unknown as SandboxToolResourceSpec,
-    summary: { components: components.length, services: services.length, routes: routes.length },
-  }
-}
-
-/** readComponentField 读容器声明里的字符串字段,用于摘要展示。 */
-function readComponentField(component: Record<string, unknown>, key: 'name' | 'image_url'): string {
-  const value = component[key]
-  return typeof value === 'string' ? value : ''
+  return (
+    <fieldset
+      className="flex flex-col gap-2"
+      aria-describedby={error ? errorId : helperId}
+      aria-invalid={error ? true : undefined}
+    >
+      <legend className="text-sm font-medium text-ink">
+        启动命令
+        <span aria-hidden="true" className="text-seal">
+          {' '}
+          *
+        </span>
+        <span className="sr-only">必填</span>
+      </legend>
+      {error ? (
+        <p id={errorId} role="alert" className="text-xs text-danger">
+          {error}
+        </p>
+      ) : (
+        <p id={helperId} className="text-xs text-ink-sub">
+          每个参数独立填写,不经过 shell。
+        </p>
+      )}
+      {value.map((item, index) => (
+        <div key={`component-argv-${index}`} className="flex items-center gap-2">
+          <Input
+            aria-label={`启动命令第 ${index + 1} 个参数`}
+            className="min-w-0 flex-1 font-mono text-sm"
+            value={item}
+            placeholder={index === 0 ? '命令' : '参数'}
+            onChange={(event) =>
+              onChange(
+                value.map((part, partIndex) => (partIndex === index ? event.target.value : part))
+              )
+            }
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={value.length <= 1}
+            onClick={() => onChange(value.filter((_, partIndex) => partIndex !== index))}
+          >
+            移除
+          </Button>
+        </div>
+      ))}
+      <Button type="button" variant="outline" size="sm" onClick={() => onChange([...value, ''])}>
+        添加参数
+      </Button>
+    </fieldset>
+  )
 }

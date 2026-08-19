@@ -160,11 +160,17 @@ func (s *Service) RunSandboxRecycleOutboxOnce(ctx context.Context) error {
 	if !ok || limit <= 0 || s.cfg.RecycleOutboxStaleMs <= 0 {
 		return apperr.ErrSandboxRecycleEventPublishFailed
 	}
-	staleBefore := timex.Now().Add(-time.Duration(s.cfg.RecycleOutboxStaleMs) * time.Millisecond)
+	now := timex.Now()
+	staleBefore := now
+	leaseUntil := now.Add(time.Duration(s.cfg.RecycleOutboxStaleMs) * time.Millisecond)
 	var items []SandboxRecycleOutbox
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, err = tx.ClaimPendingSandboxRecycleOutbox(ctx, limit, staleBefore)
+		maxAttempts, ok := intx.Int32(s.cfg.RecycleOutboxMaxAttempts)
+		if !ok || maxAttempts <= 0 {
+			return apperr.ErrSandboxRecycleEventPublishFailed
+		}
+		items, err = tx.ClaimPendingSandboxRecycleOutbox(ctx, limit, maxAttempts, staleBefore, leaseUntil)
 		if err != nil {
 			return apperr.ErrSandboxRecycleEventPublishFailed.WithCause(err)
 		}
@@ -172,12 +178,16 @@ func (s *Service) RunSandboxRecycleOutboxOnce(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
+	var firstErr error
 	for _, item := range items {
 		if err := s.publishSandboxRecycleOutboxItem(ctx, item); err != nil {
-			return err
+			logging.ErrorContext(ctx, "sandbox recycle outbox publish failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("sandbox_id", item.SandboxID), slog.Int64("outbox_id", item.ID))
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 	}
-	return nil
+	return firstErr
 }
 
 // publishSandboxRecycleOutboxItem 发布单条回收事件并按结果回写 outbox 状态。
@@ -194,7 +204,7 @@ func (s *Service) publishSandboxRecycleOutboxItem(ctx context.Context, item Sand
 // markSandboxRecycleOutboxPublished 用特权事务标记回收事件投递成功。
 func (s *Service) markSandboxRecycleOutboxPublished(ctx context.Context, item SandboxRecycleOutbox) error {
 	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.MarkSandboxRecycleOutboxPublished(ctx, item.TenantID, item.ID)
+		_, err := tx.MarkSandboxRecycleOutboxPublished(ctx, item.TenantID, item.ID, item.LeaseToken)
 		if err != nil {
 			return apperr.ErrSandboxRecycleEventPublishFailed.WithCause(err)
 		}
@@ -205,7 +215,7 @@ func (s *Service) markSandboxRecycleOutboxPublished(ctx context.Context, item Sa
 // recordSandboxRecycleOutboxFailure 记录回收事件发布失败并等待后台重试。
 func (s *Service) recordSandboxRecycleOutboxFailure(ctx context.Context, item SandboxRecycleOutbox, cause error) {
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.MarkSandboxRecycleOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()))
+		_, err := tx.MarkSandboxRecycleOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()), item.LeaseToken)
 		return err
 	}); err != nil {
 		logging.ErrorContext(ctx, "sandbox recycle outbox failure mark failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("sandbox_id", item.SandboxID), slog.Int64("outbox_id", item.ID))

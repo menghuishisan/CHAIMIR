@@ -57,6 +57,8 @@ type JudgeTask struct {
 	LastError        string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	LeaseToken       string
+	LeaseUntil       time.Time
 }
 
 // JudgeResultDetail 是可解释结果中的一项脱敏详情。
@@ -147,6 +149,8 @@ type JudgeEventOutbox struct {
 	LastError     string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	LeaseToken    string
+	LeaseUntil    time.Time
 }
 
 // ProgressMessage 描述 WebSocket 推送给调用方的用户向进度。

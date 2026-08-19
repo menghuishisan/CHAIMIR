@@ -33,6 +33,7 @@ import { moveCommand, replayMoves } from '../../replayMoves'
 import { narrativeProgress, useSimPlayback } from '../../playback'
 import { SimPlaybackControls } from '../../components/SimPlaybackControls'
 import { SimWorkbenchAside } from '../../components/SimWorkbenchAside'
+import { errorDiagnostics } from '../../../../utils/userFacingError'
 
 /** injectedActionCount 数出快照里已复现的记录动作数(记录动作在 Worker 内是 user 事件)。 */
 function injectedActionCount(snapshot: RuntimeSnapshot): number {
@@ -134,7 +135,10 @@ function ReplayRuntime({ replay }: ReplayRuntimeProps) {
    * 故这里直接采用它的 message;onError 与拒绝是同一失败的两个通知口,写入同一处状态。
    */
   const sendCommand = useCallback((command: Promise<void>) => {
-    void command.catch((commandError: Error) => setError(commandError.message))
+    void command.catch((commandError: unknown) => {
+      console.error('公开推演命令执行失败', { operation: 'sim.public-replay.command', error: errorDiagnostics(commandError) })
+      setError('推演运行失败,请重新打开后重试。')
+    })
   }, [])
 
   // Worker 与这段记录同生共死。这里不做「只装配一次」的守卫:清理已终止上一个 Worker,
@@ -157,7 +161,11 @@ function ReplayRuntime({ replay }: ReplayRuntimeProps) {
       },
       onError: (message) => {
         if (!active) return
-        setError(message)
+        console.error('公开推演运行时报告错误', {
+          operation: 'sim.public-replay.runtime',
+          error: errorDiagnostics(message),
+        })
+        setError('推演运行失败,请重新打开后重试。')
       },
     })
     setClient(runtime)

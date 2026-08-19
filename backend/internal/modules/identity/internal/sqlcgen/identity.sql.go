@@ -201,26 +201,43 @@ func (q *Queries) BatchGetAccounts(ctx context.Context, dollar_1 []int64) ([]Bat
 }
 
 const claimTenantProvisionOutbox = `-- name: ClaimTenantProvisionOutbox :many
-UPDATE tenant_provision_outbox
-SET status = 4, retry_count = retry_count + 1, updated_at = now()
-WHERE id IN (
-    SELECT id
-    FROM tenant_provision_outbox
-    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= $1::timestamptz)
-    ORDER BY created_at ASC, id ASC
-    LIMIT $2
+WITH exhausted AS (
+    UPDATE tenant_provision_outbox AS expired
+    SET status = 4, last_error = 'provision lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
+    WHERE expired.status = 2 AND expired.lease_until <= $3::timestamptz AND expired.retry_count >= $4
+    RETURNING expired.id
+), candidates AS (
+    SELECT o.id
+    FROM tenant_provision_outbox o
+    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= $3::timestamptz))
+      AND o.retry_count < $4
+    ORDER BY o.created_at ASC, o.id ASC
+    LIMIT $5
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at
+UPDATE tenant_provision_outbox AS outbox
+SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = $1, lease_until = $2::timestamptz
+FROM candidates
+WHERE outbox.id = candidates.id
+RETURNING outbox.id, outbox.tenant_id, outbox.deploy_mode, outbox.trace_id, outbox.provisioned_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
 `
 
 type ClaimTenantProvisionOutboxParams struct {
+	LeaseToken  string             `json:"lease_token"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
 	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	MaxAttempts int32              `json:"max_attempts"`
 	PageLimit   int32              `json:"page_limit"`
 }
 
 func (q *Queries) ClaimTenantProvisionOutbox(ctx context.Context, arg ClaimTenantProvisionOutboxParams) ([]TenantProvisionOutbox, error) {
-	rows, err := q.db.Query(ctx, claimTenantProvisionOutbox, arg.StaleBefore, arg.PageLimit)
+	rows, err := q.db.Query(ctx, claimTenantProvisionOutbox,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+		arg.StaleBefore,
+		arg.MaxAttempts,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -239,6 +256,8 @@ func (q *Queries) ClaimTenantProvisionOutbox(ctx context.Context, arg ClaimTenan
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -298,6 +317,29 @@ type CountActiveRoleAccountsParams struct {
 
 func (q *Queries) CountActiveRoleAccounts(ctx context.Context, arg CountActiveRoleAccountsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countActiveRoleAccounts, arg.TenantID, arg.Role)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countClassStudents = `-- name: CountClassStudents :one
+SELECT count(*)
+FROM account a
+JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
+WHERE a.tenant_id = $1
+  AND p.org_id = $2
+  AND a.base_identity = 1
+  AND a.status = 2
+  AND a.deleted_at IS NULL
+`
+
+type CountClassStudentsParams struct {
+	TenantID int64 `json:"tenant_id"`
+	OrgID    int64 `json:"org_id"`
+}
+
+func (q *Queries) CountClassStudents(ctx context.Context, arg CountClassStudentsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countClassStudents, arg.TenantID, arg.OrgID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -938,9 +980,9 @@ func (q *Queries) CreateTenantApplication(ctx context.Context, arg CreateTenantA
 }
 
 const createTenantProvisionOutbox = `-- name: CreateTenantProvisionOutbox :one
-INSERT INTO tenant_provision_outbox (id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at
+INSERT INTO tenant_provision_outbox (id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CreateTenantProvisionOutboxParams struct {
@@ -971,6 +1013,8 @@ func (q *Queries) CreateTenantProvisionOutbox(ctx context.Context, arg CreateTen
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
@@ -1787,11 +1831,14 @@ WHERE a.tenant_id = $1
   AND a.status = 2
   AND a.deleted_at IS NULL
 ORDER BY p.no, a.id
+LIMIT $4::int OFFSET $3::int
 `
 
 type ListClassStudentsParams struct {
-	TenantID int64 `json:"tenant_id"`
-	OrgID    int64 `json:"org_id"`
+	TenantID   int64 `json:"tenant_id"`
+	OrgID      int64 `json:"org_id"`
+	PageOffset int32 `json:"page_offset"`
+	PageLimit  int32 `json:"page_limit"`
 }
 
 type ListClassStudentsRow struct {
@@ -1807,7 +1854,12 @@ type ListClassStudentsRow struct {
 // (学生的 org_id 必为同租户在用班级,由 0001 迁移的触发器保证),故按 org_id 过滤即为按班级。
 // 只回在用学生:停用/归档/注销账号不该被加进新课程。
 func (q *Queries) ListClassStudents(ctx context.Context, arg ListClassStudentsParams) ([]ListClassStudentsRow, error) {
-	rows, err := q.db.Query(ctx, listClassStudents, arg.TenantID, arg.OrgID)
+	rows, err := q.db.Query(ctx, listClassStudents,
+		arg.TenantID,
+		arg.OrgID,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -2254,18 +2306,19 @@ func (q *Queries) MarkSMSCodeUsed(ctx context.Context, arg MarkSMSCodeUsedParams
 
 const markTenantProvisionOutboxFailed = `-- name: MarkTenantProvisionOutboxFailed :one
 UPDATE tenant_provision_outbox
-SET status = 3, last_error = $2, updated_at = now()
-WHERE id = $1
-RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at
+SET status = 4, last_error = $1, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkTenantProvisionOutboxFailedParams struct {
-	ID        int64       `json:"id"`
-	LastError pgtype.Text `json:"last_error"`
+	LastError  pgtype.Text `json:"last_error"`
+	ID         int64       `json:"id"`
+	LeaseToken string      `json:"lease_token"`
 }
 
 func (q *Queries) MarkTenantProvisionOutboxFailed(ctx context.Context, arg MarkTenantProvisionOutboxFailedParams) (TenantProvisionOutbox, error) {
-	row := q.db.QueryRow(ctx, markTenantProvisionOutboxFailed, arg.ID, arg.LastError)
+	row := q.db.QueryRow(ctx, markTenantProvisionOutboxFailed, arg.LastError, arg.ID, arg.LeaseToken)
 	var i TenantProvisionOutbox
 	err := row.Scan(
 		&i.ID,
@@ -2278,19 +2331,26 @@ func (q *Queries) MarkTenantProvisionOutboxFailed(ctx context.Context, arg MarkT
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
 
 const markTenantProvisionOutboxPublished = `-- name: MarkTenantProvisionOutboxPublished :one
 UPDATE tenant_provision_outbox
-SET status = 2, last_error = NULL, updated_at = now()
-WHERE id = $1
-RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at
+SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE id = $1 AND status = 2 AND lease_token = $2 AND lease_until > now()
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
-func (q *Queries) MarkTenantProvisionOutboxPublished(ctx context.Context, id int64) (TenantProvisionOutbox, error) {
-	row := q.db.QueryRow(ctx, markTenantProvisionOutboxPublished, id)
+type MarkTenantProvisionOutboxPublishedParams struct {
+	ID         int64  `json:"id"`
+	LeaseToken string `json:"lease_token"`
+}
+
+func (q *Queries) MarkTenantProvisionOutboxPublished(ctx context.Context, arg MarkTenantProvisionOutboxPublishedParams) (TenantProvisionOutbox, error) {
+	row := q.db.QueryRow(ctx, markTenantProvisionOutboxPublished, arg.ID, arg.LeaseToken)
 	var i TenantProvisionOutbox
 	err := row.Scan(
 		&i.ID,
@@ -2303,6 +2363,8 @@ func (q *Queries) MarkTenantProvisionOutboxPublished(ctx context.Context, id int
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }

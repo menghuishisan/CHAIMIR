@@ -623,9 +623,9 @@
     tags: [identity]
     summary: 班内在校学生名录(编号/姓名/学号)
     operationId: identityListClassStudents
-    x-chaimir-audience: teacher
+    x-chaimir-audience: teacher,school-admin
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/org/classes/archive:
   post:
@@ -706,6 +706,8 @@
       - bearerAuth: []
     parameters:
       - $ref: "#/components/parameters/IDPath"
+      - $ref: "#/components/parameters/PageQuery"
+      - $ref: "#/components/parameters/SizeQuery"
     requestBody:
       $ref: "#/components/requestBodies/ObjectBody"
     responses:

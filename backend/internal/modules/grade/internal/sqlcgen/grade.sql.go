@@ -78,26 +78,43 @@ func (q *Queries) ApproveGradeReview(ctx context.Context, arg ApproveGradeReview
 }
 
 const claimPendingGradeLockOutbox = `-- name: ClaimPendingGradeLockOutbox :many
-UPDATE grade_lock_outbox
-SET status = 4, retry_count = retry_count + 1, updated_at = now()
-WHERE id IN (
-    SELECT id
-    FROM grade_lock_outbox
-    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= $1::timestamptz)
-    ORDER BY created_at ASC, id ASC
-    LIMIT $2
+WITH exhausted AS (
+    UPDATE grade_lock_outbox AS expired
+    SET status = 4, last_error = 'grade lock lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
+    WHERE expired.status = 2 AND expired.lease_until <= $3::timestamptz AND expired.retry_count >= $4
+    RETURNING expired.id
+), candidates AS (
+    SELECT o.id
+    FROM grade_lock_outbox o
+    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= $3::timestamptz))
+      AND o.retry_count < $4
+    ORDER BY o.created_at ASC, o.id ASC
+    LIMIT $5
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at
+UPDATE grade_lock_outbox AS outbox
+SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = $1, lease_until = $2::timestamptz
+FROM candidates
+WHERE outbox.id = candidates.id
+RETURNING outbox.id, outbox.tenant_id, outbox.review_id, outbox.course_id, outbox.locked, outbox.reason, outbox.trace_id, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
 `
 
 type ClaimPendingGradeLockOutboxParams struct {
+	LeaseToken  string             `json:"lease_token"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
 	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	MaxAttempts int32              `json:"max_attempts"`
 	PageLimit   int32              `json:"page_limit"`
 }
 
 func (q *Queries) ClaimPendingGradeLockOutbox(ctx context.Context, arg ClaimPendingGradeLockOutboxParams) ([]GradeLockOutbox, error) {
-	rows, err := q.db.Query(ctx, claimPendingGradeLockOutbox, arg.StaleBefore, arg.PageLimit)
+	rows, err := q.db.Query(ctx, claimPendingGradeLockOutbox,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+		arg.StaleBefore,
+		arg.MaxAttempts,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -118,6 +135,8 @@ func (q *Queries) ClaimPendingGradeLockOutbox(ctx context.Context, arg ClaimPend
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -290,9 +309,9 @@ func (q *Queries) CreateGradeAppeal(ctx context.Context, arg CreateGradeAppealPa
 }
 
 const createGradeLockOutbox = `-- name: CreateGradeLockOutbox :one
-INSERT INTO grade_lock_outbox (id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at
+INSERT INTO grade_lock_outbox (id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 1, 0, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CreateGradeLockOutboxParams struct {
@@ -329,6 +348,8 @@ func (q *Queries) CreateGradeLockOutbox(ctx context.Context, arg CreateGradeLock
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
@@ -1112,19 +1133,25 @@ func (q *Queries) LockSemesterCurrentScope(ctx context.Context, lockKey int64) e
 
 const markGradeLockOutboxFailed = `-- name: MarkGradeLockOutboxFailed :one
 UPDATE grade_lock_outbox
-SET status = 3, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at
+SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
+RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkGradeLockOutboxFailedParams struct {
-	TenantID  int64       `json:"tenant_id"`
-	ID        int64       `json:"id"`
-	LastError pgtype.Text `json:"last_error"`
+	TenantID   int64       `json:"tenant_id"`
+	ID         int64       `json:"id"`
+	LastError  pgtype.Text `json:"last_error"`
+	LeaseToken string      `json:"lease_token"`
 }
 
 func (q *Queries) MarkGradeLockOutboxFailed(ctx context.Context, arg MarkGradeLockOutboxFailedParams) (GradeLockOutbox, error) {
-	row := q.db.QueryRow(ctx, markGradeLockOutboxFailed, arg.TenantID, arg.ID, arg.LastError)
+	row := q.db.QueryRow(ctx, markGradeLockOutboxFailed,
+		arg.TenantID,
+		arg.ID,
+		arg.LastError,
+		arg.LeaseToken,
+	)
 	var i GradeLockOutbox
 	err := row.Scan(
 		&i.ID,
@@ -1139,24 +1166,27 @@ func (q *Queries) MarkGradeLockOutboxFailed(ctx context.Context, arg MarkGradeLo
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
 
 const markGradeLockOutboxPublished = `-- name: MarkGradeLockOutboxPublished :one
 UPDATE grade_lock_outbox
-SET status = 2, last_error = NULL, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at
+SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
+RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkGradeLockOutboxPublishedParams struct {
-	TenantID int64 `json:"tenant_id"`
-	ID       int64 `json:"id"`
+	TenantID   int64  `json:"tenant_id"`
+	ID         int64  `json:"id"`
+	LeaseToken string `json:"lease_token"`
 }
 
 func (q *Queries) MarkGradeLockOutboxPublished(ctx context.Context, arg MarkGradeLockOutboxPublishedParams) (GradeLockOutbox, error) {
-	row := q.db.QueryRow(ctx, markGradeLockOutboxPublished, arg.TenantID, arg.ID)
+	row := q.db.QueryRow(ctx, markGradeLockOutboxPublished, arg.TenantID, arg.ID, arg.LeaseToken)
 	var i GradeLockOutbox
 	err := row.Scan(
 		&i.ID,
@@ -1171,6 +1201,8 @@ func (q *Queries) MarkGradeLockOutboxPublished(ctx context.Context, arg MarkGrad
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }

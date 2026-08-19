@@ -12,26 +12,43 @@ import (
 )
 
 const claimPendingSandboxRecycleOutbox = `-- name: ClaimPendingSandboxRecycleOutbox :many
-UPDATE sandbox_recycle_outbox
-SET status = 2, retry_count = retry_count + 1, updated_at = now()
-WHERE id IN (
-    SELECT id
-    FROM sandbox_recycle_outbox
-    WHERE status IN (1, 4) OR (status = 2 AND updated_at <= $1::timestamptz)
-    ORDER BY created_at ASC, id ASC
-    LIMIT $2
+WITH exhausted AS (
+    UPDATE sandbox_recycle_outbox AS expired
+    SET status = 4, last_error = 'recycle lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
+    WHERE expired.status = 2 AND expired.lease_until <= $3::timestamptz AND expired.retry_count >= $4
+    RETURNING expired.id
+), candidates AS (
+    SELECT o.id
+    FROM sandbox_recycle_outbox o
+    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= $3::timestamptz))
+      AND o.retry_count < $4
+    ORDER BY o.created_at ASC, o.id ASC
+    LIMIT $5
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at
+UPDATE sandbox_recycle_outbox AS outbox
+SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = $1, lease_until = $2::timestamptz
+FROM candidates
+WHERE outbox.id = candidates.id
+RETURNING outbox.id, outbox.tenant_id, outbox.sandbox_id, outbox.source_ref, outbox.owner_account_id, outbox.reason, outbox.trace_id, outbox.recycled_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
 `
 
 type ClaimPendingSandboxRecycleOutboxParams struct {
+	LeaseToken  string             `json:"lease_token"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
 	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	MaxAttempts int32              `json:"max_attempts"`
 	PageLimit   int32              `json:"page_limit"`
 }
 
 func (q *Queries) ClaimPendingSandboxRecycleOutbox(ctx context.Context, arg ClaimPendingSandboxRecycleOutboxParams) ([]SandboxRecycleOutbox, error) {
-	rows, err := q.db.Query(ctx, claimPendingSandboxRecycleOutbox, arg.StaleBefore, arg.PageLimit)
+	rows, err := q.db.Query(ctx, claimPendingSandboxRecycleOutbox,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+		arg.StaleBefore,
+		arg.MaxAttempts,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -53,6 +70,8 @@ func (q *Queries) ClaimPendingSandboxRecycleOutbox(ctx context.Context, arg Clai
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -246,9 +265,9 @@ func (q *Queries) CreateSandboxEvent(ctx context.Context, arg CreateSandboxEvent
 }
 
 const createSandboxRecycleOutbox = `-- name: CreateSandboxRecycleOutbox :one
-INSERT INTO sandbox_recycle_outbox (id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at
+INSERT INTO sandbox_recycle_outbox (id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 0, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CreateSandboxRecycleOutboxParams struct {
@@ -288,6 +307,8 @@ func (q *Queries) CreateSandboxRecycleOutbox(ctx context.Context, arg CreateSand
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
@@ -1236,19 +1257,25 @@ func (q *Queries) MarkSandboxActive(ctx context.Context, arg MarkSandboxActivePa
 
 const markSandboxRecycleOutboxFailed = `-- name: MarkSandboxRecycleOutboxFailed :one
 UPDATE sandbox_recycle_outbox
-SET status = 4, last_error = $3, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at
+SET status = 4, last_error = $1, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $2 AND id = $3 AND status = 2 AND lease_token = $4 AND lease_until > now()
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkSandboxRecycleOutboxFailedParams struct {
-	TenantID  int64       `json:"tenant_id"`
-	ID        int64       `json:"id"`
-	LastError pgtype.Text `json:"last_error"`
+	LastError  pgtype.Text `json:"last_error"`
+	TenantID   int64       `json:"tenant_id"`
+	ID         int64       `json:"id"`
+	LeaseToken string      `json:"lease_token"`
 }
 
 func (q *Queries) MarkSandboxRecycleOutboxFailed(ctx context.Context, arg MarkSandboxRecycleOutboxFailedParams) (SandboxRecycleOutbox, error) {
-	row := q.db.QueryRow(ctx, markSandboxRecycleOutboxFailed, arg.TenantID, arg.ID, arg.LastError)
+	row := q.db.QueryRow(ctx, markSandboxRecycleOutboxFailed,
+		arg.LastError,
+		arg.TenantID,
+		arg.ID,
+		arg.LeaseToken,
+	)
 	var i SandboxRecycleOutbox
 	err := row.Scan(
 		&i.ID,
@@ -1264,24 +1291,27 @@ func (q *Queries) MarkSandboxRecycleOutboxFailed(ctx context.Context, arg MarkSa
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }
 
 const markSandboxRecycleOutboxPublished = `-- name: MarkSandboxRecycleOutboxPublished :one
 UPDATE sandbox_recycle_outbox
-SET status = 3, last_error = NULL, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at
+SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
+RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkSandboxRecycleOutboxPublishedParams struct {
-	TenantID int64 `json:"tenant_id"`
-	ID       int64 `json:"id"`
+	TenantID   int64  `json:"tenant_id"`
+	ID         int64  `json:"id"`
+	LeaseToken string `json:"lease_token"`
 }
 
 func (q *Queries) MarkSandboxRecycleOutboxPublished(ctx context.Context, arg MarkSandboxRecycleOutboxPublishedParams) (SandboxRecycleOutbox, error) {
-	row := q.db.QueryRow(ctx, markSandboxRecycleOutboxPublished, arg.TenantID, arg.ID)
+	row := q.db.QueryRow(ctx, markSandboxRecycleOutboxPublished, arg.TenantID, arg.ID, arg.LeaseToken)
 	var i SandboxRecycleOutbox
 	err := row.Scan(
 		&i.ID,
@@ -1297,6 +1327,8 @@ func (q *Queries) MarkSandboxRecycleOutboxPublished(ctx context.Context, arg Mar
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
 	)
 	return i, err
 }

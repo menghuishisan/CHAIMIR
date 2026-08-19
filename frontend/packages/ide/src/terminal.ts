@@ -6,7 +6,10 @@ import type { MountedTerminal, TerminalMountOptions } from './types'
 /**
  * mountTerminal 动态加载 xterm 并挂载终端，前端只负责渲染和输入转发，不持有后端凭据。
  */
-export async function mountTerminal(container: HTMLElement, options: TerminalMountOptions = {}): Promise<MountedTerminal> {
+export async function mountTerminal(
+  container: HTMLElement,
+  options: TerminalMountOptions = {}
+): Promise<MountedTerminal> {
   const { Terminal } = await import('@xterm/xterm')
   const { FitAddon } = await import('@xterm/addon-fit')
 
@@ -31,12 +34,18 @@ export async function mountTerminal(container: HTMLElement, options: TerminalMou
     const { WebglAddon } = await import('@xterm/addon-webgl')
     const webglAddon = new WebglAddon()
     terminal.loadAddon(webglAddon)
-  } catch {
+  } catch (error) {
     // WebGL 不可用时回退到 xterm 默认渲染器。
+    console.warn('终端增强渲染不可用,已回退到标准渲染器', {
+      kind: error instanceof Error ? error.name : typeof error,
+    })
   }
 
   // 等容器完成首次绘制后再适配终端尺寸。
-  setTimeout(() => fitAddon.fit(), 10)
+  let disposed = false
+  const initialFitTimer = setTimeout(() => {
+    if (!disposed) fitAddon.fit()
+  }, 10)
   if (options.initialText) {
     terminal.write(options.initialText)
   }
@@ -50,6 +59,8 @@ export async function mountTerminal(container: HTMLElement, options: TerminalMou
     focus: () => terminal.focus(),
     resize: () => fitAddon.fit(),
     dispose: () => {
+      disposed = true
+      clearTimeout(initialFitTimer)
       dataSubscription.dispose()
       terminal.dispose()
     },

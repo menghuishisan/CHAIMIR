@@ -13,10 +13,17 @@ import (
 type Querier interface {
 	AccountTeamIDs(ctx context.Context, arg AccountTeamIDsParams) ([]int64, error)
 	AddTeamMember(ctx context.Context, arg AddTeamMemberParams) (TeamMember, error)
-	ClaimAutoArchiveContestsAcrossTenants(ctx context.Context, limit int32) ([]Contest, error)
-	ClaimPendingBattleMatchesAcrossTenants(ctx context.Context, limit int32) ([]BattleMatch, error)
+	// 归档只在没有待执行/执行中对局时取得租约;状态改为已结束后不再接受新对局。
+	ClaimAutoArchiveContestsAcrossTenants(ctx context.Context, arg ClaimAutoArchiveContestsAcrossTenantsParams) ([]ClaimAutoArchiveContestsAcrossTenantsRow, error)
+	// 已结束竞赛的人工归档和自动归档共用同一租约栅栏,避免并发生成不同最终快照。
+	ClaimManualArchiveContest(ctx context.Context, arg ClaimManualArchiveContestParams) (ClaimManualArchiveContestRow, error)
+	ClaimPendingBattleMatchesAcrossTenants(ctx context.Context, arg ClaimPendingBattleMatchesAcrossTenantsParams) ([]BattleMatch, error)
+	CompleteAutoArchiveContest(ctx context.Context, arg CompleteAutoArchiveContestParams) (int64, error)
 	ContestStats(ctx context.Context, tenantID int64) (ContestStatsRow, error)
+	CountBattleEntriesForTeam(ctx context.Context, arg CountBattleEntriesForTeamParams) (int64, error)
 	CountBattleMatchesForTeam(ctx context.Context, arg CountBattleMatchesForTeamParams) (int64, error)
+	CountBattleReplayCompletedForTeam(ctx context.Context, arg CountBattleReplayCompletedForTeamParams) (int64, error)
+	CountBattleReplayPendingForTeam(ctx context.Context, arg CountBattleReplayPendingForTeamParams) (int64, error)
 	CountCheatRecords(ctx context.Context, arg CountCheatRecordsParams) (int64, error)
 	CountContests(ctx context.Context, arg CountContestsParams) (int64, error)
 	CountLadder(ctx context.Context, arg CountLadderParams) (int64, error)
@@ -32,12 +39,16 @@ type Querier interface {
 	CreateSolveSubmission(ctx context.Context, arg CreateSolveSubmissionParams) (SolveSubmission, error)
 	CreateTeam(ctx context.Context, arg CreateTeamParams) (Team, error)
 	DeactivateBattleEntries(ctx context.Context, arg DeactivateBattleEntriesParams) error
-	FailBattleMatch(ctx context.Context, arg FailBattleMatchParams) (BattleMatch, error)
+	// 仅处理尚未提交 M3 的启动租约;已持有 judge_task_ref 的对局由 M3 生命周期收敛。
+	ExhaustUnstartedBattleMatches(ctx context.Context, arg ExhaustUnstartedBattleMatchesParams) ([]BattleMatch, error)
+	FailBattleMatchByJudgeTask(ctx context.Context, arg FailBattleMatchByJudgeTaskParams) (BattleMatch, error)
+	FailBattleMatchStart(ctx context.Context, arg FailBattleMatchStartParams) (BattleMatch, error)
 	FinalizeVulnProblem(ctx context.Context, arg FinalizeVulnProblemParams) (VulnProblem, error)
 	FinishBattleMatch(ctx context.Context, arg FinishBattleMatchParams) (BattleMatch, error)
 	GetBattleEntry(ctx context.Context, arg GetBattleEntryParams) (BattleEntry, error)
 	GetBattleMatch(ctx context.Context, arg GetBattleMatchParams) (BattleMatch, error)
 	GetBattleMatchByJudgeTask(ctx context.Context, arg GetBattleMatchByJudgeTaskParams) (BattleMatch, error)
+	GetBattleReplayCheckpointForTeam(ctx context.Context, arg GetBattleReplayCheckpointForTeamParams) (GetBattleReplayCheckpointForTeamRow, error)
 	GetContest(ctx context.Context, arg GetContestParams) (Contest, error)
 	GetContestProblem(ctx context.Context, arg GetContestProblemParams) (ContestProblem, error)
 	GetLadderByTeam(ctx context.Context, arg GetLadderByTeamParams) (GetLadderByTeamRow, error)
@@ -55,6 +66,8 @@ type Querier interface {
 	// 师生同一查询按视角过滤:传 team_id 只回该队参与的对局(学生视角),
 	// 传 0 回本赛事全部对局(组织者监控视角)。不为教师另开一条同义查询。
 	ListBattleMatchesForTeam(ctx context.Context, arg ListBattleMatchesForTeamParams) ([]BattleMatch, error)
+	// 回放专用时间窗只读取已完成对局,并由服务端携带本队视角和当时生效的参战物。
+	ListBattleReplayMatchesForTeam(ctx context.Context, arg ListBattleReplayMatchesForTeamParams) ([]ListBattleReplayMatchesForTeamRow, error)
 	ListCheatRecords(ctx context.Context, arg ListCheatRecordsParams) ([]CheatRecord, error)
 	ListContestProblems(ctx context.Context, arg ListContestProblemsParams) ([]ContestProblem, error)
 	ListContests(ctx context.Context, arg ListContestsParams) ([]Contest, error)
@@ -73,6 +86,8 @@ type Querier interface {
 	RecentFailedSolveCount(ctx context.Context, arg RecentFailedSolveCountParams) (int64, error)
 	RecentSolveCount(ctx context.Context, arg RecentSolveCountParams) (int64, error)
 	RefreshContestRanks(ctx context.Context, arg RefreshContestRanksParams) error
+	// 启动沙箱和提交判题期间仅由当前 token 续租,避免长时准备被其他 worker 重领。
+	RenewBattleMatchStartLease(ctx context.Context, arg RenewBattleMatchStartLeaseParams) (int64, error)
 	SetContestStatus(ctx context.Context, arg SetContestStatusParams) (Contest, error)
 	SetVulnProblemPrevalidate(ctx context.Context, arg SetVulnProblemPrevalidateParams) (VulnProblem, error)
 	StartBattleMatch(ctx context.Context, arg StartBattleMatchParams) (BattleMatch, error)

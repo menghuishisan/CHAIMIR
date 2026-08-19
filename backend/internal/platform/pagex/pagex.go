@@ -32,6 +32,9 @@ func Normalize(page, size int) (int, int) {
 	return page, size
 }
 
+// MaximumSize 返回平台统一单页上限,供内部批处理复用同一分页口径。
+func MaximumSize() int { return maxSize }
+
 // Int32 将规范化分页参数安全收窄为 sqlc 使用的 int32 类型。
 func Int32(page, size int) (int32, int32) {
 	page, size = Normalize(page, size)

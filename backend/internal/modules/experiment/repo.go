@@ -13,6 +13,7 @@ import (
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -49,7 +50,7 @@ type TxStore interface {
 	UpdateInstanceResources(context.Context, int64, int64, []SandboxRef, []SimSessionRef, int16) (ExperimentInstance, error)
 	SetInstanceStatus(context.Context, int64, int64, int16) (ExperimentInstance, error)
 	FinishInstance(context.Context, int64, int64, float64) (ExperimentInstance, error)
-	UpdateInstanceScore(context.Context, int64, int64, float64) (ExperimentInstance, error)
+	UpdateInstanceScoreIfChanged(context.Context, int64, int64, float64) (ExperimentInstance, bool, error)
 	TouchInstance(context.Context, int64, int64) (ExperimentInstance, error)
 	ClaimRecyclableInstances(context.Context, int, int, int32) ([]ExperimentInstance, error)
 	ListLiveInstancesByCourse(context.Context, int64, int64) ([]ExperimentInstance, error)
@@ -64,9 +65,9 @@ type TxStore interface {
 	SumScores(context.Context, int64, int64) (float64, error)
 	Stats(context.Context, int64, int64) (ExperimentStatsSnapshot, error)
 	CreateExperimentScoreOutbox(context.Context, int64, ExperimentInstance, string, time.Time) (ExperimentScoreOutbox, error)
-	ClaimPendingExperimentScoreOutbox(context.Context, int32, time.Time) ([]ExperimentScoreOutbox, error)
-	MarkExperimentScoreOutboxPublished(context.Context, int64, int64) (ExperimentScoreOutbox, error)
-	MarkExperimentScoreOutboxFailed(context.Context, int64, int64, string) (ExperimentScoreOutbox, error)
+	ClaimPendingExperimentScoreOutbox(context.Context, int32, int32, time.Time, time.Time) ([]ExperimentScoreOutbox, error)
+	MarkExperimentScoreOutboxPublished(context.Context, int64, int64, string) (ExperimentScoreOutbox, error)
+	MarkExperimentScoreOutboxFailed(context.Context, int64, int64, string, string) (ExperimentScoreOutbox, error)
 }
 
 type store struct{ database *db.DB }
@@ -357,13 +358,20 @@ func (tx *txStore) FinishInstance(ctx context.Context, tenantID, id int64, score
 	return instanceFromFinishRow(row)
 }
 
-// UpdateInstanceScore 只刷新已完成实例的分数,不改变生命周期状态。
-func (tx *txStore) UpdateInstanceScore(ctx context.Context, tenantID, id int64, score float64) (ExperimentInstance, error) {
-	row, err := tx.q.UpdateExperimentInstanceScore(ctx, sqlcgen.UpdateExperimentInstanceScoreParams{TenantID: tenantID, ID: id, Column3: fmt.Sprintf("%.2f", score)})
-	if err != nil {
-		return ExperimentInstance{}, apperr.ErrExperimentScoreInvalid.WithCause(err)
+// UpdateInstanceScoreIfChanged 仅在总分变化时保存,避免至少一次事件重投产生重复得分事件。
+func (tx *txStore) UpdateInstanceScoreIfChanged(ctx context.Context, tenantID, id int64, score float64) (ExperimentInstance, bool, error) {
+	row, err := tx.q.UpdateExperimentInstanceScoreIfChanged(ctx, sqlcgen.UpdateExperimentInstanceScoreIfChangedParams{TenantID: tenantID, ID: id, Column3: fmt.Sprintf("%.2f", score)})
+	if db.IsNoRows(err) {
+		return ExperimentInstance{}, false, nil
 	}
-	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	if err != nil {
+		return ExperimentInstance{}, false, apperr.ErrExperimentScoreInvalid.WithCause(err)
+	}
+	item, err := instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	if err != nil {
+		return ExperimentInstance{}, false, err
+	}
+	return item, true, nil
 }
 
 // TouchInstance 刷新实例活跃时间。
@@ -538,8 +546,12 @@ func (tx *txStore) CreateExperimentScoreOutbox(ctx context.Context, id int64, in
 }
 
 // ClaimPendingExperimentScoreOutbox 跨租户领取待发布、失败待重试或卡住超时的得分事件。
-func (tx *txStore) ClaimPendingExperimentScoreOutbox(ctx context.Context, limit int32, staleBefore time.Time) ([]ExperimentScoreOutbox, error) {
-	rows, err := tx.q.ClaimPendingExperimentScoreOutbox(ctx, sqlcgen.ClaimPendingExperimentScoreOutboxParams{StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit})
+func (tx *txStore) ClaimPendingExperimentScoreOutbox(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time) ([]ExperimentScoreOutbox, error) {
+	leaseToken, err := pkgcrypto.RandomToken(48)
+	if err != nil {
+		return nil, apperr.ErrExperimentEventFailed.WithCause(err)
+	}
+	rows, err := tx.q.ClaimPendingExperimentScoreOutbox(ctx, sqlcgen.ClaimPendingExperimentScoreOutboxParams{LeaseToken: leaseToken, LeaseUntil: timex.RequiredTimestamptz(leaseUntil), StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit, MaxAttempts: maxAttempts})
 	if err != nil {
 		return nil, apperr.ErrExperimentEventFailed.WithCause(err)
 	}
@@ -555,8 +567,8 @@ func (tx *txStore) ClaimPendingExperimentScoreOutbox(ctx context.Context, limit 
 }
 
 // MarkExperimentScoreOutboxPublished 标记得分事件投递成功。
-func (tx *txStore) MarkExperimentScoreOutboxPublished(ctx context.Context, tenantID, id int64) (ExperimentScoreOutbox, error) {
-	row, err := tx.q.MarkExperimentScoreOutboxPublished(ctx, sqlcgen.MarkExperimentScoreOutboxPublishedParams{TenantID: tenantID, ID: id})
+func (tx *txStore) MarkExperimentScoreOutboxPublished(ctx context.Context, tenantID, id int64, leaseToken string) (ExperimentScoreOutbox, error) {
+	row, err := tx.q.MarkExperimentScoreOutboxPublished(ctx, sqlcgen.MarkExperimentScoreOutboxPublishedParams{TenantID: tenantID, ID: id, LeaseToken: leaseToken})
 	if err != nil {
 		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
 	}
@@ -564,8 +576,8 @@ func (tx *txStore) MarkExperimentScoreOutboxPublished(ctx context.Context, tenan
 }
 
 // MarkExperimentScoreOutboxFailed 标记得分事件投递失败并保留脱敏原因。
-func (tx *txStore) MarkExperimentScoreOutboxFailed(ctx context.Context, tenantID, id int64, reason string) (ExperimentScoreOutbox, error) {
-	row, err := tx.q.MarkExperimentScoreOutboxFailed(ctx, sqlcgen.MarkExperimentScoreOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason)})
+func (tx *txStore) MarkExperimentScoreOutboxFailed(ctx context.Context, tenantID, id int64, reason, leaseToken string) (ExperimentScoreOutbox, error) {
+	row, err := tx.q.MarkExperimentScoreOutboxFailed(ctx, sqlcgen.MarkExperimentScoreOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason), LeaseToken: leaseToken})
 	if err != nil {
 		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
 	}

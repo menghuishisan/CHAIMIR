@@ -424,40 +424,45 @@ func (s *Service) cloneChaptersAndLessons(ctx context.Context, tx TxStore, sourc
 // cloneAssignments 复制作业壳和题目引用,不复制任何提交或成绩数据。
 func (s *Service) cloneAssignments(ctx context.Context, tx TxStore, source Course, targetTenantID, targetCourseID int64, chapterMap map[int64]int64) error {
 	// publishedOnly 传 false:克隆要带上草稿作业,克隆结果本身也统一落草稿态
-	assignments, err := tx.ListAssignmentsByCourse(ctx, source.TenantID, source.ID, false)
-	if err != nil {
-		return err
-	}
-	for _, assignment := range assignments {
-		targetChapterID := int64(0)
-		if assignment.ChapterID > 0 {
-			targetChapterID = chapterMap[assignment.ChapterID]
-			if targetChapterID == 0 {
-				return apperr.ErrTeachingAssignmentInvalid
+	for page := 1; ; page++ {
+		assignments, total, err := tx.ListAssignmentsByCourse(ctx, source.TenantID, source.ID, false, page, pagex.MaximumSize())
+		if err != nil {
+			return err
+		}
+		for _, assignment := range assignments {
+			targetChapterID := int64(0)
+			if assignment.ChapterID > 0 {
+				targetChapterID = chapterMap[assignment.ChapterID]
+				if targetChapterID == 0 {
+					return apperr.ErrTeachingAssignmentInvalid
+				}
+			}
+			latePenalty, err := jsonx.CloneObjectStrict(assignment.LatePenalty)
+			if err != nil {
+				return err
+			}
+			clonedAssignment, err := tx.CreateAssignment(ctx, Assignment{ID: s.ids.Generate(), TenantID: targetTenantID, CourseID: targetCourseID, Title: assignment.Title, ChapterID: targetChapterID, DueAt: assignment.DueAt, MaxAttempts: assignment.MaxAttempts, LatePolicy: assignment.LatePolicy, LatePenalty: latePenalty, Status: AssignmentStatusDraft})
+			if err != nil {
+				return err
+			}
+			items, err := tx.ListAssignmentItems(ctx, source.TenantID, assignment.ID)
+			if err != nil {
+				return err
+			}
+			clonedItems := make([]AssignmentItem, 0, len(items))
+			for _, item := range items {
+				clonedItems = append(clonedItems, AssignmentItem{ID: s.ids.Generate(), TenantID: targetTenantID, AssignmentID: clonedAssignment.ID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: item.JudgerCode})
+			}
+			persistedItems, err := tx.ReplaceAssignmentItems(ctx, targetTenantID, clonedAssignment.ID, clonedItems)
+			if err != nil {
+				return err
+			}
+			if err := s.refreshAssignmentUsageRefs(ctx, targetTenantID, clonedAssignment, persistedItems); err != nil {
+				return err
 			}
 		}
-		latePenalty, err := jsonx.CloneObjectStrict(assignment.LatePenalty)
-		if err != nil {
-			return err
-		}
-		clonedAssignment, err := tx.CreateAssignment(ctx, Assignment{ID: s.ids.Generate(), TenantID: targetTenantID, CourseID: targetCourseID, Title: assignment.Title, ChapterID: targetChapterID, DueAt: assignment.DueAt, MaxAttempts: assignment.MaxAttempts, LatePolicy: assignment.LatePolicy, LatePenalty: latePenalty, Status: AssignmentStatusDraft})
-		if err != nil {
-			return err
-		}
-		items, err := tx.ListAssignmentItems(ctx, source.TenantID, assignment.ID)
-		if err != nil {
-			return err
-		}
-		clonedItems := make([]AssignmentItem, 0, len(items))
-		for _, item := range items {
-			clonedItems = append(clonedItems, AssignmentItem{ID: s.ids.Generate(), TenantID: targetTenantID, AssignmentID: clonedAssignment.ID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: item.JudgerCode})
-		}
-		persistedItems, err := tx.ReplaceAssignmentItems(ctx, targetTenantID, clonedAssignment.ID, clonedItems)
-		if err != nil {
-			return err
-		}
-		if err := s.refreshAssignmentUsageRefs(ctx, targetTenantID, clonedAssignment, persistedItems); err != nil {
-			return err
+		if int64(page*pagex.MaximumSize()) >= total || len(assignments) == 0 {
+			break
 		}
 	}
 	return nil

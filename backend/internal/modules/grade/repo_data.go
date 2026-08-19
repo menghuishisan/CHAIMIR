@@ -12,6 +12,7 @@ import (
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 )
 
 // CreateLevelConfig 创建等级映射配置。
@@ -248,8 +249,12 @@ func (t *txStore) CreateGradeLockOutbox(ctx context.Context, id int64, review Re
 }
 
 // ClaimPendingGradeLockOutbox 跨租户领取待发布、失败待重试或卡住超时的锁定事件。
-func (t *txStore) ClaimPendingGradeLockOutbox(ctx context.Context, limit int32, staleBefore time.Time) ([]GradeLockOutbox, error) {
-	rows, err := t.q.ClaimPendingGradeLockOutbox(ctx, sqlcgen.ClaimPendingGradeLockOutboxParams{StaleBefore: timex.Timestamptz(staleBefore), PageLimit: limit})
+func (t *txStore) ClaimPendingGradeLockOutbox(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time) ([]GradeLockOutbox, error) {
+	leaseToken, err := pkgcrypto.RandomToken(48)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := t.q.ClaimPendingGradeLockOutbox(ctx, sqlcgen.ClaimPendingGradeLockOutboxParams{LeaseToken: leaseToken, LeaseUntil: timex.Timestamptz(leaseUntil), StaleBefore: timex.Timestamptz(staleBefore), PageLimit: limit, MaxAttempts: maxAttempts})
 	if err != nil {
 		return nil, err
 	}
@@ -261,8 +266,8 @@ func (t *txStore) ClaimPendingGradeLockOutbox(ctx context.Context, limit int32, 
 }
 
 // MarkGradeLockOutboxPublished 标记锁定事件发布成功。
-func (t *txStore) MarkGradeLockOutboxPublished(ctx context.Context, tenantID, id int64) (GradeLockOutbox, error) {
-	row, err := t.q.MarkGradeLockOutboxPublished(ctx, sqlcgen.MarkGradeLockOutboxPublishedParams{TenantID: tenantID, ID: id})
+func (t *txStore) MarkGradeLockOutboxPublished(ctx context.Context, tenantID, id int64, leaseToken string) (GradeLockOutbox, error) {
+	row, err := t.q.MarkGradeLockOutboxPublished(ctx, sqlcgen.MarkGradeLockOutboxPublishedParams{TenantID: tenantID, ID: id, LeaseToken: leaseToken})
 	if err != nil {
 		return GradeLockOutbox{}, err
 	}
@@ -270,8 +275,8 @@ func (t *txStore) MarkGradeLockOutboxPublished(ctx context.Context, tenantID, id
 }
 
 // MarkGradeLockOutboxFailed 标记锁定事件发布失败并保留脱敏原因。
-func (t *txStore) MarkGradeLockOutboxFailed(ctx context.Context, tenantID, id int64, reason string) (GradeLockOutbox, error) {
-	row, err := t.q.MarkGradeLockOutboxFailed(ctx, sqlcgen.MarkGradeLockOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason)})
+func (t *txStore) MarkGradeLockOutboxFailed(ctx context.Context, tenantID, id int64, reason, leaseToken string) (GradeLockOutbox, error) {
+	row, err := t.q.MarkGradeLockOutboxFailed(ctx, sqlcgen.MarkGradeLockOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason), LeaseToken: leaseToken})
 	if err != nil {
 		return GradeLockOutbox{}, err
 	}
@@ -498,7 +503,7 @@ func reviewDTO(row sqlcgen.GradeReview) ReviewDTO {
 
 // gradeLockOutbox 转换成绩锁事件 outbox 行。
 func gradeLockOutbox(row sqlcgen.GradeLockOutbox) GradeLockOutbox {
-	return GradeLockOutbox{ID: row.ID, TenantID: row.TenantID, ReviewID: row.ReviewID, CourseID: row.CourseID, Locked: row.Locked, Reason: row.Reason, TraceID: row.TraceID, Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), UpdatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.UpdatedAt))}
+	return GradeLockOutbox{ID: row.ID, TenantID: row.TenantID, ReviewID: row.ReviewID, CourseID: row.CourseID, Locked: row.Locked, Reason: row.Reason, TraceID: row.TraceID, Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), UpdatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.UpdatedAt)), LeaseToken: row.LeaseToken, LeaseUntil: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.LeaseUntil))}
 }
 
 // semesterGradeSummary 转换学期成绩聚合行。

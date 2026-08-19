@@ -109,32 +109,87 @@ func (q *Queries) ArchiveSimSessionsBySourceRef(ctx context.Context, arg Archive
 }
 
 const claimSimPackagesForPreview = `-- name: ClaimSimPackagesForPreview :many
-SELECT p.id, p.code, p.version, p.name, p.category, p.compute, p.scale_limit, p.bundle_key, p.bundle_hash, p.entry,
-       p.backend_adapter, p.backend_config, p.interaction_schema, p.code_trace, p.author_type, p.author_id, p.status,
-       p.created_at, p.updated_at
-FROM sim_package p
-JOIN sim_package_review r ON r.package_id = p.id AND r.result = 1
-WHERE p.status = 2
-  AND p.compute = 2
-  AND NOT (r.preview_report ? 'determinism_check' AND r.preview_report ? 'worker_preview')
-ORDER BY r.created_at ASC, p.id ASC
-LIMIT $1
-FOR UPDATE OF p SKIP LOCKED
+WITH candidates AS (
+    SELECT r.id
+    FROM sim_package_review r
+    JOIN sim_package p ON p.id = r.package_id
+    WHERE r.result = 1
+      AND p.status = 2
+      AND p.compute = 2
+      AND r.preview_attempt_count < $3::int
+      AND NOT (r.preview_report ? 'determinism_check' AND r.preview_report ? 'worker_preview')
+      AND (r.preview_lease_until IS NULL OR r.preview_lease_until <= $4::timestamptz)
+    ORDER BY r.created_at ASC, p.id ASC
+    LIMIT $5::int
+    FOR UPDATE OF r SKIP LOCKED
+)
+UPDATE sim_package_review r
+SET preview_lease_token = $1,
+    preview_lease_until = $2::timestamptz,
+    preview_attempt_count = r.preview_attempt_count + 1,
+    updated_at = now()
+FROM candidates c
+JOIN sim_package p ON p.id = r.package_id
+WHERE r.id = c.id
+RETURNING p.id, p.code, p.version, p.name, p.category, p.compute, p.scale_limit, p.bundle_key, p.bundle_hash, p.entry,
+          p.backend_adapter, p.backend_config, p.interaction_schema, p.code_trace, p.author_type, p.author_id, p.status,
+          p.created_at, p.updated_at, r.id AS review_id, r.preview_lease_token, r.preview_lease_until,
+          r.preview_attempt_count
 `
+
+type ClaimSimPackagesForPreviewParams struct {
+	LeaseToken  string             `json:"lease_token"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
+	MaxAttempts int32              `json:"max_attempts"`
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	PageLimit   int32              `json:"page_limit"`
+}
+
+type ClaimSimPackagesForPreviewRow struct {
+	ID                  int64              `json:"id"`
+	Code                string             `json:"code"`
+	Version             string             `json:"version"`
+	Name                string             `json:"name"`
+	Category            string             `json:"category"`
+	Compute             int16              `json:"compute"`
+	ScaleLimit          []byte             `json:"scale_limit"`
+	BundleKey           string             `json:"bundle_key"`
+	BundleHash          string             `json:"bundle_hash"`
+	Entry               pgtype.Text        `json:"entry"`
+	BackendAdapter      pgtype.Text        `json:"backend_adapter"`
+	BackendConfig       []byte             `json:"backend_config"`
+	InteractionSchema   []byte             `json:"interaction_schema"`
+	CodeTrace           []byte             `json:"code_trace"`
+	AuthorType          int16              `json:"author_type"`
+	AuthorID            pgtype.Int8        `json:"author_id"`
+	Status              int16              `json:"status"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ReviewID            int64              `json:"review_id"`
+	PreviewLeaseToken   string             `json:"preview_lease_token"`
+	PreviewLeaseUntil   pgtype.Timestamptz `json:"preview_lease_until"`
+	PreviewAttemptCount int32              `json:"preview_attempt_count"`
+}
 
 // 认领待隔离预览的包:审核中、且报告里两项动态校验都还没有结论。
 // 四项审核门禁中 determinism_check 与 worker_preview 只能由隔离预览产出,
 // 没有这个认领查询就没有生产者,教师提交的包会永久停在待审(见 docs/04-仿真可视化引擎/06-业务流程与状态机.md §4)。
 // FOR UPDATE SKIP LOCKED:多副本部署时各副本认领互不重复,也不互相阻塞。
-func (q *Queries) ClaimSimPackagesForPreview(ctx context.Context, limit int32) ([]SimPackage, error) {
-	rows, err := q.db.Query(ctx, claimSimPackagesForPreview, limit)
+func (q *Queries) ClaimSimPackagesForPreview(ctx context.Context, arg ClaimSimPackagesForPreviewParams) ([]ClaimSimPackagesForPreviewRow, error) {
+	rows, err := q.db.Query(ctx, claimSimPackagesForPreview,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+		arg.MaxAttempts,
+		arg.StaleBefore,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []SimPackage{}
+	items := []ClaimSimPackagesForPreviewRow{}
 	for rows.Next() {
-		var i SimPackage
+		var i ClaimSimPackagesForPreviewRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Code,
@@ -155,6 +210,10 @@ func (q *Queries) ClaimSimPackagesForPreview(ctx context.Context, limit int32) (
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ReviewID,
+			&i.PreviewLeaseToken,
+			&i.PreviewLeaseUntil,
+			&i.PreviewAttemptCount,
 		); err != nil {
 			return nil, err
 		}
@@ -183,14 +242,26 @@ type CompleteSimReviewParams struct {
 	Comment    pgtype.Text `json:"comment"`
 }
 
-func (q *Queries) CompleteSimReview(ctx context.Context, arg CompleteSimReviewParams) (SimPackageReview, error) {
+type CompleteSimReviewRow struct {
+	ID            int64              `json:"id"`
+	PackageID     int64              `json:"package_id"`
+	SubmitterID   int64              `json:"submitter_id"`
+	PreviewReport []byte             `json:"preview_report"`
+	ReviewerID    pgtype.Int8        `json:"reviewer_id"`
+	Result        int16              `json:"result"`
+	Comment       pgtype.Text        `json:"comment"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) CompleteSimReview(ctx context.Context, arg CompleteSimReviewParams) (CompleteSimReviewRow, error) {
 	row := q.db.QueryRow(ctx, completeSimReview,
 		arg.ID,
 		arg.Result,
 		arg.ReviewerID,
 		arg.Comment,
 	)
-	var i SimPackageReview
+	var i CompleteSimReviewRow
 	err := row.Scan(
 		&i.ID,
 		&i.PackageID,
@@ -390,14 +461,26 @@ type CreateSimPackageReviewParams struct {
 	PreviewReport []byte `json:"preview_report"`
 }
 
-func (q *Queries) CreateSimPackageReview(ctx context.Context, arg CreateSimPackageReviewParams) (SimPackageReview, error) {
+type CreateSimPackageReviewRow struct {
+	ID            int64              `json:"id"`
+	PackageID     int64              `json:"package_id"`
+	SubmitterID   int64              `json:"submitter_id"`
+	PreviewReport []byte             `json:"preview_report"`
+	ReviewerID    pgtype.Int8        `json:"reviewer_id"`
+	Result        int16              `json:"result"`
+	Comment       pgtype.Text        `json:"comment"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) CreateSimPackageReview(ctx context.Context, arg CreateSimPackageReviewParams) (CreateSimPackageReviewRow, error) {
 	row := q.db.QueryRow(ctx, createSimPackageReview,
 		arg.ID,
 		arg.PackageID,
 		arg.SubmitterID,
 		arg.PreviewReport,
 	)
-	var i SimPackageReview
+	var i CreateSimPackageReviewRow
 	err := row.Scan(
 		&i.ID,
 		&i.PackageID,
@@ -498,6 +581,67 @@ func (q *Queries) CreateSimShare(ctx context.Context, arg CreateSimShareParams) 
 	return i, err
 }
 
+const exhaustSimPreviewAttempts = `-- name: ExhaustSimPreviewAttempts :many
+UPDATE sim_package_review
+SET preview_report = preview_report || $1,
+    preview_lease_token = '', preview_lease_until = NULL, updated_at = now()
+WHERE result = 1
+  AND preview_attempt_count >= $2::int
+  AND NOT (preview_report ? 'determinism_check' AND preview_report ? 'worker_preview')
+  AND preview_lease_until IS NOT NULL
+  AND preview_lease_until <= $3::timestamptz
+RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at
+`
+
+type ExhaustSimPreviewAttemptsParams struct {
+	PreviewReport []byte             `json:"preview_report"`
+	MaxAttempts   int32              `json:"max_attempts"`
+	StaleBefore   pgtype.Timestamptz `json:"stale_before"`
+}
+
+type ExhaustSimPreviewAttemptsRow struct {
+	ID            int64              `json:"id"`
+	PackageID     int64              `json:"package_id"`
+	SubmitterID   int64              `json:"submitter_id"`
+	PreviewReport []byte             `json:"preview_report"`
+	ReviewerID    pgtype.Int8        `json:"reviewer_id"`
+	Result        int16              `json:"result"`
+	Comment       pgtype.Text        `json:"comment"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+// worker 在最后一次预览中崩溃时没有机会写报告;租约过期后由下一轮收敛为明确的终态门禁。
+func (q *Queries) ExhaustSimPreviewAttempts(ctx context.Context, arg ExhaustSimPreviewAttemptsParams) ([]ExhaustSimPreviewAttemptsRow, error) {
+	rows, err := q.db.Query(ctx, exhaustSimPreviewAttempts, arg.PreviewReport, arg.MaxAttempts, arg.StaleBefore)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ExhaustSimPreviewAttemptsRow{}
+	for rows.Next() {
+		var i ExhaustSimPreviewAttemptsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.PackageID,
+			&i.SubmitterID,
+			&i.PreviewReport,
+			&i.ReviewerID,
+			&i.Result,
+			&i.Comment,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getLastSimAction = `-- name: GetLastSimAction :one
 SELECT id, tenant_id, session_id, seq, at_tick, event_type, payload, created_at
 FROM sim_action_log
@@ -535,9 +679,21 @@ ORDER BY created_at DESC, id DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLatestSimReviewForPackage(ctx context.Context, packageID int64) (SimPackageReview, error) {
+type GetLatestSimReviewForPackageRow struct {
+	ID            int64              `json:"id"`
+	PackageID     int64              `json:"package_id"`
+	SubmitterID   int64              `json:"submitter_id"`
+	PreviewReport []byte             `json:"preview_report"`
+	ReviewerID    pgtype.Int8        `json:"reviewer_id"`
+	Result        int16              `json:"result"`
+	Comment       pgtype.Text        `json:"comment"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetLatestSimReviewForPackage(ctx context.Context, packageID int64) (GetLatestSimReviewForPackageRow, error) {
 	row := q.db.QueryRow(ctx, getLatestSimReviewForPackage, packageID)
-	var i SimPackageReview
+	var i GetLatestSimReviewForPackageRow
 	err := row.Scan(
 		&i.ID,
 		&i.PackageID,
@@ -659,9 +815,21 @@ FROM sim_package_review
 WHERE id = $1
 `
 
-func (q *Queries) GetSimReviewByID(ctx context.Context, id int64) (SimPackageReview, error) {
+type GetSimReviewByIDRow struct {
+	ID            int64              `json:"id"`
+	PackageID     int64              `json:"package_id"`
+	SubmitterID   int64              `json:"submitter_id"`
+	PreviewReport []byte             `json:"preview_report"`
+	ReviewerID    pgtype.Int8        `json:"reviewer_id"`
+	Result        int16              `json:"result"`
+	Comment       pgtype.Text        `json:"comment"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetSimReviewByID(ctx context.Context, id int64) (GetSimReviewByIDRow, error) {
 	row := q.db.QueryRow(ctx, getSimReviewByID, id)
-	var i SimPackageReview
+	var i GetSimReviewByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.PackageID,
@@ -1029,20 +1197,40 @@ func (q *Queries) ListSimReviews(ctx context.Context, arg ListSimReviewsParams) 
 
 const mergeSimValidationReport = `-- name: MergeSimValidationReport :one
 UPDATE sim_package_review
-SET preview_report = preview_report || $2,
-    updated_at = now()
-WHERE package_id = $1 AND result = 1
+SET preview_report = preview_report || $1,
+    updated_at = now(), preview_lease_token = '', preview_lease_until = NULL
+WHERE id = $2 AND package_id = $3 AND result = 1
+  AND preview_lease_token = $4 AND preview_lease_until > now()
 RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at
 `
 
 type MergeSimValidationReportParams struct {
-	PackageID     int64  `json:"package_id"`
 	PreviewReport []byte `json:"preview_report"`
+	ReviewID      int64  `json:"review_id"`
+	PackageID     int64  `json:"package_id"`
+	LeaseToken    string `json:"lease_token"`
 }
 
-func (q *Queries) MergeSimValidationReport(ctx context.Context, arg MergeSimValidationReportParams) (SimPackageReview, error) {
-	row := q.db.QueryRow(ctx, mergeSimValidationReport, arg.PackageID, arg.PreviewReport)
-	var i SimPackageReview
+type MergeSimValidationReportRow struct {
+	ID            int64              `json:"id"`
+	PackageID     int64              `json:"package_id"`
+	SubmitterID   int64              `json:"submitter_id"`
+	PreviewReport []byte             `json:"preview_report"`
+	ReviewerID    pgtype.Int8        `json:"reviewer_id"`
+	Result        int16              `json:"result"`
+	Comment       pgtype.Text        `json:"comment"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) MergeSimValidationReport(ctx context.Context, arg MergeSimValidationReportParams) (MergeSimValidationReportRow, error) {
+	row := q.db.QueryRow(ctx, mergeSimValidationReport,
+		arg.PreviewReport,
+		arg.ReviewID,
+		arg.PackageID,
+		arg.LeaseToken,
+	)
+	var i MergeSimValidationReportRow
 	err := row.Scan(
 		&i.ID,
 		&i.PackageID,
@@ -1055,6 +1243,28 @@ func (q *Queries) MergeSimValidationReport(ctx context.Context, arg MergeSimVali
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const releaseSimPreviewLease = `-- name: ReleaseSimPreviewLease :execrows
+UPDATE sim_package_review
+SET preview_lease_token = '', preview_lease_until = NULL, updated_at = now()
+WHERE id = $1 AND package_id = $2 AND result = 1
+  AND preview_lease_token = $3 AND preview_lease_until > now()
+`
+
+type ReleaseSimPreviewLeaseParams struct {
+	ReviewID   int64  `json:"review_id"`
+	PackageID  int64  `json:"package_id"`
+	LeaseToken string `json:"lease_token"`
+}
+
+// 基础设施异常不等同于包校验失败:释放仍由本 worker 持有的租约,交给下一轮重试。
+func (q *Queries) ReleaseSimPreviewLease(ctx context.Context, arg ReleaseSimPreviewLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseSimPreviewLease, arg.ReviewID, arg.PackageID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateSimPackageDraft = `-- name: UpdateSimPackageDraft :one

@@ -145,7 +145,7 @@ func experimentScoreOutbox(row sqlcgen.ExperimentScoreOutbox) (ExperimentScoreOu
 	if err != nil {
 		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
 	}
-	return ExperimentScoreOutbox{ID: row.ID, TenantID: row.TenantID, ExperimentID: row.ExperimentID, InstanceID: row.InstanceID, StudentID: row.StudentID, Score: score, TraceID: row.TraceID, ScoredAt: timex.FromTimestamptz(row.ScoredAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}, nil
+	return ExperimentScoreOutbox{ID: row.ID, TenantID: row.TenantID, ExperimentID: row.ExperimentID, InstanceID: row.InstanceID, StudentID: row.StudentID, Score: score, ScoreRevision: row.ScoreRevision, TraceID: row.TraceID, ScoredAt: timex.FromTimestamptz(row.ScoredAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt), LeaseToken: row.LeaseToken, LeaseUntil: timex.FromTimestamptz(row.LeaseUntil)}, nil
 }
 
 // decodeComponentConfig 解析组件 JSON,空值按空组件处理。

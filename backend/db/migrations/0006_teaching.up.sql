@@ -138,13 +138,15 @@ CREATE TABLE IF NOT EXISTS submission_judge_outbox (
     code_hash VARCHAR(128) NOT NULL,
     extra_input JSONB NOT NULL DEFAULT '{}'::jsonb,
     source_ref VARCHAR(96) NOT NULL,
-    status SMALLINT NOT NULL CHECK (status IN (1, 2, 3)),
+    status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4)),
     retry_count INT NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
     last_error TEXT,
     score INT,
     completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until TIMESTAMPTZ,
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, submission_id, assignment_item_id),
     UNIQUE (tenant_id, source_ref),
@@ -155,6 +157,7 @@ CREATE TABLE IF NOT EXISTS submission_judge_outbox (
     FOREIGN KEY (tenant_id, source_course_id) REFERENCES course(tenant_id, id),
     FOREIGN KEY (tenant_id, student_id) REFERENCES account(tenant_id, id)
 );
+CREATE INDEX IF NOT EXISTS idx_submission_judge_outbox_lease ON submission_judge_outbox(status, lease_until) WHERE status = 2;
 
 CREATE TABLE IF NOT EXISTS submission_draft (
     id BIGINT PRIMARY KEY,
@@ -282,10 +285,13 @@ CREATE TABLE IF NOT EXISTS teaching_grade_event_outbox (
     last_error VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until TIMESTAMPTZ,
     CONSTRAINT chk_teaching_grade_event_outbox_status CHECK (status IN (1,2,3,4)),
     FOREIGN KEY (tenant_id, course_id) REFERENCES course(tenant_id, id),
     FOREIGN KEY (tenant_id, student_id) REFERENCES account(tenant_id, id)
 );
+CREATE INDEX IF NOT EXISTS idx_teaching_grade_event_outbox_lease ON teaching_grade_event_outbox(status, lease_until) WHERE status = 2;
 
 CREATE INDEX IF NOT EXISTS idx_course_teacher_status ON course(tenant_id, teacher_id, status) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_course_status ON course(tenant_id, status) WHERE deleted_at IS NULL;

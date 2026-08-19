@@ -89,45 +89,66 @@ func (q *Queries) AddTeamMember(ctx context.Context, arg AddTeamMemberParams) (T
 }
 
 const claimAutoArchiveContestsAcrossTenants = `-- name: ClaimAutoArchiveContestsAcrossTenants :many
-UPDATE contest
-SET status = 5, updated_at = now()
-WHERE id IN (
-    SELECT id FROM contest
-    WHERE status IN (3, 4) AND end_at <= now() AND deleted_at IS NULL
-    ORDER BY end_at ASC
-    LIMIT $1
-    FOR UPDATE SKIP LOCKED
+WITH candidates AS (
+    SELECT c.id
+    FROM contest c
+    WHERE c.deleted_at IS NULL
+      AND ((c.status IN (3, 4) AND c.end_at <= now())
+        OR (c.status = 5 AND (c.archive_lease_until IS NULL OR c.archive_lease_until <= $3::timestamptz)))
+      AND NOT EXISTS (
+          SELECT 1 FROM battle_match m
+          WHERE m.tenant_id = c.tenant_id AND m.contest_id = c.id AND m.status IN (1, 2)
+      )
+    ORDER BY c.end_at ASC
+    LIMIT $4::int
+    FOR UPDATE OF c SKIP LOCKED
 )
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+UPDATE contest c
+SET status = 5,
+    archive_lease_token = $1,
+    archive_lease_until = $2::timestamptz,
+    updated_at = now()
+FROM candidates x
+WHERE c.id = x.id
+RETURNING c.id, c.tenant_id, c.created_at, c.archive_lease_token, c.archive_lease_until
 `
 
-func (q *Queries) ClaimAutoArchiveContestsAcrossTenants(ctx context.Context, limit int32) ([]Contest, error) {
-	rows, err := q.db.Query(ctx, claimAutoArchiveContestsAcrossTenants, limit)
+type ClaimAutoArchiveContestsAcrossTenantsParams struct {
+	LeaseToken  string             `json:"lease_token"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	PageLimit   int32              `json:"page_limit"`
+}
+
+type ClaimAutoArchiveContestsAcrossTenantsRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	ArchiveLeaseToken string             `json:"archive_lease_token"`
+	ArchiveLeaseUntil pgtype.Timestamptz `json:"archive_lease_until"`
+}
+
+// 归档只在没有待执行/执行中对局时取得租约;状态改为已结束后不再接受新对局。
+func (q *Queries) ClaimAutoArchiveContestsAcrossTenants(ctx context.Context, arg ClaimAutoArchiveContestsAcrossTenantsParams) ([]ClaimAutoArchiveContestsAcrossTenantsRow, error) {
+	rows, err := q.db.Query(ctx, claimAutoArchiveContestsAcrossTenants,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+		arg.StaleBefore,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Contest{}
+	items := []ClaimAutoArchiveContestsAcrossTenantsRow{}
 	for rows.Next() {
-		var i Contest
+		var i ClaimAutoArchiveContestsAcrossTenantsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
-			&i.OrganizerID,
-			&i.Name,
-			&i.Mode,
-			&i.MatchMode,
-			&i.TeamMode,
-			&i.SignupStart,
-			&i.SignupEnd,
-			&i.StartAt,
-			&i.EndAt,
-			&i.FreezeMinutes,
-			&i.Rules,
-			&i.Status,
 			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
+			&i.ArchiveLeaseToken,
+			&i.ArchiveLeaseUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -139,21 +160,92 @@ func (q *Queries) ClaimAutoArchiveContestsAcrossTenants(ctx context.Context, lim
 	return items, nil
 }
 
-const claimPendingBattleMatchesAcrossTenants = `-- name: ClaimPendingBattleMatchesAcrossTenants :many
-UPDATE battle_match
-SET status = 2
-WHERE id IN (
-    SELECT id FROM battle_match
-    WHERE status = 1
-    ORDER BY matched_at ASC
-    LIMIT $1
-    FOR UPDATE SKIP LOCKED
-)
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+const claimManualArchiveContest = `-- name: ClaimManualArchiveContest :one
+UPDATE contest AS c
+SET archive_lease_token = $1, archive_lease_until = $2::timestamptz, updated_at = now()
+WHERE c.tenant_id = $3 AND c.id = $4 AND c.status = 5
+  AND (c.archive_lease_until IS NULL OR c.archive_lease_until <= $5::timestamptz)
+  AND NOT EXISTS (
+      SELECT 1 FROM battle_match m
+      WHERE m.tenant_id = c.tenant_id AND m.contest_id = c.id AND m.status IN (1, 2)
+  )
+RETURNING c.id, c.tenant_id, c.created_at, c.archive_lease_token, c.archive_lease_until
 `
 
-func (q *Queries) ClaimPendingBattleMatchesAcrossTenants(ctx context.Context, limit int32) ([]BattleMatch, error) {
-	rows, err := q.db.Query(ctx, claimPendingBattleMatchesAcrossTenants, limit)
+type ClaimManualArchiveContestParams struct {
+	LeaseToken  string             `json:"lease_token"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
+	TenantID    int64              `json:"tenant_id"`
+	ContestID   int64              `json:"contest_id"`
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+}
+
+type ClaimManualArchiveContestRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	ArchiveLeaseToken string             `json:"archive_lease_token"`
+	ArchiveLeaseUntil pgtype.Timestamptz `json:"archive_lease_until"`
+}
+
+// 已结束竞赛的人工归档和自动归档共用同一租约栅栏,避免并发生成不同最终快照。
+func (q *Queries) ClaimManualArchiveContest(ctx context.Context, arg ClaimManualArchiveContestParams) (ClaimManualArchiveContestRow, error) {
+	row := q.db.QueryRow(ctx, claimManualArchiveContest,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+		arg.TenantID,
+		arg.ContestID,
+		arg.StaleBefore,
+	)
+	var i ClaimManualArchiveContestRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.CreatedAt,
+		&i.ArchiveLeaseToken,
+		&i.ArchiveLeaseUntil,
+	)
+	return i, err
+}
+
+const claimPendingBattleMatchesAcrossTenants = `-- name: ClaimPendingBattleMatchesAcrossTenants :many
+WITH candidates AS (
+    SELECT m.id
+    FROM battle_match m
+    JOIN contest c ON c.tenant_id = m.tenant_id AND c.id = m.contest_id
+    WHERE (c.status IN (3, 4) OR (c.status = 5 AND c.archive_lease_token = ''))
+      AND m.attempt_count < $3::int
+      AND (m.status = 1 OR (m.status = 2 AND COALESCE(m.judge_task_ref, '') = '' AND m.lease_until <= $4::timestamptz))
+    ORDER BY m.matched_at ASC
+    LIMIT $5::int
+    FOR UPDATE OF m SKIP LOCKED
+)
+UPDATE battle_match m
+SET status = 2,
+    lease_token = $1,
+    lease_until = $2::timestamptz,
+    attempt_count = m.attempt_count + 1
+FROM candidates c
+WHERE m.id = c.id
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+`
+
+type ClaimPendingBattleMatchesAcrossTenantsParams struct {
+	LeaseToken  string             `json:"lease_token"`
+	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
+	MaxAttempts int32              `json:"max_attempts"`
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	PageLimit   int32              `json:"page_limit"`
+}
+
+func (q *Queries) ClaimPendingBattleMatchesAcrossTenants(ctx context.Context, arg ClaimPendingBattleMatchesAcrossTenantsParams) ([]BattleMatch, error) {
+	rows, err := q.db.Query(ctx, claimPendingBattleMatchesAcrossTenants,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+		arg.MaxAttempts,
+		arg.StaleBefore,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -177,6 +269,9 @@ func (q *Queries) ClaimPendingBattleMatchesAcrossTenants(ctx context.Context, li
 			&i.Status,
 			&i.MatchedAt,
 			&i.FinishedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
+			&i.AttemptCount,
 		); err != nil {
 			return nil, err
 		}
@@ -186,6 +281,31 @@ func (q *Queries) ClaimPendingBattleMatchesAcrossTenants(ctx context.Context, li
 		return nil, err
 	}
 	return items, nil
+}
+
+const completeAutoArchiveContest = `-- name: CompleteAutoArchiveContest :execrows
+UPDATE contest AS c
+SET status = 6, archive_lease_token = '', archive_lease_until = NULL, updated_at = now()
+WHERE c.tenant_id = $1 AND c.id = $2 AND c.status = 5
+  AND c.archive_lease_token = $3 AND c.archive_lease_until > now()
+  AND NOT EXISTS (
+      SELECT 1 FROM battle_match m
+      WHERE m.tenant_id = c.tenant_id AND m.contest_id = c.id AND m.status IN (1, 2)
+  )
+`
+
+type CompleteAutoArchiveContestParams struct {
+	TenantID   int64  `json:"tenant_id"`
+	ContestID  int64  `json:"contest_id"`
+	LeaseToken string `json:"lease_token"`
+}
+
+func (q *Queries) CompleteAutoArchiveContest(ctx context.Context, arg CompleteAutoArchiveContestParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeAutoArchiveContest, arg.TenantID, arg.ContestID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const contestStats = `-- name: ContestStats :one
@@ -210,6 +330,25 @@ func (q *Queries) ContestStats(ctx context.Context, tenantID int64) (ContestStat
 	return i, err
 }
 
+const countBattleEntriesForTeam = `-- name: CountBattleEntriesForTeam :one
+SELECT count(*)
+FROM battle_entry
+WHERE tenant_id = $1 AND contest_id = $2 AND team_id = $3
+`
+
+type CountBattleEntriesForTeamParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	ContestID int64 `json:"contest_id"`
+	TeamID    int64 `json:"team_id"`
+}
+
+func (q *Queries) CountBattleEntriesForTeam(ctx context.Context, arg CountBattleEntriesForTeamParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countBattleEntriesForTeam, arg.TenantID, arg.ContestID, arg.TeamID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countBattleMatchesForTeam = `-- name: CountBattleMatchesForTeam :one
 SELECT count(*)::bigint
 FROM battle_match m
@@ -227,6 +366,50 @@ type CountBattleMatchesForTeamParams struct {
 
 func (q *Queries) CountBattleMatchesForTeam(ctx context.Context, arg CountBattleMatchesForTeamParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countBattleMatchesForTeam, arg.TenantID, arg.ContestID, arg.TeamID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countBattleReplayCompletedForTeam = `-- name: CountBattleReplayCompletedForTeam :one
+SELECT count(*)::bigint
+FROM battle_match m
+JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
+JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
+WHERE m.tenant_id = $1 AND m.contest_id = $2 AND m.status = 3
+  AND (a.team_id = $3::bigint OR b.team_id = $3::bigint)
+`
+
+type CountBattleReplayCompletedForTeamParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	ContestID int64 `json:"contest_id"`
+	TeamID    int64 `json:"team_id"`
+}
+
+func (q *Queries) CountBattleReplayCompletedForTeam(ctx context.Context, arg CountBattleReplayCompletedForTeamParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countBattleReplayCompletedForTeam, arg.TenantID, arg.ContestID, arg.TeamID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countBattleReplayPendingForTeam = `-- name: CountBattleReplayPendingForTeam :one
+SELECT count(*)::bigint
+FROM battle_match m
+JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
+JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
+WHERE m.tenant_id = $1 AND m.contest_id = $2 AND m.status IN (1, 2)
+  AND (a.team_id = $3::bigint OR b.team_id = $3::bigint)
+`
+
+type CountBattleReplayPendingForTeamParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	ContestID int64 `json:"contest_id"`
+	TeamID    int64 `json:"team_id"`
+}
+
+func (q *Queries) CountBattleReplayPendingForTeam(ctx context.Context, arg CountBattleReplayPendingForTeamParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countBattleReplayPendingForTeam, arg.TenantID, arg.ContestID, arg.TeamID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -398,9 +581,13 @@ func (q *Queries) CreateBattleEntry(ctx context.Context, arg CreateBattleEntryPa
 }
 
 const createBattleMatch = `-- name: CreateBattleMatch :one
-INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL, '{}'::jsonb, NULL, 1, now(), NULL)
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until)
+SELECT $1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL, '{}'::jsonb, NULL, 1, now(), NULL, '', NULL
+WHERE EXISTS (
+    SELECT 1 FROM contest c
+    WHERE c.tenant_id = $2 AND c.id = $3 AND c.status IN (3, 4) AND c.end_at > now()
+)
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
 `
 
 type CreateBattleMatchParams struct {
@@ -440,6 +627,9 @@ func (q *Queries) CreateBattleMatch(ctx context.Context, arg CreateBattleMatchPa
 		&i.Status,
 		&i.MatchedAt,
 		&i.FinishedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+		&i.AttemptCount,
 	)
 	return i, err
 }
@@ -490,7 +680,7 @@ func (q *Queries) CreateCheatRecord(ctx context.Context, arg CreateCheatRecordPa
 const createContest = `-- name: CreateContest :one
 INSERT INTO contest (id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, now(), now(), NULL)
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 `
 
 type CreateContestParams struct {
@@ -542,6 +732,8 @@ func (q *Queries) CreateContest(ctx context.Context, arg CreateContestParams) (C
 		&i.FreezeMinutes,
 		&i.Rules,
 		&i.Status,
+		&i.ArchiveLeaseToken,
+		&i.ArchiveLeaseUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -718,20 +910,80 @@ func (q *Queries) DeactivateBattleEntries(ctx context.Context, arg DeactivateBat
 	return err
 }
 
-const failBattleMatch = `-- name: FailBattleMatch :one
-UPDATE battle_match
-SET status = 4, finished_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+const exhaustUnstartedBattleMatches = `-- name: ExhaustUnstartedBattleMatches :many
+UPDATE battle_match AS m
+SET status = 4, finished_at = now(), lease_token = '', lease_until = NULL
+WHERE status = 2 AND COALESCE(judge_task_ref, '') = ''
+  AND lease_until <= $1::timestamptz
+  AND attempt_count >= $2::int
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
 `
 
-type FailBattleMatchParams struct {
-	TenantID int64 `json:"tenant_id"`
-	ID       int64 `json:"id"`
+type ExhaustUnstartedBattleMatchesParams struct {
+	StaleBefore pgtype.Timestamptz `json:"stale_before"`
+	MaxAttempts int32              `json:"max_attempts"`
 }
 
-func (q *Queries) FailBattleMatch(ctx context.Context, arg FailBattleMatchParams) (BattleMatch, error) {
-	row := q.db.QueryRow(ctx, failBattleMatch, arg.TenantID, arg.ID)
+// 仅处理尚未提交 M3 的启动租约;已持有 judge_task_ref 的对局由 M3 生命周期收敛。
+func (q *Queries) ExhaustUnstartedBattleMatches(ctx context.Context, arg ExhaustUnstartedBattleMatchesParams) ([]BattleMatch, error) {
+	rows, err := q.db.Query(ctx, exhaustUnstartedBattleMatches, arg.StaleBefore, arg.MaxAttempts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BattleMatch{}
+	for rows.Next() {
+		var i BattleMatch
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ContestID,
+			&i.ProblemID,
+			&i.EntryAID,
+			&i.EntryBID,
+			&i.SourceRef,
+			&i.SandboxRef,
+			&i.JudgeTaskRef,
+			&i.Result,
+			&i.ScoreDelta,
+			&i.ReplayRef,
+			&i.Status,
+			&i.MatchedAt,
+			&i.FinishedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
+			&i.AttemptCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const failBattleMatchByJudgeTask = `-- name: FailBattleMatchByJudgeTask :one
+UPDATE battle_match AS m
+SET status = 4, finished_at = now(), lease_token = '', lease_until = NULL
+WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.judge_task_ref = $3
+  AND EXISTS (
+      SELECT 1 FROM contest c
+      WHERE c.tenant_id = m.tenant_id AND c.id = m.contest_id
+        AND (c.status IN (3, 4) OR (c.status = 5 AND c.archive_lease_token = ''))
+  )
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+`
+
+type FailBattleMatchByJudgeTaskParams struct {
+	TenantID     int64       `json:"tenant_id"`
+	ID           int64       `json:"id"`
+	JudgeTaskRef pgtype.Text `json:"judge_task_ref"`
+}
+
+func (q *Queries) FailBattleMatchByJudgeTask(ctx context.Context, arg FailBattleMatchByJudgeTaskParams) (BattleMatch, error) {
+	row := q.db.QueryRow(ctx, failBattleMatchByJudgeTask, arg.TenantID, arg.ID, arg.JudgeTaskRef)
 	var i BattleMatch
 	err := row.Scan(
 		&i.ID,
@@ -749,6 +1001,49 @@ func (q *Queries) FailBattleMatch(ctx context.Context, arg FailBattleMatchParams
 		&i.Status,
 		&i.MatchedAt,
 		&i.FinishedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+		&i.AttemptCount,
+	)
+	return i, err
+}
+
+const failBattleMatchStart = `-- name: FailBattleMatchStart :one
+UPDATE battle_match AS m
+SET status = 4, finished_at = now(), lease_token = '', lease_until = NULL
+WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.lease_token = $3 AND m.lease_until > now()
+  AND COALESCE(m.judge_task_ref, '') = ''
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+`
+
+type FailBattleMatchStartParams struct {
+	TenantID   int64  `json:"tenant_id"`
+	ID         int64  `json:"id"`
+	LeaseToken string `json:"lease_token"`
+}
+
+func (q *Queries) FailBattleMatchStart(ctx context.Context, arg FailBattleMatchStartParams) (BattleMatch, error) {
+	row := q.db.QueryRow(ctx, failBattleMatchStart, arg.TenantID, arg.ID, arg.LeaseToken)
+	var i BattleMatch
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ContestID,
+		&i.ProblemID,
+		&i.EntryAID,
+		&i.EntryBID,
+		&i.SourceRef,
+		&i.SandboxRef,
+		&i.JudgeTaskRef,
+		&i.Result,
+		&i.ScoreDelta,
+		&i.ReplayRef,
+		&i.Status,
+		&i.MatchedAt,
+		&i.FinishedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+		&i.AttemptCount,
 	)
 	return i, err
 }
@@ -799,16 +1094,21 @@ func (q *Queries) FinalizeVulnProblem(ctx context.Context, arg FinalizeVulnProbl
 }
 
 const finishBattleMatch = `-- name: FinishBattleMatch :one
-UPDATE battle_match
+UPDATE battle_match AS m
 SET sandbox_ref = $3,
     judge_task_ref = $4,
     result = $5,
     score_delta = $6,
     replay_ref = $7,
     status = 3,
-    finished_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+    finished_at = now(), lease_token = '', lease_until = NULL
+WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.judge_task_ref = $4
+  AND EXISTS (
+      SELECT 1 FROM contest c
+      WHERE c.tenant_id = m.tenant_id AND c.id = m.contest_id
+        AND (c.status IN (3, 4) OR (c.status = 5 AND c.archive_lease_token = ''))
+  )
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
 `
 
 type FinishBattleMatchParams struct {
@@ -848,6 +1148,9 @@ func (q *Queries) FinishBattleMatch(ctx context.Context, arg FinishBattleMatchPa
 		&i.Status,
 		&i.MatchedAt,
 		&i.FinishedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+		&i.AttemptCount,
 	)
 	return i, err
 }
@@ -883,7 +1186,7 @@ func (q *Queries) GetBattleEntry(ctx context.Context, arg GetBattleEntryParams) 
 }
 
 const getBattleMatch = `-- name: GetBattleMatch :one
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
 FROM battle_match
 WHERE tenant_id = $1 AND id = $2
 `
@@ -912,12 +1215,15 @@ func (q *Queries) GetBattleMatch(ctx context.Context, arg GetBattleMatchParams) 
 		&i.Status,
 		&i.MatchedAt,
 		&i.FinishedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+		&i.AttemptCount,
 	)
 	return i, err
 }
 
 const getBattleMatchByJudgeTask = `-- name: GetBattleMatchByJudgeTask :one
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
 FROM battle_match
 WHERE tenant_id = $1 AND judge_task_ref = $2
 `
@@ -946,12 +1252,81 @@ func (q *Queries) GetBattleMatchByJudgeTask(ctx context.Context, arg GetBattleMa
 		&i.Status,
 		&i.MatchedAt,
 		&i.FinishedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+		&i.AttemptCount,
+	)
+	return i, err
+}
+
+const getBattleReplayCheckpointForTeam = `-- name: GetBattleReplayCheckpointForTeam :one
+WITH visible AS (
+    SELECT m.result, m.score_delta, m.finished_at, m.id,
+           ROW_NUMBER() OVER (ORDER BY m.finished_at ASC, m.id ASC)::bigint AS sequence_no,
+           CASE WHEN a.team_id = $4::bigint THEN 'a' ELSE 'b' END AS my_side
+    FROM battle_match m
+    JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
+    JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
+    WHERE m.tenant_id = $1 AND m.contest_id = $2 AND m.status = 3
+      AND (a.team_id = $4::bigint OR b.team_id = $4::bigint)
+)
+SELECT
+    count(*) FILTER (WHERE (my_side = 'a' AND result = 1) OR (my_side = 'b' AND result = 2))::int AS wins,
+    count(*) FILTER (WHERE (my_side = 'a' AND result = 2) OR (my_side = 'b' AND result = 1))::int AS losses,
+    count(*) FILTER (WHERE result = 3)::int AS draws,
+    COALESCE(SUM(CASE
+        WHEN my_side = 'a' THEN COALESCE((score_delta->>'delta_a')::float8, 0)
+        ELSE COALESCE((score_delta->>'delta_b')::float8, 0)
+    END), 0)::float8 AS rating_delta,
+    COALESCE((
+        SELECT CASE
+            WHEN v.my_side = 'a' THEN COALESCE((v.score_delta->>'rating_a_after')::float8, 0)
+            ELSE COALESCE((v.score_delta->>'rating_b_after')::float8, 0)
+        END
+        FROM visible v
+        WHERE v.sequence_no <= $3::bigint
+        ORDER BY v.sequence_no DESC
+        LIMIT 1
+    ), 0)::float8 AS rating
+FROM visible
+WHERE sequence_no <= $3::bigint
+`
+
+type GetBattleReplayCheckpointForTeamParams struct {
+	TenantID   int64 `json:"tenant_id"`
+	ContestID  int64 `json:"contest_id"`
+	PageOffset int64 `json:"page_offset"`
+	TeamID     int64 `json:"team_id"`
+}
+
+type GetBattleReplayCheckpointForTeamRow struct {
+	Wins        int32   `json:"wins"`
+	Losses      int32   `json:"losses"`
+	Draws       int32   `json:"draws"`
+	RatingDelta float64 `json:"rating_delta"`
+	Rating      float64 `json:"rating"`
+}
+
+func (q *Queries) GetBattleReplayCheckpointForTeam(ctx context.Context, arg GetBattleReplayCheckpointForTeamParams) (GetBattleReplayCheckpointForTeamRow, error) {
+	row := q.db.QueryRow(ctx, getBattleReplayCheckpointForTeam,
+		arg.TenantID,
+		arg.ContestID,
+		arg.PageOffset,
+		arg.TeamID,
+	)
+	var i GetBattleReplayCheckpointForTeamRow
+	err := row.Scan(
+		&i.Wins,
+		&i.Losses,
+		&i.Draws,
+		&i.RatingDelta,
+		&i.Rating,
 	)
 	return i, err
 }
 
 const getContest = `-- name: GetContest :one
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 `
@@ -979,6 +1354,8 @@ func (q *Queries) GetContest(ctx context.Context, arg GetContestParams) (Contest
 		&i.FreezeMinutes,
 		&i.Rules,
 		&i.Status,
+		&i.ArchiveLeaseToken,
+		&i.ArchiveLeaseUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -1407,16 +1784,25 @@ SELECT id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artif
 FROM battle_entry
 WHERE tenant_id = $1 AND contest_id = $2 AND team_id = $3
 ORDER BY submitted_at DESC, id DESC
+LIMIT $5::int OFFSET $4::int
 `
 
 type ListBattleEntriesForTeamParams struct {
-	TenantID  int64 `json:"tenant_id"`
-	ContestID int64 `json:"contest_id"`
-	TeamID    int64 `json:"team_id"`
+	TenantID   int64 `json:"tenant_id"`
+	ContestID  int64 `json:"contest_id"`
+	TeamID     int64 `json:"team_id"`
+	PageOffset int32 `json:"page_offset"`
+	PageLimit  int32 `json:"page_limit"`
 }
 
 func (q *Queries) ListBattleEntriesForTeam(ctx context.Context, arg ListBattleEntriesForTeamParams) ([]BattleEntry, error) {
-	rows, err := q.db.Query(ctx, listBattleEntriesForTeam, arg.TenantID, arg.ContestID, arg.TeamID)
+	rows, err := q.db.Query(ctx, listBattleEntriesForTeam,
+		arg.TenantID,
+		arg.ContestID,
+		arg.TeamID,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1448,7 +1834,7 @@ func (q *Queries) ListBattleEntriesForTeam(ctx context.Context, arg ListBattleEn
 }
 
 const listBattleMatchesForTeam = `-- name: ListBattleMatchesForTeam :many
-SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at
+SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
 FROM battle_match m
 JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
@@ -1499,6 +1885,129 @@ func (q *Queries) ListBattleMatchesForTeam(ctx context.Context, arg ListBattleMa
 			&i.Status,
 			&i.MatchedAt,
 			&i.FinishedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
+			&i.AttemptCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBattleReplayMatchesForTeam = `-- name: ListBattleReplayMatchesForTeam :many
+WITH visible AS (
+    SELECT
+        m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id,
+        m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta,
+        m.replay_ref, m.status, m.matched_at, m.finished_at,
+        ROW_NUMBER() OVER (ORDER BY m.finished_at ASC, m.id ASC)::bigint AS sequence_no,
+        CASE WHEN a.team_id = $5::bigint THEN 'a' ELSE 'b' END AS my_side,
+        active_entry.id AS active_entry_id,
+        active_entry.role AS active_entry_role,
+        active_entry.version_no AS active_entry_version_no,
+        active_entry.submitted_at AS active_entry_submitted_at
+    FROM battle_match m
+    JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
+    JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
+    LEFT JOIN LATERAL (
+        SELECT be.id, be.role, be.version_no, be.submitted_at
+        FROM battle_entry be
+        WHERE be.tenant_id = m.tenant_id
+          AND be.contest_id = m.contest_id
+          AND be.problem_id = m.problem_id
+          AND be.team_id = $5::bigint
+          AND be.submitted_at <= m.finished_at
+        ORDER BY be.submitted_at DESC, be.version_no DESC, be.id DESC
+        LIMIT 1
+    ) active_entry ON true
+    WHERE m.tenant_id = $1 AND m.contest_id = $2 AND m.status = 3
+      AND (a.team_id = $5::bigint OR b.team_id = $5::bigint)
+)
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id,
+       source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref,
+       status, matched_at, finished_at, sequence_no, my_side,
+       active_entry_id, active_entry_role, active_entry_version_no, active_entry_submitted_at
+FROM visible
+WHERE sequence_no > $3::bigint
+  AND sequence_no <= $3::bigint + $4::bigint
+ORDER BY sequence_no ASC
+`
+
+type ListBattleReplayMatchesForTeamParams struct {
+	TenantID   int64 `json:"tenant_id"`
+	ContestID  int64 `json:"contest_id"`
+	PageOffset int64 `json:"page_offset"`
+	PageLimit  int64 `json:"page_limit"`
+	TeamID     int64 `json:"team_id"`
+}
+
+type ListBattleReplayMatchesForTeamRow struct {
+	ID                     int64              `json:"id"`
+	TenantID               int64              `json:"tenant_id"`
+	ContestID              int64              `json:"contest_id"`
+	ProblemID              int64              `json:"problem_id"`
+	EntryAID               int64              `json:"entry_a_id"`
+	EntryBID               int64              `json:"entry_b_id"`
+	SourceRef              string             `json:"source_ref"`
+	SandboxRef             pgtype.Text        `json:"sandbox_ref"`
+	JudgeTaskRef           pgtype.Text        `json:"judge_task_ref"`
+	Result                 pgtype.Int2        `json:"result"`
+	ScoreDelta             []byte             `json:"score_delta"`
+	ReplayRef              pgtype.Text        `json:"replay_ref"`
+	Status                 int16              `json:"status"`
+	MatchedAt              pgtype.Timestamptz `json:"matched_at"`
+	FinishedAt             pgtype.Timestamptz `json:"finished_at"`
+	SequenceNo             int64              `json:"sequence_no"`
+	MySide                 string             `json:"my_side"`
+	ActiveEntryID          int64              `json:"active_entry_id"`
+	ActiveEntryRole        int16              `json:"active_entry_role"`
+	ActiveEntryVersionNo   int32              `json:"active_entry_version_no"`
+	ActiveEntrySubmittedAt pgtype.Timestamptz `json:"active_entry_submitted_at"`
+}
+
+// 回放专用时间窗只读取已完成对局,并由服务端携带本队视角和当时生效的参战物。
+func (q *Queries) ListBattleReplayMatchesForTeam(ctx context.Context, arg ListBattleReplayMatchesForTeamParams) ([]ListBattleReplayMatchesForTeamRow, error) {
+	rows, err := q.db.Query(ctx, listBattleReplayMatchesForTeam,
+		arg.TenantID,
+		arg.ContestID,
+		arg.PageOffset,
+		arg.PageLimit,
+		arg.TeamID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBattleReplayMatchesForTeamRow{}
+	for rows.Next() {
+		var i ListBattleReplayMatchesForTeamRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ContestID,
+			&i.ProblemID,
+			&i.EntryAID,
+			&i.EntryBID,
+			&i.SourceRef,
+			&i.SandboxRef,
+			&i.JudgeTaskRef,
+			&i.Result,
+			&i.ScoreDelta,
+			&i.ReplayRef,
+			&i.Status,
+			&i.MatchedAt,
+			&i.FinishedAt,
+			&i.SequenceNo,
+			&i.MySide,
+			&i.ActiveEntryID,
+			&i.ActiveEntryRole,
+			&i.ActiveEntryVersionNo,
+			&i.ActiveEntrySubmittedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1604,7 +2113,7 @@ func (q *Queries) ListContestProblems(ctx context.Context, arg ListContestProble
 }
 
 const listContests = `-- name: ListContests :many
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = $1 AND deleted_at IS NULL AND ($2::smallint = 0 OR status = $2)
 ORDER BY updated_at DESC, id DESC
@@ -1647,6 +2156,8 @@ func (q *Queries) ListContests(ctx context.Context, arg ListContestsParams) ([]C
 			&i.FreezeMinutes,
 			&i.Rules,
 			&i.Status,
+			&i.ArchiveLeaseToken,
+			&i.ArchiveLeaseUntil,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
@@ -1731,11 +2242,9 @@ func (q *Queries) ListLadder(ctx context.Context, arg ListLadderParams) ([]ListL
 }
 
 const listRunningBattleMatchesWithJudgeTask = `-- name: ListRunningBattleMatchesWithJudgeTask :many
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
 FROM battle_match
-WHERE status = 2
-  AND judge_task_ref IS NOT NULL
-  AND judge_task_ref <> ''
+WHERE status = 2 AND COALESCE(judge_task_ref, '') <> ''
 ORDER BY matched_at ASC, id ASC
 LIMIT $1
 `
@@ -1765,6 +2274,9 @@ func (q *Queries) ListRunningBattleMatchesWithJudgeTask(ctx context.Context, lim
 			&i.Status,
 			&i.MatchedAt,
 			&i.FinishedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
+			&i.AttemptCount,
 		); err != nil {
 			return nil, err
 		}
@@ -1835,7 +2347,7 @@ func (q *Queries) ListStudentContestRecords(ctx context.Context, arg ListStudent
 }
 
 const listStudentContests = `-- name: ListStudentContests :many
-SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 FROM contest
 WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6
   AND ($2::smallint = 0 OR status = $2::smallint)
@@ -1880,6 +2392,8 @@ func (q *Queries) ListStudentContests(ctx context.Context, arg ListStudentContes
 			&i.FreezeMinutes,
 			&i.Rules,
 			&i.Status,
+			&i.ArchiveLeaseToken,
+			&i.ArchiveLeaseUntil,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
@@ -2206,11 +2720,43 @@ func (q *Queries) RefreshContestRanks(ctx context.Context, arg RefreshContestRan
 	return err
 }
 
+const renewBattleMatchStartLease = `-- name: RenewBattleMatchStartLease :execrows
+UPDATE battle_match
+SET lease_until = $4::timestamptz
+WHERE tenant_id = $1
+  AND id = $2
+  AND status = 2
+  AND COALESCE(judge_task_ref, '') = ''
+  AND lease_token = $3
+  AND lease_until > now()
+`
+
+type RenewBattleMatchStartLeaseParams struct {
+	TenantID   int64              `json:"tenant_id"`
+	ID         int64              `json:"id"`
+	LeaseToken string             `json:"lease_token"`
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+}
+
+// 启动沙箱和提交判题期间仅由当前 token 续租,避免长时准备被其他 worker 重领。
+func (q *Queries) RenewBattleMatchStartLease(ctx context.Context, arg RenewBattleMatchStartLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewBattleMatchStartLease,
+		arg.TenantID,
+		arg.ID,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setContestStatus = `-- name: SetContestStatus :one
 UPDATE contest
 SET status = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 `
 
 type SetContestStatusParams struct {
@@ -2237,6 +2783,8 @@ func (q *Queries) SetContestStatus(ctx context.Context, arg SetContestStatusPara
 		&i.FreezeMinutes,
 		&i.Rules,
 		&i.Status,
+		&i.ArchiveLeaseToken,
+		&i.ArchiveLeaseUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -2289,12 +2837,14 @@ func (q *Queries) SetVulnProblemPrevalidate(ctx context.Context, arg SetVulnProb
 }
 
 const startBattleMatch = `-- name: StartBattleMatch :one
-UPDATE battle_match
+UPDATE battle_match AS m
 SET sandbox_ref = $3,
     judge_task_ref = $4,
-    status = 2
-WHERE tenant_id = $1 AND id = $2 AND status = 2
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at
+    status = 2,
+    lease_token = '',
+    lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $5 AND lease_until > now()
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
 `
 
 type StartBattleMatchParams struct {
@@ -2302,6 +2852,7 @@ type StartBattleMatchParams struct {
 	ID           int64       `json:"id"`
 	SandboxRef   pgtype.Text `json:"sandbox_ref"`
 	JudgeTaskRef pgtype.Text `json:"judge_task_ref"`
+	LeaseToken   string      `json:"lease_token"`
 }
 
 func (q *Queries) StartBattleMatch(ctx context.Context, arg StartBattleMatchParams) (BattleMatch, error) {
@@ -2310,6 +2861,7 @@ func (q *Queries) StartBattleMatch(ctx context.Context, arg StartBattleMatchPara
 		arg.ID,
 		arg.SandboxRef,
 		arg.JudgeTaskRef,
+		arg.LeaseToken,
 	)
 	var i BattleMatch
 	err := row.Scan(
@@ -2328,6 +2880,9 @@ func (q *Queries) StartBattleMatch(ctx context.Context, arg StartBattleMatchPara
 		&i.Status,
 		&i.MatchedAt,
 		&i.FinishedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+		&i.AttemptCount,
 	)
 	return i, err
 }
@@ -2375,7 +2930,7 @@ SET name = $3,
     rules = $12,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status IN (1, 2) AND deleted_at IS NULL
-RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 `
 
 type UpdateContestParams struct {
@@ -2424,6 +2979,8 @@ func (q *Queries) UpdateContest(ctx context.Context, arg UpdateContestParams) (C
 		&i.FreezeMinutes,
 		&i.Rules,
 		&i.Status,
+		&i.ArchiveLeaseToken,
+		&i.ArchiveLeaseUntil,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,

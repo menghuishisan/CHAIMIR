@@ -15,10 +15,12 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
 	"chaimir/pkg/textx"
 )
@@ -33,8 +35,22 @@ func (s *Service) RunPackagePreviewOnce(ctx context.Context) error {
 		return apperr.ErrSimPackageQueryFailed
 	}
 	var pending []Package
+	leaseToken, err := pkgcrypto.RandomToken(48)
+	if err != nil {
+		return apperr.ErrSimPackageQueryFailed.WithCause(err)
+	}
+	leaseUntil := time.Now().Add(time.Duration(s.previewLeaseDurationMs) * time.Millisecond)
+	maxAttempts, ok := intx.Int32(s.previewMaxAttempts)
+	if !ok || maxAttempts <= 0 {
+		return apperr.ErrSimPackageQueryFailed
+	}
+	staleBefore := time.Now()
+	exhaustedReport := previewAttemptsExhaustedReport()
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		items, err := tx.ClaimPackagesForPreview(ctx, batchSize)
+		if _, err := tx.ExhaustPreviewAttempts(ctx, maxAttempts, staleBefore, exhaustedReport); err != nil {
+			return apperr.ErrSimReviewStateInvalid.WithCause(err)
+		}
+		items, err := tx.ClaimPackagesForPreview(ctx, batchSize, maxAttempts, staleBefore, leaseUntil, leaseToken)
 		if err != nil {
 			return apperr.ErrSimPackageQueryFailed.WithCause(err)
 		}
@@ -58,39 +74,55 @@ func (s *Service) RunPackagePreviewOnce(ctx context.Context) error {
 func (s *Service) previewPackageOnce(ctx context.Context, pkg Package) error {
 	adapter := s.backends[pkg.BackendAdapter]
 	if adapter == nil {
-		return apperr.ErrSimBackendComputeUnavailable.WithCause(fmt.Errorf("仿真包 %s@%s 绑定的执行能力 %q 未注册", pkg.Code, pkg.Version, pkg.BackendAdapter))
+		return s.handlePreviewInfrastructureFailure(ctx, pkg, apperr.ErrSimBackendComputeUnavailable.WithCause(fmt.Errorf("仿真包 %s@%s 绑定的执行能力 %q 未注册", pkg.Code, pkg.Version, pkg.BackendAdapter)))
 	}
 	bundle, err := s.loadBundleForPreview(ctx, pkg)
 	if err != nil {
-		return err
+		return s.handlePreviewInfrastructureFailure(ctx, pkg, err)
 	}
 	result, previewErr := adapter.Preview(ctx, pkg, bundle, s.previewFrameCount)
+	if previewErr != nil {
+		return s.handlePreviewInfrastructureFailure(ctx, pkg, previewErr)
+	}
 	report, err := previewReport(result, previewErr)
 	if err != nil {
 		return err
 	}
 	return s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		if _, err := tx.MergeValidationReport(ctx, pkg.ID, report); err != nil {
+		if _, err := tx.MergeValidationReport(ctx, pkg.PreviewReviewID, pkg.ID, pkg.PreviewLeaseToken, report); err != nil {
 			return apperr.ErrSimReviewStateInvalid.WithCause(err)
 		}
 		return nil
 	})
 }
 
+// handlePreviewInfrastructureFailure 保留动态预览可重试语义;只有已用尽预算时才写受控的终态报告。
+func (s *Service) handlePreviewInfrastructureFailure(ctx context.Context, pkg Package, previewErr error) error {
+	return s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		if int(pkg.PreviewAttemptCount) >= s.previewMaxAttempts {
+			if _, err := tx.MergeValidationReport(ctx, pkg.PreviewReviewID, pkg.ID, pkg.PreviewLeaseToken, previewAttemptsExhaustedReport()); err != nil {
+				return apperr.ErrSimReviewStateInvalid.WithCause(err)
+			}
+			return previewErr
+		}
+		affected, err := tx.ReleasePreviewLease(ctx, pkg.PreviewReviewID, pkg.ID, pkg.PreviewLeaseToken)
+		if err != nil {
+			return apperr.ErrSimReviewStateInvalid.WithCause(err)
+		}
+		if affected != 1 {
+			return apperr.ErrSimReviewStateInvalid
+		}
+		return previewErr
+	})
+}
+
 // previewReport 把预览产出转成审核报告的动态字段。
-//
-// 装配或运行失败时两项同时判定为 failed:包跑不起来,谈不上确定性也谈不上渲染预览,
-// 分别给一个"未执行"会让审核人以为还能等,而实际上等不来。
 //
 // 样例帧序列化失败必须显式失败而不是静默丢帧:帧是审核人判断"算法实现对不对"的唯一依据,
 // 少了它审核只剩两个徽章,而报告本身看不出帧曾经存在过。
 func previewReport(result PreviewResult, previewErr error) (ValidationReport, error) {
 	if previewErr != nil {
-		message := boundedValidationMessage(userFacingPreviewMessage(previewErr))
-		return ValidationReport{
-			DeterminismCheck: ValidationStatus{Status: validationFailed, Message: message},
-			WorkerPreview:    ValidationStatus{Status: validationFailed, Message: message},
-		}, nil
+		return ValidationReport{}, previewErr
 	}
 	report := ValidationReport{
 		WorkerPreview: ValidationStatus{Status: validationPassed},
@@ -110,19 +142,19 @@ func previewReport(result PreviewResult, previewErr error) (ValidationReport, er
 	return report, nil
 }
 
+// previewAttemptsExhaustedReport 给无法完成预览的包留下可行动、无基础设施细节的审核结论。
+func previewAttemptsExhaustedReport() ValidationReport {
+	message := "隔离预览多次未完成，请联系平台管理员检查预览环境后重新提交。"
+	return ValidationReport{
+		DeterminismCheck: ValidationStatus{Status: validationFailed, Message: message},
+		WorkerPreview:    ValidationStatus{Status: validationFailed, Message: message},
+	}
+}
+
 // boundedValidationMessage 把容器给出的原因截断到报告字段的展示上限。
 // 文本来自隔离容器输出,长度不可信;截断而不是拒写 —— 作者需要看到原因,哪怕只有开头。
 func boundedValidationMessage(message string) string {
 	return textx.TruncateRunes(strings.TrimSpace(message), maxValidationMessageLength)
-}
-
-// userFacingPreviewMessage 提取可展示给包作者的失败原因。
-// 作者需要知道"改什么",故保留容器给出的协议或装配错误文本;集群细节由适配器在包装时剥离。
-func userFacingPreviewMessage(err error) string {
-	if appErr, ok := apperr.As(err); ok {
-		return appErr.UserMessage()
-	}
-	return err.Error()
 }
 
 // loadBundleForPreview 取出待审包的归档正文,交隔离容器装配。

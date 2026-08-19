@@ -50,11 +50,17 @@ func (s *Service) RunTenantProvisionOutboxOnce(ctx context.Context) error {
 	if !ok || limit <= 0 {
 		return apperr.ErrInternal
 	}
-	staleBefore := timex.Now().Add(-time.Duration(s.cfg.TenantProvisionOutboxStaleMs) * time.Millisecond)
+	now := timex.Now()
+	staleBefore := now
+	leaseUntil := now.Add(time.Duration(s.cfg.TenantProvisionOutboxStaleMs) * time.Millisecond)
 	var items []TenantProvisionOutbox
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, err = tx.ClaimTenantProvisionOutbox(ctx, limit, staleBefore)
+		maxAttempts, ok := intx.Int32(s.cfg.TenantProvisionOutboxMaxAttempts)
+		if !ok || maxAttempts <= 0 {
+			return apperr.ErrInternal
+		}
+		items, err = tx.ClaimTenantProvisionOutbox(ctx, limit, maxAttempts, staleBefore, leaseUntil)
 		return err
 	}); err != nil {
 		return apperr.ErrInternal.WithCause(fmt.Errorf("领取新租户初始化事件失败: %w", err))
@@ -76,23 +82,23 @@ func (s *Service) publishTenantProvisionOutbox(ctx context.Context, item TenantP
 	eventCtx := response.WithTrace(ctx, item.TraceID)
 	event := contracts.TenantProvisionedEvent{TenantID: item.TenantID, TraceID: item.TraceID, DeployMode: item.DeployMode, ProvisionedAt: item.ProvisionedAt}
 	if err := s.bus.Publish(eventCtx, contracts.SubjectTenantProvisioned, event); err != nil {
-		s.recordTenantProvisionFailure(eventCtx, item.ID, err)
+		s.recordTenantProvisionFailure(eventCtx, item, err)
 		return apperr.ErrInternal.WithCause(fmt.Errorf("发布新租户初始化事件失败: %w", err))
 	}
 	return s.store.PrivilegedTx(eventCtx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.MarkTenantProvisionOutboxPublished(ctx, item.ID)
+		_, err := tx.MarkTenantProvisionOutboxPublished(ctx, item.ID, item.LeaseToken)
 		return err
 	})
 }
 
 // recordTenantProvisionFailure 持久化发布失败原因，记录失败本身也必须可定位。
-func (s *Service) recordTenantProvisionFailure(ctx context.Context, outboxID int64, cause error) {
+func (s *Service) recordTenantProvisionFailure(ctx context.Context, item TenantProvisionOutbox, cause error) {
 	detail := textx.TruncateRunes(cause.Error(), tenantProvisionFailureDetailLimit)
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.MarkTenantProvisionOutboxFailed(ctx, outboxID, detail)
+		_, err := tx.MarkTenantProvisionOutboxFailed(ctx, item.ID, detail, item.LeaseToken)
 		return err
 	}); err != nil {
-		logging.ErrorContext(ctx, "tenant provision outbox failure persist failed", err.Error(), slog.Int64("outbox_id", outboxID))
+		logging.ErrorContext(ctx, "tenant provision outbox failure persist failed", err.Error(), slog.Int64("outbox_id", item.ID))
 	}
 }
 

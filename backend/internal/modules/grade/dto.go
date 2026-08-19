@@ -18,6 +18,31 @@ type GradeSummaryDTO struct {
 	ComputedAt    time.Time          `json:"computed_at"`
 }
 
+// StudentGradePageDTO 是学生成绩页面的有界课程明细与当前范围汇总。
+type StudentGradePageDTO struct {
+	StudentID     ids.ID             `json:"student_id"`
+	SemesterID    ids.ID             `json:"semester_id,omitempty"`
+	TotalCredits  float64            `json:"total_credits"`
+	GPA           float64            `json:"gpa"`
+	CumulativeGPA float64            `json:"cumulative_gpa"`
+	ComputedAt    time.Time          `json:"computed_at"`
+	List          []CourseGradeInput `json:"list"`
+	Total         int64              `json:"total"`
+	Page          int                `json:"page"`
+	Size          int                `json:"size"`
+}
+
+// StudentGradeAggregateDTO 是浏览器成绩页缓存的有界标量摘要,不携带课程明细。
+type StudentGradeAggregateDTO struct {
+	StudentID     ids.ID    `json:"student_id"`
+	SemesterID    ids.ID    `json:"semester_id,omitempty"`
+	TotalCredits  float64   `json:"total_credits"`
+	GPA           float64   `json:"gpa"`
+	CumulativeGPA float64   `json:"cumulative_gpa"`
+	ComputedAt    time.Time `json:"computed_at"`
+	Total         int64     `json:"total"`
+}
+
 // LevelConfigRequest 是等级映射配置请求。
 type LevelConfigRequest struct {
 	Name         string       `json:"name"`

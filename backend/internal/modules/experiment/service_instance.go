@@ -4,7 +4,6 @@ package experiment
 import (
 	"context"
 	"encoding/binary"
-	"fmt"
 	"hash/fnv"
 	"log/slog"
 	"strings"
@@ -241,7 +240,7 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 	}
 	var inst ExperimentInstance
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetInstance(ctx, id.TenantID, instanceID)
+		current, err := tx.GetInstanceForUpdate(ctx, id.TenantID, instanceID)
 		if err != nil {
 			return err
 		}
@@ -259,6 +258,9 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 			if _, err := tx.GetReportByInstanceStudent(ctx, id.TenantID, instanceID, id.AccountID); err != nil {
 				return apperr.ErrExperimentReportRequired.WithCause(err)
 			}
+		}
+		if err := s.ensureTriggeredCheckpointsTerminal(ctx, tx, current); err != nil {
+			return err
 		}
 		score, err := tx.SumScores(ctx, id.TenantID, instanceID)
 		if err != nil {
@@ -284,6 +286,34 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 		return InstanceDTO{}, err
 	}
 	return instanceDTOFromModel(inst, nil), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumStudent, "experiment.instance.finish", auditTargetInstance, inst.ID, map[string]any{"score": inst.Score})
+}
+
+// ensureTriggeredCheckpointsTerminal 防止学生在 M3 仍执行检查点时固化不完整总分。
+func (s *Service) ensureTriggeredCheckpointsTerminal(ctx context.Context, tx TxStore, inst ExperimentInstance) error {
+	checkpoints, err := tx.ListCheckpoints(ctx, inst.TenantID, inst.ID)
+	if err != nil {
+		return err
+	}
+	for _, checkpoint := range checkpoints {
+		if checkpoint.JudgeTaskRef == "" {
+			continue
+		}
+		if s.judge == nil {
+			return apperr.ErrExperimentJudgeUnavailable
+		}
+		taskID, ok := ids.Parse(checkpoint.JudgeTaskRef)
+		if !ok {
+			return apperr.ErrExperimentCheckpointInvalid
+		}
+		info, err := s.judge.GetJudgeTask(ctx, inst.TenantID, taskID)
+		if err != nil {
+			return apperr.ErrExperimentJudgeUnavailable.WithCause(err)
+		}
+		if info.Status == contracts.JudgeTaskStatusQueued || info.Status == contracts.JudgeTaskStatusRunning {
+			return apperr.ErrExperimentJudgePending
+		}
+	}
+	return nil
 }
 
 // RunRecycleOnce 执行一次 M7 后台回收扫描,供统一 background runner 调用。
@@ -453,11 +483,17 @@ func (s *Service) RunExperimentScoreOutboxOnce(ctx context.Context) error {
 	if !ok || limit <= 0 {
 		return apperr.ErrExperimentEventFailed
 	}
-	staleBefore := timex.Now().Add(-time.Duration(s.cfg.ScoreOutboxStaleMs) * time.Millisecond)
+	now := timex.Now()
+	staleBefore := now
+	leaseUntil := now.Add(time.Duration(s.cfg.ScoreOutboxStaleMs) * time.Millisecond)
 	var items []ExperimentScoreOutbox
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, err = tx.ClaimPendingExperimentScoreOutbox(ctx, limit, staleBefore)
+		maxAttempts, ok := intx.Int32(s.cfg.ScoreOutboxMaxAttempts)
+		if !ok || maxAttempts <= 0 {
+			return apperr.ErrExperimentEventFailed
+		}
+		items, err = tx.ClaimPendingExperimentScoreOutbox(ctx, limit, maxAttempts, staleBefore, leaseUntil)
 		if err != nil {
 			return apperr.ErrExperimentEventFailed.WithCause(err)
 		}
@@ -476,46 +512,36 @@ func (s *Service) RunExperimentScoreOutboxOnce(ctx context.Context) error {
 // publishScoreOutboxItem 发布单条得分事件并按结果回写 outbox 状态。
 func (s *Service) publishScoreOutboxItem(ctx context.Context, item ExperimentScoreOutbox) error {
 	eventCtx := response.WithTrace(ctx, item.TraceID)
-	payload := contracts.ExperimentScoredEvent{TenantID: item.TenantID, TraceID: item.TraceID, ExperimentID: item.ExperimentID, InstanceID: item.InstanceID, StudentID: item.StudentID, Score: item.Score, ScoredAt: item.ScoredAt}
-	if err := s.bus.Publish(eventCtx, contracts.SubjectExperimentScored, payload); err != nil {
+	experimentName, err := s.experimentNameForScoreEvent(eventCtx, item)
+	if err != nil {
 		s.recordExperimentScoreOutboxFailure(eventCtx, item, err)
 		return apperr.ErrExperimentEventFailed.WithCause(err)
 	}
-	if err := s.publishExperimentCompletedNotification(eventCtx, item); err != nil {
+	payload := contracts.ExperimentScoredEvent{EventID: ids.Format(item.ID), TenantID: item.TenantID, TraceID: item.TraceID, ExperimentID: item.ExperimentID, ExperimentName: experimentName, InstanceID: item.InstanceID, StudentID: item.StudentID, Score: item.Score, ScoredAt: item.ScoredAt}
+	if err := s.bus.Publish(eventCtx, contracts.SubjectExperimentScored, payload); err != nil {
 		s.recordExperimentScoreOutboxFailure(eventCtx, item, err)
 		return apperr.ErrExperimentEventFailed.WithCause(err)
 	}
 	return s.markExperimentScoreOutboxPublished(eventCtx, item)
 }
 
-// publishExperimentCompletedNotification 通过 M10 统一通知事件写入实验完成站内信。
-func (s *Service) publishExperimentCompletedNotification(ctx context.Context, item ExperimentScoreOutbox) error {
+// experimentNameForScoreEvent 读取通知展示所需的最小实验名称,不把 M7 内部组件配置带入事件。
+func (s *Service) experimentNameForScoreEvent(ctx context.Context, item ExperimentScoreOutbox) (string, error) {
 	var exp Experiment
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
 		exp, err = tx.GetExperiment(ctx, item.TenantID, item.ExperimentID)
 		return err
 	}); err != nil {
-		return err
+		return "", err
 	}
-	evt := contracts.NotifySendRequestedEvent{
-		TenantID:  item.TenantID,
-		TraceID:   item.TraceID,
-		Type:      "experiment.completed",
-		Receivers: []int64{item.StudentID},
-		Params: map[string]string{
-			"experiment": exp.Name,
-			"score":      fmt.Sprintf("%.2f", item.Score),
-		},
-		Link: "student/experiment-detail?id=" + ids.Format(item.ExperimentID),
-	}
-	return s.bus.Publish(ctx, contracts.SubjectNotifySendRequested, evt)
+	return exp.Name, nil
 }
 
 // markExperimentScoreOutboxPublished 标记实验得分事件发布成功。
 func (s *Service) markExperimentScoreOutboxPublished(ctx context.Context, item ExperimentScoreOutbox) error {
 	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.MarkExperimentScoreOutboxPublished(ctx, item.TenantID, item.ID)
+		_, err := tx.MarkExperimentScoreOutboxPublished(ctx, item.TenantID, item.ID, item.LeaseToken)
 		if err != nil {
 			return apperr.ErrExperimentEventFailed.WithCause(err)
 		}
@@ -526,7 +552,7 @@ func (s *Service) markExperimentScoreOutboxPublished(ctx context.Context, item E
 // recordExperimentScoreOutboxFailure 记录得分事件发布失败并等待后台重试。
 func (s *Service) recordExperimentScoreOutboxFailure(ctx context.Context, item ExperimentScoreOutbox, cause error) {
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.MarkExperimentScoreOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()))
+		_, err := tx.MarkExperimentScoreOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()), item.LeaseToken)
 		return err
 	}); err != nil {
 		logging.ErrorContext(ctx, "experiment score outbox failure mark failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("instance_id", item.InstanceID), slog.Int64("outbox_id", item.ID))

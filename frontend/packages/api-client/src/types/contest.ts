@@ -206,6 +206,37 @@ export interface BattleReplayRef {
   available: boolean
 }
 
+export interface BattleReplayWindow {
+  list: BattleReplayWindowItem[]
+  total: number
+  page: number
+  size: number
+  pending: number
+  checkpoint: BattleReplayCheckpoint
+}
+
+export interface BattleReplayWindowItem {
+  match: BattleMatch
+  sequence: number
+  my_side: 'a' | 'b'
+  active_entry?: BattleReplayActiveEntry
+}
+
+export interface BattleReplayActiveEntry {
+  id: SnowflakeID
+  role: BattleRole
+  version_no: number
+  submitted_at: string
+}
+
+export interface BattleReplayCheckpoint {
+  wins: number
+  losses: number
+  draws: number
+  rating_delta: number
+  rating: number
+}
+
 export interface BattleReplayDownloadGrant {
   token: string
   mode: 'download'

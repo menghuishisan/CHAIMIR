@@ -53,6 +53,28 @@ func (q *Queries) CountNotifications(ctx context.Context, arg CountNotifications
 	return count, err
 }
 
+const countNotificationsBySource = `-- name: CountNotificationsBySource :one
+SELECT COUNT(*)
+FROM notification
+WHERE tenant_id = $1
+  AND source_ref = $2
+  AND receiver_id = ANY($3::bigint[])
+`
+
+type CountNotificationsBySourceParams struct {
+	TenantID    int64       `json:"tenant_id"`
+	SourceRef   pgtype.Text `json:"source_ref"`
+	ReceiverIds []int64     `json:"receiver_ids"`
+}
+
+// 业务事件重投时先识别已持久化的同一收件人集合,避免重复投递被限流当作失败。
+func (q *Queries) CountNotificationsBySource(ctx context.Context, arg CountNotificationsBySourceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countNotificationsBySource, arg.TenantID, arg.SourceRef, arg.ReceiverIds)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUnreadNotifications = `-- name: CountUnreadNotifications :one
 SELECT COUNT(*) FROM notification
 WHERE receiver_id = $1 AND is_read = false AND deleted_at IS NULL
@@ -109,8 +131,9 @@ func (q *Queries) CreateAnnouncement(ctx context.Context, arg CreateAnnouncement
 }
 
 const createNotification = `-- name: CreateNotification :exec
-INSERT INTO notification (id, tenant_id, receiver_id, type, title, content, link, is_read, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO notification (id, tenant_id, receiver_id, type, title, content, link, source_ref, is_read, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (tenant_id, receiver_id, source_ref) WHERE source_ref IS NOT NULL DO NOTHING
 `
 
 type CreateNotificationParams struct {
@@ -121,6 +144,7 @@ type CreateNotificationParams struct {
 	Title      string             `json:"title"`
 	Content    string             `json:"content"`
 	Link       pgtype.Text        `json:"link"`
+	SourceRef  pgtype.Text        `json:"source_ref"`
 	IsRead     bool               `json:"is_read"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
@@ -134,6 +158,7 @@ func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotification
 		arg.Title,
 		arg.Content,
 		arg.Link,
+		arg.SourceRef,
 		arg.IsRead,
 		arg.CreatedAt,
 	)
@@ -155,7 +180,7 @@ const deleteNotification = `-- name: DeleteNotification :one
 UPDATE notification
 SET deleted_at = now()
 WHERE id = $1 AND receiver_id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, receiver_id, type, title, content, link, is_read, read_at, created_at, deleted_at
+RETURNING id, tenant_id, receiver_id, type, title, content, link, source_ref, is_read, read_at, created_at, deleted_at
 `
 
 type DeleteNotificationParams struct {
@@ -174,6 +199,7 @@ func (q *Queries) DeleteNotification(ctx context.Context, arg DeleteNotification
 		&i.Title,
 		&i.Content,
 		&i.Link,
+		&i.SourceRef,
 		&i.IsRead,
 		&i.ReadAt,
 		&i.CreatedAt,
@@ -364,7 +390,7 @@ func (q *Queries) ListNotificationTemplates(ctx context.Context) ([]Notification
 }
 
 const listNotifications = `-- name: ListNotifications :many
-SELECT id, tenant_id, receiver_id, type, title, content, link, is_read, read_at, created_at, deleted_at
+SELECT id, tenant_id, receiver_id, type, title, content, link, source_ref, is_read, read_at, created_at, deleted_at
 FROM notification
 WHERE receiver_id = $1
   AND deleted_at IS NULL
@@ -405,6 +431,7 @@ func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsPa
 			&i.Title,
 			&i.Content,
 			&i.Link,
+			&i.SourceRef,
 			&i.IsRead,
 			&i.ReadAt,
 			&i.CreatedAt,
@@ -506,7 +533,7 @@ const markNotificationRead = `-- name: MarkNotificationRead :one
 UPDATE notification
 SET is_read = true, read_at = now()
 WHERE id = $1 AND receiver_id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, receiver_id, type, title, content, link, is_read, read_at, created_at, deleted_at
+RETURNING id, tenant_id, receiver_id, type, title, content, link, source_ref, is_read, read_at, created_at, deleted_at
 `
 
 type MarkNotificationReadParams struct {
@@ -525,6 +552,7 @@ func (q *Queries) MarkNotificationRead(ctx context.Context, arg MarkNotification
 		&i.Title,
 		&i.Content,
 		&i.Link,
+		&i.SourceRef,
 		&i.IsRead,
 		&i.ReadAt,
 		&i.CreatedAt,

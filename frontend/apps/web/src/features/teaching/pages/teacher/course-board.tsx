@@ -31,7 +31,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { usePagedResource } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
@@ -58,10 +58,7 @@ function CourseAnnouncements({ courseId }: CourseBoardProps) {
   const [composeOpen, setComposeOpen] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
-  const announcements = useAsyncResource(
-    () => api.teaching.listAnnouncements(courseId),
-    [courseId],
-  )
+	const announcements = usePagedResource<TeachingAnnouncement>((params) => api.teaching.listAnnouncements(courseId, params), [courseId])
 
   const togglePin = useCallback(
     async (announcement: TeachingAnnouncement) => {
@@ -101,9 +98,9 @@ function CourseAnnouncements({ courseId }: CourseBoardProps) {
           }
           skeleton={<Skeleton variant="line" lines={3} />}
         >
-          {(list) => (
-            <div className="flex flex-col gap-3">
-              {list.map((announcement) => (
+			{(page) => (
+				<div className="flex flex-col gap-3">
+              {page.list.map((announcement) => (
                 <Card key={announcement.id}>
                   <CardHeader
                     title={
@@ -129,9 +126,10 @@ function CourseAnnouncements({ courseId }: CourseBoardProps) {
                     </p>
                   </CardBody>
                 </Card>
-              ))}
-            </div>
-          )}
+					))}
+					<Pagination page={announcements.page} pageSize={announcements.pageSize} total={announcements.total} onPageChange={announcements.setPage} />
+				</div>
+			)}
         </ResourceState>
       </div>
 

@@ -204,6 +204,41 @@ type BattleReplayRefDTO struct {
 	Available bool   `json:"available"`
 }
 
+// BattleReplayWindowDTO 是回放时间窗响应,检查点和总量均由服务端计算。
+type BattleReplayWindowDTO struct {
+	List       []BattleReplayWindowItemDTO `json:"list"`
+	Total      int64                       `json:"total"`
+	Page       int                         `json:"page"`
+	Size       int                         `json:"size"`
+	Pending    int64                       `json:"pending"`
+	Checkpoint BattleReplayCheckpointDTO   `json:"checkpoint"`
+}
+
+// BattleReplayWindowItemDTO 是窗口内按完成时间排序的一局对抗。
+type BattleReplayWindowItemDTO struct {
+	Match       BattleMatchDTO              `json:"match"`
+	Sequence    int64                       `json:"sequence"`
+	MySide      string                      `json:"my_side"`
+	ActiveEntry *BattleReplayActiveEntryDTO `json:"active_entry,omitempty"`
+}
+
+// BattleReplayActiveEntryDTO 是某一局完成时生效的本队参战物摘要。
+type BattleReplayActiveEntryDTO struct {
+	ID          ids.ID    `json:"id"`
+	Role        int16     `json:"role"`
+	VersionNo   int32     `json:"version_no"`
+	SubmittedAt time.Time `json:"submitted_at"`
+}
+
+// BattleReplayCheckpointDTO 是窗口开始前的服务端战绩快照。
+type BattleReplayCheckpointDTO struct {
+	Wins        int32   `json:"wins"`
+	Losses      int32   `json:"losses"`
+	Draws       int32   `json:"draws"`
+	RatingDelta float64 `json:"rating_delta"`
+	Rating      float64 `json:"rating"`
+}
+
 // LadderDTO 是排行榜输出。
 type LadderDTO struct {
 	TeamID      ids.ID    `json:"team_id"`

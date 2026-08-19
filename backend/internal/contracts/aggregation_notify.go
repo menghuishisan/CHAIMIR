@@ -7,6 +7,7 @@ import (
 
 // NotifySendRequest 是模块发送站内信时提交给 M10 的统一请求。
 type NotifySendRequest struct {
+	RequestID string            `json:"request_id,omitempty"`
 	TenantID  int64             `json:"tenant_id"`
 	Type      string            `json:"type"`
 	Receivers []int64           `json:"receivers"`

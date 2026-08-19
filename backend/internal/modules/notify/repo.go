@@ -26,6 +26,7 @@ type Store interface {
 type TxStore interface {
 	GetNotificationTemplate(context.Context, string) (notificationTemplate, error)
 	ListNotificationTemplates(context.Context) ([]notificationTemplate, error)
+	CountNotificationsBySource(context.Context, int64, string, []int64) (int64, error)
 	CreateNotifications(context.Context, []notificationRecord) error
 	ListNotifications(context.Context, int64, *bool, string, int, int) ([]NotificationDTO, int64, error)
 	CountUnread(context.Context, int64) (int64, error)

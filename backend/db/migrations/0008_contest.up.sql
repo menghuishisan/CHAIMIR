@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS contest (
     freeze_minutes INT NOT NULL DEFAULT 0 CHECK (freeze_minutes >= 0),
     rules JSONB NOT NULL DEFAULT '{}'::jsonb,
     status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4, 5, 6)),
+    archive_lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    archive_lease_until TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     deleted_at TIMESTAMPTZ,
@@ -164,6 +166,9 @@ CREATE TABLE IF NOT EXISTS battle_match (
     status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4)),
     matched_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     finished_at TIMESTAMPTZ,
+    lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until TIMESTAMPTZ,
+    attempt_count INT NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, source_ref),
     FOREIGN KEY (tenant_id, contest_id) REFERENCES contest(tenant_id, id),
@@ -171,6 +176,8 @@ CREATE TABLE IF NOT EXISTS battle_match (
     FOREIGN KEY (tenant_id, entry_a_id) REFERENCES battle_entry(tenant_id, id),
     FOREIGN KEY (tenant_id, entry_b_id) REFERENCES battle_entry(tenant_id, id)
 );
+CREATE INDEX IF NOT EXISTS idx_battle_match_lease ON battle_match(status, lease_until) WHERE status = 2;
+CREATE INDEX IF NOT EXISTS idx_contest_archive_lease ON contest(status, archive_lease_until) WHERE status = 5;
 
 CREATE TABLE IF NOT EXISTS ladder_rank (
     id BIGINT PRIMARY KEY,

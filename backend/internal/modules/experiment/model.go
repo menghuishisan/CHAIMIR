@@ -203,17 +203,20 @@ type ExperimentStatsSnapshot struct {
 
 // ExperimentScoreOutbox 是实验得分事件的生产者 outbox 记录。
 type ExperimentScoreOutbox struct {
-	ID           int64
-	TenantID     int64
-	ExperimentID int64
-	InstanceID   int64
-	StudentID    int64
-	Score        float64
-	TraceID      string
-	ScoredAt     time.Time
-	Status       int16
-	RetryCount   int32
-	LastError    string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID            int64
+	TenantID      int64
+	ExperimentID  int64
+	InstanceID    int64
+	StudentID     int64
+	Score         float64
+	ScoreRevision int32
+	TraceID       string
+	ScoredAt      time.Time
+	Status        int16
+	RetryCount    int32
+	LastError     string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	LeaseToken    string
+	LeaseUntil    time.Time
 }

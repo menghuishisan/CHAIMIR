@@ -226,11 +226,44 @@ export class SandboxApi {
    * 获取 Web 工具代理 URL
    */
   async getToolProxyUrl(instanceId: string, toolCode: string, proxyPath = '', toolOrigin: string): Promise<string> {
-    const normalizedPath = proxyPath.replace(/^\/+/, '')
+    const normalizedPath = normalizeProxyPath(proxyPath)
     const encodedTool = encodePathSegment(toolCode)
     const pathPrefix = `${API_BASE_PATH}/sandbox/sandboxes/${encodePathSegment(instanceId)}/tools/${encodedTool}`
     const path = `/sandbox/sandboxes/${encodePathSegment(instanceId)}/tools/${encodedTool}/${normalizedPath}`
     const { ticket } = await this.identity.issueBrowserAccessTicket(pathPrefix)
     return this.client.browserURLAtOrigin(toolOrigin, path, { ticket })
   }
+}
+
+/** 将代理下游路径限制为不含查询、片段或路径逃逸的编码路径。 */
+function normalizeProxyPath(proxyPath: string): string {
+  const normalized = proxyPath.trim().replace(/^\/+/, '')
+  if (/[?#\\]/.test(normalized) || hasControlCharacter(normalized)) {
+    throw new Error('工具代理路径包含不允许的字符')
+  }
+  const segments = normalized.split('/').filter(Boolean).map((segment) => {
+    let decoded: string
+    try {
+      decoded = decodeURIComponent(segment)
+    } catch {
+      throw new Error('工具代理路径包含无效编码')
+    }
+    if (decoded === '.' || decoded === '..' || /[\\/?#]/.test(decoded) || hasControlCharacter(decoded)) {
+      throw new Error('工具代理路径包含不允许的路径段')
+    }
+    return encodeURIComponent(decoded)
+  })
+  if (segments.length === 0) {
+    return ''
+  }
+  return segments.join('/')
+}
+
+/** 检查路径中不可进入 URL 的 ASCII 控制字符。 */
+function hasControlCharacter(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code <= 0x1f || code === 0x7f) return true
+  }
+  return false
 }

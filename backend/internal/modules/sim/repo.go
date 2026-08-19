@@ -4,6 +4,7 @@ package sim
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"chaimir/internal/modules/sim/internal/sqlcgen"
 	"chaimir/internal/platform/db"
@@ -47,8 +48,10 @@ type TxStore interface {
 	GetReview(ctx context.Context, id int64) (Review, error)
 	GetLatestReviewForPackage(ctx context.Context, packageID int64) (Review, error)
 	ListReviews(ctx context.Context, result int16, limit, offset int32) ([]ReviewInfo, int64, error)
-	MergeValidationReport(ctx context.Context, packageID int64, report ValidationReport) (Review, error)
-	ClaimPackagesForPreview(ctx context.Context, limit int32) ([]Package, error)
+	MergeValidationReport(ctx context.Context, reviewID, packageID int64, leaseToken string, report ValidationReport) (Review, error)
+	ReleasePreviewLease(ctx context.Context, reviewID, packageID int64, leaseToken string) (int64, error)
+	ExhaustPreviewAttempts(ctx context.Context, maxAttempts int32, staleBefore time.Time, report ValidationReport) ([]Review, error)
+	ClaimPackagesForPreview(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time, leaseToken string) ([]Package, error)
 	CompleteReview(ctx context.Context, id int64, result int16, reviewerID int64, comment string) (Review, error)
 	CreateSession(ctx context.Context, session Session) (Session, error)
 	GetSession(ctx context.Context, tenantID, sessionID int64) (Session, error)
@@ -256,7 +259,7 @@ func (s *txStore) CreateReview(ctx context.Context, id, packageID, submitterID i
 	if err != nil {
 		return Review{}, err
 	}
-	return reviewFromRow(row)
+	return reviewFromFields(row.ID, row.PackageID, row.SubmitterID, row.PreviewReport, row.ReviewerID, row.Result, row.Comment, row.CreatedAt, row.UpdatedAt)
 }
 
 // GetReview 按 ID 查询审核记录。
@@ -265,7 +268,7 @@ func (s *txStore) GetReview(ctx context.Context, id int64) (Review, error) {
 	if err != nil {
 		return Review{}, err
 	}
-	return reviewFromRow(row)
+	return reviewFromFields(row.ID, row.PackageID, row.SubmitterID, row.PreviewReport, row.ReviewerID, row.Result, row.Comment, row.CreatedAt, row.UpdatedAt)
 }
 
 // GetLatestReviewForPackage 查询包的最新审核记录。
@@ -274,7 +277,7 @@ func (s *txStore) GetLatestReviewForPackage(ctx context.Context, packageID int64
 	if err != nil {
 		return Review{}, err
 	}
-	return reviewFromRow(row)
+	return reviewFromFields(row.ID, row.PackageID, row.SubmitterID, row.PreviewReport, row.ReviewerID, row.Result, row.Comment, row.CreatedAt, row.UpdatedAt)
 }
 
 // ListReviews 查询审核分页。
@@ -299,27 +302,53 @@ func (s *txStore) ListReviews(ctx context.Context, result int16, limit, offset i
 }
 
 // MergeValidationReport 合并动态预览报告。
-func (s *txStore) MergeValidationReport(ctx context.Context, packageID int64, report ValidationReport) (Review, error) {
+func (s *txStore) MergeValidationReport(ctx context.Context, reviewID, packageID int64, leaseToken string, report ValidationReport) (Review, error) {
 	raw, err := dynamicValidationReportJSON(report)
 	if err != nil {
 		return Review{}, err
 	}
-	row, err := s.q.MergeSimValidationReport(ctx, sqlcgen.MergeSimValidationReportParams{PackageID: packageID, PreviewReport: raw})
+	row, err := s.q.MergeSimValidationReport(ctx, sqlcgen.MergeSimValidationReportParams{ReviewID: reviewID, PackageID: packageID, PreviewReport: raw, LeaseToken: leaseToken})
 	if err != nil {
 		return Review{}, err
 	}
-	return reviewFromRow(row)
+	return reviewFromFields(row.ID, row.PackageID, row.SubmitterID, row.PreviewReport, row.ReviewerID, row.Result, row.Comment, row.CreatedAt, row.UpdatedAt)
+}
+
+// ReleasePreviewLease 仅释放仍属于本 worker 的预览租约,避免基础设施故障被误判为包内容问题。
+func (s *txStore) ReleasePreviewLease(ctx context.Context, reviewID, packageID int64, leaseToken string) (int64, error) {
+	return s.q.ReleaseSimPreviewLease(ctx, sqlcgen.ReleaseSimPreviewLeaseParams{ReviewID: reviewID, PackageID: packageID, LeaseToken: leaseToken})
+}
+
+// ExhaustPreviewAttempts 将最后一次预览在 worker 崩溃后遗留的过期租约收敛为受控终态报告。
+func (s *txStore) ExhaustPreviewAttempts(ctx context.Context, maxAttempts int32, staleBefore time.Time, report ValidationReport) ([]Review, error) {
+	raw, err := dynamicValidationReportJSON(report)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.q.ExhaustSimPreviewAttempts(ctx, sqlcgen.ExhaustSimPreviewAttemptsParams{MaxAttempts: maxAttempts, StaleBefore: timex.RequiredTimestamptz(staleBefore), PreviewReport: raw})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Review, 0, len(rows))
+	for _, row := range rows {
+		item, err := reviewFromFields(row.ID, row.PackageID, row.SubmitterID, row.PreviewReport, row.ReviewerID, row.Result, row.Comment, row.CreatedAt, row.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 // ClaimPackagesForPreview 认领待隔离预览的包,SKIP LOCKED 保证多副本认领互不重复。
-func (s *txStore) ClaimPackagesForPreview(ctx context.Context, limit int32) ([]Package, error) {
-	rows, err := s.q.ClaimSimPackagesForPreview(ctx, limit)
+func (s *txStore) ClaimPackagesForPreview(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time, leaseToken string) ([]Package, error) {
+	rows, err := s.q.ClaimSimPackagesForPreview(ctx, sqlcgen.ClaimSimPackagesForPreviewParams{PageLimit: limit, MaxAttempts: maxAttempts, StaleBefore: timex.RequiredTimestamptz(staleBefore), LeaseUntil: timex.RequiredTimestamptz(leaseUntil), LeaseToken: leaseToken})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Package, 0, len(rows))
 	for _, row := range rows {
-		pkg, err := packageFromRow(row)
+		pkg, err := packageFromPreviewRow(row)
 		if err != nil {
 			return nil, err
 		}
@@ -334,7 +363,7 @@ func (s *txStore) CompleteReview(ctx context.Context, id int64, result int16, re
 	if err != nil {
 		return Review{}, err
 	}
-	return reviewFromRow(row)
+	return reviewFromFields(row.ID, row.PackageID, row.SubmitterID, row.PreviewReport, row.ReviewerID, row.Result, row.Comment, row.CreatedAt, row.UpdatedAt)
 }
 
 // CreateSession 新建仿真会话。

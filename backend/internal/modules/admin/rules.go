@@ -11,7 +11,7 @@ import (
 )
 
 // ParseMonitoringPanels 解析并校验外接监控面板嵌入地址。
-func ParseMonitoringPanels(raw string) ([]MonitoringPanel, error) {
+func ParseMonitoringPanels(raw string, allowedOrigins []string) ([]MonitoringPanel, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, apperr.ErrAdminMonitoringInvalid
@@ -23,7 +23,7 @@ func ParseMonitoringPanels(raw string) ([]MonitoringPanel, error) {
 	for i := range panels {
 		panels[i].Name = strings.TrimSpace(panels[i].Name)
 		panels[i].URL = strings.TrimSpace(panels[i].URL)
-		if panels[i].Name == "" || !safePanelURL(panels[i].URL) {
+		if panels[i].Name == "" || !safePanelURL(panels[i].URL, allowedOrigins) {
 			return nil, apperr.ErrAdminMonitoringInvalid
 		}
 	}
@@ -31,9 +31,18 @@ func ParseMonitoringPanels(raw string) ([]MonitoringPanel, error) {
 }
 
 // safePanelURL 校验面板 URL 仅含 HTTPS scheme/host/path,不携带令牌类信息。
-func safePanelURL(raw string) bool {
+func safePanelURL(raw string, allowedOrigins []string) bool {
 	u, err := url.Parse(strings.TrimSpace(raw))
-	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == ""
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	for _, allowed := range allowedOrigins {
+		origin, parseErr := url.Parse(strings.TrimSpace(allowed))
+		if parseErr == nil && strings.EqualFold(origin.Scheme, u.Scheme) && strings.EqualFold(origin.Host, u.Host) {
+			return true
+		}
+	}
+	return false
 }
 
 // validateScopeTenant 校验全局/租户范围与 tenant_id 的对应关系。

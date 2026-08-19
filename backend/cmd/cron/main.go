@@ -92,12 +92,16 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	return runBackup(ctx, cfg, database, objects, ids)
+	recorder, err := admin.NewBackupRecorderFromDatabase(database, ids)
+	if err != nil {
+		return err
+	}
+	return runBackup(ctx, cfg, objects, ids, recorder)
 }
 
 // runBackup 执行数据库与对象存储备份,最终把结果写入 M9 backup_record。
-func runBackup(ctx context.Context, cfg *config.Config, database *db.DB, objects *storage.Storage, ids snowflake.Generator) error {
-	if cfg == nil || database == nil || objects == nil || ids == nil {
+func runBackup(ctx context.Context, cfg *config.Config, objects *storage.Storage, ids snowflake.Generator, recorder *admin.BackupRecorder) error {
+	if cfg == nil || objects == nil || ids == nil || recorder == nil {
 		return fmt.Errorf("备份任务依赖不完整")
 	}
 	batch := "backup-" + platformids.Format(ids.Generate())
@@ -120,7 +124,7 @@ func runBackup(ctx context.Context, cfg *config.Config, database *db.DB, objects
 		if failErr != nil {
 			return errors.Join(err, failErr)
 		}
-		if recordErr := recordBackup(ctx, database, ids, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: failRef, Status: status}); recordErr != nil {
+		if recordErr := recorder.RecordResult(ctx, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: failRef, Status: status}); recordErr != nil {
 			return errors.Join(err, recordErr)
 		}
 		return err
@@ -135,7 +139,7 @@ func runBackup(ctx context.Context, cfg *config.Config, database *db.DB, objects
 		if failErr != nil {
 			return errors.Join(err, failErr)
 		}
-		if recordErr := recordBackup(ctx, database, ids, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: failRef, Status: status}); recordErr != nil {
+		if recordErr := recorder.RecordResult(ctx, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: failRef, Status: status}); recordErr != nil {
 			return errors.Join(err, recordErr)
 		}
 		return err
@@ -147,7 +151,7 @@ func runBackup(ctx context.Context, cfg *config.Config, database *db.DB, objects
 		if failErr != nil {
 			return errors.Join(err, failErr)
 		}
-		if recordErr := recordBackup(ctx, database, ids, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: failRef, SizeBytes: sizeBytes, Status: status}); recordErr != nil {
+		if recordErr := recorder.RecordResult(ctx, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: failRef, SizeBytes: sizeBytes, Status: status}); recordErr != nil {
 			return errors.Join(err, recordErr)
 		}
 		return err
@@ -172,14 +176,14 @@ func runBackup(ctx context.Context, cfg *config.Config, database *db.DB, objects
 		if failErr != nil {
 			return errors.Join(err, failErr)
 		}
-		if recordErr := recordBackup(ctx, database, ids, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: failRef, SizeBytes: sizeBytes, Status: status}); recordErr != nil {
+		if recordErr := recorder.RecordResult(ctx, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: failRef, SizeBytes: sizeBytes, Status: status}); recordErr != nil {
 			return errors.Join(err, recordErr)
 		}
 		return err
 	}
 	sizeBytes += manifestSize
 	status = admin.BackupStatusSucceeded
-	if err := recordBackup(ctx, database, ids, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: storageRef, SizeBytes: sizeBytes, Status: status}); err != nil {
+	if err := recorder.RecordResult(ctx, admin.BackupRecordCreate{Type: admin.BackupTypeFull, StorageRef: storageRef, SizeBytes: sizeBytes, Status: status}); err != nil {
 		return err
 	}
 	slog.Info("backup completed", slog.String("batch", batch), slog.Int64("size_bytes", sizeBytes))
@@ -368,13 +372,4 @@ func backupObjectKey(batch, bucket, key string) (string, error) {
 		parts = append(parts, url.PathEscape(seg))
 	}
 	return storage.ObjectKey(0, "admin", "backup", parts...)
-}
-
-// recordBackup 在 M9 自有 backup_record 表中写入本次受控备份结果。
-func recordBackup(ctx context.Context, database *db.DB, ids snowflake.Generator, req admin.BackupRecordCreate) error {
-	if req.StorageRef == "" {
-		return fmt.Errorf("备份记录缺少对象引用")
-	}
-	_, err := admin.RecordBackupResult(ctx, admin.NewStore(database), ids.Generate(), req)
-	return err
 }

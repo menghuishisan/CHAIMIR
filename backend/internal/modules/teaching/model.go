@@ -140,6 +140,8 @@ type JudgeOutbox struct {
 	CompletedAt      time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	LeaseToken       string
+	LeaseUntil       time.Time
 }
 
 type SubmissionDraft struct {
@@ -228,6 +230,8 @@ type CourseGradeExportRequest struct {
 	NextCheckAt    time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	LeaseToken     string
+	LeaseUntil     time.Time
 }
 
 // TeachingGradeEventOutbox 是成绩变更事件的生产者 outbox 记录。
@@ -243,6 +247,8 @@ type TeachingGradeEventOutbox struct {
 	LastError      string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	LeaseToken     string
+	LeaseUntil     time.Time
 }
 
 type CourseListFilter struct {

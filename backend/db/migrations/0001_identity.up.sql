@@ -48,8 +48,11 @@ CREATE TABLE IF NOT EXISTS tenant_provision_outbox (
     last_error VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    lease_until TIMESTAMPTZ,
     UNIQUE (tenant_id)
 );
+CREATE INDEX IF NOT EXISTS idx_tenant_provision_outbox_lease ON tenant_provision_outbox(status, lease_until) WHERE status = 2;
 
 CREATE TABLE IF NOT EXISTS tenant_application (
     id BIGINT PRIMARY KEY,

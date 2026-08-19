@@ -25,7 +25,8 @@ import {
   PageBody,
   PageHeader,
   PageScaffold,
-  PageSection,
+	PageSection,
+	Pagination,
   Stat,
   StatusIndicator,
   Table,
@@ -37,7 +38,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
+import { useAsyncResource, usePagedResource } from '../../../../hooks'
 import {
   formatDate,
   formatDateTime,
@@ -309,10 +310,7 @@ interface CourseAssignmentsProps {
  * CourseAssignments 列出课程作业。学生只会收到已发布作业(服务端按身份过滤)。
  */
 function CourseAssignments({ courseId, onNavigate }: CourseAssignmentsProps) {
-  const assignments = useAsyncResource(
-    () => api.teaching.listCourseAssignments(courseId),
-    [courseId],
-  )
+	const assignments = usePagedResource<Assignment>((params) => api.teaching.listCourseAssignments(courseId, params), [courseId])
 
   const columns: TableColumn<Assignment>[] = [
     {
@@ -381,7 +379,12 @@ function CourseAssignments({ courseId, onNavigate }: CourseAssignmentsProps) {
         emptyDescription="老师发布作业后会显示在这里,截止时间也会一并给出。"
         skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
       >
-        {(list) => <Table columns={columns} data={list} rowKey={(item) => item.id} />}
+		{(page) => (
+			<div className="flex flex-col gap-4">
+				<Table columns={columns} data={page.list} rowKey={(item) => item.id} />
+				<Pagination page={assignments.page} pageSize={assignments.pageSize} total={assignments.total} onPageChange={assignments.setPage} />
+			</div>
+		)}
       </ResourceState>
     </PageSection>
   )

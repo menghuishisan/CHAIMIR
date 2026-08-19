@@ -27,6 +27,8 @@ func tenantProvisionOutboxFromRow(row sqlcgen.TenantProvisionOutbox) TenantProvi
 		LastError:     pgtypex.TextValue(row.LastError),
 		CreatedAt:     timex.FromTimestamptz(row.CreatedAt),
 		UpdatedAt:     timex.FromTimestamptz(row.UpdatedAt),
+		LeaseToken:    row.LeaseToken,
+		LeaseUntil:    timex.FromTimestamptz(row.LeaseUntil),
 	}
 }
 

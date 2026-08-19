@@ -103,12 +103,8 @@ func statusText(status int16) string {
 		return "judging"
 	case JudgeTaskStatusDone:
 		return "done"
-	case JudgeTaskStatusTimeout:
-		return "timeout"
 	case JudgeTaskStatusFailed:
 		return "failed"
-	case JudgeTaskStatusError:
-		return "error"
 	case JudgeTaskStatusCancelled:
 		return "cancelled"
 	default:

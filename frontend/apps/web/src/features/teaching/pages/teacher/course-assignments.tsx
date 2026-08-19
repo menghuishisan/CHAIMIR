@@ -28,7 +28,8 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
-  PageSection,
+	PageSection,
+	Pagination,
   Select,
   StatusIndicator,
   Table,
@@ -39,7 +40,7 @@ import { api } from '../../../../app/api'
 import { toDateTimeInputValue } from '../../../../utils/dateInput'
 import { ResourceState } from '../../../../components/ResourceState'
 import { ContentItemPicker } from '../../../content/components/ContentItemPicker'
-import { useAsyncResource } from '../../../../hooks'
+import { useAsyncResource, usePagedResource } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import {
   assignmentStatusLabel,
@@ -64,10 +65,7 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
-  const assignments = useAsyncResource(
-    () => api.teaching.listCourseAssignments(courseId),
-    [courseId],
-  )
+	const assignments = usePagedResource<Assignment>((params) => api.teaching.listCourseAssignments(courseId, params), [courseId])
 
   /** publishAssignment 发布作业:发布后学生可见,题目与分值不能再改。 */
   const publishAssignment = useCallback(async () => {
@@ -178,7 +176,12 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
           }
           skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
         >
-          {(list) => <Table columns={columns} data={list} rowKey={(item) => item.id} />}
+			{(page) => (
+				<div className="flex flex-col gap-4">
+					<Table columns={columns} data={page.list} rowKey={(item) => item.id} />
+					<Pagination page={assignments.page} pageSize={assignments.pageSize} total={assignments.total} onPageChange={assignments.setPage} />
+				</div>
+			)}
         </ResourceState>
       </div>
 

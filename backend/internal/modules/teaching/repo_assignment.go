@@ -35,20 +35,25 @@ func (s *txStore) GetAssignment(ctx context.Context, tenantID, id int64) (Assign
 
 // ListAssignmentsByCourse 查询课程作业外壳。
 // publishedOnly 为 true 只回已发布作业(学生视角),false 回全部含草稿(授课教师与课程克隆)。
-func (s *txStore) ListAssignmentsByCourse(ctx context.Context, tenantID, courseID int64, publishedOnly bool) ([]Assignment, error) {
-	rows, err := s.q.ListAssignmentsByCourse(ctx, sqlcgen.ListAssignmentsByCourseParams{TenantID: tenantID, CourseID: courseID, PublishedOnly: publishedOnly})
+func (s *txStore) ListAssignmentsByCourse(ctx context.Context, tenantID, courseID int64, publishedOnly bool, page, size int) ([]Assignment, int64, error) {
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := s.q.ListAssignmentsByCourse(ctx, sqlcgen.ListAssignmentsByCourseParams{TenantID: tenantID, CourseID: courseID, PublishedOnly: publishedOnly, PageLimit: limit, PageOffset: offset})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	total, err := s.q.CountAssignmentsByCourse(ctx, sqlcgen.CountAssignmentsByCourseParams{TenantID: tenantID, CourseID: courseID, PublishedOnly: publishedOnly})
+	if err != nil {
+		return nil, 0, err
 	}
 	out := make([]Assignment, 0, len(rows))
 	for _, row := range rows {
 		item, err := assignmentFromRow(row)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		out = append(out, item)
 	}
-	return out, nil
+	return out, total, nil
 }
 
 // UpdateAssignment 更新草稿作业。
@@ -224,8 +229,8 @@ func (s *txStore) CreateJudgeOutbox(ctx context.Context, outbox JudgeOutbox) (Ju
 }
 
 // ClaimJudgeOutbox 声明待派发判题任务。
-func (s *txStore) ClaimJudgeOutbox(ctx context.Context, tenantID int64, limit int32) ([]JudgeOutbox, error) {
-	rows, err := s.q.ClaimJudgeOutbox(ctx, sqlcgen.ClaimJudgeOutboxParams{TenantID: tenantID, Limit: limit})
+func (s *txStore) ClaimJudgeOutbox(ctx context.Context, tenantID int64, limit, maxAttempts int32, staleBefore time.Time, leaseToken string, leaseUntil time.Time) ([]JudgeOutbox, error) {
+	rows, err := s.q.ClaimJudgeOutbox(ctx, sqlcgen.ClaimJudgeOutboxParams{TenantID: tenantID, Limit: limit, MaxAttempts: maxAttempts, LeaseToken: leaseToken, LeaseUntil: timex.RequiredTimestamptz(leaseUntil), StaleBefore: timex.RequiredTimestamptz(staleBefore)})
 	if err != nil {
 		return nil, err
 	}
@@ -241,8 +246,8 @@ func (s *txStore) ClaimJudgeOutbox(ctx context.Context, tenantID int64, limit in
 }
 
 // ClaimJudgeOutboxAcrossTenants 声明所有租户待派发判题任务,仅供模块后台任务使用。
-func (s *txStore) ClaimJudgeOutboxAcrossTenants(ctx context.Context, limit int32) ([]JudgeOutbox, error) {
-	rows, err := s.q.ClaimJudgeOutboxAcrossTenants(ctx, limit)
+func (s *txStore) ClaimJudgeOutboxAcrossTenants(ctx context.Context, limit, maxAttempts int32, staleBefore time.Time, leaseToken string, leaseUntil time.Time) ([]JudgeOutbox, error) {
+	rows, err := s.q.ClaimJudgeOutboxAcrossTenants(ctx, sqlcgen.ClaimJudgeOutboxAcrossTenantsParams{Limit: limit, MaxAttempts: maxAttempts, LeaseToken: leaseToken, LeaseUntil: timex.RequiredTimestamptz(leaseUntil), StaleBefore: timex.RequiredTimestamptz(staleBefore)})
 	if err != nil {
 		return nil, err
 	}
@@ -257,18 +262,28 @@ func (s *txStore) ClaimJudgeOutboxAcrossTenants(ctx context.Context, limit int32
 	return out, nil
 }
 
+// ExhaustExpiredJudgeOutbox 终止已耗尽派发次数的过期租约。
+func (s *txStore) ExhaustExpiredJudgeOutbox(ctx context.Context, tenantID int64, maxAttempts int32, staleBefore time.Time) (int64, error) {
+	return s.q.ExhaustExpiredJudgeOutbox(ctx, sqlcgen.ExhaustExpiredJudgeOutboxParams{TenantID: tenantID, MaxAttempts: maxAttempts, StaleBefore: timex.RequiredTimestamptz(staleBefore)})
+}
+
+// ExhaustExpiredJudgeOutboxAcrossTenants 终止所有租户中已耗尽派发次数的过期租约。
+func (s *txStore) ExhaustExpiredJudgeOutboxAcrossTenants(ctx context.Context, maxAttempts int32, staleBefore time.Time) (int64, error) {
+	return s.q.ExhaustExpiredJudgeOutboxAcrossTenants(ctx, sqlcgen.ExhaustExpiredJudgeOutboxAcrossTenantsParams{MaxAttempts: maxAttempts, StaleBefore: timex.RequiredTimestamptz(staleBefore)})
+}
+
 // CompleteJudgeOutbox 标记判题派发完成。
-func (s *txStore) CompleteJudgeOutbox(ctx context.Context, tenantID, id int64) (JudgeOutbox, error) {
-	row, err := s.q.CompleteJudgeOutbox(ctx, sqlcgen.CompleteJudgeOutboxParams{TenantID: tenantID, ID: id})
+func (s *txStore) CompleteJudgeOutbox(ctx context.Context, tenantID, id int64, leaseToken string) (JudgeOutbox, error) {
+	row, err := s.q.CompleteJudgeOutbox(ctx, sqlcgen.CompleteJudgeOutboxParams{TenantID: tenantID, ID: id, LeaseToken: leaseToken})
 	if err != nil {
 		return JudgeOutbox{}, err
 	}
 	return outboxFromRow(row)
 }
 
-// RetryJudgeOutbox 回退判题 outbox 到待派发。
-func (s *txStore) RetryJudgeOutbox(ctx context.Context, tenantID, id int64, lastError string) (JudgeOutbox, error) {
-	row, err := s.q.RetryJudgeOutbox(ctx, sqlcgen.RetryJudgeOutboxParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(lastError)})
+// RetryJudgeOutbox 在本次派发失败后回退 outbox;尝试次数已在认领时递增。
+func (s *txStore) RetryJudgeOutbox(ctx context.Context, tenantID, id int64, maxAttempts int32, lastError, leaseToken string) (JudgeOutbox, error) {
+	row, err := s.q.RetryJudgeOutbox(ctx, sqlcgen.RetryJudgeOutboxParams{TenantID: tenantID, ID: id, MaxAttempts: maxAttempts, LastError: pgtypex.Text(lastError), LeaseToken: leaseToken})
 	if err != nil {
 		return JudgeOutbox{}, err
 	}

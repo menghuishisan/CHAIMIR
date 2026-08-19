@@ -61,20 +61,21 @@ func (s *Service) ListCourseGrades(ctx context.Context, tenantID, courseID int64
 }
 
 // ListStudentGrades 实现 M6 对 M11 的学生成绩只读契约。
-func (s *Service) ListStudentGrades(ctx context.Context, tenantID, studentID int64) ([]contracts.TeachingCourseGrade, error) {
+func (s *Service) ListStudentGrades(ctx context.Context, tenantID, studentID int64, semester string, page, size int) ([]contracts.TeachingCourseGrade, int64, error) {
 	var grades []CourseGrade
+	var total int64
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		grades, err = tx.ListStudentGrades(ctx, tenantID, studentID)
+		grades, total, err = tx.ListStudentGrades(ctx, tenantID, studentID, semester, page, size)
 		return err
 	}); err != nil {
-		return nil, mapGradeError(err)
+		return nil, 0, mapGradeError(err)
 	}
 	out := make([]contracts.TeachingCourseGrade, 0, len(grades))
 	for _, grade := range grades {
 		out = append(out, contractGrade(grade))
 	}
-	return out, nil
+	return out, total, nil
 }
 
 // Stats 实现 M6 对 M9 的教学统计只读契约。

@@ -48,34 +48,42 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), now())
 RETURNING id, code, name, type, status, deploy_mode, expire_at, logo_ref, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at;
 
 -- name: CreateTenantProvisionOutbox :one
-INSERT INTO tenant_provision_outbox (id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now())
-RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at;
+INSERT INTO tenant_provision_outbox (id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: ClaimTenantProvisionOutbox :many
-UPDATE tenant_provision_outbox
-SET status = 4, retry_count = retry_count + 1, updated_at = now()
-WHERE id IN (
-    SELECT id
-    FROM tenant_provision_outbox
-    WHERE status IN (1, 3) OR (status = 4 AND updated_at <= @stale_before::timestamptz)
-    ORDER BY created_at ASC, id ASC
+WITH exhausted AS (
+    UPDATE tenant_provision_outbox AS expired
+    SET status = 4, last_error = 'provision lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
+    WHERE expired.status = 2 AND expired.lease_until <= @stale_before::timestamptz AND expired.retry_count >= @max_attempts
+    RETURNING expired.id
+), candidates AS (
+    SELECT o.id
+    FROM tenant_provision_outbox o
+    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= @stale_before::timestamptz))
+      AND o.retry_count < @max_attempts
+    ORDER BY o.created_at ASC, o.id ASC
     LIMIT @page_limit
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at;
+UPDATE tenant_provision_outbox AS outbox
+SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = @lease_token, lease_until = @lease_until::timestamptz
+FROM candidates
+WHERE outbox.id = candidates.id
+RETURNING outbox.id, outbox.tenant_id, outbox.deploy_mode, outbox.trace_id, outbox.provisioned_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
 
 -- name: MarkTenantProvisionOutboxPublished :one
 UPDATE tenant_provision_outbox
-SET status = 2, last_error = NULL, updated_at = now()
-WHERE id = $1
-RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at;
+SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE id = sqlc.arg(id) AND status = 2 AND lease_token = sqlc.arg(lease_token) AND lease_until > now()
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: MarkTenantProvisionOutboxFailed :one
 UPDATE tenant_provision_outbox
-SET status = 3, last_error = $2, updated_at = now()
-WHERE id = $1
-RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at;
+SET status = 4, last_error = sqlc.arg(last_error), updated_at = now(), lease_token = '', lease_until = NULL
+WHERE id = sqlc.arg(id) AND status = 2 AND lease_token = sqlc.arg(lease_token) AND lease_until > now()
+RETURNING id, tenant_id, deploy_mode, trace_id, provisioned_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: UpdateTenantConfig :one
 UPDATE tenant
@@ -350,7 +358,18 @@ WHERE a.tenant_id = $1
   AND a.base_identity = 1
   AND a.status = 2
   AND a.deleted_at IS NULL
-ORDER BY p.no, a.id;
+ORDER BY p.no, a.id
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountClassStudents :one
+SELECT count(*)
+FROM account a
+JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
+WHERE a.tenant_id = $1
+  AND p.org_id = $2
+  AND a.base_identity = 1
+  AND a.status = 2
+  AND a.deleted_at IS NULL;
 
 -- name: UpdateAccountStatus :one
 UPDATE account

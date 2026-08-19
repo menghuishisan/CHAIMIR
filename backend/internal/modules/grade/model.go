@@ -38,4 +38,6 @@ type GradeLockOutbox struct {
 	LastError  string
 	CreatedAt  string
 	UpdatedAt  string
+	LeaseToken string
+	LeaseUntil string
 }

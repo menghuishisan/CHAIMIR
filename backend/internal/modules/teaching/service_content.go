@@ -262,9 +262,16 @@ func (s *Service) AddCourseMembers(ctx context.Context, courseID int64, req Batc
 	if classID <= 0 {
 		return nil, apperr.ErrTeachingMemberInvalid
 	}
-	students, err := s.identity.ListClassStudents(ctx, id.TenantID, classID)
-	if err != nil {
-		return nil, apperr.ErrTeachingMemberInvalid.WithCause(err)
+	students := make([]contracts.AccountInfo, 0)
+	for page := 1; ; page++ {
+		batch, listErr := s.identity.ListClassStudents(ctx, id.TenantID, classID, page, pagex.MaximumSize())
+		if listErr != nil {
+			return nil, apperr.ErrTeachingMemberInvalid.WithCause(listErr)
+		}
+		students = append(students, batch...)
+		if len(batch) < pagex.MaximumSize() {
+			break
+		}
 	}
 	if len(students) == 0 {
 		return nil, apperr.ErrTeachingMemberClassEmpty
