@@ -32,7 +32,7 @@ runtime/evm-hardhat sha256:<64位hex>
 service/backend sha256:<64位hex>
 ```
 
-CI 的后端、前端和通用镜像流水线在 Trivy 扫描、SBOM、推送 Harbor、Cosign 签名/证明与验证完成后,分别上传职责内 `image-digest-*` 锁片段。唯一的 `image-metadata-promotion` 工作流串行消费片段,用 `images/sync-image-metadata.ps1` 合并当前权威锁并同步 local-dev 部署 digest、受控仿真引用和 `deploy/config/chaimir.env` 的本地/私有化准入列表;首次收到某个服务镜像时,同步器会把对应 `newTag` 原位替换为 digest,并删除已离开正式锁的旧证明。`backend/.env.example` 不写入环境证明,生产由 Secret/KMS 注入。随后工作流创建机器人 PR并启用自动合并。同一服务自己的 lock 变化不会触发重建;只有明确的共享基座 digest 变化会触发其消费者重建一次,避免供应链回环。
+CI 的后端、前端和通用镜像流水线在 Trivy 扫描、SBOM、推送 Harbor、Cosign 签名/证明与验证完成后,分别上传职责内 `image-digest-*` 锁片段。唯一的 `image-metadata-promotion` 工作流串行消费片段,用 `images/sync-image-metadata.ps1` 合并当前权威锁并同步 acceptance 部署 digest、受控仿真引用和 `deploy/config/chaimir.env` 的验收/私有化准入列表;首次收到某个服务镜像时,同步器会把对应 `newTag` 原位替换为 digest,并删除已离开正式锁的旧证明。`backend/.env.example` 不写入环境证明,生产由 Secret/KMS 注入。随后工作流创建机器人 PR并启用自动合并。同一服务自己的 lock 变化不会触发重建;只有明确的共享基座 digest 变化会触发其消费者重建一次,避免供应链回环。
 
 仓库必须启用 GitHub Auto-merge,并配置具有 contents/pull requests 权限的 GitHub App 或细粒度 PAT Secret `IMAGE_METADATA_BOT_TOKEN`;不能使用受递归保护、无法触发后续 PR 检查的默认 `GITHUB_TOKEN` 代替。Harbor 与 Cosign 凭据继续只由独立 GitHub Secrets 注入。任一权限、检查、扫描、签名、验签或自动合并步骤失败时,新 digest 不得晋升,旧权威文件也不得被静默覆盖。
 

@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	// SandboxBackendRoleName 是动态命名空间内授予控制面的固定 Role 名称。
-	SandboxBackendRoleName = "chaimir-backend-sandbox-workload"
+	// SandboxBackendClusterRoleName 是部署层维护的固定沙箱工作负载 ClusterRole 名称。
+	SandboxBackendClusterRoleName = "chaimir-backend-sandbox-workload"
 	// SandboxBackendRoleBindingName 是动态命名空间内固定的控制面 RoleBinding 名称。
 	SandboxBackendRoleBindingName = "chaimir-backend-sandbox-workload"
 	// SandboxBackendServiceAccountNamespace 是控制面 ServiceAccount 的部署命名空间。
@@ -32,23 +32,6 @@ const (
 	// sandboxManagedByLabel 只允许平台创建的命名空间进入预配队列。
 	sandboxManagedByLabel = "chaimir-backend"
 )
-
-// sandboxBackendPolicyRules 是控制面编排沙箱资源所需的最小命名空间权限。
-// 该权限只在单个动态命名空间内生效，不包含任何 RBAC 或跨命名空间资源。
-func sandboxBackendPolicyRules() []rbacv1.PolicyRule {
-	return []rbacv1.PolicyRule{
-		{APIGroups: []string{""}, Resources: []string{"pods", "pods/log", "pods/exec", "pods/status"}, Verbs: []string{"create", "delete", "get", "list", "watch"}},
-		{APIGroups: []string{""}, Resources: []string{"serviceaccounts"}, Verbs: []string{"create", "delete", "get", "list", "watch", "update"}},
-		{APIGroups: []string{""}, Resources: []string{"services", "configmaps"}, Verbs: []string{"create", "delete", "get", "list", "watch"}},
-		{APIGroups: []string{""}, Resources: []string{"secrets"}, Verbs: []string{"create", "delete", "get", "list", "watch", "update"}},
-		{APIGroups: []string{""}, Resources: []string{"persistentvolumeclaims"}, Verbs: []string{"create", "delete", "get", "list", "watch"}},
-		{APIGroups: []string{"networking.k8s.io"}, Resources: []string{"networkpolicies"}, Verbs: []string{"create", "delete", "get", "list", "watch"}},
-		{APIGroups: []string{""}, Resources: []string{"resourcequotas", "limitranges"}, Verbs: []string{"create", "delete", "get", "list", "watch"}},
-		{APIGroups: []string{"metrics.k8s.io"}, Resources: []string{"pods"}, Verbs: []string{"get", "list", "watch"}},
-		{APIGroups: []string{"snapshot.storage.k8s.io"}, Resources: []string{"volumesnapshots"}, Verbs: []string{"create", "delete", "get", "list", "watch"}},
-		{APIGroups: []string{"snapshot.storage.k8s.io"}, Resources: []string{"volumesnapshotcontents", "volumesnapshotclasses"}, Verbs: []string{"get", "list", "watch"}},
-	}
-}
 
 // SandboxRBACProvisioner 监听平台拥有的动态命名空间并维护其命名空间级 RoleBinding。
 type SandboxRBACProvisioner struct {
@@ -137,30 +120,12 @@ func (p *SandboxRBACProvisioner) processNext(ctx context.Context, queue workqueu
 	return true
 }
 
-// reconcileNamespace 在单个命名空间内创建或修复固定 Role 和 RoleBinding。
+// reconcileNamespace 在单个命名空间内创建或修复指向部署层固定 ClusterRole 的 RoleBinding。
 func (p *SandboxRBACProvisioner) reconcileNamespace(ctx context.Context, namespace string) error {
-	roles := p.client.RbacV1().Roles(namespace)
-	desiredRole := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: SandboxBackendRoleName, Namespace: namespace, Labels: sandboxResourceLabels(namespace)}, Rules: sandboxBackendPolicyRules()}
-	existingRole, err := roles.Get(ctx, SandboxBackendRoleName, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		if _, err := roles.Create(ctx, desiredRole, metav1.CreateOptions{}); err != nil {
-			return fmt.Errorf("创建动态命名空间 Role 失败: %w", err)
-		}
-	} else if err != nil {
-		return fmt.Errorf("查询动态命名空间 Role 失败: %w", err)
-	} else if !reflect.DeepEqual(existingRole.Rules, desiredRole.Rules) || !reflect.DeepEqual(existingRole.Labels, desiredRole.Labels) {
-		updated := existingRole.DeepCopy()
-		updated.Labels = desiredRole.Labels
-		updated.Rules = desiredRole.Rules
-		if _, err := roles.Update(ctx, updated, metav1.UpdateOptions{}); err != nil {
-			return fmt.Errorf("修复动态命名空间 Role 失败: %w", err)
-		}
-	}
-
 	bindings := p.client.RbacV1().RoleBindings(namespace)
 	desiredBinding := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: SandboxBackendRoleBindingName, Namespace: namespace, Labels: sandboxResourceLabels(namespace)},
-		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: SandboxBackendRoleName},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: SandboxBackendClusterRoleName},
 		Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Namespace: p.backendServiceAccountNS, Name: p.backendServiceAccountName}},
 	}
 	existingBinding, err := bindings.Get(ctx, SandboxBackendRoleBindingName, metav1.GetOptions{})
@@ -224,9 +189,9 @@ func sandboxResourceLabels(namespace string) map[string]string {
 	return map[string]string{"app.kubernetes.io/part-of": "chaimir", "chaimir.io/managed-by": sandboxManagedByLabel, "chaimir.io/namespace": namespace}
 }
 
-// roleBindingMatches 校验绑定只指向固定 Role 和指定后端 ServiceAccount。
+// roleBindingMatches 校验绑定只指向固定 ClusterRole 和指定后端 ServiceAccount。
 func roleBindingMatches(binding *rbacv1.RoleBinding, namespace, name string) bool {
-	if binding == nil || binding.RoleRef.Kind != "Role" || binding.RoleRef.Name != SandboxBackendRoleName || binding.RoleRef.APIGroup != rbacv1.GroupName || len(binding.Subjects) != 1 {
+	if binding == nil || binding.RoleRef.Kind != "ClusterRole" || binding.RoleRef.Name != SandboxBackendClusterRoleName || binding.RoleRef.APIGroup != rbacv1.GroupName || len(binding.Subjects) != 1 {
 		return false
 	}
 	subject := binding.Subjects[0]

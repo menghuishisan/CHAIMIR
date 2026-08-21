@@ -171,9 +171,11 @@ type JudgeCheckpointRequest struct {
 	BindingOutput  map[string]any `json:"binding_output"`
 }
 
-// SubmitReportRequest 是提交实验报告的请求。
-type SubmitReportRequest struct {
-	ContentRef string `json:"content_ref"`
+// ReportUploadRequest 是 API 边界读取报告文件后交给服务层的受控输入。
+type ReportUploadRequest struct {
+	FileName    string
+	ContentType string
+	Content     []byte
 }
 
 // GradeReportRequest 是教师批改实验报告的请求。
@@ -194,6 +196,12 @@ type ReportDTO struct {
 	Comment     string    `json:"comment,omitempty"`
 	Status      int16     `json:"status"`
 	SubmittedAt time.Time `json:"submitted_at"`
+}
+
+// ReportAccessDTO 是教师读取实验报告时使用的一次性下载授权。
+type ReportAccessDTO struct {
+	Token     string `json:"token"`
+	ExpiresAt string `json:"expires_at"`
 }
 
 // CreateGroupRequest 是创建协作小组的请求。

@@ -25,6 +25,21 @@ function requireMatch(relativePath, source, pattern, message) {
   if (!pattern.test(source)) failures.push(`${relativePath}: ${message}`)
 }
 
+/**
+ * parseEnv 解析受控环境文件,只用于比较键和值是否漂移,不会输出敏感值。
+ */
+function parseEnv(source) {
+  const values = new Map()
+  for (const rawLine of source.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (line === '' || line.startsWith('#')) continue
+    const separator = line.indexOf('=')
+    if (separator <= 0) continue
+    values.set(line.slice(0, separator).trim(), line.slice(separator + 1).trim())
+  }
+  return values
+}
+
 for (const relativePath of ['frontend/.env', 'frontend/.env.example']) {
   const source = read(relativePath)
   requireMatch(relativePath, source, /^VITE_API_BASE_URL=\/api\/v1\s*$/m, 'API 必须使用同源 /api/v1')
@@ -34,7 +49,7 @@ for (const relativePath of ['frontend/.env', 'frontend/.env.example']) {
   }
 }
 
-for (const [name, deploymentMode] of [['local-dev', 'saas'], ['staging', 'saas'], ['prod-saas', 'saas'], ['prod-school', 'school']]) {
+for (const [name, deploymentMode] of [['acceptance', 'saas'], ['staging', 'saas'], ['prod-saas', 'saas'], ['prod-school', 'school']]) {
   const relativePath = `deploy/overlays/${name}/frontend-runtime-config.js`
   const source = read(relativePath)
   requireMatch(relativePath, source, new RegExp(`deploymentMode:\\s*['"]${deploymentMode}['"]`), `运行时部署形态必须为 ${deploymentMode}`)
@@ -44,6 +59,33 @@ for (const [name, deploymentMode] of [['local-dev', 'saas'], ['staging', 'saas']
 for (const relativePath of ['backend/.env.example', 'deploy/config/chaimir.env']) {
   const source = read(relativePath)
   requireMatch(relativePath, source, new RegExp(`^IDENTITY_SSO_ALLOWED_SERVICE_ORIGINS=https://${PUBLIC_HOST.replaceAll('.', '\\.') }\\s*$`, 'm'), `CAS service origin 默认必须为 https://${PUBLIC_HOST}`)
+}
+
+// deploy/config 是 Kubernetes 运行时权威源;示例和存在于本机的私有副本不得静默漂移。
+const deployConfig = parseEnv(read('deploy/config/chaimir.env'))
+const backendExample = parseEnv(read('backend/.env.example'))
+for (const [key, value] of backendExample) {
+  if (!deployConfig.has(key)) {
+    failures.push(`backend/.env.example: ${key} 未在 deploy/config/chaimir.env 定义`)
+  } else if (key !== 'PLATFORM_IMAGE_ATTESTATIONS_JSON' && deployConfig.get(key) !== value) {
+    failures.push(`backend/.env.example: ${key} 与 deploy/config/chaimir.env 不一致`)
+  }
+}
+
+const backendPrivatePath = path.join(ROOT, 'backend/.env')
+if (fs.existsSync(backendPrivatePath)) {
+  const runtimeConfig = new Map(deployConfig)
+  const secretPath = path.join(ROOT, 'deploy/config/secret.env')
+  if (fs.existsSync(secretPath)) {
+    for (const [key, value] of parseEnv(fs.readFileSync(secretPath, 'utf8'))) runtimeConfig.set(key, value)
+  }
+  for (const [key, value] of parseEnv(fs.readFileSync(backendPrivatePath, 'utf8'))) {
+    if (!runtimeConfig.has(key)) {
+      failures.push(`backend/.env: ${key} 已不在 deploy 权威配置中`)
+    } else if (runtimeConfig.get(key) !== value) {
+      failures.push(`backend/.env: ${key} 与 deploy 权威配置不一致`)
+    }
+  }
 }
 
 const headersPath = 'images/service/frontend/security-headers.conf'
@@ -57,7 +99,7 @@ for (const [pattern, message] of [
   [/add_header Permissions-Policy/, '必须显式限制浏览器高风险权限'],
 ]) requireMatch(headersPath, headers, pattern, message)
 
-for (const name of ['local-dev', 'staging', 'prod-saas', 'prod-school']) {
+for (const name of ['acceptance', 'staging', 'prod-saas', 'prod-school']) {
   const relativePath = `deploy/overlays/${name}/kustomization.yaml`
   const source = read(relativePath)
   const publicHostCount = (source.match(new RegExp(`value:\\s*${PUBLIC_HOST.replaceAll('.', '\\.')}`, 'g')) ?? []).length

@@ -1,0 +1,35 @@
+# 本文件固定 Cilium 的生产安全配置;运行镜像 digest 由安装脚本从权威镜像锁注入。
+policyEnforcementMode: always
+kubeProxyReplacement: "false"
+routingMode: tunnel
+tunnelProtocol: vxlan
+
+cni:
+  install: true
+  uninstall: false
+  chainingMode: none
+  exclusive: true
+
+ipam:
+  mode: cluster-pool
+  operator:
+    clusterPoolIPv4PodCIDRList:
+      - 10.245.0.0/16
+    clusterPoolIPv4MaskSize: 24
+
+ipv4:
+  enabled: true
+ipv6:
+  enabled: false
+
+operator:
+  replicas: 2
+
+envoy:
+  enabled: true
+
+hubble:
+  enabled: false
+
+prometheus:
+  enabled: true

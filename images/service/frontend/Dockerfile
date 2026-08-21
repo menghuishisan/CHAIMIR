@@ -25,7 +25,7 @@ WORKDIR /src/frontend
 RUN corepack enable && corepack prepare pnpm@9.1.0 --activate
 
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml frontend/turbo.json frontend/tsconfig.base.json ./
-COPY frontend/.eslintrc.js frontend/.prettierrc.json ./
+COPY frontend/eslint.config.js frontend/.prettierrc.json ./
 COPY frontend/packages ./packages
 COPY frontend/apps ./apps
 # Vite 与 Nginx 共同读取同一份生产安全头配置,构建阶段只复制该真相源供 Vite 解析。

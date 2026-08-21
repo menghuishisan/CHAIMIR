@@ -72,12 +72,12 @@ export function WizardComponentsStep({ draft, errors, onChange }: WizardComponen
             },
           })),
           checkpoints: draft.components.checkpoints.map((checkpoint) =>
-            checkpoint.env_id === env.id ? { ...checkpoint, env_id: undefined } : checkpoint,
+            checkpoint.env_id === env.id ? { ...checkpoint, env_id: undefined } : checkpoint
           ),
         },
       })
     },
-    [draft.components, onChange],
+    [draft.components, onChange]
   )
 
   const removeSim = useCallback(
@@ -95,12 +95,12 @@ export function WizardComponentsStep({ draft, errors, onChange }: WizardComponen
             },
           })),
           checkpoints: draft.components.checkpoints.map((checkpoint) =>
-            checkpoint.sim_id === sim.id ? { ...checkpoint, sim_id: undefined } : checkpoint,
+            checkpoint.sim_id === sim.id ? { ...checkpoint, sim_id: undefined } : checkpoint
           ),
         },
       })
     },
-    [draft.components, onChange],
+    [draft.components, onChange]
   )
 
   return (
@@ -276,7 +276,8 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
   const [formError, setFormError] = useState<string>()
 
   const catalog = useOrchestrationCatalog()
-  const imageOptions = useMemo(() => catalog.imageOptions(runtimeCode), [catalog, runtimeCode])
+  const imageOptions = catalog.imageOptions(runtimeCode)
+  const compatibleTools = catalog.tools(runtimeCode)
 
   const submit = useCallback(() => {
     const trimmedId = id.trim()
@@ -364,14 +365,11 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
                       onValueChange={(value) => {
                         setRuntimeCode(value)
                         setImageVersion('')
+                        setTools([])
                       }}
                     />
                   </FormField>
-                  <FormField
-                    label="镜像版本"
-                    htmlFor="env-image"
-                    helper="不选则用运行时的默认镜像"
-                  >
+                  <FormField label="镜像版本" htmlFor="env-image" helper="不选则用运行时的默认镜像">
                     <Select
                       id="env-image"
                       options={imageOptions}
@@ -390,9 +388,9 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
                 </div>
 
                 <FormField label="可用工具" helper="学生在这个环境里能打开哪些工具">
-                  {catalog.tools.length > 0 ? (
+                  {compatibleTools.length > 0 ? (
                     <div className="flex flex-col gap-2">
-                      {catalog.tools.map((tool) => (
+                      {compatibleTools.map((tool) => (
                         <Checkbox
                           key={tool.code}
                           checked={tools.includes(tool.code)}
@@ -401,7 +399,7 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
                             setTools((current) =>
                               checked === true
                                 ? [...current, tool.code]
-                                : current.filter((code) => code !== tool.code),
+                                : current.filter((code) => code !== tool.code)
                             )
                           }
                         />
@@ -409,7 +407,7 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
                     </div>
                   ) : (
                     <p className="text-sm text-ink-sub">
-                      平台还没有可用工具,请联系平台管理员在沙箱工具里注册。
+                      该运行时没有兼容的可用工具,可只使用运行时能力或联系平台管理员检查工具配置。
                     </p>
                   )}
                 </FormField>
@@ -487,13 +485,13 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
         size: PAGINATION_MAX_SIZE,
       }),
     [],
-    () => false,
+    () => false
   )
 
   const versions = useAsyncResource(
     () => (packageCode ? api.sim.getPackageVersions(packageCode) : Promise.resolve([])),
     [packageCode],
-    () => false,
+    () => false
   )
 
   const packageOptions = useMemo(() => {
@@ -505,7 +503,10 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
         seen.add(item.code)
         return true
       })
-      .map((item) => ({ value: item.code, label: `${item.name} · ${simCategoryLabel(item.category)}` }))
+      .map((item) => ({
+        value: item.code,
+        label: `${item.name} · ${simCategoryLabel(item.category)}`,
+      }))
   }, [packages.data])
 
   const versionOptions = useMemo(
@@ -513,7 +514,7 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
       (versions.data ?? [])
         .filter((item) => item.status === SIM_PACKAGE_STATUS.PUBLISHED)
         .map((item) => ({ value: item.version, label: item.version })),
-    [versions.data],
+    [versions.data]
   )
 
   const submit = useCallback(() => {

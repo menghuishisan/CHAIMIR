@@ -4,7 +4,8 @@ FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc
 LABEL org.opencontainers.image.title="tool/novnc-desktop"
 LABEL org.opencontainers.image.description="Chaimir noVNC desktop tool image"
 
-RUN apk add --no-cache \
+RUN apk upgrade --no-cache \
+    && apk add --no-cache \
         bash \
         ca-certificates \
         fluxbox \

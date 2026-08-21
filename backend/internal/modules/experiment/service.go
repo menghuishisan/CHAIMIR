@@ -4,6 +4,7 @@ package experiment
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
@@ -11,43 +12,63 @@ import (
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/snowflake"
 )
 
-// objectStorage 描述 M7 报告引用校验所需的对象存储桶信息。
+const (
+	experimentModuleName     = "experiment"
+	experimentReportResource = "report"
+)
+
+// objectStorage 描述 M7 报告上传和旧对象清理所需的统一对象存储能力。
 type objectStorage interface {
+	Delete(ctx context.Context, bucket, key string) error
+	Put(ctx context.Context, bucket, key string, r io.Reader, size int64, contentType string) error
 	BucketReport() string
+}
+
+// fileService 描述 M7 复用统一文件上传规划所需的最小能力。
+type fileService interface {
+	PlanUpload(ctx context.Context, req storage.PlanUploadRequest) (storage.UploadPlan, error)
+	IssueDownloadGrant(req storage.IssueDownloadGrantRequest) (string, storage.DownloadGrant, error)
 }
 
 // Service 承载 experiment 模块业务编排,依赖 repo 接口和跨模块 contracts。
 type Service struct {
-	store   Store
-	ids     snowflake.Generator
-	cfg     config.ExperimentConfig
-	audit   audit.Writer
-	roles   contracts.IdentityService
-	content contracts.ContentReadService
-	sandbox contracts.SandboxService
-	judge   contracts.JudgeService
-	sim     contracts.SimService
-	bus     eventbus.Bus
-	storage objectStorage
+	store            Store
+	ids              snowflake.Generator
+	cfg              config.ExperimentConfig
+	audit            audit.Writer
+	roles            contracts.IdentityService
+	content          contracts.ContentReadService
+	sandbox          contracts.SandboxService
+	judge            contracts.JudgeService
+	sim              contracts.SimService
+	bus              eventbus.Bus
+	storage          objectStorage
+	files            fileService
+	reportMaxBytes   int64
+	reportScanPolicy upload.ScanPolicy
 }
 
 // ServiceDeps 是 experiment service 的装配依赖集合。
 type ServiceDeps struct {
-	Store   Store
-	IDs     snowflake.Generator
-	Config  config.ExperimentConfig
-	Audit   audit.Writer
-	Roles   contracts.IdentityService
-	Content contracts.ContentReadService
-	Sandbox contracts.SandboxService
-	Judge   contracts.JudgeService
-	Sim     contracts.SimService
-	Bus     eventbus.Bus
-	Storage *storage.Storage
+	Store            Store
+	IDs              snowflake.Generator
+	Config           config.ExperimentConfig
+	Audit            audit.Writer
+	Roles            contracts.IdentityService
+	Content          contracts.ContentReadService
+	Sandbox          contracts.SandboxService
+	Judge            contracts.JudgeService
+	Sim              contracts.SimService
+	Bus              eventbus.Bus
+	Storage          *storage.Storage
+	FileService      fileService
+	ReportMaxBytes   int64
+	ReportScanPolicy upload.ScanPolicy
 }
 
 // isValidJudgeSandboxMode 在 service 边界校验 M3 沙箱模式契约,避免 rules 层依赖 contracts。
@@ -87,10 +108,16 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Storage == nil {
 		return nil, fmt.Errorf("experiment service 缺少统一对象存储")
 	}
+	if deps.FileService == nil {
+		return nil, fmt.Errorf("experiment service 缺少统一文件服务")
+	}
+	if deps.ReportMaxBytes <= 0 {
+		return nil, fmt.Errorf("experiment service 缺少报告大小配置")
+	}
 	if deps.Config.RecyclePollIntervalSeconds <= 0 || deps.Config.RecycleBatchSize <= 0 || deps.Config.InstanceIdleTimeoutSeconds <= 0 || deps.Config.PausedTimeoutSeconds <= 0 || deps.Config.ScoreOutboxBatchSize <= 0 || deps.Config.ScoreOutboxStaleMs <= 0 {
 		return nil, fmt.Errorf("experiment service 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, cfg: deps.Config, audit: deps.Audit, roles: deps.Roles, content: deps.Content, sandbox: deps.Sandbox, judge: deps.Judge, sim: deps.Sim, bus: deps.Bus, storage: deps.Storage}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, cfg: deps.Config, audit: deps.Audit, roles: deps.Roles, content: deps.Content, sandbox: deps.Sandbox, judge: deps.Judge, sim: deps.Sim, bus: deps.Bus, storage: deps.Storage, files: deps.FileService, reportMaxBytes: deps.ReportMaxBytes, reportScanPolicy: deps.ReportScanPolicy}, nil
 }
 
 // currentIdentity 读取租户账号身份。

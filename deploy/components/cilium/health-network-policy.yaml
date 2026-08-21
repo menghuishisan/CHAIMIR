@@ -1,0 +1,26 @@
+# 本文件只放行 Cilium 健康探针所需的保留身份流量,避免全局 always 模式下健康端点被默认拒绝。
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: allow-cilium-health-to-endpoints
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEntities:
+        - health
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: allow-cilium-health-probes
+spec:
+  endpointSelector:
+    matchLabels:
+      reserved:health: ""
+  ingress:
+    - fromEntities:
+        - host
+        - remote-node
+  egress:
+    - toEntities:
+        - cluster

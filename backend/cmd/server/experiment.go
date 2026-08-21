@@ -15,6 +15,7 @@ import (
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/snowflake"
 
 	"github.com/gin-gonic/gin"
@@ -22,19 +23,21 @@ import (
 
 // ExperimentModuleDeps 汇总组合根装配 M7 需要的基础设施和跨模块契约。
 type ExperimentModuleDeps struct {
-	Router   gin.IRouter
-	Database *db.DB
-	IDs      snowflake.Generator
-	Config   config.ExperimentConfig
-	Content  contracts.ContentReadService
-	Sandbox  contracts.SandboxService
-	Judge    contracts.JudgeService
-	Sim      contracts.SimService
-	Audit    audit.Writer
-	EventBus eventbus.Bus
-	Storage  *storage.Storage
-	Auth     *auth.Manager
-	Roles    contracts.IdentityService
+	Router      gin.IRouter
+	Database    *db.DB
+	IDs         snowflake.Generator
+	Config      config.ExperimentConfig
+	Content     contracts.ContentReadService
+	Sandbox     contracts.SandboxService
+	Judge       contracts.JudgeService
+	Sim         contracts.SimService
+	Audit       audit.Writer
+	EventBus    eventbus.Bus
+	Storage     *storage.Storage
+	Upload      config.UploadConfig
+	FileService storage.Service
+	Auth        *auth.Manager
+	Roles       contracts.IdentityService
 }
 
 // RegisterExperimentModule 构造实验 store/service,注册路由、事件和生命周期后台任务。
@@ -50,17 +53,20 @@ func RegisterExperimentModule(ctx context.Context, deps ExperimentModuleDeps) (*
 	}
 	store := experiment.NewStore(deps.Database)
 	svc, err := experiment.NewService(experiment.ServiceDeps{
-		Store:   store,
-		IDs:     deps.IDs,
-		Config:  deps.Config,
-		Audit:   deps.Audit,
-		Roles:   deps.Roles,
-		Content: deps.Content,
-		Sandbox: deps.Sandbox,
-		Judge:   deps.Judge,
-		Sim:     deps.Sim,
-		Bus:     deps.EventBus,
-		Storage: deps.Storage,
+		Store:            store,
+		IDs:              deps.IDs,
+		Config:           deps.Config,
+		Audit:            deps.Audit,
+		Roles:            deps.Roles,
+		Content:          deps.Content,
+		Sandbox:          deps.Sandbox,
+		Judge:            deps.Judge,
+		Sim:              deps.Sim,
+		Bus:              deps.EventBus,
+		Storage:          deps.Storage,
+		FileService:      deps.FileService,
+		ReportMaxBytes:   deps.Upload.ExperimentReportMaxBytes,
+		ReportScanPolicy: upload.ScanPolicy{Required: deps.Upload.VirusScanRequired},
 	})
 	if err != nil {
 		return nil, err

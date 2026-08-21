@@ -26,15 +26,22 @@ type Store interface {
 type TxStore interface {
 	GetRuntimeByCode(ctx context.Context, code string) (Runtime, error)
 	GetRuntimeByID(ctx context.Context, id int64) (Runtime, error)
+	GetRuntimeByIDForUpdate(ctx context.Context, id int64) (Runtime, error)
 	ListRuntimes(ctx context.Context) ([]Runtime, error)
-	UpsertRuntime(ctx context.Context, id int64, req RuntimeRequest, spec AdapterSpec) (Runtime, error)
-	UpdateRuntimeSelftest(ctx context.Context, runtimeID int64, status, runtimeStatus int16, detail []byte) (Runtime, error)
+	UpsertRuntime(ctx context.Context, id int64, req RuntimeRequest, spec AdapterSpec, selftestStatus int16, selftestDetail []byte) (Runtime, error)
+	StartRuntimeSelftest(ctx context.Context, runtimeID int64, detail []byte) (Runtime, error)
+	FinishRuntimeSelftest(ctx context.Context, runtimeID int64, attemptID string, status, runtimeStatus int16, detail []byte) (Runtime, error)
 	GetRuntimeImageByID(ctx context.Context, runtimeID, imageID int64) (RuntimeImage, error)
+	GetRuntimeImageByIDForUpdate(ctx context.Context, runtimeID, imageID int64) (RuntimeImage, error)
 	GetRuntimeImageByVersion(ctx context.Context, runtimeID int64, version string) (RuntimeImage, error)
+	GetRuntimeImageByVersionForShare(ctx context.Context, runtimeID int64, version string) (RuntimeImage, error)
 	GetDefaultRuntimeImage(ctx context.Context, runtimeID int64) (RuntimeImage, error)
+	GetDefaultRuntimeImageForShare(ctx context.Context, runtimeID int64) (RuntimeImage, error)
 	ListRuntimeImages(ctx context.Context, runtimeID int64) ([]RuntimeImage, error)
 	CreateRuntimeImage(ctx context.Context, id, runtimeID int64, req RuntimeImageRequest) (RuntimeImage, error)
-	UpdateRuntimeImagePrepull(ctx context.Context, runtimeID, imageID int64, prepulled bool, status int16, detail []byte, at time.Time) (RuntimeImage, error)
+	StartRuntimeImagePrepull(ctx context.Context, runtimeID, imageID int64, detail []byte) (RuntimeImage, error)
+	FinishRuntimeImagePrepull(ctx context.Context, runtimeID, imageID int64, attemptID string, prepulled bool, status int16, detail []byte, at time.Time) (RuntimeImage, error)
+	InvalidateRuntimeImagesPrepull(ctx context.Context, runtimeID int64, detail []byte) error
 	DisableRuntimeImage(ctx context.Context, runtimeID, imageID int64, detail []byte) (RuntimeImage, error)
 	GetToolByCode(ctx context.Context, code string) (Tool, error)
 	ListTools(ctx context.Context) ([]Tool, error)
@@ -153,6 +160,15 @@ func (s *txStore) GetRuntimeByID(ctx context.Context, id int64) (Runtime, error)
 	return runtimeFromRow(row)
 }
 
+// GetRuntimeByIDForUpdate 锁定运行时定义,供同一事务精确比较执行契约并更新。
+func (s *txStore) GetRuntimeByIDForUpdate(ctx context.Context, id int64) (Runtime, error) {
+	row, err := s.q.GetRuntimeByIDForUpdate(ctx, id)
+	if err != nil {
+		return Runtime{}, err
+	}
+	return runtimeFromRow(row)
+}
+
 // ListRuntimes 查询运行时列表。
 func (s *txStore) ListRuntimes(ctx context.Context) ([]Runtime, error) {
 	rows, err := s.q.ListRuntimes(ctx)
@@ -171,7 +187,7 @@ func (s *txStore) ListRuntimes(ctx context.Context) ([]Runtime, error) {
 }
 
 // UpsertRuntime 新建或更新运行时声明。
-func (s *txStore) UpsertRuntime(ctx context.Context, id int64, req RuntimeRequest, spec AdapterSpec) (Runtime, error) {
+func (s *txStore) UpsertRuntime(ctx context.Context, id int64, req RuntimeRequest, spec AdapterSpec, selftestStatus int16, selftestDetail []byte) (Runtime, error) {
 	rawSpec, err := jsonBytes(spec)
 	if err != nil {
 		return Runtime{}, err
@@ -185,8 +201,8 @@ func (s *txStore) UpsertRuntime(ctx context.Context, id int64, req RuntimeReques
 		AdapterSpec:    rawSpec,
 		CapabilityImpl: pgtypex.Text(req.CapabilityImpl),
 		PluginRef:      pgtypex.Text(req.PluginRef),
-		SelftestStatus: RuntimeSelftestPending,
-		SelftestDetail: []byte(`{}`),
+		SelftestStatus: selftestStatus,
+		SelftestDetail: selftestDetail,
 		Status:         req.Status,
 	})
 	if err != nil {
@@ -195,13 +211,26 @@ func (s *txStore) UpsertRuntime(ctx context.Context, id int64, req RuntimeReques
 	return runtimeFromRow(row)
 }
 
-// UpdateRuntimeSelftest 更新运行时自检状态。
-func (s *txStore) UpdateRuntimeSelftest(ctx context.Context, runtimeID int64, status, runtimeStatus int16, detail []byte) (Runtime, error) {
-	row, err := s.q.UpdateRuntimeSelftest(ctx, sqlcgen.UpdateRuntimeSelftestParams{
+// StartRuntimeSelftest 写入自检批次并把运行时切回接入中。
+func (s *txStore) StartRuntimeSelftest(ctx context.Context, runtimeID int64, detail []byte) (Runtime, error) {
+	row, err := s.q.StartRuntimeSelftest(ctx, sqlcgen.StartRuntimeSelftestParams{
+		ID:             runtimeID,
+		SelftestDetail: detail,
+	})
+	if err != nil {
+		return Runtime{}, err
+	}
+	return runtimeFromRow(row)
+}
+
+// FinishRuntimeSelftest 只让同一批次在运行时仍处于接入中时写回最终状态。
+func (s *txStore) FinishRuntimeSelftest(ctx context.Context, runtimeID int64, attemptID string, status, runtimeStatus int16, detail []byte) (Runtime, error) {
+	row, err := s.q.FinishRuntimeSelftest(ctx, sqlcgen.FinishRuntimeSelftestParams{
 		ID:             runtimeID,
 		SelftestStatus: status,
 		SelftestDetail: detail,
 		Status:         runtimeStatus,
+		AttemptID:      attemptID,
 	})
 	if err != nil {
 		return Runtime{}, err
@@ -218,6 +247,15 @@ func (s *txStore) GetRuntimeImageByID(ctx context.Context, runtimeID, imageID in
 	return runtimeImageFromRow(row), nil
 }
 
+// GetRuntimeImageByIDForUpdate 锁定预拉取证明行,让闭包变更与预拉取开始形成确定顺序。
+func (s *txStore) GetRuntimeImageByIDForUpdate(ctx context.Context, runtimeID, imageID int64) (RuntimeImage, error) {
+	row, err := s.q.GetRuntimeImageByIDForUpdate(ctx, sqlcgen.GetRuntimeImageByIDForUpdateParams{ID: imageID, RuntimeID: runtimeID})
+	if err != nil {
+		return RuntimeImage{}, err
+	}
+	return runtimeImageFromRow(row), nil
+}
+
 // GetRuntimeImageByVersion 按固定版本查询镜像。
 func (s *txStore) GetRuntimeImageByVersion(ctx context.Context, runtimeID int64, version string) (RuntimeImage, error) {
 	row, err := s.q.GetRuntimeImageByVersion(ctx, sqlcgen.GetRuntimeImageByVersionParams{RuntimeID: runtimeID, Version: version})
@@ -227,9 +265,27 @@ func (s *txStore) GetRuntimeImageByVersion(ctx context.Context, runtimeID int64,
 	return runtimeImageFromRow(row), nil
 }
 
+// GetRuntimeImageByVersionForShare 锁定显式镜像版本,防止创建事务与预拉取失效交叉放行。
+func (s *txStore) GetRuntimeImageByVersionForShare(ctx context.Context, runtimeID int64, version string) (RuntimeImage, error) {
+	row, err := s.q.GetRuntimeImageByVersionForShare(ctx, sqlcgen.GetRuntimeImageByVersionForShareParams{RuntimeID: runtimeID, Version: version})
+	if err != nil {
+		return RuntimeImage{}, err
+	}
+	return runtimeImageFromRow(row), nil
+}
+
 // GetDefaultRuntimeImage 查询运行时默认镜像。
 func (s *txStore) GetDefaultRuntimeImage(ctx context.Context, runtimeID int64) (RuntimeImage, error) {
 	row, err := s.q.GetDefaultRuntimeImage(ctx, runtimeID)
+	if err != nil {
+		return RuntimeImage{}, err
+	}
+	return runtimeImageFromRow(row), nil
+}
+
+// GetDefaultRuntimeImageForShare 锁定默认镜像版本,防止创建事务与预拉取失效交叉放行。
+func (s *txStore) GetDefaultRuntimeImageForShare(ctx context.Context, runtimeID int64) (RuntimeImage, error) {
+	row, err := s.q.GetDefaultRuntimeImageForShare(ctx, runtimeID)
 	if err != nil {
 		return RuntimeImage{}, err
 	}
@@ -270,20 +326,38 @@ func (s *txStore) CreateRuntimeImage(ctx context.Context, id, runtimeID int64, r
 	return runtimeImageFromRow(row), nil
 }
 
-// UpdateRuntimeImagePrepull 更新镜像预拉取闭环状态。
-func (s *txStore) UpdateRuntimeImagePrepull(ctx context.Context, runtimeID, imageID int64, prepulled bool, status int16, detail []byte, at time.Time) (RuntimeImage, error) {
-	row, err := s.q.UpdateRuntimeImagePrepull(ctx, sqlcgen.UpdateRuntimeImagePrepullParams{
+// StartRuntimeImagePrepull 把已在同一事务内核对的工作负载闭包标记为进行中。
+func (s *txStore) StartRuntimeImagePrepull(ctx context.Context, runtimeID, imageID int64, detail []byte) (RuntimeImage, error) {
+	row, err := s.q.StartRuntimeImagePrepull(ctx, sqlcgen.StartRuntimeImagePrepullParams{ID: imageID, RuntimeID: runtimeID, PrepullDetail: detail})
+	if err != nil {
+		return RuntimeImage{}, err
+	}
+	return runtimeImageFromRow(row), nil
+}
+
+// FinishRuntimeImagePrepull 仅允许同一次预拉取尝试写回最终节点状态。
+func (s *txStore) FinishRuntimeImagePrepull(ctx context.Context, runtimeID, imageID int64, attemptID string, prepulled bool, status int16, detail []byte, at time.Time) (RuntimeImage, error) {
+	row, err := s.q.FinishRuntimeImagePrepull(ctx, sqlcgen.FinishRuntimeImagePrepullParams{
 		ID:            imageID,
 		RuntimeID:     runtimeID,
 		Prepulled:     prepulled,
 		PrepullStatus: status,
 		PrepullDetail: detail,
 		PrepulledAt:   timex.Timestamptz(at),
+		AttemptID:     attemptID,
 	})
 	if err != nil {
 		return RuntimeImage{}, err
 	}
 	return runtimeImageFromRow(row), nil
+}
+
+// InvalidateRuntimeImagesPrepull 在运行时工作负载闭包变化后撤销全部可用镜像版本的旧预拉取证明。
+func (s *txStore) InvalidateRuntimeImagesPrepull(ctx context.Context, runtimeID int64, detail []byte) error {
+	return s.q.InvalidateRuntimeImagesPrepull(ctx, sqlcgen.InvalidateRuntimeImagesPrepullParams{
+		RuntimeID:     runtimeID,
+		PrepullDetail: detail,
+	})
 }
 
 // DisableRuntimeImage 停用镜像版本并重置预拉取状态,避免新沙箱继续调度该镜像。
@@ -337,10 +411,6 @@ func (s *txStore) ListCatalogRuntimes(ctx context.Context) ([]CatalogRuntime, er
 		if len(out) == 0 || out[len(out)-1].Code != row.RuntimeCode {
 			out = append(out, CatalogRuntime{Code: row.RuntimeCode, Name: row.RuntimeName, Eco: row.Eco, Images: []CatalogRuntimeImage{}})
 		}
-		// LEFT JOIN 无镜像时版本为空串,此时只保留运行时本身(可用其默认镜像起环境)。
-		if row.ImageVersion == "" {
-			continue
-		}
 		current := &out[len(out)-1]
 		current.Images = append(current.Images, CatalogRuntimeImage{Version: row.ImageVersion, IsDefault: row.ImageIsDefault})
 	}
@@ -355,7 +425,14 @@ func (s *txStore) ListCatalogTools(ctx context.Context) ([]CatalogTool, error) {
 	}
 	out := make([]CatalogTool, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, CatalogTool{Code: row.Code, Name: row.Name, Kind: row.Kind})
+		resourceSpec, err := toolResourceSpecFromJSON(row.ResourceSpec)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, CatalogTool{
+			Code: row.Code, Name: row.Name, Kind: row.Kind,
+			EcoTags: splitCSV(row.EcoTags), ResourceSpec: resourceSpec,
+		})
 	}
 	return out, nil
 }

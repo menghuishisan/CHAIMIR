@@ -22,7 +22,7 @@ FROM ${CILIUM_RUNTIME_IMAGE}
 ARG TARGETOS
 ARG TARGETARCH
 LABEL org.opencontainers.image.title="network/cilium"
-LABEL org.opencontainers.image.description="Cilium v1.20.0 agent rebuilt from patched official source"
+LABEL org.opencontainers.image.description="Cilium v1.20.1 agent rebuilt from verified official source"
 
 RUN echo '. /etc/profile.d/bash_completion.sh' >> /etc/bash.bashrc
 COPY --from=envoy /usr/bin/cilium-envoy /usr/bin/cilium-envoy-starter /usr/bin/

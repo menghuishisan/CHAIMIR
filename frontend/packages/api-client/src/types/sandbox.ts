@@ -179,6 +179,7 @@ export interface SandboxCatalogRuntime {
   name: string
   eco: string
   images: SandboxCatalogRuntimeImage[]
+  tool_codes: string[]
 }
 
 export interface SandboxCatalogRuntimeImage {

@@ -15,6 +15,7 @@ import type {
   ProgressDTO,
   CheckpointResult,
   ReportDTO,
+  ReportAccessDTO,
   ExperimentGroup,
   ExperimentGroupMemberRequest,
   ExperimentGroupRequest,
@@ -102,6 +103,13 @@ export class ExperimentApi {
   }
 
   /**
+   * 教师换取实验报告的一次性下载授权。
+   */
+  async issueReportAccess(reportId: string): Promise<ReportAccessDTO> {
+    return this.client.post(`/experiment/reports/${encodePathSegment(reportId)}/access`)
+  }
+
+  /**
    * 教师批改实验报告。
    */
   async gradeReport(reportId: string, data: GradeReportRequest): Promise<ReportDTO> {
@@ -156,10 +164,18 @@ export class ExperimentApi {
   }
 
   /**
-   * 提交实验报告
+   * 上传并提交实验报告。
    */
-  async submitReport(instanceId: string, data: { content_ref: string }): Promise<ReportDTO> {
-    return this.client.post(`/experiment/instances/${encodePathSegment(instanceId)}/report`, data)
+  async submitReport(
+    instanceId: string,
+    file: File,
+    onProgress?: (progress: number) => void,
+  ): Promise<ReportDTO> {
+    return this.client.upload(
+      `/experiment/instances/${encodePathSegment(instanceId)}/report`,
+      file,
+      onProgress,
+    )
   }
 
   /**

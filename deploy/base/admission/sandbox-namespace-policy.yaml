@@ -31,7 +31,7 @@ spec:
       message: "动态运行命名空间前缀仅保留给 Chaimir 后端创建。"
     - expression: >
         !(
-          object.metadata.labels.exists(key, value,
+          (request.operation == 'DELETE' ? oldObject : object).metadata.labels.exists(key, value,
             key == 'chaimir.io/managed-by' && value == 'chaimir-backend'
           )
         ) ||
@@ -39,7 +39,7 @@ spec:
           request.userInfo.username == 'system:serviceaccount:chaimir-system:chaimir-backend' ||
           request.userInfo.groups.exists(group, group == 'system:masters')
         )
-      message: "只有 Chaimir 后端 ServiceAccount 可以创建或修改平台所有权命名空间。"
+      message: "只有 Chaimir 后端 ServiceAccount 可以创建、修改或删除平台所有权命名空间。"
     - expression: >
         !(
           request.userInfo.username == 'system:serviceaccount:chaimir-system:chaimir-backend'
@@ -92,7 +92,7 @@ spec:
   policyName: chaimir-sandbox-namespace-boundary
   validationActions: ["Deny"]
 ---
-# 预配器即使被入侵,也只能修复固定 namespaced Role/RoleBinding,不能把集群角色绑定给任意主体。
+# 预配器即使被入侵,也只能在动态命名空间把固定 ClusterRole 绑定给固定后端主体。
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -105,8 +105,8 @@ spec:
     resourceRules:
       - apiGroups: ["rbac.authorization.k8s.io"]
         apiVersions: ["v1"]
-        operations: ["CREATE", "UPDATE", "DELETE"]
-        resources: ["roles", "rolebindings"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["rolebindings"]
   validations:
     - expression: >
         request.userInfo.username != 'system:serviceaccount:chaimir-system:chaimir-sandbox-rbac-provisioner' ||
@@ -118,34 +118,15 @@ spec:
             request.namespace.startsWith('sim-')
           ) &&
           request.name == 'chaimir-backend-sandbox-workload' &&
-          (
-            request.resource.resource == 'roles' ||
-            (
-              object.roleRef.kind == 'Role' &&
-              object.roleRef.apiGroup == 'rbac.authorization.k8s.io' &&
-              object.roleRef.name == 'chaimir-backend-sandbox-workload' &&
-              size(object.subjects) == 1 &&
-              object.subjects[0].kind == 'ServiceAccount' &&
-              object.subjects[0].namespace == 'chaimir-system' &&
-              object.subjects[0].name == 'chaimir-backend'
-            )
-          )
+          object.roleRef.kind == 'ClusterRole' &&
+          object.roleRef.apiGroup == 'rbac.authorization.k8s.io' &&
+          object.roleRef.name == 'chaimir-backend-sandbox-workload' &&
+          size(object.subjects) == 1 &&
+          object.subjects[0].kind == 'ServiceAccount' &&
+          object.subjects[0].namespace == 'chaimir-system' &&
+          object.subjects[0].name == 'chaimir-backend'
         )
       message: "沙箱 RBAC 预配器只能维护固定动态命名空间内的最小控制面绑定。"
-    - expression: >
-        request.userInfo.username != 'system:serviceaccount:chaimir-system:chaimir-sandbox-rbac-provisioner' ||
-        (
-          request.resource.resource != 'roles' ||
-          object.rules.all(rule,
-            !rule.apiGroups.exists(group, group == 'rbac.authorization.k8s.io') &&
-            !rule.apiGroups.exists(group, group == '*') &&
-            !rule.verbs.exists(verb, verb == '*') &&
-            !rule.resources.exists(resource,
-              resource in ['roles', 'rolebindings', 'clusterroles', 'clusterrolebindings', 'namespaces', 'nodes', 'persistentvolumes', 'storageclasses']
-            )
-          )
-        )
-      message: "沙箱工作负载 Role 不得授予 RBAC 或集群级资源权限。"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

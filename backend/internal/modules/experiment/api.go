@@ -10,7 +10,9 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
 	"chaimir/internal/platform/response"
+	"chaimir/internal/platform/upload"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 
 	"github.com/gin-gonic/gin"
 )
@@ -52,6 +54,7 @@ func (a experimentAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/experiments/:id/publish", a.publishExperiment)
 	g.POST("/experiments/:id/unpublish", a.unpublishExperiment)
 	g.GET("/experiments/:id/reports", a.listReports)
+	g.POST("/reports/:id/access", a.issueReportAccess)
 	g.POST("/reports/:id/grade", a.gradeReport)
 	g.POST("/experiments/:id/groups", a.createGroup)
 	g.GET("/experiments/:id/groups", a.listGroups)
@@ -270,17 +273,32 @@ func (a experimentAPI) judgeCheckpoint(c *gin.Context) {
 	httpx.Write(c, out, err)
 }
 
-// submitReport 绑定实验报告提交请求。
+// submitReport 读取大小受限的报告文件并委托服务层完成安全校验、上传和关联。
 func (a experimentAPI) submitReport(c *gin.Context) {
 	id, ok := httpx.PathID(c, "id")
 	if !ok {
 		return
 	}
-	var req SubmitReportRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrExperimentReportInvalid) {
+	file, err := c.FormFile("file")
+	if err != nil || file.Size <= 0 || file.Size > a.svc.reportMaxBytes {
+		httpx.Write(c, nil, apperr.ErrExperimentReportInvalid)
 		return
 	}
-	out, err := a.svc.SubmitReport(c.Request.Context(), id, req)
+	opened, err := file.Open()
+	if err != nil {
+		httpx.Write(c, nil, apperr.ErrExperimentReportInvalid.WithCause(err))
+		return
+	}
+	defer logging.CloseContext(c.Request.Context(), "关闭实验报告上传文件失败", opened)
+	content, result, err := upload.ReadBounded(opened, a.svc.reportMaxBytes)
+	if err != nil || result != upload.SizeOK {
+		if err == nil {
+			err = apperr.ErrExperimentReportInvalid
+		}
+		httpx.Write(c, nil, apperr.ErrExperimentReportInvalid.WithCause(err))
+		return
+	}
+	out, err := a.svc.SubmitReport(c.Request.Context(), id, ReportUploadRequest{FileName: file.Filename, ContentType: file.Header.Get("Content-Type"), Content: content})
 	httpx.Write(c, out, err)
 }
 
@@ -301,6 +319,16 @@ func (a experimentAPI) listReports(c *gin.Context) {
 	}
 	out, total, p, s, err := a.svc.ListReports(c.Request.Context(), id, status, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
+}
+
+// issueReportAccess 校验报告编号后签发教师一次性下载授权。
+func (a experimentAPI) issueReportAccess(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.IssueReportAccess(c.Request.Context(), id)
+	httpx.Write(c, out, err)
 }
 
 // gradeReport 绑定教师报告批改请求。

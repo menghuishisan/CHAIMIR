@@ -18,7 +18,7 @@ FROM scratch
 ARG TARGETOS
 ARG TARGETARCH
 LABEL org.opencontainers.image.title="network/cilium-operator"
-LABEL org.opencontainers.image.description="Cilium v1.20.0 generic operator rebuilt from patched official source"
+LABEL org.opencontainers.image.description="Cilium v1.20.1 generic operator rebuilt from verified official source"
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=builder /usr/bin/gops /usr/bin/gops

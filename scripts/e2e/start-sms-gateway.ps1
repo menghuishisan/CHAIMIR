@@ -1,4 +1,4 @@
-# start-sms-gateway.ps1 创建 local-dev 的临时短信验收夹具并完成真实后端探活。
+# start-sms-gateway.ps1 创建 acceptance 的临时短信验收夹具并完成真实后端探活。
 # 网关实现来自同目录 sms-gateway.mjs；本脚本只负责 Kubernetes 编排和临时端口转发。
 
 [CmdletBinding()]

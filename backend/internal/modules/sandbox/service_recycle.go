@@ -90,6 +90,19 @@ func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) err
 	}
 	sb = locked
 	if shouldPersistBeforeRecycle(sb) {
+		plan, err := s.planForExistingSandbox(ctx, sb)
+		if err != nil {
+			s.markRecycleFailed(ctx, sb, err)
+			return err
+		}
+		recoveryCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+		err = s.orchestrator.EnsureWorkspaceAccess(recoveryCtx, plan)
+		cancel()
+		if err != nil {
+			wrapped := apperr.ErrSandboxFilePersistFailed.WithCause(err)
+			s.markRecycleFailed(ctx, sb, wrapped)
+			return wrapped
+		}
 		if _, _, err := s.saveSandboxFiles(ctx, sb.TenantID, sb.ID); err != nil {
 			s.markRecycleFailed(ctx, sb, err)
 			return err

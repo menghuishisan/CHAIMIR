@@ -65,7 +65,7 @@ export function ContestProblems({ contest }: ContestProblemsProps) {
   const problems = useAsyncResource(
     () => api.contest.getProblems(contest.id),
     [contest.id],
-    (value) => value.length === 0,
+    (value) => value.length === 0
   )
 
   const isBattle = contest.mode === ContestMode.BATTLE
@@ -190,23 +190,19 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
   const isBattle = contest.mode === ContestMode.BATTLE
 
   const [itemRef, setItemRef] = useState(
-    problem ? `${problem.item_code}|${problem.item_version}` : '',
+    problem ? `${problem.item_code}|${problem.item_version}` : ''
   )
   const [score, setScore] = useState(String(problem?.score ?? 100))
   const [seq, setSeq] = useState(String(problem?.seq ?? nextSeq))
   const [dynamicEnabled, setDynamicEnabled] = useState(
-    (problem?.dynamic_score?.decay_per_solve ?? 0) > 0,
+    (problem?.dynamic_score?.decay_per_solve ?? 0) > 0
   )
-  const [minScore, setMinScore] = useState(
-    String(problem?.dynamic_score?.min_score ?? 60),
-  )
-  const [decay, setDecay] = useState(
-    String(problem?.dynamic_score?.decay_per_solve ?? 5),
-  )
+  const [minScore, setMinScore] = useState(String(problem?.dynamic_score?.min_score ?? 60))
+  const [decay, setDecay] = useState(String(problem?.dynamic_score?.decay_per_solve ?? 5))
   const [battleRule, setBattleRule] = useState(String(problem?.battle_rule ?? BATTLE_RULES[0]))
   const [runtimeCode, setRuntimeCode] = useState(problem?.battle_config?.runtime_code ?? '')
   const [imageVersion, setImageVersion] = useState(
-    problem?.battle_config?.runtime_image_version ?? '',
+    problem?.battle_config?.runtime_image_version ?? ''
   )
   const [toolCodes, setToolCodes] = useState<string[]>(problem?.battle_config?.tool_codes ?? [])
   const [formError, setFormError] = useState<string>()
@@ -221,14 +217,18 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
         size: PAGINATION_MAX_SIZE,
       }),
     [],
-    () => false,
+    () => false
   )
 
   // 对抗题才需要执行环境:解题赛题目不起环境,故目录只在对抗分支取
   const catalog = useOrchestrationCatalog(isBattle)
-  const imageOptions = useMemo(() => catalog.imageOptions(runtimeCode), [catalog, runtimeCode])
+  const imageOptions = catalog.imageOptions(runtimeCode)
+  const compatibleTools = catalog.tools(runtimeCode)
 
-  const itemOptions = useMemo(() => toContentItemVersionOptions(items.data?.list ?? []), [items.data])
+  const itemOptions = useMemo(
+    () => toContentItemVersionOptions(items.data?.list ?? []),
+    [items.data]
+  )
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -311,7 +311,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
       score,
       seq,
       toolCodes,
-    ],
+    ]
   )
 
   return (
@@ -364,7 +364,11 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                   onChange={(event) => setScore(event.target.value)}
                 />
               </FormField>
-              <FormField label="序号" htmlFor="problem-seq" helper="决定赛题在学生答题界面的排列顺序">
+              <FormField
+                label="序号"
+                htmlFor="problem-seq"
+                helper="决定赛题在学生答题界面的排列顺序"
+              >
                 <Input
                   id="problem-seq"
                   type="number"
@@ -453,6 +457,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                             onValueChange={(value) => {
                               setRuntimeCode(value)
                               setImageVersion('')
+                              setToolCodes([])
                             }}
                           />
                         </FormField>
@@ -478,15 +483,15 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                         label="可用工具"
                         helper="对局执行时可用的命令工具,不选则只有运行时自带能力"
                       >
-                        {catalog.tools.length > 0 ? (
+                        {compatibleTools.length > 0 ? (
                           <SandboxToolChecklist
-                            tools={catalog.tools}
+                            tools={compatibleTools}
                             selectedCodes={toolCodes}
                             onChange={setToolCodes}
                           />
                         ) : (
                           <p className="text-sm text-ink-sub">
-                            平台还没有可用工具,请联系平台管理员在沙箱工具里注册。
+                            该运行时没有兼容的可用工具,可只使用运行时能力或联系平台管理员检查工具配置。
                           </p>
                         )}
                       </FormField>

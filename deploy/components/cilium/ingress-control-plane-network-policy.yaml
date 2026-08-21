@@ -1,0 +1,55 @@
+# 本文件创建受限 ingress-nginx 命名空间并定义最小控制面网络边界。
+# 命名空间与策略放在同一清单,确保全新集群首次安装时先有策略承载边界。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/part-of: chaimir-trusted-control-plane
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+---
+# 入口控制器必须访问 Kubernetes API 监听 Ingress/Service/EndpointSlice/Secret,
+# admission 证书 Job 也必须访问同一 API;DNS 只允许访问 kube-dns,外部流量只从节点入口进入。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-ingress-control-plane
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  endpointSelector: {}
+  ingress:
+    - fromEntities:
+        - host
+        - remote-node
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+            - port: "10254"
+              protocol: TCP
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP

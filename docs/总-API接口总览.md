@@ -153,7 +153,7 @@
 - `/student/experiments`、`/student/experiments/{id}`:学生可发现的已发布实验列表与单条读取,统一走学生投影(剔除环境初始化与判题内部配置)。
 - `/experiments/{id}/instances`、`/instances/{id}`:实例创建(编排 M2/M4)/工作台/控制;`/instances/{id}/stages/{stage}/activate` 是阶段资源创建唯一写入口;`/instances/{id}/progress` 返回 M10 订阅元信息。**无手动回收接口**:引擎资源释放走 `finish` 内部回收、后台超时回收、以及订阅 `teaching.course.ended` 的课程结束级联三条自动路径。
 - `/instances/{id}/checkpoints/{cp}/judge`:检查点判分(调 M3)。
-- `/instances/{id}/report`、`/reports/{id}/grade`:报告。
+- `/instances/{id}/report`:学生以 `multipart/form-data` 的 `file` 字段上传并提交报告,服务端统一校验后生成对象引用;`/reports/{id}/access`:教师换取一次性报告下载授权;`/reports/{id}/grade`:教师批改报告。
 - `/groups/*`:多人协作。`GET /experiments/{id}/groups` 是教师编组视角(全部分组 + 成员角色,不含实例),`GET /groups/{id}` 是按组读单组并附带共享实例。
 - `/internal/instances/{id}/score`、`/internal/stats` `[内部]`(供上层聚合/M9;M7 不直接依赖同层 M6)。
 

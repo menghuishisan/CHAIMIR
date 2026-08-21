@@ -10,6 +10,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { useParams } from 'react-router'
 import {
   ClipboardCheck,
+  Download,
   FileText,
   LayoutTemplate,
   Plus,
@@ -37,6 +38,7 @@ import {
   DescriptionList,
   Empty,
   FormField,
+  IconButton,
   Input,
   Modal,
   ModalBody,
@@ -64,6 +66,7 @@ import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../.
 import { formatDateTime, formatScore } from '../../../../utils/formatters'
 import { experimentCollabModeLabel, experimentReportStatusLabel } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { experimentReportStatusTone } from '../../statusPresentation'
 
 /**
@@ -130,6 +133,17 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
     [experiment.id],
   )
 
+  /** downloadReport 经业务授权和统一文件服务下载报告,不暴露对象存储地址。 */
+  const downloadReport = useCallback(async (report: ReportDTO) => {
+    try {
+      const grant = await api.experiment.issueReportAccess(report.id)
+      const file = await api.storage.consumeGrant(grant.token)
+      downloadAttachment(file)
+    } catch (error) {
+      toast.error(userFacingErrorMessage(error, '报告没能下载,请稍后重试。'))
+    }
+  }, [])
+
   const columns: TableColumn<ReportDTO>[] = [
     {
       key: 'student_id',
@@ -185,9 +199,17 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
       header: '操作',
       align: 'right',
       render: (report) => (
-        <Button variant="ghost" size="sm" onClick={() => setGradeTarget(report)}>
-          {report.status === ExperimentReportStatus.GRADED ? '修改评分' : '批改'}
-        </Button>
+        <div className="flex items-center justify-end gap-1">
+          <IconButton
+            aria-label={`下载 ${report.student_name} 的实验报告`}
+            icon={Download}
+            size="sm"
+            onClick={() => void downloadReport(report)}
+          />
+          <Button variant="ghost" size="sm" onClick={() => setGradeTarget(report)}>
+            {report.status === ExperimentReportStatus.GRADED ? '修改评分' : '批改'}
+          </Button>
+        </div>
       ),
     },
   ]
@@ -278,7 +300,7 @@ interface GradeReportModalProps {
 
 /**
  * GradeReportModal 给单份报告打分写评语。
- * 报告正文是对象存储引用,取件走 storage 授权;这里只做评分,不在弹窗里内嵌阅读器。
+ * 报告文件在列表操作列通过一次性 storage 授权下载;弹窗只负责评分。
  */
 function GradeReportModal({ report, onClose, onSaved }: GradeReportModalProps) {
   const [score, setScore] = useState(String(report.manual_score || ''))

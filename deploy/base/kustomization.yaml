@@ -34,7 +34,7 @@ components:
   - ../config
 
 # 密钥真实值(Secret chaimir-secret / chaimir-data-secret)不放 base —— 因密钥处理按形态不同:
-#   local-dev / prod-school:overlay 用 secretGenerator 从 gitignored secret.env 生成;
+#   acceptance / prod-school:overlay 用 secretGenerator 从 gitignored secret.env 生成;
 #   staging / prod-saas:overlay 引用 ../config/external-secret component,由 External Secrets/KMS 同步。
 # base 资源以字面名引用;overlay 有 secretGenerator 时 kustomize 自动改写为带哈希名。
 # 模板见 config/secret.env.example(复制为 config/secret.env,本地文件不入仓)。

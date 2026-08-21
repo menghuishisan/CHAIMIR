@@ -1,0 +1,21 @@
+# 本文件定义无默认 CNI 的 Kind 集群提供方式;所有安全配置执行统一生产基线。
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+networking:
+  disableDefaultCNI: true
+  podSubnet: 10.245.0.0/16
+  serviceSubnet: 10.96.0.0/12
+kubeadmConfigPatches:
+  - |
+    kind: ClusterConfiguration
+    apiServer:
+      certSANs:
+        - localhost
+        - host.docker.internal
+  - |
+    kind: KubeletConfiguration
+    serverTLSBootstrap: true
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker

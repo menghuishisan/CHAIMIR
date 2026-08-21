@@ -11,6 +11,7 @@ import {
 import {
   Button,
   Callout,
+  Checkbox,
   FormField,
   Input,
   Modal,
@@ -80,6 +81,7 @@ interface SidecarState {
   name: string
   imageUrl: string
   prepullCommand: string[]
+  prepullHold: boolean
   raw?: Record<string, unknown>
 }
 interface VolumeState {
@@ -175,6 +177,7 @@ function readFormSpec(runtime?: SandboxRuntime): FormSpec {
         name: stringValue(sidecar.name),
         imageUrl: stringValue(sidecar.image_url),
         prepullCommand: commandText(sidecar.prepull_command),
+        prepullHold: sidecar.prepull_hold === true,
         raw: sidecar,
       }
     }),
@@ -219,6 +222,7 @@ function buildAdapterSpec(form: FormSpec): SandboxAdapterSpec {
         name: sidecar.name.trim(),
         image_url: sidecar.imageUrl.trim(),
         prepull_command: sidecar.prepullCommand,
+        prepull_hold: sidecar.prepullHold,
       })),
     volume_domains: form.volumes
       .filter((volume) => volume.name.trim() !== '')
@@ -268,7 +272,11 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
   const [pluginRef, setPluginRef] = useState(runtime?.plugin_ref ?? '')
   const [status, setStatus] = useState(
     String(
-      runtime?.status === RuntimeStatus.DISABLED ? RuntimeStatus.DISABLED : RuntimeStatus.ONBOARDING
+      runtime?.status === RuntimeStatus.AVAILABLE
+        ? 0
+        : runtime?.status === RuntimeStatus.DISABLED
+          ? RuntimeStatus.DISABLED
+          : RuntimeStatus.ONBOARDING
     )
   )
   const [form, setForm] = useState<FormSpec>(() => readFormSpec(runtime))
@@ -321,14 +329,15 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
         )
           ? null
           : '请至少填写一个有效端口。',
-        sidecars: form.sidecars.every(
-          (sidecar) =>
-            sidecar.name.trim() !== '' &&
-            sidecar.imageUrl.trim() !== '' &&
-            sidecar.prepullCommand.some((item) => item.trim() !== '')
-        )
-          ? null
-          : '附加组件必须填写名称、镜像和预拉取命令。',
+        sidecars:
+          form.sidecars.every(
+            (sidecar) =>
+              sidecar.name.trim() !== '' &&
+              sidecar.imageUrl.trim() !== '' &&
+              sidecar.prepullCommand.some((item) => item.trim() !== '')
+          ) && form.sidecars.filter((sidecar) => sidecar.prepullHold).length === 1
+            ? null
+            : '附加组件必须填写名称、镜像和预拉取命令,并且只能选择一个保持容器。',
         workspaceOps: WORKSPACE_OP_KEYS.every((key) =>
           form.workspaceOps[key].some((item) => item.trim() !== '')
         )
@@ -365,7 +374,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
           adapter_spec: parsed,
           capability_impl: capabilityImpl.trim(),
           plugin_ref: pluginRef.trim(),
-          status: Number(status) as RuntimeStatus,
+          status: Number(status) === 0 ? undefined : (Number(status) as RuntimeStatus),
         }
         if (editing) await api.sandbox.updateRuntime(runtime.id, payload)
         else await api.sandbox.registerRuntime(payload)
@@ -464,13 +473,31 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                 />
               </FormField>
             </div>
-            <FormField label="登记状态" required helper="可用由自检通过后自动写入。">
+            <FormField
+              label="登记状态"
+              required
+              helper={
+                runtime?.status === RuntimeStatus.AVAILABLE
+                  ? '不改执行配置会保持可用；执行配置变化后必须重新自检。'
+                  : '可用由自检通过后自动写入。'
+              }
+            >
               <SegmentedControl
                 aria-label="登记状态"
-                options={SUBMITTABLE_STATUSES.map((item) => ({
-                  value: String(item),
-                  label: runtimeStatusLabel(item),
-                }))}
+                options={
+                  runtime?.status === RuntimeStatus.AVAILABLE
+                    ? [
+                        { value: '0', label: '保持可用' },
+                        {
+                          value: String(RuntimeStatus.DISABLED),
+                          label: runtimeStatusLabel(RuntimeStatus.DISABLED),
+                        },
+                      ]
+                    : SUBMITTABLE_STATUSES.map((item) => ({
+                        value: String(item),
+                        label: runtimeStatusLabel(item),
+                      }))
+                }
                 value={status}
                 onValueChange={setStatus}
               />
@@ -795,13 +822,18 @@ function SidecarEditor({
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => onChange([...sidecars, { name: '', imageUrl: '', prepullCommand: [''] }])}
+          onClick={() =>
+            onChange([
+              ...sidecars,
+              { name: '', imageUrl: '', prepullCommand: [''], prepullHold: false },
+            ])
+          }
         >
           添加组件
         </Button>
       </div>
       {sidecars.map((sidecar, index) => (
-        <div key={`sidecar-${index}`} className="grid gap-2 sm:grid-cols-4">
+        <div key={`sidecar-${index}`} className="grid gap-2 sm:grid-cols-5">
           <Input
             aria-label="组件名称"
             value={sidecar.name}
@@ -832,6 +864,18 @@ function SidecarEditor({
                 sidecars.map((item, i) =>
                   i === index ? { ...item, imageUrl: event.target.value } : item
                 )
+              )
+            }
+          />
+          <Checkbox
+            checked={sidecar.prepullHold}
+            label="保持预拉取就绪"
+            onCheckedChange={(checked) =>
+              onChange(
+                sidecars.map((item, i) => ({
+                  ...item,
+                  prepullHold: i === index ? checked === true : false,
+                }))
               )
             }
           />

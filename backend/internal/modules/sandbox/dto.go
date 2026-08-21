@@ -90,10 +90,11 @@ type OrchestrationCatalogResponse struct {
 
 // CatalogRuntimeResponse 是编排目录里的单个运行时,镜像版本内联返回避免调用方 N+1。
 type CatalogRuntimeResponse struct {
-	Code   string                        `json:"code"`
-	Name   string                        `json:"name"`
-	Eco    string                        `json:"eco"`
-	Images []CatalogRuntimeImageResponse `json:"images"`
+	Code      string                        `json:"code"`
+	Name      string                        `json:"name"`
+	Eco       string                        `json:"eco"`
+	Images    []CatalogRuntimeImageResponse `json:"images"`
+	ToolCodes []string                      `json:"tool_codes"`
 }
 
 // CatalogRuntimeImageResponse 是编排目录里的镜像版本,不含镜像地址与预拉取状态。

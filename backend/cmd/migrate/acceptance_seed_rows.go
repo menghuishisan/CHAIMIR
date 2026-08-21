@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/modules/experiment"
+	"chaimir/internal/modules/sandbox"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/crypto"
@@ -82,19 +84,96 @@ func seedRuntimeRows(ctx context.Context, tx pgx.Tx) error {
 	if err != nil {
 		return fmt.Errorf("编码运行时适配器配置失败: %w", err)
 	}
+	var currentAdapterSpec sandbox.AdapterSpec
+	if err := json.Unmarshal(runtimeSpec, &currentAdapterSpec); err != nil {
+		return fmt.Errorf("解析当前运行时预拉取声明失败: %w", err)
+	}
+	var previousEco string
+	var previousRuntimeSpec []byte
+	previousRuntimeErr := tx.QueryRow(ctx, `SELECT eco, adapter_spec FROM runtime WHERE id=$1`, acceptanceIDs.Runtime).Scan(&previousEco, &previousRuntimeSpec)
+	hasPreviousRuntime := previousRuntimeErr == nil
+	if previousRuntimeErr != nil && previousRuntimeErr != pgx.ErrNoRows {
+		return fmt.Errorf("读取原运行时预拉取声明失败: %w", previousRuntimeErr)
+	}
+	runtimePrepullChanged := false
+	if hasPreviousRuntime {
+		var previousAdapterSpec sandbox.AdapterSpec
+		if err := json.Unmarshal(previousRuntimeSpec, &previousAdapterSpec); err != nil {
+			return fmt.Errorf("解析原运行时预拉取声明失败: %w", err)
+		}
+		runtimePrepullChanged = sandbox.RuntimePrepullDefinitionChanged(previousEco, previousAdapterSpec, "evm", currentAdapterSpec)
+	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO runtime (id, code, name, eco, adapter_level, adapter_spec, capability_impl, selftest_status, selftest_detail, status)
 VALUES ($1,'evm-foundry','EVM Foundry 教学运行时','evm',2,$2,'sandbox-exec',1,'{"result":"pending","reason":"requires-runtime-selftest"}'::jsonb,2)
-ON CONFLICT (id) DO UPDATE SET code=EXCLUDED.code, name=EXCLUDED.name, eco=EXCLUDED.eco, adapter_level=EXCLUDED.adapter_level, adapter_spec=EXCLUDED.adapter_spec, capability_impl=EXCLUDED.capability_impl, selftest_status=EXCLUDED.selftest_status, selftest_detail=EXCLUDED.selftest_detail, status=EXCLUDED.status, updated_at=now()`,
+ON CONFLICT (id) DO UPDATE SET
+    code=EXCLUDED.code,
+    name=EXCLUDED.name,
+    eco=EXCLUDED.eco,
+    adapter_level=EXCLUDED.adapter_level,
+    adapter_spec=EXCLUDED.adapter_spec,
+    capability_impl=EXCLUDED.capability_impl,
+    plugin_ref=EXCLUDED.plugin_ref,
+    selftest_status=CASE
+        WHEN runtime.eco IS DISTINCT FROM EXCLUDED.eco
+          OR runtime.adapter_level IS DISTINCT FROM EXCLUDED.adapter_level
+          OR runtime.adapter_spec IS DISTINCT FROM EXCLUDED.adapter_spec
+          OR runtime.capability_impl IS DISTINCT FROM EXCLUDED.capability_impl
+          OR runtime.plugin_ref IS DISTINCT FROM EXCLUDED.plugin_ref
+        THEN EXCLUDED.selftest_status ELSE runtime.selftest_status END,
+    selftest_detail=CASE
+        WHEN runtime.eco IS DISTINCT FROM EXCLUDED.eco
+          OR runtime.adapter_level IS DISTINCT FROM EXCLUDED.adapter_level
+          OR runtime.adapter_spec IS DISTINCT FROM EXCLUDED.adapter_spec
+          OR runtime.capability_impl IS DISTINCT FROM EXCLUDED.capability_impl
+          OR runtime.plugin_ref IS DISTINCT FROM EXCLUDED.plugin_ref
+        THEN EXCLUDED.selftest_detail ELSE runtime.selftest_detail END,
+    status=CASE
+        WHEN runtime.eco IS DISTINCT FROM EXCLUDED.eco
+          OR runtime.adapter_level IS DISTINCT FROM EXCLUDED.adapter_level
+          OR runtime.adapter_spec IS DISTINCT FROM EXCLUDED.adapter_spec
+          OR runtime.capability_impl IS DISTINCT FROM EXCLUDED.capability_impl
+          OR runtime.plugin_ref IS DISTINCT FROM EXCLUDED.plugin_ref
+        THEN EXCLUDED.status ELSE runtime.status END,
+    updated_at=now()`,
 		acceptanceIDs.Runtime, runtimeSpec); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
+WITH upserted AS (
 INSERT INTO runtime_image (id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default)
 VALUES ($1,$2,$3,'2026.06',1,false,1,'{"source":"acceptance-seed","prepulled":false}'::jsonb,NULL,true,true)
-ON CONFLICT (runtime_id, version) DO UPDATE SET image_url=EXCLUDED.image_url, status=EXCLUDED.status, prepulled=EXCLUDED.prepulled, prepull_status=EXCLUDED.prepull_status, prepull_detail=EXCLUDED.prepull_detail, prepulled_at=EXCLUDED.prepulled_at, genesis_baked=EXCLUDED.genesis_baked, is_default=EXCLUDED.is_default`,
+ON CONFLICT (runtime_id, version) DO UPDATE SET
+    image_url=EXCLUDED.image_url,
+    status=CASE WHEN runtime_image.image_url=EXCLUDED.image_url THEN runtime_image.status ELSE EXCLUDED.status END,
+    prepulled=CASE WHEN runtime_image.image_url=EXCLUDED.image_url THEN runtime_image.prepulled ELSE EXCLUDED.prepulled END,
+    prepull_status=CASE WHEN runtime_image.image_url=EXCLUDED.image_url THEN runtime_image.prepull_status ELSE EXCLUDED.prepull_status END,
+    prepull_detail=CASE WHEN runtime_image.image_url=EXCLUDED.image_url THEN runtime_image.prepull_detail ELSE EXCLUDED.prepull_detail END,
+    prepulled_at=CASE WHEN runtime_image.image_url=EXCLUDED.image_url THEN runtime_image.prepulled_at ELSE EXCLUDED.prepulled_at END,
+    genesis_baked=EXCLUDED.genesis_baked,
+    is_default=EXCLUDED.is_default
+RETURNING prepulled, prepull_status
+)
+UPDATE runtime
+SET selftest_status=1,
+    selftest_detail='{"result":"pending","reason":"requires-runtime-selftest"}'::jsonb,
+    status=2,
+    updated_at=now()
+WHERE id=$2
+  AND EXISTS (SELECT 1 FROM upserted WHERE NOT prepulled OR prepull_status<>2)`,
 		acceptanceIDs.RuntimeImage, acceptanceIDs.Runtime, runtimeImageURL); err != nil {
 		return err
+	}
+	if runtimePrepullChanged {
+		if err := execJSON(ctx, tx, `
+UPDATE runtime_image
+SET prepulled=false,
+    prepull_status=1,
+    prepull_detail='{"stage":"invalidated","reason":"runtime_prepull_contract_changed","subject":"evm-foundry"}'::jsonb,
+    prepulled_at=NULL
+WHERE runtime_id=$1 AND status=1`, acceptanceIDs.Runtime); err != nil {
+			return err
+		}
 	}
 	if err := seedToolRows(ctx, tx); err != nil {
 		return err
@@ -245,8 +324,11 @@ func acceptanceRuntimeAdapterSpec(runtimeImageURL string) map[string]any {
 			"reset":  map[string]any{"command": []string{"/usr/local/bin/chaimir-chain", "reset"}, "timeout_seconds": 30},
 		},
 		"selftest": map[string]any{
-			"deploy_payload": map[string]any{"bytecode": "0x6080604052348015600f57600080fd5b50600080f3"},
-			"query_target":   "chainId",
+			"deploy_payload": map[string]any{
+				"bytecode": "0x6080604052348015600f57600080fd5b50600080f3",
+				"from":     "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+			},
+			"query_target": "chainId",
 		},
 	}
 }
@@ -338,16 +420,25 @@ func seedToolRows(ctx context.Context, tx pgx.Tx) error {
 	if err != nil {
 		return err
 	}
+	previousTools, err := readSeedTools(ctx, tx)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM sandbox_tool`); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM tool`); err != nil {
 		return err
 	}
+	currentTools := make([]sandbox.Tool, 0, len(defs))
 	for _, def := range defs {
 		spec, err := jsonb(def.ResourceSpec)
 		if err != nil {
 			return err
+		}
+		var resourceSpec sandbox.ToolResourceSpec
+		if err := json.Unmarshal(spec, &resourceSpec); err != nil {
+			return fmt.Errorf("解析工具 %s 预拉取声明失败: %w", def.Code, err)
 		}
 		if err := execJSON(ctx, tx, `
 INSERT INTO tool (id, code, name, kind, eco_tags, resource_spec, status)
@@ -355,8 +446,79 @@ VALUES ($1,$2,$3,$4,$5,$6,$7)`,
 			def.ID, def.Code, def.Name, def.Kind, strings.Join(def.EcoTags, ","), spec, def.Status); err != nil {
 			return err
 		}
+		currentTools = append(currentTools, sandbox.Tool{
+			ID: def.ID, Code: def.Code, Name: def.Name, Kind: def.Kind,
+			EcoTags: append([]string(nil), def.EcoTags...), ResourceSpec: resourceSpec, Status: def.Status,
+		})
+	}
+	runtimeRows, err := tx.Query(ctx, `SELECT id, eco FROM runtime ORDER BY id`)
+	if err != nil {
+		return fmt.Errorf("读取工具预拉取影响范围失败: %w", err)
+	}
+	type runtimeEco struct {
+		id  int64
+		eco string
+	}
+	runtimes := make([]runtimeEco, 0)
+	for runtimeRows.Next() {
+		var item runtimeEco
+		if err := runtimeRows.Scan(&item.id, &item.eco); err != nil {
+			runtimeRows.Close()
+			return fmt.Errorf("读取工具预拉取影响范围失败: %w", err)
+		}
+		runtimes = append(runtimes, item)
+	}
+	if err := runtimeRows.Err(); err != nil {
+		runtimeRows.Close()
+		return fmt.Errorf("读取工具预拉取影响范围失败: %w", err)
+	}
+	runtimeRows.Close()
+	for _, runtime := range runtimes {
+		changed, err := sandbox.ToolPrepullDefinitionsChangedForEco(previousTools, currentTools, runtime.eco)
+		if err != nil {
+			return fmt.Errorf("比较 %s 生态工具预拉取闭包失败: %w", runtime.eco, err)
+		}
+		if !changed {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `
+UPDATE runtime_image
+SET prepulled=false,
+    prepull_status=1,
+    prepull_detail='{"stage":"invalidated","reason":"tool_prepull_contract_changed","subject":"acceptance-seed"}'::jsonb,
+    prepulled_at=NULL
+WHERE runtime_id=$1 AND status=1`, runtime.id); err != nil {
+			return fmt.Errorf("撤销旧工具闭包预拉取证明失败: %w", err)
+		}
 	}
 	return nil
+}
+
+// readSeedTools 读取 seed 覆盖前的工具定义,交给 M2 同一闭包规则比较。
+func readSeedTools(ctx context.Context, tx pgx.Tx) ([]sandbox.Tool, error) {
+	rows, err := tx.Query(ctx, `SELECT id, code, name, kind, eco_tags, resource_spec, status FROM tool ORDER BY code`)
+	if err != nil {
+		return nil, fmt.Errorf("读取原工具预拉取定义失败: %w", err)
+	}
+	defer rows.Close()
+	tools := make([]sandbox.Tool, 0)
+	for rows.Next() {
+		var tool sandbox.Tool
+		var ecoTags string
+		var resourceSpec []byte
+		if err := rows.Scan(&tool.ID, &tool.Code, &tool.Name, &tool.Kind, &ecoTags, &resourceSpec, &tool.Status); err != nil {
+			return nil, fmt.Errorf("读取原工具预拉取定义失败: %w", err)
+		}
+		tool.EcoTags = acceptanceCompactCommand(strings.Split(ecoTags, ","))
+		if err := json.Unmarshal(resourceSpec, &tool.ResourceSpec); err != nil {
+			return nil, fmt.Errorf("解析原工具 %s 预拉取声明失败: %w", tool.Code, err)
+		}
+		tools = append(tools, tool)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("读取原工具预拉取定义失败: %w", err)
+	}
+	return tools, nil
 }
 
 // seedTenantQuotaRow 写入租户沙箱配额,确保沙箱统计和创建流程使用真实配额表。
@@ -804,13 +966,14 @@ ON CONFLICT (tenant_id, group_id, student_id) DO UPDATE SET role=EXCLUDED.role`,
 	if err != nil {
 		return fmt.Errorf("编码实验沙箱引用失败: %w", err)
 	}
-	simRefs, err := jsonb([]map[string]any{{
-		"component_id": "gas-metering",
-		"stage":        1,
-		"session_id":   acceptanceIDs.SimSession,
-		"package_code": "builtin__runtime-gas-metering",
-		"version":      "1.0.0",
-		"bundle_ref":   "builtin://sim-sdk/builtin__runtime-gas-metering@1.0.0",
+	// 使用实验模块的稳定引用类型生成快照,避免验收数据绕过正式 JSON 契约后发生字段漂移。
+	simRefs, err := jsonb([]experiment.SimSessionRef{{
+		ComponentID: "gas-metering",
+		Stage:       1,
+		SessionID:   ids.ID(acceptanceIDs.SimSession),
+		PackageCode: acceptanceSimPackageCode,
+		Version:     acceptanceSimPackageVersion,
+		Compute:     "browser",
 	}})
 	if err != nil {
 		return fmt.Errorf("编码实验仿真引用失败: %w", err)
@@ -1045,7 +1208,11 @@ ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUD
 		acceptanceIDs.BattleEntryB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleTeamB, strings.Repeat("b", 64)); err != nil {
 		return err
 	}
-	scoreDelta, err := jsonb(map[string]any{"team_a": ids.Format(acceptanceIDs.BattleTeamA), "team_b": ids.Format(acceptanceIDs.BattleTeamB), "rating_a_before": 1200, "rating_b_before": 1200, "rating_a_after": 1216, "rating_b_after": 1184, "delta_a": 16, "delta_b": -16})
+	scoreDelta, err := jsonb(map[string]any{
+		"team_a": ids.Format(acceptanceIDs.BattleTeamA), "team_b": ids.Format(acceptanceIDs.BattleTeamB),
+		"rating_a_before": 1200, "rating_b_before": 1200, "rating_a_after": 1216, "rating_b_after": 1184,
+		"delta_a": 16, "delta_b": -16, "k_factor": 32, "result": 1,
+	})
 	if err != nil {
 		return fmt.Errorf("编码对局积分变更失败: %w", err)
 	}

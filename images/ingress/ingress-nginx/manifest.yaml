@@ -20,11 +20,13 @@ source:
 upstream:
   registry: cgr.dev
   image: chainguard/wolfi-base
-  version: "2026-07-07"
-  digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
+  version: "2026-08-19"
+  digest: sha256:fdcd31a2db35958c251ea22e80cda72a8222228114e736ec7dd9c94452a2dc51
+  source_repository: https://github.com/chainguard-forks/ingress-nginx
+  source_commit: 5a85da174c066f62bbce8315fb1c4f2e71446683
   packages:
-    - ingress-nginx-controller-1.15=1.15.10-r0
-    - ingress-nginx-controller-compat-1.15=1.15.10-r0
+    - ingress-nginx-controller-1.15=1.15.10-r2
+    - ingress-nginx-controller-compat-1.15=1.15.10-r2
   reuse_policy: wolfi-package-build
   license: Apache-2.0
 private_delivery:
@@ -55,6 +57,11 @@ ports:
     protocol: TCP
     expose: internal
     purpose: Admission webhook
+  - name: health
+    container_port: 10254
+    protocol: TCP
+    expose: internal
+    purpose: 控制器健康检查与监控指标
 local_dev:
   host_mappings: []
 security:
@@ -63,15 +70,21 @@ security:
   allow_privilege_escalation: false
   privileged: false
   host_network: false
-  automount_service_account_token: false
+  automount_service_account_token: true
   drop_capabilities:
     - ALL
+  add_capabilities:
+    - NET_BIND_SERVICE
   network_policy: deny-all
 security_exceptions:
   - field: read_only_root_filesystem
     reason: ingress-nginx 需要写临时 Nginx 配置、PID 和缓存目录。
     writable_mounts:
       - runtime-state
+  - field: automount_service_account_token
+    reason: ingress-nginx 控制器必须监听 Ingress、Service、EndpointSlice 和 Secret 等集群资源,使用专用最小权限 ServiceAccount 访问 Kubernetes API。
+  - field: add_capabilities
+    reason: 控制器以非 root 用户监听 80/443,只授予 NET_BIND_SERVICE 并继续丢弃其余 Linux capabilities。
 student_access:
   enabled: false
 data_volumes:

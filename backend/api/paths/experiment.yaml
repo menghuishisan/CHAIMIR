@@ -169,6 +169,15 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/reports/{id}/access:
+  post:
+    tags: [experiment]
+    summary: 签发实验报告一次性下载授权
+    operationId: experimentIssueReportAccess
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/experiment/reports/{id}/grade:
   post:
     tags: [experiment]

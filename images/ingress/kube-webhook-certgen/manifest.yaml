@@ -1,0 +1,78 @@
+# 本文件声明 ingress-nginx admission 证书工具的固定上游镜像与最小权限边界。
+schema_version: 1
+category: ingress
+name: kube-webhook-certgen
+image: ingress/kube-webhook-certgen
+labels:
+  app.kubernetes.io/name: kube-webhook-certgen
+  app.kubernetes.io/component: admission-certificate
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: ingress
+  chaimir.io/image: ingress/kube-webhook-certgen
+  chaimir.io/data-driven: "false"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: cluster-admission-helper
+  chaimir.io/scope: ingress
+  chaimir.io/source: upstream-pinned
+description: ingress-nginx admission webhook 证书创建与配置修补工具。
+source:
+  type: upstream-pinned
+upstream:
+  registry: registry.k8s.io
+  image: ingress-nginx/kube-webhook-certgen
+  version: v1.6.9
+  digest: sha256:01038e7de14b78d702d2849c3aad72fd25903c4765af63cf16aa3398f5d5f2dd
+  reuse_policy: upstream-pinned
+  license: Apache-2.0
+private_delivery:
+  offline_bundle: true
+  import_project: ingress
+data_driven: false
+capabilities:
+  - admission-certificate-bootstrap
+env_keys:
+  config: []
+  secret: []
+secrets_required: []
+ports: []
+local_dev:
+  host_mappings: []
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: true
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+security_exceptions:
+  - field: automount_service_account_token
+    reason: 证书 Job 通过专用最小权限 ServiceAccount 创建 admission Secret 并修补 ValidatingWebhookConfiguration。
+student_access:
+  enabled: false
+data_volumes: []
+backup:
+  required: false
+  mode: declarative-config-only
+network:
+  expose: internal
+  default_deny: true
+resources:
+  cpu_request: 10m
+  cpu_limit: 100m
+  memory_request: 20Mi
+  memory_limit: 64Mi
+  ephemeral_storage_limit: 64Mi
+selftest:
+  commands:
+    - name: help
+      command:
+        - /ko-app/kube-webhook-certgen
+        - --help
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true

@@ -1,4 +1,4 @@
-# run-acceptance-seed-job.ps1 在 local-dev 迁移完成后调度 canonical 验收夹具种子。
+# run-acceptance-seed-job.ps1 在 acceptance 迁移完成后调度 canonical 验收夹具种子。
 # 脚本只复制当前迁移 Job 的运行时配置和不可变镜像,业务数据仍由 cmd/migrate seed-acceptance 负责。
 
 [CmdletBinding()]

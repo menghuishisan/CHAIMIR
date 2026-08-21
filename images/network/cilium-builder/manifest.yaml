@@ -14,21 +14,34 @@ labels:
   chaimir.io/sensitivity: build-base
   chaimir.io/scope: build
   chaimir.io/source: build-base
-description: Cilium v1.20.0 agent 与 generic operator 的统一安全构建基座。
+description: Cilium v1.20.1 agent 与 generic operator 的统一 Alpine 安全构建基座。
 source:
   type: build-base
 upstream:
   components:
-    - image: library/golang
+    - image: base/go-builder
+      registry: registry.chaimir.io
+      version: go1.26.6
+      digest: sha256:2e1cc3ef0c530f5a92ccd0c7e197f7d16e16e6cf879f43a9dd0657f08c0d3343
+    - image: library/alpine
       registry: docker.io
-      version: "1.26.5"
-      digest: sha256:3aff6657219a4d9c14e27fb1d8976c49c29fddb70ba835014f477e1c70636647
+      version: "3.23"
+      digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+    - image: cilium/cilium-llvm
+      registry: quay.io
+      version: 19.1.7-1785833026-d8383c5
+      digest: sha256:80ae6ceb1a1556d5f65f7a086d873c4706ed548444c4d49d89cbeedf24f817d4
   source_repository: https://github.com/cilium/cilium
-  version: v1.20.0
-  source_commit: 97ce49d65e777e07fa2457e942725050b086d553
-  source_archive: https://github.com/cilium/cilium/archive/refs/tags/v1.20.0.tar.gz
-  source_sha256: 665d818161c87a21588305f7a135e2f890c8983999715bf4d9685933b3583eb4
-  builder_arg: CILIUM_RUNTIME_IMAGE
+  version: v1.20.1
+  source_commit: 7d68cfb394f2960e10aa72e76d0d51e66c1b2ebc
+  source_archive: https://github.com/cilium/cilium/archive/refs/tags/v1.20.1.tar.gz
+  source_sha256: 6b133c7b5a6a037a15c8b5ce02d7fcf94e98d90d121fb76b712c79eda9d36731
+  source_assets:
+    - name: gops
+      version: v0.3.29
+      url: https://github.com/google/gops/archive/refs/tags/v0.3.29.tar.gz
+      sha256: c4637684ac8efbcc0bc55faf64e3920a7764a9ae8f4580945084c1a5b8b2d051
+  builder_arg: GO_BUILDER_IMAGE
   source_security_overrides:
     golang.org/x/text: v0.39.0
   reuse_policy: rebuild-signed-official-release-source
@@ -70,7 +83,7 @@ selftest:
       command:
         - sh
         - -ec
-        - test "$(cat /src/cilium/VERSION)" = "1.20.0" && grep -q '^# golang.org/x/text v0.39.0$' /src/cilium/vendor/modules.txt
+        - test "$(cat /src/cilium/VERSION)" = "1.20.1" && grep -q '^# golang.org/x/text v0.39.0$' /src/cilium/vendor/modules.txt
 build:
   context: images/network
   dockerfile: cilium-builder/Dockerfile

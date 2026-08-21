@@ -232,13 +232,14 @@ func (s *Service) ResumeInstance(ctx context.Context, instanceID int64) (Instanc
 	})
 }
 
-// FinishInstance 完成实验实例,汇总得分并发布 experiment.scored。
+// FinishInstance 完成实验实例,首次固化得分并在后续重试中幂等续跑资源回收。
 func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (InstanceDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return InstanceDTO{}, err
 	}
 	var inst ExperimentInstance
+	action := instanceFinishPrepare
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetInstanceForUpdate(ctx, id.TenantID, instanceID)
 		if err != nil {
@@ -247,8 +248,13 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 		if err := ensureInstanceAccess(ctx, tx, id.AccountID, current); err != nil {
 			return err
 		}
-		if err := validateInstanceTransition(current.Status, InstanceStatusFinished); err != nil {
+		action, err = resolveInstanceFinishAction(current.Status)
+		if err != nil {
 			return err
+		}
+		if action != instanceFinishPrepare {
+			inst = current
+			return nil
 		}
 		exp, err := tx.GetExperiment(ctx, id.TenantID, current.ExperimentID)
 		if err != nil {
@@ -274,7 +280,12 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 	}); err != nil {
 		return InstanceDTO{}, err
 	}
-	s.drainExperimentScoreOutboxBestEffort(ctx)
+	if action == instanceFinishCompleted {
+		return instanceDTOFromModel(inst, nil), nil
+	}
+	if action == instanceFinishPrepare {
+		s.drainExperimentScoreOutboxBestEffort(ctx)
+	}
 	if err := s.recycleEngines(ctx, inst, "finished"); err != nil {
 		return InstanceDTO{}, err
 	}
@@ -566,13 +577,15 @@ func (s *Service) drainExperimentScoreOutboxBestEffort(ctx context.Context) {
 	}
 }
 
-// HandleSandboxRecycled 消费 M2 回收事件并将仍在进行的实例标记为环境已释放。
+// HandleSandboxRecycled 消费 M2 回收事件,同步进行中实例或续跑已完成实例的整体回收。
 func (s *Service) HandleSandboxRecycled(ctx context.Context, event contracts.SandboxRecycledEvent) error {
 	if event.TenantID <= 0 || !validExperimentSourceRef(event.SourceRef) {
 		return apperr.ErrExperimentSourceRefInvalid
 	}
-	return s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
-		inst, err := tx.GetInstanceBySourceRef(ctx, event.TenantID, event.SourceRef)
+	var inst ExperimentInstance
+	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		inst, err = tx.GetInstanceBySourceRef(ctx, event.TenantID, event.SourceRef)
 		if err != nil {
 			return err
 		}
@@ -581,7 +594,53 @@ func (s *Service) HandleSandboxRecycled(ctx context.Context, event contracts.San
 			return err
 		}
 		return nil
+	}); err != nil {
+		return err
+	}
+	if inst.Status != InstanceStatusFinished {
+		return nil
+	}
+	allDestroyed, err := s.allInstanceSandboxesDestroyed(ctx, inst)
+	if err != nil {
+		return err
+	}
+	if !allDestroyed {
+		return nil
+	}
+	if err := s.recycleEngines(ctx, inst, "finished_recovery"); err != nil {
+		return err
+	}
+	return s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
+		current, err := tx.GetInstanceForUpdate(ctx, event.TenantID, inst.ID)
+		if err != nil {
+			return err
+		}
+		if current.Status != InstanceStatusFinished {
+			return nil
+		}
+		_, err = tx.SetInstanceStatus(ctx, event.TenantID, inst.ID, InstanceStatusRecycled)
+		return err
 	})
+}
+
+// allInstanceSandboxesDestroyed 确认实例引用的全部 M2 沙箱都已销毁,避免单个组件事件提前结束整实例。
+func (s *Service) allInstanceSandboxesDestroyed(ctx context.Context, inst ExperimentInstance) (bool, error) {
+	if len(inst.SandboxRefs) == 0 {
+		return true, nil
+	}
+	if s.sandbox == nil {
+		return false, apperr.ErrExperimentRecycleFailed
+	}
+	for _, ref := range inst.SandboxRefs {
+		info, err := s.sandbox.GetSandbox(ctx, inst.TenantID, ref.SandboxID.Int64())
+		if err != nil {
+			return false, apperr.ErrExperimentRecycleFailed.WithCause(err)
+		}
+		if info.Status != contracts.SandboxStatusDestroyed {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // HandleCourseEnded 课程结束或归档后级联回收课内仍占用引擎资源的实验实例(M7 需求 D3)。

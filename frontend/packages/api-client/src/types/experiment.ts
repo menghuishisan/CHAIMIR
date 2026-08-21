@@ -264,6 +264,11 @@ export interface ReportDTO {
   submitted_at: string
 }
 
+export interface ReportAccessDTO {
+  token: string
+  expires_at: string
+}
+
 export interface GradeReportRequest {
   manual_score: number
   comment: string

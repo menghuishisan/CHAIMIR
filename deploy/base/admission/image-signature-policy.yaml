@@ -10,10 +10,8 @@ metadata:
     app.kubernetes.io/part-of: chaimir
 spec:
   images:
-    # policy-controller glob 匹配按仓库路径段展开;覆盖平台 service/middleware/base 镜像且只允许 canonical registry。
-    - glob: "registry.chaimir.io/service/*"
-    - glob: "registry.chaimir.io/middleware/*"
-    - glob: "registry.chaimir.io/base/*"
+    # canonical registry 下的全部分类镜像统一强制验签,避免运行时、工具或基础设施镜像落在策略之外。
+    - glob: "registry.chaimir.io/**"
   authorities:
     - name: chaimir-cosign
       source:

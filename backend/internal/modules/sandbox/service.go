@@ -44,6 +44,8 @@ type Orchestrator interface {
 	RestoreSnapshotResources(ctx context.Context, plan CreateSandboxPlan) error
 	// ResourceUsage 汇总沙箱当前已申请资源,用于状态查询返回资源用量。
 	ResourceUsage(ctx context.Context, sb Sandbox) (contracts.SandboxResourceUsage, error)
+	// EnsureWorkspaceAccess 在最终归档前恢复已终止的运行时 Pod,并重新挂载原工作区 PVC。
+	EnsureWorkspaceAccess(ctx context.Context, plan CreateSandboxPlan) error
 	// Exec 在沙箱容器中执行受控命令。
 	Exec(ctx context.Context, namespace, container string, command []string, stdin []byte, tty bool) ([]byte, []byte, error)
 	// ExecStream 在沙箱容器中执行交互式命令并透传流。
@@ -735,15 +737,20 @@ func (s *Service) resolveTools(ctx context.Context, tx TxStore, runtime Runtime,
 		if err != nil {
 			return nil, apperr.ErrSandboxToolNotFound.WithCause(err)
 		}
-		if tool.Status != ToolStatusAvailable || !toolCompatible(runtime.Eco, tool.EcoTags) {
-			return nil, apperr.ErrSandboxToolIncompatible
-		}
-		if err := validateToolNetworkRulesForRuntime(tool, runtime.AdapterSpec); err != nil {
+		if err := validateToolForRuntime(tool, runtime); err != nil {
 			return nil, err
 		}
 		tools = append(tools, tool)
 	}
 	return tools, nil
+}
+
+// validateToolForRuntime 统一工具目录、发布校验和真实创建使用的运行时兼容规则。
+func validateToolForRuntime(tool Tool, runtime Runtime) error {
+	if tool.Status != ToolStatusAvailable || !toolCompatible(runtime.Eco, tool.EcoTags) {
+		return apperr.ErrSandboxToolIncompatible
+	}
+	return validateToolNetworkRulesForRuntime(tool, runtime.AdapterSpec)
 }
 
 // createSandboxRecord 计算过期时间和对象存储 key 后创建沙箱主记录。
@@ -1111,7 +1118,7 @@ func (s *Service) markStartFailed(ctx context.Context, sb Sandbox, cause error) 
 	if shouldBroadcast {
 		s.broadcastProgress(ctx, sb.TenantID, sb.ID, broadcastPhase, SandboxStatusFailed, response.TraceFromContext(ctx))
 	}
-	logging.ErrorContext(ctx, "sandbox start failed", cause.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
+	logging.ErrorContext(ctx, "sandbox start failed", apperr.AsAppError(cause).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 }
 
 // markInitFailed 记录阶段二个性化初始化失败,保留阶段一可进入状态供用户继续查看和修复。
@@ -1145,7 +1152,7 @@ func (s *Service) markInitFailed(ctx context.Context, sb Sandbox, cause error) {
 	if shouldBroadcast {
 		s.broadcastProgress(ctx, sb.TenantID, sb.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
 	}
-	logging.ErrorContext(ctx, "sandbox init failed", cause.Error(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
+	logging.ErrorContext(ctx, "sandbox init failed", apperr.AsAppError(cause).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 }
 
 // updateToolReadiness 将工具真实健康检查结果写回控制面,避免未就绪工具被访问。
@@ -1241,13 +1248,13 @@ func asyncPersistenceContext(ctx context.Context, timeout time.Duration) (contex
 // selectRuntimeImage 按请求固定版本或默认版本选择已登记镜像。
 func selectRuntimeImage(ctx context.Context, tx TxStore, runtimeID int64, version string) (RuntimeImage, error) {
 	if strings.TrimSpace(version) != "" {
-		image, err := tx.GetRuntimeImageByVersion(ctx, runtimeID, strings.TrimSpace(version))
+		image, err := tx.GetRuntimeImageByVersionForShare(ctx, runtimeID, strings.TrimSpace(version))
 		if err != nil {
 			return RuntimeImage{}, apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
 		}
 		return image, nil
 	}
-	image, err := tx.GetDefaultRuntimeImage(ctx, runtimeID)
+	image, err := tx.GetDefaultRuntimeImageForShare(ctx, runtimeID)
 	if err != nil {
 		return RuntimeImage{}, apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
 	}

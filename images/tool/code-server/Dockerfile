@@ -25,7 +25,7 @@ LABEL org.opencontainers.image.title="tool/code-server"
 LABEL org.opencontainers.image.description="Chaimir code-server web IDE image"
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    packages='bash=5.3-r12 ca-certificates=20260413-r0 git=2.55.0-r3 git-lfs=3.7.1-r18 openssh-client=10.4_p1-r1 nodejs-24=24.18.0-r2 npm=12.0.1-r2' \
+    packages='bash=5.3-r12 ca-certificates=20260413-r0 git=2.55.0-r3 git-lfs=3.7.1-r19 openssh-client=10.4_p1-r1 nodejs-24=24.18.0-r2 npm=12.0.1-r2' \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \

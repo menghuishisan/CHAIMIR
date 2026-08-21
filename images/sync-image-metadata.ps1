@@ -23,7 +23,7 @@ if ([string]::IsNullOrWhiteSpace($DigestLockPath)) {
 }
 if ($OverlayPaths.Count -eq 0) {
     $OverlayPaths = @(
-        (Join-Path $RepoRoot "deploy\overlays\local-dev\kustomization.yaml"),
+        (Join-Path $RepoRoot "deploy\overlays\acceptance\kustomization.yaml"),
         (Join-Path $RepoRoot "deploy\overlays\staging\kustomization.yaml"),
         (Join-Path $RepoRoot "deploy\overlays\prod-saas\kustomization.yaml"),
         (Join-Path $RepoRoot "deploy\overlays\prod-school\kustomization.yaml")

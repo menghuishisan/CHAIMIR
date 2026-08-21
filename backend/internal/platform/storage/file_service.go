@@ -30,6 +30,7 @@ type PlanUploadRequest struct {
 	Module             string
 	ResourceType       string
 	ResourceID         string
+	NestedResourceIDs  []string
 	FileName           string
 	ContentType        string
 	Size               int64
@@ -140,7 +141,11 @@ func (s Service) PlanUpload(ctx context.Context, req PlanUploadRequest) (UploadP
 		return UploadPlan{}, err
 	}
 
-	key, err := ObjectKey(req.TenantID, req.Module, req.ResourceType, req.ResourceID, fileName)
+	pathParts := make([]string, 0, len(req.NestedResourceIDs)+2)
+	pathParts = append(pathParts, req.ResourceID)
+	pathParts = append(pathParts, req.NestedResourceIDs...)
+	pathParts = append(pathParts, fileName)
+	key, err := ObjectKey(req.TenantID, req.Module, req.ResourceType, pathParts...)
 	if err != nil {
 		return UploadPlan{}, err
 	}

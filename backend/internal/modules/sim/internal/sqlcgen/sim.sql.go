@@ -128,9 +128,9 @@ SET preview_lease_token = $1,
     preview_lease_until = $2::timestamptz,
     preview_attempt_count = r.preview_attempt_count + 1,
     updated_at = now()
-FROM candidates c
-JOIN sim_package p ON p.id = r.package_id
+FROM candidates c, sim_package p
 WHERE r.id = c.id
+  AND p.id = r.package_id
 RETURNING p.id, p.code, p.version, p.name, p.category, p.compute, p.scale_limit, p.bundle_key, p.bundle_hash, p.entry,
           p.backend_adapter, p.backend_config, p.interaction_schema, p.code_trace, p.author_type, p.author_id, p.status,
           p.created_at, p.updated_at, r.id AS review_id, r.preview_lease_token, r.preview_lease_until,

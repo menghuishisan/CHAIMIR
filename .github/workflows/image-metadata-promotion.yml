@@ -87,7 +87,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- images/image-digests.lock deploy/overlays/local-dev/kustomization.yaml deploy/overlays/staging/kustomization.yaml deploy/overlays/prod-saas/kustomization.yaml deploy/overlays/prod-school/kustomization.yaml backend/.env.example deploy/config/chaimir.env; then
+          if git diff --quiet -- images/image-digests.lock deploy/overlays/acceptance/kustomization.yaml deploy/overlays/staging/kustomization.yaml deploy/overlays/prod-saas/kustomization.yaml deploy/overlays/prod-school/kustomization.yaml backend/.env.example deploy/config/chaimir.env; then
             echo "present=false" >> "$GITHUB_OUTPUT"
           else
             echo "present=true" >> "$GITHUB_OUTPUT"
@@ -98,7 +98,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git add images/image-digests.lock deploy/overlays/local-dev/kustomization.yaml deploy/overlays/staging/kustomization.yaml deploy/overlays/prod-saas/kustomization.yaml deploy/overlays/prod-school/kustomization.yaml backend/.env.example deploy/config/chaimir.env
+          git add images/image-digests.lock deploy/overlays/acceptance/kustomization.yaml deploy/overlays/staging/kustomization.yaml deploy/overlays/prod-saas/kustomization.yaml deploy/overlays/prod-school/kustomization.yaml backend/.env.example deploy/config/chaimir.env
           git diff --cached --check
           git commit -m "chore(images): promote verified image digests"
           git push --force-with-lease origin "$AUTOMATION_BRANCH"

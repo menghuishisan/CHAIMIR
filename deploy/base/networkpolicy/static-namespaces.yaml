@@ -126,6 +126,32 @@ spec:
         - protocol: TCP
           port: 443
 ---
+# Cilium 下 Kubernetes Service VIP 会在数据面转换为 kube-apiserver 实体。
+# 原生 NetworkPolicy 的 Service CIDR 放行不能覆盖该转换路径,因此对真正需要
+# client-go 的控制面补充同等端口范围的 Cilium 策略;不放行节点或公网地址。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-control-plane-to-kube-apiserver
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  endpointSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: ["control-plane", "rbac-provisioner"]
+  egress:
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+            - port: "6443"
+              protocol: TCP
+---
 # 允许后端控制面访问动态沙箱命名空间内由后端显式放行的运行时/工具端口。
 # 出站侧仅限定到 Chaimir 管理的动态命名空间;目标 Pod 与端口仍由动态命名空间内
 # sandbox-allow-control-plane-* ingress 策略按 runtime/tool 声明精确约束。
@@ -208,3 +234,40 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: chaimir-data
+---
+# ClamAV 首次启动和定期更新只访问官方病毒库域名;默认拒绝仍阻断其他公网出口。
+# DNS 规则开启 Cilium DNS 代理,使 toFQDNs 能按实际解析结果建立短时 IP 允许集。
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: allow-clamav-virus-database-egress
+  namespace: chaimir-data
+  labels:
+    app.kubernetes.io/part-of: chaimir
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: clamav
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchName: database.clamav.net
+              - matchPattern: "*.clamav.net"
+    - toFQDNs:
+        - matchName: database.clamav.net
+        - matchPattern: "*.clamav.net"
+        - matchPattern: "*.clamav.net.cdn.cloudflare.net"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

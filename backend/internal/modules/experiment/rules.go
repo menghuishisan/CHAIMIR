@@ -346,6 +346,32 @@ func validateInstanceTransition(current, next int16) error {
 	return apperr.ErrExperimentInstanceStateInvalid
 }
 
+type instanceFinishAction int
+
+const (
+	// instanceFinishPrepare 表示需要首次固化得分并生成 outbox。
+	instanceFinishPrepare instanceFinishAction = iota
+	// instanceFinishRetryRecycle 表示得分已固化,只需要续跑引擎回收。
+	instanceFinishRetryRecycle
+	// instanceFinishCompleted 表示实例已经完成全部回收,可幂等返回。
+	instanceFinishCompleted
+)
+
+// resolveInstanceFinishAction 区分首次完成、回收补偿和已完成幂等返回,避免重复计分。
+func resolveInstanceFinishAction(status int16) (instanceFinishAction, error) {
+	switch status {
+	case InstanceStatusFinished:
+		return instanceFinishRetryRecycle, nil
+	case InstanceStatusRecycled:
+		return instanceFinishCompleted, nil
+	default:
+		if err := validateInstanceTransition(status, InstanceStatusFinished); err != nil {
+			return instanceFinishPrepare, err
+		}
+		return instanceFinishPrepare, nil
+	}
+}
+
 // checkpointByID 在组件配置中查找检查点定义。
 func checkpointByID(exp Experiment, checkpointID string) (CheckpointComponent, bool) {
 	for _, cp := range exp.Components.Checkpoints {

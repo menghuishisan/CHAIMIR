@@ -84,17 +84,19 @@ type ServerConfig struct {
 
 // PostgresConfig 描述 PostgreSQL 连接池和可选特权连接。
 type PostgresConfig struct {
-	Host                string
-	Port                int
-	Database            string
-	User                string
-	Password            string
-	SSLMode             string
-	MaxConns            int
-	MinConns            int
-	PrivUser            string
-	PrivPassword        string
-	GrantTimeoutSeconds int
+	Host                             string
+	Port                             int
+	Database                         string
+	User                             string
+	Password                         string
+	SSLMode                          string
+	MaxConns                         int
+	MinConns                         int
+	PrivUser                         string
+	PrivPassword                     string
+	StartupTimeoutSeconds            int
+	StartupRetryIntervalMilliseconds int
+	GrantTimeoutSeconds              int
 }
 
 // RedisConfig 描述 Redis 连接和探测超时。
@@ -200,6 +202,7 @@ type SMSConfig struct {
 type UploadConfig struct {
 	ImportMaxBytes            int64
 	ContentAttachmentMaxBytes int64
+	ExperimentReportMaxBytes  int64
 	CourseMaterialMaxBytes    int64
 	TenantLogoMaxBytes        int64
 	CourseCoverMaxBytes       int64
@@ -559,17 +562,19 @@ func Load() (*Config, error) {
 		WSReadLimitBytes:         reqInt64("WS_READ_LIMIT_BYTES"),
 	}
 	c.Postgres = PostgresConfig{
-		Host:                req("PG_HOST"),
-		Port:                reqInt("PG_PORT"),
-		Database:            req("PG_DATABASE"),
-		User:                req("PG_USER"),
-		Password:            req("PG_PASSWORD"),
-		SSLMode:             req("PG_SSLMODE"),
-		MaxConns:            reqInt("PG_MAX_CONNS"),
-		MinConns:            reqInt("PG_MIN_CONNS"),
-		PrivUser:            os.Getenv("PG_PRIV_USER"),
-		PrivPassword:        os.Getenv("PG_PRIV_PASSWORD"),
-		GrantTimeoutSeconds: reqInt("PG_GRANT_TIMEOUT_SECONDS"),
+		Host:                             req("PG_HOST"),
+		Port:                             reqInt("PG_PORT"),
+		Database:                         req("PG_DATABASE"),
+		User:                             req("PG_USER"),
+		Password:                         req("PG_PASSWORD"),
+		SSLMode:                          req("PG_SSLMODE"),
+		MaxConns:                         reqInt("PG_MAX_CONNS"),
+		MinConns:                         reqInt("PG_MIN_CONNS"),
+		PrivUser:                         os.Getenv("PG_PRIV_USER"),
+		PrivPassword:                     os.Getenv("PG_PRIV_PASSWORD"),
+		StartupTimeoutSeconds:            reqInt("PG_STARTUP_TIMEOUT_SECONDS"),
+		StartupRetryIntervalMilliseconds: reqInt("PG_STARTUP_RETRY_INTERVAL_MILLISECONDS"),
+		GrantTimeoutSeconds:              reqInt("PG_GRANT_TIMEOUT_SECONDS"),
 	}
 	c.Redis = RedisConfig{
 		Host:               req("REDIS_HOST"),
@@ -663,6 +668,7 @@ func Load() (*Config, error) {
 	c.Upload = UploadConfig{
 		ImportMaxBytes:            reqInt64("UPLOAD_IMPORT_MAX_BYTES"),
 		ContentAttachmentMaxBytes: reqInt64("UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES"),
+		ExperimentReportMaxBytes:  reqInt64("UPLOAD_EXPERIMENT_REPORT_MAX_BYTES"),
 		CourseMaterialMaxBytes:    reqInt64("UPLOAD_COURSE_MATERIAL_MAX_BYTES"),
 		TenantLogoMaxBytes:        reqInt64("UPLOAD_TENANT_LOGO_MAX_BYTES"),
 		CourseCoverMaxBytes:       reqInt64("UPLOAD_COURSE_COVER_MAX_BYTES"),
@@ -901,6 +907,12 @@ func Load() (*Config, error) {
 	if c.Server.WriteTimeoutSeconds <= 0 {
 		errs = append(errs, "HTTP_WRITE_TIMEOUT_SECONDS 必须大于 0")
 	}
+	if c.Server.WriteTimeoutSeconds > 0 && c.Sandbox.PrepullTimeoutSeconds > 0 && c.Server.WriteTimeoutSeconds <= c.Sandbox.PrepullTimeoutSeconds {
+		errs = append(errs, "HTTP_WRITE_TIMEOUT_SECONDS 必须大于 SANDBOX_PREPULL_TIMEOUT_SECONDS,否则预拉取完成后 HTTP 响应会被提前中断")
+	}
+	if c.Server.WriteTimeoutSeconds > 0 && c.Sandbox.SelftestRecycleTimeoutSeconds > 0 && c.Server.WriteTimeoutSeconds <= 2*c.Sandbox.SelftestRecycleTimeoutSeconds {
+		errs = append(errs, "HTTP_WRITE_TIMEOUT_SECONDS 必须大于两倍 SANDBOX_SELFTEST_RECYCLE_TIMEOUT_SECONDS,否则自检执行和清理完成后 HTTP 响应会被提前中断")
+	}
 	if c.Server.IdleTimeoutSeconds <= 0 {
 		errs = append(errs, "HTTP_IDLE_TIMEOUT_SECONDS 必须大于 0")
 	}
@@ -927,6 +939,12 @@ func Load() (*Config, error) {
 	}
 	if c.Postgres.GrantTimeoutSeconds <= 0 {
 		errs = append(errs, "PG_GRANT_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Postgres.StartupTimeoutSeconds <= 0 {
+		errs = append(errs, "PG_STARTUP_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Postgres.StartupRetryIntervalMilliseconds <= 0 {
+		errs = append(errs, "PG_STARTUP_RETRY_INTERVAL_MILLISECONDS 必须大于 0")
 	}
 	if strings.EqualFold(strings.TrimSpace(c.Postgres.SSLMode), "disable") && !IsLocalLikeEnvironment(c.Server.AppEnv) {
 		errs = append(errs, "生产或预发布环境 PG_SSLMODE 不得为 disable")
@@ -963,6 +981,9 @@ func Load() (*Config, error) {
 	}
 	if c.Upload.ContentAttachmentMaxBytes <= 0 {
 		errs = append(errs, "UPLOAD_CONTENT_ATTACHMENT_MAX_BYTES 必须大于 0")
+	}
+	if c.Upload.ExperimentReportMaxBytes <= 0 {
+		errs = append(errs, "UPLOAD_EXPERIMENT_REPORT_MAX_BYTES 必须大于 0")
 	}
 	if c.Upload.CourseMaterialMaxBytes <= 0 {
 		errs = append(errs, "UPLOAD_COURSE_MATERIAL_MAX_BYTES 必须大于 0")

@@ -11,10 +11,11 @@
 //   进度经 M10 的统一业务 WS 订阅实例 topic(短时票据建连),收到推送就重读实例 ——
 //   实例本身才是权威,推送只是「该刷新了」的信号,不用推送内容改本地状态。
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 import {
   FlaskConical,
+  FileUp,
   LoaderCircle,
   Pause,
   Play,
@@ -42,7 +43,6 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
-  Textarea,
   WorkbenchShell,
   WorkbenchTopbar,
   toast,
@@ -55,6 +55,7 @@ import { useTicketedWebSocket } from '../../../../hooks'
 import { useImmersive } from '../../../../layouts/immersive/context'
 import { experimentInstanceStatusLabel } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { formatFileSize } from '../../../../utils/formatters'
 import { BlockIncubator, type WorkspaceCodeRef } from './block-incubator'
 
 /** 查询参数名:实例编号随进入时写进地址,刷新与深链据此回到同一现场。 */
@@ -574,32 +575,34 @@ interface ReportModalProps {
 }
 
 /**
- * ReportModal 提交实验报告。
- * 报告正文以文本提交(后端存的是内容引用),提交后由老师批改 ——
- * 学生侧不做报告列表(那条接口在教师组),提交结果在实验详情看。
+ * ReportModal 上传并提交实验报告。
+ * 文件由后端校验后写入统一对象存储,前端不接触或构造对象引用。
  */
 function ReportModal({ instanceId, onClose, onSubmitted }: ReportModalProps) {
-  const [content, setContent] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [file, setFile] = useState<File>()
+  const [progress, setProgress] = useState<number>()
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
   const submit = useCallback(async () => {
-    if (content.trim() === '') {
-      setFormError('请写下实验报告内容')
+    if (!file) {
+      setFormError('请选择实验报告文件')
       return
     }
     setFormError(undefined)
     setWorking(true)
     try {
-      await api.experiment.submitReport(instanceId, { content_ref: content.trim() })
+      await api.experiment.submitReport(instanceId, file, setProgress)
       toast.success('报告已提交,等老师批改')
       onSubmitted()
     } catch (error) {
       setFormError(userFacingErrorMessage(error, '提交没有成功,请稍后重试。'))
     } finally {
       setWorking(false)
+      setProgress(undefined)
     }
-  }, [content, instanceId, onSubmitted])
+  }, [file, instanceId, onSubmitted])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -607,17 +610,44 @@ function ReportModal({ instanceId, onClose, onSubmitted }: ReportModalProps) {
         <ModalHeader>
           <ModalTitle>提交实验报告</ModalTitle>
           <ModalDescription>
-            写清做法、遇到的问题与结论。提交后由老师批改,批改结果在实验详情里看。
+            选择 PDF、Markdown 或纯文本报告。提交后由老师批改,批改结果在实验详情里看。
           </ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-3">
-          <Textarea
-            aria-label="实验报告内容"
-            value={content}
-            rows={12}
-            invalid={Boolean(formError)}
-            onChange={(event) => setContent(event.target.value)}
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".pdf,.md,.markdown,.txt,application/pdf,text/markdown,text/plain"
+            aria-label="选择实验报告文件"
+            className="sr-only"
+            onChange={(event) => {
+              const selected = event.target.files?.[0]
+              event.target.value = ''
+              if (selected) {
+                setFile(selected)
+                setFormError(undefined)
+              }
+            }}
           />
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              leftIcon={FileUp}
+              aria-hidden="true"
+              tabIndex={-1}
+              onClick={() => inputRef.current?.click()}
+            >
+              {file ? '更换报告' : '选择报告'}
+            </Button>
+            <span role="status" className="min-w-0 text-sm text-ink-sub">
+              {progress !== undefined
+                ? `已上传 ${progress}%`
+                : file
+                  ? `${file.name} · ${formatFileSize(file.size)}`
+                  : ''}
+            </span>
+          </div>
           {formError ? <p className="text-sm text-danger">{formError}</p> : null}
         </ModalBody>
         <ModalFooter>

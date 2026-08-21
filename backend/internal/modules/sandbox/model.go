@@ -53,10 +53,11 @@ type Tool struct {
 // 它不是 RuntimeResponse 的子集别名:适配器清单、镜像地址、自检详情属平台运维资产,
 // 这里刻意不携带,避免编排面拿到只有平台面该看的内容。
 type CatalogRuntime struct {
-	Code   string
-	Name   string
-	Eco    string
-	Images []CatalogRuntimeImage
+	Code      string
+	Name      string
+	Eco       string
+	Images    []CatalogRuntimeImage
+	ToolCodes []string
 }
 
 // CatalogRuntimeImage 是编排目录里的镜像版本投影,只有版本号与是否默认。
@@ -65,11 +66,13 @@ type CatalogRuntimeImage struct {
 	IsDefault bool
 }
 
-// CatalogTool 是编排目录里的工具投影,只有编码、名称与类型。
+// CatalogTool 是编排目录的内部工具投影;生态标签和资源声明只用于服务端兼容计算,不会下发。
 type CatalogTool struct {
-	Code string
-	Name string
-	Kind int16
+	Code         string
+	Name         string
+	Kind         int16
+	EcoTags      []string
+	ResourceSpec ToolResourceSpec
 }
 
 // Sandbox 描述单个沙箱实例的内部运行态快照。

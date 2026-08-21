@@ -14,13 +14,13 @@ labels:
   chaimir.io/sensitivity: cluster-network-agent
   chaimir.io/scope: system
   chaimir.io/source: platform-built
-description: Cilium v1.20.0 节点 CNI agent 安全重建镜像。
+description: Cilium v1.20.1 节点 CNI agent 安全重建镜像。
 source:
   type: platform-built
 upstream:
   source_repository: https://github.com/cilium/cilium
-  version: v1.20.0
-  source_commit: 97ce49d65e777e07fa2457e942725050b086d553
+  version: v1.20.1
+  source_commit: 7d68cfb394f2960e10aa72e76d0d51e66c1b2ebc
   builder_arg: CILIUM_BUILDER_IMAGE
   runtime_arg: CILIUM_RUNTIME_IMAGE
   envoy_arg: CILIUM_ENVOY_IMAGE

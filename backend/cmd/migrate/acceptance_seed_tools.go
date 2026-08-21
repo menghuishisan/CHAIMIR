@@ -127,7 +127,7 @@ func acceptanceToolDefinitions() ([]acceptanceToolDefinition, error) {
 		}
 		def, err := toolDefinitionFromManifest(len(defs), manifest)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("生成工具定义失败 %s: %w", manifest.Name, err)
 		}
 		defs = append(defs, def)
 	}
@@ -310,9 +310,6 @@ func normalizeExplicitToolResourceSpec(input map[string]any, imageURL string, ki
 		if _, ok := spec["command_policy"].(map[string]any); !ok {
 			return nil, fmt.Errorf("命令工具显式 WorkloadSpec 必须声明 command_policy")
 		}
-	}
-	if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
-		return nil, err
 	}
 	return spec, nil
 }

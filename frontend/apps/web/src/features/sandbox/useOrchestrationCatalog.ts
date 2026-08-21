@@ -24,8 +24,8 @@ export interface OrchestrationCatalogState {
   resource: AsyncResourceState<SandboxOrchestrationCatalog>
   /** runtimeOptions 是运行时下拉选项,标签带编码便于教师核对。 */
   runtimeOptions: SelectOption[]
-  /** tools 是可勾选的工具定义。 */
-  tools: SandboxCatalogTool[]
+  /** tools 返回指定运行时生态下可勾选的工具定义。 */
+  tools: (runtimeCode: string) => SandboxCatalogTool[]
   /** imageOptions 返回指定运行时下的镜像版本选项,默认镜像标注出来。 */
   imageOptions: (runtimeCode: string) => SelectOption[]
 }
@@ -45,7 +45,7 @@ export function useOrchestrationCatalog(enabled = true): OrchestrationCatalogSta
         ? api.sandbox.getOrchestrationCatalog()
         : Promise.resolve<SandboxOrchestrationCatalog>({ runtimes: [], tools: [] }),
     [enabled],
-    (value) => value.runtimes.length === 0,
+    (value) => value.runtimes.length === 0
   )
 
   const runtimeOptions = useMemo(
@@ -54,10 +54,17 @@ export function useOrchestrationCatalog(enabled = true): OrchestrationCatalogSta
         value: runtime.code,
         label: `${runtime.name} · ${runtime.code}`,
       })),
-    [resource.data],
+    [resource.data]
   )
 
-  const tools = useMemo(() => resource.data?.tools ?? [], [resource.data])
+  const tools = useCallback(
+    (runtimeCode: string): SandboxCatalogTool[] => {
+      const runtime = (resource.data?.runtimes ?? []).find((item) => item.code === runtimeCode)
+      const allowed = new Set(runtime?.tool_codes ?? [])
+      return (resource.data?.tools ?? []).filter((tool) => allowed.has(tool.code))
+    },
+    [resource.data]
+  )
 
   const imageOptions = useCallback(
     (runtimeCode: string): SelectOption[] => {
@@ -67,7 +74,7 @@ export function useOrchestrationCatalog(enabled = true): OrchestrationCatalogSta
         label: image.is_default ? `${image.version}(默认)` : image.version,
       }))
     },
-    [resource.data],
+    [resource.data]
   )
 
   return { resource, runtimeOptions, tools, imageOptions }

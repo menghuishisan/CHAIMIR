@@ -11,8 +11,8 @@ WORKDIR /src/pgweb
 RUN test "$(git rev-parse HEAD)" = "${PGWEB_COMMIT}" \
     && go get \
         github.com/sirupsen/logrus@v1.9.4 \
-        golang.org/x/crypto@v0.52.0 \
-        golang.org/x/net@v0.55.0 \
+        golang.org/x/crypto@v0.53.0 \
+        golang.org/x/net@v0.56.0 \
         golang.org/x/text@v0.39.0 \
         google.golang.org/grpc@v1.82.1 \
     && go mod tidy \

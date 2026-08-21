@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# EVM chain capability helper for the Foundry runtime.
+# 本脚本为 Foundry 运行时提供受控的 EVM 链部署、交易、查询和重置能力。
 set -eu
 
 cmd="${1:-}"
@@ -25,15 +25,6 @@ json_string() {
   jq -r "$1 // empty"
 }
 
-require_private_key() {
-  private_key="$1"
-  if [ -z "$private_key" ]; then
-    private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-}"
-  fi
-  [ -n "$private_key" ] || fail "private key must be provided by payload or CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY" 64
-  printf '%s' "$private_key"
-}
-
 case "$cmd" in
   reset)
     mkdir -p "$state_dir"
@@ -47,12 +38,21 @@ case "$cmd" in
     project_dir="$(printf '%s' "$payload" | json_string '.project_dir')"
     artifact="$(printf '%s' "$payload" | json_string '.artifact')"
     private_key="$(printf '%s' "$payload" | json_string '.private_key')"
-    private_key="$(require_private_key "$private_key")"
+    from="$(printf '%s' "$payload" | json_string '.from')"
+    if [ -z "$private_key" ]; then
+      private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-}"
+    fi
     if [ -z "$bytecode" ] && [ -n "$project_dir" ] && [ -n "$artifact" ]; then
       bytecode="$(jq -r '.bytecode.object // .bytecode // empty' "$project_dir/$artifact")"
     fi
     [ -n "$bytecode" ] || fail "deploy payload requires bytecode or project_dir plus artifact" 22
-    output="$(cast send --rpc-url "$rpc_url" --private-key "$private_key" --create "$bytecode" --json)"
+    if [ -n "$private_key" ]; then
+      output="$(cast send --rpc-url "$rpc_url" --private-key "$private_key" --create "$bytecode" --json)"
+    elif [ -n "$from" ]; then
+      output="$(cast send --rpc-url "$rpc_url" --from "$from" --unlocked --create "$bytecode" --json)"
+    else
+      fail "deploy payload requires private_key, from, or CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY" 64
+    fi
     address="$(printf '%s' "$output" | jq -r '.contractAddress // .contract_address // empty')"
     [ -n "$address" ] || fail "deploy did not return contract address" 70
     mkdir -p "$state_dir"
@@ -66,16 +66,25 @@ case "$cmd" in
     data="$(printf '%s' "$payload" | json_string '.data')"
     value="$(printf '%s' "$payload" | json_string '.value')"
     private_key="$(printf '%s' "$payload" | json_string '.private_key')"
+    from="$(printf '%s' "$payload" | json_string '.from')"
     if [ -z "$to" ] && [ -f "$last_contract_file" ]; then
       to="$(cat "$last_contract_file")"
     fi
-    private_key="$(require_private_key "$private_key")"
+    if [ -z "$private_key" ]; then
+      private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-}"
+    fi
     [ -n "$to" ] || fail "tx payload requires to or a previous deployment" 22
     [ -n "$data" ] || fail "tx payload requires data" 22
-    if [ -n "$value" ]; then
+    if [ -n "$private_key" ] && [ -n "$value" ]; then
       output="$(cast send --rpc-url "$rpc_url" --private-key "$private_key" --value "$value" "$to" "$data" --json)"
-    else
+    elif [ -n "$private_key" ]; then
       output="$(cast send --rpc-url "$rpc_url" --private-key "$private_key" "$to" "$data" --json)"
+    elif [ -n "$from" ] && [ -n "$value" ]; then
+      output="$(cast send --rpc-url "$rpc_url" --from "$from" --unlocked --value "$value" "$to" "$data" --json)"
+    elif [ -n "$from" ]; then
+      output="$(cast send --rpc-url "$rpc_url" --from "$from" --unlocked "$to" "$data" --json)"
+    else
+      fail "tx payload requires private_key, from, or CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY" 64
     fi
     jq -cn --argjson receipt "$output" '{receipt:$receipt}'
     ;;

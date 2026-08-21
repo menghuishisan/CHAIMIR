@@ -221,6 +221,7 @@ func maxMultipartBodyBytes(cfg *config.Config) int64 {
 	limits := []int64{
 		cfg.Upload.ImportMaxBytes,
 		cfg.Upload.ContentAttachmentMaxBytes,
+		cfg.Upload.ExperimentReportMaxBytes,
 		cfg.Upload.CourseMaterialMaxBytes,
 		cfg.Upload.TenantLogoMaxBytes,
 		cfg.Upload.CourseCoverMaxBytes,
@@ -339,7 +340,7 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if err != nil {
 		return err
 	}
-	experimentSvc, err := RegisterExperimentModule(ctx, ExperimentModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Experiment, Content: contentSvc, Sandbox: sandboxSvc, Judge: judgeSvc, Sim: simSvc, Audit: auditWriter, EventBus: infra.bus, Storage: infra.storage, Auth: infra.auth, Roles: identitySvc})
+	experimentSvc, err := RegisterExperimentModule(ctx, ExperimentModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Experiment, Content: contentSvc, Sandbox: sandboxSvc, Judge: judgeSvc, Sim: simSvc, Audit: auditWriter, EventBus: infra.bus, Storage: infra.storage, Upload: cfg.Upload, FileService: infra.files, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}

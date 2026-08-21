@@ -9,7 +9,7 @@
 // 验证结果里的 actual 是后端已脱敏的短文本(chainassert.ShortJSON),
 // 页面原样呈现即可,不再二次解析。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { CircleCheck, CircleX, FlaskConical, Server } from 'lucide-react'
 import { VulnPrevalidateStatus, type VulnProblem } from '@chaimir/api-client'
 import {
@@ -76,7 +76,8 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
   const [running, setRunning] = useState(false)
 
   const catalog = useOrchestrationCatalog()
-  const imageOptions = useMemo(() => catalog.imageOptions(runtimeCode), [catalog, runtimeCode])
+  const imageOptions = catalog.imageOptions(runtimeCode)
+  const compatibleTools = catalog.tools(runtimeCode)
 
   const run = useCallback(async () => {
     if (runtimeCode === '' || imageVersion === '') {
@@ -150,6 +151,7 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
                       onValueChange={(value) => {
                         setRuntimeCode(value)
                         setImageVersion('')
+                        setToolCodes([])
                       }}
                     />
                   </FormField>
@@ -171,10 +173,10 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
                   </FormField>
                 </div>
 
-                {catalog.tools.length > 0 ? (
+                {compatibleTools.length > 0 ? (
                   <FormField label="验证时可用工具" helper="按攻击步骤的需要勾选;不确定就不勾">
                     <SandboxToolChecklist
-                      tools={catalog.tools}
+                      tools={compatibleTools}
                       selectedCodes={toolCodes}
                       onChange={setToolCodes}
                     />
@@ -223,7 +225,12 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
           <Button variant="outline" onClick={onClose}>
             关闭
           </Button>
-          <Button variant="primary" leftIcon={FlaskConical} loading={running} onClick={() => void run()}>
+          <Button
+            variant="primary"
+            leftIcon={FlaskConical}
+            loading={running}
+            onClick={() => void run()}
+          >
             {Object.keys(result.prevalidate_detail).length === 0 ? '开始验证' : '重新验证'}
           </Button>
         </ModalFooter>
@@ -331,7 +338,7 @@ function ValidationSection({ title, description, expectPassed, section }: Valida
 /** readSection 从验证明细里读出一段结果;缺失或形状不符回 undefined。 */
 function readSection(
   detail: Record<string, unknown>,
-  key: string,
+  key: string
 ): { passed: boolean; assertions: AssertionResult[] } | undefined {
   const raw = detail[key]
   if (typeof raw !== 'object' || raw === null) return undefined

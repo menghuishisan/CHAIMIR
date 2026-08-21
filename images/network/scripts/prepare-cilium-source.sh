@@ -6,7 +6,7 @@ source_dir="$1"
 source_commit="$2"
 cd "$source_dir"
 
-test "$(cat VERSION)" = "1.20.0"
+test "$(cat VERSION)" = "1.20.1"
 printf '%s %s\n' "$source_commit" "1970-01-01T00:00:00Z" > GIT_VERSION
 
 # Cilium 的发布源码携带 vendor；只改 go.mod 会被 vendored 旧版本覆盖，必须同步重建 vendor。

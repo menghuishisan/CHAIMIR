@@ -1,7 +1,7 @@
 # gvisor 组件:声明不可信沙箱强制隔离运行时的 RuntimeClass。
-# 经 `kubectl apply -k components/gvisor` 装入集群(见 deploy/Makefile 的 gvisor-up*/gvisor-check 目标)。
+# 经 `kubectl apply -k components/gvisor` 装入集群(见 deploy/Makefile 的 gvisor-up/gvisor-check 目标)。
 # 节点侧 runsc 安装是集群前置(与 CNI、containerd 同类),不在本清单内:
-#   生产用云厂商 gVisor 节点池,本地用 `make gvisor-up-local`,详见 README.md。
+#   云厂商使用 gVisor 节点池,自管 Kind 使用 `make gvisor-up`,两者执行相同隔离验收。
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

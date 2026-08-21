@@ -14,7 +14,7 @@ labels:
   chaimir.io/sensitivity: cluster-network-base
   chaimir.io/scope: system
   chaimir.io/source: platform-built
-description: Cilium v1.20.0 构建与 agent 共用的安全运行基座。
+description: Cilium 构建与 agent 共用的安全运行基座，使用已验证 Go 1.26.6 工具链。
 source:
   type: platform-built
 upstream:
@@ -23,10 +23,10 @@ upstream:
       registry: docker.io
       version: "26.04"
       digest: sha256:3131b4cc82a783df6c9df078f86e01819a13594b865c2cad47bd1bca2b7063bb
-    - image: library/golang
-      registry: docker.io
-      version: "1.26.5"
-      digest: sha256:3aff6657219a4d9c14e27fb1d8976c49c29fddb70ba835014f477e1c70636647
+    - image: base/go-builder
+      registry: registry.chaimir.io
+      version: go1.26.6
+      digest: sha256:2e1cc3ef0c530f5a92ccd0c7e197f7d16e16e6cf879f43a9dd0657f08c0d3343
     - image: cilium/cilium-llvm
       registry: quay.io
       version: 19.1.7-1782898005-bed4da5
@@ -54,7 +54,7 @@ upstream:
       sha256: 15dc9570470ee8bdd418259a93d40a10225db30cf094983f5529fe89168ed993
   security_remediation:
     removed_file: /usr/bin/pebble
-    reason: Ubuntu 基座遗留 Pebble 命中 HIGH 漏洞，Cilium v1.20.0 源码与运行依赖均不使用该文件。
+    reason: Ubuntu 基座遗留 Pebble 不属于 Cilium 运行依赖，构建阶段明确移除该文件。
   reuse_policy: rebuild-fixed-upstream-components
   license: Apache-2.0
 private_delivery:

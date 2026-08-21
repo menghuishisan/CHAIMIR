@@ -102,7 +102,7 @@ func run() error {
 
 // migrateAndGrant 执行数据库 schema migration,随后幂等授权应用角色。
 func migrateAndGrant(ctx context.Context, cfg *config.Config) error {
-	if err := runMigrations(cfg.Postgres); err != nil {
+	if err := runMigrations(ctx, cfg.Postgres); err != nil {
 		return err
 	}
 	if err := grantApplicationRole(ctx, cfg.Postgres); err != nil {
@@ -174,8 +174,11 @@ func closeRedisClient(client *redis.Client, message string, resultErr *error) {
 	}
 }
 
-// runMigrations 使用 golang-migrate 执行嵌入的版本化 SQL。
-func runMigrations(pg config.PostgresConfig) (resultErr error) {
+// runMigrations 等待 PostgreSQL 就绪后使用 golang-migrate 执行嵌入的版本化 SQL。
+func runMigrations(ctx context.Context, pg config.PostgresConfig) (resultErr error) {
+	if err := db.WaitForPostgres(ctx, pg, privilegedUser(pg), privilegedPassword(pg)); err != nil {
+		return fmt.Errorf("等待迁移数据库就绪失败: %w", err)
+	}
 	source, err := iofs.New(migrations.FS, ".")
 	if err != nil {
 		return fmt.Errorf("创建迁移源失败: %w", err)
@@ -206,6 +209,9 @@ func resetLocalDatabase(ctx context.Context, cfg *config.Config) (resultErr erro
 	}
 	adminDB := cfg.Postgres
 	adminDB.Database = "postgres"
+	if err := db.WaitForPostgres(ctx, adminDB, privilegedUser(cfg.Postgres), privilegedPassword(cfg.Postgres)); err != nil {
+		return fmt.Errorf("等待本地管理数据库就绪失败: %w", err)
+	}
 	sqlDB, err := sql.Open("pgx", postgresURL(adminDB, privilegedUser(cfg.Postgres), privilegedPassword(cfg.Postgres)))
 	if err != nil {
 		return fmt.Errorf("打开本地重置数据库连接失败: %w", err)

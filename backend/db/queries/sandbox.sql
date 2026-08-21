@@ -29,10 +29,28 @@ SET name = EXCLUDED.name,
     updated_at = now()
 RETURNING id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at;
 
--- name: UpdateRuntimeSelftest :one
+-- name: GetRuntimeByIDForUpdate :one
+-- 运行时更新必须在同一事务内比较旧执行契约并写入新状态,防止并发更新覆盖自检结论。
+SELECT id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at
+FROM runtime
+WHERE id = $1
+FOR UPDATE;
+
+-- name: StartRuntimeSelftest :one
+-- 自检启动时写入唯一批次并退回接入中,并发契约更新或停用可使旧批次自然失效。
+UPDATE runtime
+SET selftest_status = 1, selftest_detail = $2, status = 2, updated_at = now()
+WHERE id = $1 AND status <> 3
+RETURNING id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at;
+
+-- name: FinishRuntimeSelftest :one
+-- 只允许仍处于接入中的同一自检批次写回,防止旧结果覆盖并发配置更新或停用。
 UPDATE runtime
 SET selftest_status = $2, selftest_detail = $3, status = $4, updated_at = now()
 WHERE id = $1
+  AND selftest_status = 1
+  AND status = 2
+  AND selftest_detail->>'attempt_id' = sqlc.arg(attempt_id)::text
 RETURNING id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at;
 
 -- name: GetRuntimeImageByID :one
@@ -45,10 +63,22 @@ SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, pr
 FROM runtime_image
 WHERE runtime_id = $1 AND version = $2 AND status = 1;
 
+-- name: GetRuntimeImageByVersionForShare :one
+SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+FROM runtime_image
+WHERE runtime_id = $1 AND version = $2 AND status = 1
+FOR SHARE;
+
 -- name: GetDefaultRuntimeImage :one
 SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
 FROM runtime_image
 WHERE runtime_id = $1 AND is_default = true AND status = 1;
+
+-- name: GetDefaultRuntimeImageForShare :one
+SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+FROM runtime_image
+WHERE runtime_id = $1 AND is_default = true AND status = 1
+FOR SHARE;
 
 -- name: ListRuntimeImages :many
 SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
@@ -66,11 +96,38 @@ UPDATE runtime_image
 SET is_default = false
 WHERE runtime_id = $1 AND id <> $2;
 
--- name: UpdateRuntimeImagePrepull :one
+-- name: GetRuntimeImageByIDForUpdate :one
+-- 开始预拉取前先锁定证明行;运行时或工具变更事务必须等本次闭包快照落为 running 后再执行失效。
+SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+FROM runtime_image
+WHERE id = $1 AND runtime_id = $2
+FOR UPDATE;
+
+-- name: StartRuntimeImagePrepull :one
 UPDATE runtime_image
-SET prepulled = $3, prepull_status = $4, prepull_detail = $5, prepulled_at = $6
+SET prepulled = false, prepull_status = 4, prepull_detail = $3, prepulled_at = NULL
 WHERE id = $1 AND runtime_id = $2 AND status = 1
 RETURNING id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at;
+
+-- name: FinishRuntimeImagePrepull :one
+-- 只允许启动本轮 DaemonSet 的同一次尝试写回结果;中途失效或后发尝试不得被旧结果覆盖。
+UPDATE runtime_image
+SET prepulled = $3, prepull_status = $4, prepull_detail = $5, prepulled_at = $6
+WHERE id = $1
+  AND runtime_id = $2
+  AND status = 1
+  AND prepull_status = 4
+  AND prepull_detail->>'attempt_id' = sqlc.arg(attempt_id)::text
+RETURNING id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at;
+
+-- name: InvalidateRuntimeImagesPrepull :exec
+-- 运行时工作负载闭包变化后统一撤销旧证明,重新预拉取成功前不得创建新沙箱。
+UPDATE runtime_image
+SET prepulled = false,
+    prepull_status = 1,
+    prepull_detail = $2,
+    prepulled_at = NULL
+WHERE runtime_id = $1 AND status = 1;
 
 -- name: DisableRuntimeImage :one
 UPDATE runtime_image
@@ -94,22 +151,25 @@ FROM tool
 ORDER BY created_at DESC, id DESC;
 
 -- name: ListCatalogRuntimes :many
--- 编排目录只取可编排字段:运行时本体的 code/name/eco 与其可用镜像版本。
--- 一次 LEFT JOIN 平铺取回后由 repo 按运行时分组,既避免按运行时逐个查镜像的 N+1,
+-- 编排目录只取真正可调度的运行时与镜像版本,不把未完成自检或最新闭包预拉取的项暴露给教师。
+-- 一次 JOIN 平铺取回后由 repo 按运行时分组,既避免按运行时逐个查镜像的 N+1,
 -- 也不用 jsonb_agg —— 那会让生成的行类型退化成 interface{},把解码负担推给业务层。
--- 停用的运行时与镜像不进可选集;没有可用镜像的运行时仍要出现(可用默认镜像起环境)。
 SELECT r.code AS runtime_code, r.name AS runtime_name, r.eco,
-       COALESCE(i.version, '')::varchar AS image_version,
-       COALESCE(i.is_default, false)::boolean AS image_is_default
+       i.version AS image_version,
+       i.is_default AS image_is_default
 FROM runtime r
-LEFT JOIN runtime_image i
-       ON i.runtime_id = r.id AND i.status = 1
-WHERE r.status = 1
-ORDER BY r.code, i.is_default DESC NULLS LAST, i.version DESC NULLS LAST;
+JOIN runtime_image i
+  ON i.runtime_id = r.id
+ AND i.status = 1
+ AND i.prepulled = true
+ AND i.prepull_status = 2
+ AND i.genesis_baked = true
+WHERE r.status = 1 AND r.selftest_status = 2
+ORDER BY r.code, i.is_default DESC, i.version DESC;
 
 -- name: ListCatalogTools :many
--- 编排目录只取工具的 code/name/kind,不出 resource_spec 与镜像引用。
-SELECT code, name, kind
+-- eco_tags 只在服务端计算各运行时兼容工具编码,不会直接下发给编排端。
+SELECT code, name, kind, eco_tags, resource_spec
 FROM tool
 WHERE status = 1
 ORDER BY code;

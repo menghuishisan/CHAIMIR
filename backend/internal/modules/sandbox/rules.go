@@ -175,6 +175,20 @@ func validateToolResourceSpecShape(spec *ToolResourceSpec, kind int16) error {
 	if err := validatePrepullCommand(spec.PrepullCommand); err != nil {
 		return err
 	}
+	for i := range spec.Components {
+		component := &spec.Components[i]
+		// DaemonSet 由运行时唯一保持容器维持 Ready,工具镜像只作为 initContainer 拉取并自检。
+		if component.PrepullHold {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		command := component.PrepullCommand
+		if len(command) == 0 {
+			command = spec.PrepullCommand
+		}
+		if len(command) == 0 || validatePrepullCommand(command) != nil {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+	}
 	return nil
 }
 
@@ -622,6 +636,9 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 			ports[port.Name] = struct{}{}
 		}
 	}
+	if err := validateRuntimePrepullHold(spec.InfraSidecars); err != nil {
+		return err
+	}
 	if err := validateRuntimeContainerNames(spec); err != nil {
 		return err
 	}
@@ -630,6 +647,20 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 	}
 	if err := validateNetworkRules(spec); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateRuntimePrepullHold 保证每个运行时闭包只有一个常驻容器,其余镜像均以 initContainer 自检。
+func validateRuntimePrepullHold(sidecars []workload.ComponentSpec) error {
+	holdCount := 0
+	for _, sidecar := range sidecars {
+		if sidecar.PrepullHold {
+			holdCount++
+		}
+	}
+	if holdCount != 1 {
+		return apperr.ErrSandboxAdapterSpecInvalid
 	}
 	return nil
 }

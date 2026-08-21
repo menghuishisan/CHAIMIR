@@ -18,21 +18,32 @@ type Querier interface {
 	CreateSandboxTool(ctx context.Context, arg CreateSandboxToolParams) (SandboxTool, error)
 	DisableRuntimeImage(ctx context.Context, arg DisableRuntimeImageParams) (RuntimeImage, error)
 	EnsureTenantQuota(ctx context.Context, arg EnsureTenantQuotaParams) (EnsureTenantQuotaRow, error)
+	// 只允许启动本轮 DaemonSet 的同一次尝试写回结果;中途失效或后发尝试不得被旧结果覆盖。
+	FinishRuntimeImagePrepull(ctx context.Context, arg FinishRuntimeImagePrepullParams) (RuntimeImage, error)
+	// 只允许仍处于接入中的同一自检批次写回,防止旧结果覆盖并发配置更新或停用。
+	FinishRuntimeSelftest(ctx context.Context, arg FinishRuntimeSelftestParams) (Runtime, error)
 	GetDefaultRuntimeImage(ctx context.Context, runtimeID int64) (RuntimeImage, error)
+	GetDefaultRuntimeImageForShare(ctx context.Context, runtimeID int64) (RuntimeImage, error)
 	GetRuntimeByCode(ctx context.Context, code string) (Runtime, error)
 	GetRuntimeByID(ctx context.Context, id int64) (Runtime, error)
+	// 运行时更新必须在同一事务内比较旧执行契约并写入新状态,防止并发更新覆盖自检结论。
+	GetRuntimeByIDForUpdate(ctx context.Context, id int64) (Runtime, error)
 	GetRuntimeImageByID(ctx context.Context, arg GetRuntimeImageByIDParams) (RuntimeImage, error)
+	// 开始预拉取前先锁定证明行;运行时或工具变更事务必须等本次闭包快照落为 running 后再执行失效。
+	GetRuntimeImageByIDForUpdate(ctx context.Context, arg GetRuntimeImageByIDForUpdateParams) (RuntimeImage, error)
 	GetRuntimeImageByVersion(ctx context.Context, arg GetRuntimeImageByVersionParams) (RuntimeImage, error)
+	GetRuntimeImageByVersionForShare(ctx context.Context, arg GetRuntimeImageByVersionForShareParams) (RuntimeImage, error)
 	GetSandbox(ctx context.Context, arg GetSandboxParams) (Sandbox, error)
 	GetTenantQuota(ctx context.Context, tenantID int64) (TenantQuotum, error)
 	GetTenantQuotaForUpdate(ctx context.Context, tenantID int64) (TenantQuotum, error)
 	GetToolByCode(ctx context.Context, code string) (Tool, error)
-	// 编排目录只取可编排字段:运行时本体的 code/name/eco 与其可用镜像版本。
-	// 一次 LEFT JOIN 平铺取回后由 repo 按运行时分组,既避免按运行时逐个查镜像的 N+1,
+	// 运行时工作负载闭包变化后统一撤销旧证明,重新预拉取成功前不得创建新沙箱。
+	InvalidateRuntimeImagesPrepull(ctx context.Context, arg InvalidateRuntimeImagesPrepullParams) error
+	// 编排目录只取真正可调度的运行时与镜像版本,不把未完成自检或最新闭包预拉取的项暴露给教师。
+	// 一次 JOIN 平铺取回后由 repo 按运行时分组,既避免按运行时逐个查镜像的 N+1,
 	// 也不用 jsonb_agg —— 那会让生成的行类型退化成 interface{},把解码负担推给业务层。
-	// 停用的运行时与镜像不进可选集;没有可用镜像的运行时仍要出现(可用默认镜像起环境)。
 	ListCatalogRuntimes(ctx context.Context) ([]ListCatalogRuntimesRow, error)
-	// 编排目录只取工具的 code/name/kind,不出 resource_spec 与镜像引用。
+	// eco_tags 只在服务端计算各运行时兼容工具编码,不会直接下发给编排端。
 	ListCatalogTools(ctx context.Context) ([]ListCatalogToolsRow, error)
 	ListRecycleCandidates(ctx context.Context, arg ListRecycleCandidatesParams) ([]Sandbox, error)
 	ListRuntimeImages(ctx context.Context, runtimeID int64) ([]RuntimeImage, error)
@@ -46,9 +57,10 @@ type Querier interface {
 	MarkSandboxActive(ctx context.Context, arg MarkSandboxActiveParams) (Sandbox, error)
 	MarkSandboxRecycleOutboxFailed(ctx context.Context, arg MarkSandboxRecycleOutboxFailedParams) (SandboxRecycleOutbox, error)
 	MarkSandboxRecycleOutboxPublished(ctx context.Context, arg MarkSandboxRecycleOutboxPublishedParams) (SandboxRecycleOutbox, error)
+	StartRuntimeImagePrepull(ctx context.Context, arg StartRuntimeImagePrepullParams) (RuntimeImage, error)
+	// 自检启动时写入唯一批次并退回接入中,并发契约更新或停用可使旧批次自然失效。
+	StartRuntimeSelftest(ctx context.Context, arg StartRuntimeSelftestParams) (Runtime, error)
 	StatsByTenant(ctx context.Context, tenantID int64) (StatsByTenantRow, error)
-	UpdateRuntimeImagePrepull(ctx context.Context, arg UpdateRuntimeImagePrepullParams) (RuntimeImage, error)
-	UpdateRuntimeSelftest(ctx context.Context, arg UpdateRuntimeSelftestParams) (Runtime, error)
 	UpdateSandboxCode(ctx context.Context, arg UpdateSandboxCodeParams) (Sandbox, error)
 	UpdateSandboxPhaseStatus(ctx context.Context, arg UpdateSandboxPhaseStatusParams) (Sandbox, error)
 	UpdateSandboxSnapshot(ctx context.Context, arg UpdateSandboxSnapshotParams) (Sandbox, error)

@@ -1,0 +1,65 @@
+# 本文件让外部 HTTPS 入口把业务域名重新加密转发到 Cilium 集群;EndpointSlice 由脚本写入真实节点地址。
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chaimir-edge
+  labels:
+    app.kubernetes.io/part-of: chaimir-external-edge
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chaimir-cilium-ingress
+  namespace: chaimir-edge
+  labels:
+    app.kubernetes.io/part-of: chaimir-external-edge
+spec:
+  ports:
+    - name: https
+      port: 30443
+      targetPort: 30443
+      protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: chaimir-cilium-edge
+  namespace: chaimir-edge
+  labels:
+    app.kubernetes.io/part-of: chaimir-external-edge
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "501m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - www.chaimir.io
+        - tools.chaimir.io
+      secretName: chaimir-edge-tls
+  rules:
+    - host: www.chaimir.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: chaimir-cilium-ingress
+                port:
+                  number: 30443
+    - host: tools.chaimir.io
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: chaimir-cilium-ingress
+                port:
+                  number: 30443

@@ -1,4 +1,4 @@
-// sms-gateway.mjs 是 local-dev E2E 使用的临时短信代理网关实现。
+// sms-gateway.mjs 是 acceptance E2E 使用的临时短信代理网关实现。
 // 鉴权 token 只从运行时注入的 SMS_HTTP_TOKEN 读取，不接受默认值或配置文件路径。
 
 import fs from 'node:fs'

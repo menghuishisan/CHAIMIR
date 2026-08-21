@@ -28,6 +28,11 @@ rules:
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["get", "list", "watch"]
+  # 后端只读取预配器创建的固定 RoleBinding,把最小权限就绪作为创建工作负载的门禁。
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    resourceNames: ["chaimir-backend-sandbox-workload"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -44,7 +49,43 @@ subjects:
     name: chaimir-backend
     namespace: chaimir-system
 ---
-# 预配器只观察 Namespace,并在受标签保护的动态 Namespace 内修复固定 Role/RoleBinding。
+# 部署管理员维护固定工作负载权限,RoleBinding 绑定后仅在单个动态命名空间内生效。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chaimir-backend-sandbox-workload
+  labels:
+    app.kubernetes.io/part-of: chaimir
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log", "pods/exec", "pods/status"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["create", "delete", "get", "list", "watch", "update"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "delete", "get", "list", "watch", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "resourcequotas", "limitranges"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents", "volumesnapshotclasses"]
+    verbs: ["get", "list", "watch"]
+---
+# 预配器只观察 Namespace,并在受标签保护的动态 Namespace 内修复固定 RoleBinding。
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -67,8 +108,13 @@ rules:
     resources: ["namespaces"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["rbac.authorization.k8s.io"]
-    resources: ["roles", "rolebindings"]
+    resources: ["rolebindings"]
     verbs: ["create", "get", "update"]
+  # 仅允许把部署层固定 ClusterRole 绑定到动态命名空间,不授予创建或升级 Role 的能力。
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    resourceNames: ["chaimir-backend-sandbox-workload"]
+    verbs: ["bind"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -130,6 +176,11 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
+  # 静态命名空间中的固定拉取凭据由部署流程预创建,后端仅校验并同步凭据轮换。
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["chaimir-harbor-pull"]
+    verbs: ["get", "update"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

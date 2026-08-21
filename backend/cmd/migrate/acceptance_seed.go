@@ -2,6 +2,7 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -212,6 +213,9 @@ func seedAcceptance(ctx context.Context, cfg *config.Config) error {
 	if err := seedAcceptanceAccounts(ctx, database, cfg.Bootstrap.AdminPassword, includeIsolationTenant); err != nil {
 		return err
 	}
+	if err := seedAcceptanceExperimentAssets(ctx, objectStore, cfg.MinIO.BucketCode); err != nil {
+		return err
+	}
 	replayRef, replayKey, err := seedAcceptanceReplayObject(ctx, objectStore, cfg.MinIO.BucketReport)
 	if err != nil {
 		return err
@@ -223,6 +227,80 @@ func seedAcceptance(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	return nil
+}
+
+// seedAcceptanceExperimentAssets 写入实验启动实际会读取的工作区归档与初始化脚本。
+func seedAcceptanceExperimentAssets(ctx context.Context, objects *storage.Storage, codeBucket string) error {
+	archive, err := acceptanceExperimentArchive()
+	if err != nil {
+		return err
+	}
+	assets := []struct {
+		objectRef   string
+		content     []byte
+		contentType string
+	}{
+		{objectRef: acceptanceInitCodeRef, content: archive, contentType: "application/x-tar"},
+		{objectRef: acceptanceInitScriptRef, content: []byte("#!/bin/sh\nset -eu\ncd /workspace\nforge build --offline\n"), contentType: "text/x-shellscript"},
+	}
+	for _, asset := range assets {
+		ref, err := storage.ParseObjectRef(asset.objectRef)
+		if err != nil {
+			return fmt.Errorf("解析验收实验初始化对象引用失败: %w", err)
+		}
+		if ref.Bucket != codeBucket {
+			return fmt.Errorf("验收实验初始化对象必须位于代码桶: ref=%s bucket=%s", asset.objectRef, codeBucket)
+		}
+		if err := objects.Put(ctx, ref.Bucket, ref.Key, bytes.NewReader(asset.content), int64(len(asset.content)), asset.contentType); err != nil {
+			return fmt.Errorf("写入验收实验初始化对象失败: ref=%s: %w", asset.objectRef, err)
+		}
+	}
+	return nil
+}
+
+// acceptanceExperimentArchive 构造可在隔离运行时离线编译的最小 Foundry 教学工程。
+func acceptanceExperimentArchive() ([]byte, error) {
+	files := []struct {
+		name string
+		body string
+	}{
+		{name: "foundry.toml", body: "[profile.default]\nsrc = \"src\"\nout = \"out\"\nlibs = []\nsolc = \"/usr/local/bin/solc-0.8.20\"\noptimizer = true\noptimizer_runs = 200\n"},
+		{name: "src/ReentrancyVault.sol", body: `// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+contract ReentrancyVault {
+    mapping(address => uint256) public balances;
+
+    function deposit() external payable {
+        balances[msg.sender] += msg.value;
+    }
+
+    function withdraw() external {
+        uint256 amount = balances[msg.sender];
+        require(amount > 0, "no balance");
+        (bool sent,) = payable(msg.sender).call{value: amount}("");
+        require(sent, "transfer failed");
+        balances[msg.sender] = 0;
+    }
+}
+`},
+		{name: "README.md", body: "# 可重入漏洞攻防实验\n\n审计 `src/ReentrancyVault.sol`,复现重入路径,再按检查-生效-交互顺序完成修复。\n"},
+	}
+	var out bytes.Buffer
+	writer := tar.NewWriter(&out)
+	for _, file := range files {
+		header := &tar.Header{Name: file.name, Mode: 0o644, Size: int64(len(file.body))}
+		if err := writer.WriteHeader(header); err != nil {
+			return nil, fmt.Errorf("写入验收实验归档头失败: %w", err)
+		}
+		if _, err := writer.Write([]byte(file.body)); err != nil {
+			return nil, fmt.Errorf("写入验收实验归档内容失败: %w", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("关闭验收实验归档失败: %w", err)
+	}
+	return out.Bytes(), nil
 }
 
 // seedAcceptanceReplayObject 写入一份结构完整的验收回放归档,供浏览器验证授权与下载链路。

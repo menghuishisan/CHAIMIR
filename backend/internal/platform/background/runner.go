@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"chaimir/internal/platform/response"
+	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 
 	"github.com/google/uuid"
@@ -61,6 +62,7 @@ func runOnce(ctx context.Context, task Task) {
 		return
 	}
 	if err := task.Run(ctx); err != nil {
-		logging.ErrorContext(ctx, "background task failed", err.Error())
+		// 后台日志属于运维边界,必须保留应用错误包装的内部原因链以便定位根因。
+		logging.ErrorContext(ctx, "background task failed", apperr.AsAppError(err).LogString())
 	}
 }

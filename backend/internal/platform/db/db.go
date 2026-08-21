@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/ids"
@@ -43,6 +44,16 @@ func New(ctx context.Context, cfg config.PostgresConfig) (*DB, error) {
 		database.priv = priv
 	}
 	return database, nil
+}
+
+// WaitForPostgres 使用与应用连接池相同的配置执行有界就绪等待,供迁移命令在建库前复用。
+func WaitForPostgres(ctx context.Context, cfg config.PostgresConfig, user, password string) error {
+	pool, err := openPool(ctx, cfg, user, password)
+	if err != nil {
+		return err
+	}
+	pool.Close()
+	return nil
 }
 
 // IsNoRows 统一识别 pgx 未命中错误,供上层转换为业务错误码。
@@ -129,7 +140,7 @@ func (d *DB) WithPrivilegedModuleTx(ctx context.Context, module string, fn TxFun
 	})
 }
 
-// openPool 构造并连通检查一个连接池。
+// openPool 构造连接池并在配置时限内等待 PostgreSQL 就绪。
 func openPool(ctx context.Context, cfg config.PostgresConfig, user, password string) (*pgxpool.Pool, error) {
 	pc, err := buildPoolConfig(cfg, user, password)
 	if err != nil {
@@ -139,11 +150,39 @@ func openPool(ctx context.Context, cfg config.PostgresConfig, user, password str
 	if err != nil {
 		return nil, err
 	}
-	if err := pool.Ping(ctx); err != nil {
+	startupCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.StartupTimeoutSeconds)*time.Second)
+	defer cancel()
+	if err := waitUntilReady(startupCtx, time.Duration(cfg.StartupRetryIntervalMilliseconds)*time.Millisecond, pool.Ping); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("连通性检查失败: %w", err)
 	}
 	return pool, nil
+}
+
+// waitUntilReady 重试依赖探测直到成功或调用方配置的启动时限结束。
+func waitUntilReady(ctx context.Context, retryInterval time.Duration, check func(context.Context) error) error {
+	if retryInterval <= 0 {
+		return fmt.Errorf("数据库启动重试间隔必须大于 0")
+	}
+	if check == nil {
+		return fmt.Errorf("数据库就绪检查函数不能为空")
+	}
+	var lastErr error
+	for {
+		if err := check(ctx); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+
+		timer := time.NewTimer(retryInterval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return fmt.Errorf("等待 PostgreSQL 就绪超时: %w", errors.Join(lastErr, ctx.Err()))
+		case <-timer.C:
+		}
+	}
 }
 
 // buildPoolConfig 通过结构化字段构造连接池配置,避免凭据特殊字符破坏 DSN。

@@ -452,6 +452,102 @@ func (q *Queries) EnsureTenantQuota(ctx context.Context, arg EnsureTenantQuotaPa
 	return i, err
 }
 
+const finishRuntimeImagePrepull = `-- name: FinishRuntimeImagePrepull :one
+UPDATE runtime_image
+SET prepulled = $3, prepull_status = $4, prepull_detail = $5, prepulled_at = $6
+WHERE id = $1
+  AND runtime_id = $2
+  AND status = 1
+  AND prepull_status = 4
+  AND prepull_detail->>'attempt_id' = $7::text
+RETURNING id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+`
+
+type FinishRuntimeImagePrepullParams struct {
+	ID            int64              `json:"id"`
+	RuntimeID     int64              `json:"runtime_id"`
+	Prepulled     bool               `json:"prepulled"`
+	PrepullStatus int16              `json:"prepull_status"`
+	PrepullDetail []byte             `json:"prepull_detail"`
+	PrepulledAt   pgtype.Timestamptz `json:"prepulled_at"`
+	AttemptID     string             `json:"attempt_id"`
+}
+
+// 只允许启动本轮 DaemonSet 的同一次尝试写回结果;中途失效或后发尝试不得被旧结果覆盖。
+func (q *Queries) FinishRuntimeImagePrepull(ctx context.Context, arg FinishRuntimeImagePrepullParams) (RuntimeImage, error) {
+	row := q.db.QueryRow(ctx, finishRuntimeImagePrepull,
+		arg.ID,
+		arg.RuntimeID,
+		arg.Prepulled,
+		arg.PrepullStatus,
+		arg.PrepullDetail,
+		arg.PrepulledAt,
+		arg.AttemptID,
+	)
+	var i RuntimeImage
+	err := row.Scan(
+		&i.ID,
+		&i.RuntimeID,
+		&i.ImageUrl,
+		&i.Version,
+		&i.Status,
+		&i.Prepulled,
+		&i.PrepullStatus,
+		&i.PrepullDetail,
+		&i.PrepulledAt,
+		&i.GenesisBaked,
+		&i.IsDefault,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const finishRuntimeSelftest = `-- name: FinishRuntimeSelftest :one
+UPDATE runtime
+SET selftest_status = $2, selftest_detail = $3, status = $4, updated_at = now()
+WHERE id = $1
+  AND selftest_status = 1
+  AND status = 2
+  AND selftest_detail->>'attempt_id' = $5::text
+RETURNING id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at
+`
+
+type FinishRuntimeSelftestParams struct {
+	ID             int64  `json:"id"`
+	SelftestStatus int16  `json:"selftest_status"`
+	SelftestDetail []byte `json:"selftest_detail"`
+	Status         int16  `json:"status"`
+	AttemptID      string `json:"attempt_id"`
+}
+
+// 只允许仍处于接入中的同一自检批次写回,防止旧结果覆盖并发配置更新或停用。
+func (q *Queries) FinishRuntimeSelftest(ctx context.Context, arg FinishRuntimeSelftestParams) (Runtime, error) {
+	row := q.db.QueryRow(ctx, finishRuntimeSelftest,
+		arg.ID,
+		arg.SelftestStatus,
+		arg.SelftestDetail,
+		arg.Status,
+		arg.AttemptID,
+	)
+	var i Runtime
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.Eco,
+		&i.AdapterLevel,
+		&i.AdapterSpec,
+		&i.CapabilityImpl,
+		&i.PluginRef,
+		&i.SelftestStatus,
+		&i.SelftestDetail,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getDefaultRuntimeImage = `-- name: GetDefaultRuntimeImage :one
 SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
 FROM runtime_image
@@ -460,6 +556,33 @@ WHERE runtime_id = $1 AND is_default = true AND status = 1
 
 func (q *Queries) GetDefaultRuntimeImage(ctx context.Context, runtimeID int64) (RuntimeImage, error) {
 	row := q.db.QueryRow(ctx, getDefaultRuntimeImage, runtimeID)
+	var i RuntimeImage
+	err := row.Scan(
+		&i.ID,
+		&i.RuntimeID,
+		&i.ImageUrl,
+		&i.Version,
+		&i.Status,
+		&i.Prepulled,
+		&i.PrepullStatus,
+		&i.PrepullDetail,
+		&i.PrepulledAt,
+		&i.GenesisBaked,
+		&i.IsDefault,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getDefaultRuntimeImageForShare = `-- name: GetDefaultRuntimeImageForShare :one
+SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+FROM runtime_image
+WHERE runtime_id = $1 AND is_default = true AND status = 1
+FOR SHARE
+`
+
+func (q *Queries) GetDefaultRuntimeImageForShare(ctx context.Context, runtimeID int64) (RuntimeImage, error) {
+	row := q.db.QueryRow(ctx, getDefaultRuntimeImageForShare, runtimeID)
 	var i RuntimeImage
 	err := row.Scan(
 		&i.ID,
@@ -532,6 +655,35 @@ func (q *Queries) GetRuntimeByID(ctx context.Context, id int64) (Runtime, error)
 	return i, err
 }
 
+const getRuntimeByIDForUpdate = `-- name: GetRuntimeByIDForUpdate :one
+SELECT id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at
+FROM runtime
+WHERE id = $1
+FOR UPDATE
+`
+
+// 运行时更新必须在同一事务内比较旧执行契约并写入新状态,防止并发更新覆盖自检结论。
+func (q *Queries) GetRuntimeByIDForUpdate(ctx context.Context, id int64) (Runtime, error) {
+	row := q.db.QueryRow(ctx, getRuntimeByIDForUpdate, id)
+	var i Runtime
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.Eco,
+		&i.AdapterLevel,
+		&i.AdapterSpec,
+		&i.CapabilityImpl,
+		&i.PluginRef,
+		&i.SelftestStatus,
+		&i.SelftestDetail,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getRuntimeImageByID = `-- name: GetRuntimeImageByID :one
 SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
 FROM runtime_image
@@ -563,6 +715,39 @@ func (q *Queries) GetRuntimeImageByID(ctx context.Context, arg GetRuntimeImageBy
 	return i, err
 }
 
+const getRuntimeImageByIDForUpdate = `-- name: GetRuntimeImageByIDForUpdate :one
+SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+FROM runtime_image
+WHERE id = $1 AND runtime_id = $2
+FOR UPDATE
+`
+
+type GetRuntimeImageByIDForUpdateParams struct {
+	ID        int64 `json:"id"`
+	RuntimeID int64 `json:"runtime_id"`
+}
+
+// 开始预拉取前先锁定证明行;运行时或工具变更事务必须等本次闭包快照落为 running 后再执行失效。
+func (q *Queries) GetRuntimeImageByIDForUpdate(ctx context.Context, arg GetRuntimeImageByIDForUpdateParams) (RuntimeImage, error) {
+	row := q.db.QueryRow(ctx, getRuntimeImageByIDForUpdate, arg.ID, arg.RuntimeID)
+	var i RuntimeImage
+	err := row.Scan(
+		&i.ID,
+		&i.RuntimeID,
+		&i.ImageUrl,
+		&i.Version,
+		&i.Status,
+		&i.Prepulled,
+		&i.PrepullStatus,
+		&i.PrepullDetail,
+		&i.PrepulledAt,
+		&i.GenesisBaked,
+		&i.IsDefault,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getRuntimeImageByVersion = `-- name: GetRuntimeImageByVersion :one
 SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
 FROM runtime_image
@@ -576,6 +761,38 @@ type GetRuntimeImageByVersionParams struct {
 
 func (q *Queries) GetRuntimeImageByVersion(ctx context.Context, arg GetRuntimeImageByVersionParams) (RuntimeImage, error) {
 	row := q.db.QueryRow(ctx, getRuntimeImageByVersion, arg.RuntimeID, arg.Version)
+	var i RuntimeImage
+	err := row.Scan(
+		&i.ID,
+		&i.RuntimeID,
+		&i.ImageUrl,
+		&i.Version,
+		&i.Status,
+		&i.Prepulled,
+		&i.PrepullStatus,
+		&i.PrepullDetail,
+		&i.PrepulledAt,
+		&i.GenesisBaked,
+		&i.IsDefault,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getRuntimeImageByVersionForShare = `-- name: GetRuntimeImageByVersionForShare :one
+SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+FROM runtime_image
+WHERE runtime_id = $1 AND version = $2 AND status = 1
+FOR SHARE
+`
+
+type GetRuntimeImageByVersionForShareParams struct {
+	RuntimeID int64  `json:"runtime_id"`
+	Version   string `json:"version"`
+}
+
+func (q *Queries) GetRuntimeImageByVersionForShare(ctx context.Context, arg GetRuntimeImageByVersionForShareParams) (RuntimeImage, error) {
+	row := q.db.QueryRow(ctx, getRuntimeImageByVersionForShare, arg.RuntimeID, arg.Version)
 	var i RuntimeImage
 	err := row.Scan(
 		&i.ID,
@@ -707,15 +924,39 @@ func (q *Queries) GetToolByCode(ctx context.Context, code string) (Tool, error) 
 	return i, err
 }
 
+const invalidateRuntimeImagesPrepull = `-- name: InvalidateRuntimeImagesPrepull :exec
+UPDATE runtime_image
+SET prepulled = false,
+    prepull_status = 1,
+    prepull_detail = $2,
+    prepulled_at = NULL
+WHERE runtime_id = $1 AND status = 1
+`
+
+type InvalidateRuntimeImagesPrepullParams struct {
+	RuntimeID     int64  `json:"runtime_id"`
+	PrepullDetail []byte `json:"prepull_detail"`
+}
+
+// 运行时工作负载闭包变化后统一撤销旧证明,重新预拉取成功前不得创建新沙箱。
+func (q *Queries) InvalidateRuntimeImagesPrepull(ctx context.Context, arg InvalidateRuntimeImagesPrepullParams) error {
+	_, err := q.db.Exec(ctx, invalidateRuntimeImagesPrepull, arg.RuntimeID, arg.PrepullDetail)
+	return err
+}
+
 const listCatalogRuntimes = `-- name: ListCatalogRuntimes :many
 SELECT r.code AS runtime_code, r.name AS runtime_name, r.eco,
-       COALESCE(i.version, '')::varchar AS image_version,
-       COALESCE(i.is_default, false)::boolean AS image_is_default
+       i.version AS image_version,
+       i.is_default AS image_is_default
 FROM runtime r
-LEFT JOIN runtime_image i
-       ON i.runtime_id = r.id AND i.status = 1
-WHERE r.status = 1
-ORDER BY r.code, i.is_default DESC NULLS LAST, i.version DESC NULLS LAST
+JOIN runtime_image i
+  ON i.runtime_id = r.id
+ AND i.status = 1
+ AND i.prepulled = true
+ AND i.prepull_status = 2
+ AND i.genesis_baked = true
+WHERE r.status = 1 AND r.selftest_status = 2
+ORDER BY r.code, i.is_default DESC, i.version DESC
 `
 
 type ListCatalogRuntimesRow struct {
@@ -726,10 +967,9 @@ type ListCatalogRuntimesRow struct {
 	ImageIsDefault bool   `json:"image_is_default"`
 }
 
-// 编排目录只取可编排字段:运行时本体的 code/name/eco 与其可用镜像版本。
-// 一次 LEFT JOIN 平铺取回后由 repo 按运行时分组,既避免按运行时逐个查镜像的 N+1,
+// 编排目录只取真正可调度的运行时与镜像版本,不把未完成自检或最新闭包预拉取的项暴露给教师。
+// 一次 JOIN 平铺取回后由 repo 按运行时分组,既避免按运行时逐个查镜像的 N+1,
 // 也不用 jsonb_agg —— 那会让生成的行类型退化成 interface{},把解码负担推给业务层。
-// 停用的运行时与镜像不进可选集;没有可用镜像的运行时仍要出现(可用默认镜像起环境)。
 func (q *Queries) ListCatalogRuntimes(ctx context.Context) ([]ListCatalogRuntimesRow, error) {
 	rows, err := q.db.Query(ctx, listCatalogRuntimes)
 	if err != nil {
@@ -757,19 +997,21 @@ func (q *Queries) ListCatalogRuntimes(ctx context.Context) ([]ListCatalogRuntime
 }
 
 const listCatalogTools = `-- name: ListCatalogTools :many
-SELECT code, name, kind
+SELECT code, name, kind, eco_tags, resource_spec
 FROM tool
 WHERE status = 1
 ORDER BY code
 `
 
 type ListCatalogToolsRow struct {
-	Code string `json:"code"`
-	Name string `json:"name"`
-	Kind int16  `json:"kind"`
+	Code         string `json:"code"`
+	Name         string `json:"name"`
+	Kind         int16  `json:"kind"`
+	EcoTags      string `json:"eco_tags"`
+	ResourceSpec []byte `json:"resource_spec"`
 }
 
-// 编排目录只取工具的 code/name/kind,不出 resource_spec 与镜像引用。
+// eco_tags 只在服务端计算各运行时兼容工具编码,不会直接下发给编排端。
 func (q *Queries) ListCatalogTools(ctx context.Context) ([]ListCatalogToolsRow, error) {
 	rows, err := q.db.Query(ctx, listCatalogTools)
 	if err != nil {
@@ -779,7 +1021,13 @@ func (q *Queries) ListCatalogTools(ctx context.Context) ([]ListCatalogToolsRow, 
 	items := []ListCatalogToolsRow{}
 	for rows.Next() {
 		var i ListCatalogToolsRow
-		if err := rows.Scan(&i.Code, &i.Name, &i.Kind); err != nil {
+		if err := rows.Scan(
+			&i.Code,
+			&i.Name,
+			&i.Kind,
+			&i.EcoTags,
+			&i.ResourceSpec,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1333,6 +1581,73 @@ func (q *Queries) MarkSandboxRecycleOutboxPublished(ctx context.Context, arg Mar
 	return i, err
 }
 
+const startRuntimeImagePrepull = `-- name: StartRuntimeImagePrepull :one
+UPDATE runtime_image
+SET prepulled = false, prepull_status = 4, prepull_detail = $3, prepulled_at = NULL
+WHERE id = $1 AND runtime_id = $2 AND status = 1
+RETURNING id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+`
+
+type StartRuntimeImagePrepullParams struct {
+	ID            int64  `json:"id"`
+	RuntimeID     int64  `json:"runtime_id"`
+	PrepullDetail []byte `json:"prepull_detail"`
+}
+
+func (q *Queries) StartRuntimeImagePrepull(ctx context.Context, arg StartRuntimeImagePrepullParams) (RuntimeImage, error) {
+	row := q.db.QueryRow(ctx, startRuntimeImagePrepull, arg.ID, arg.RuntimeID, arg.PrepullDetail)
+	var i RuntimeImage
+	err := row.Scan(
+		&i.ID,
+		&i.RuntimeID,
+		&i.ImageUrl,
+		&i.Version,
+		&i.Status,
+		&i.Prepulled,
+		&i.PrepullStatus,
+		&i.PrepullDetail,
+		&i.PrepulledAt,
+		&i.GenesisBaked,
+		&i.IsDefault,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const startRuntimeSelftest = `-- name: StartRuntimeSelftest :one
+UPDATE runtime
+SET selftest_status = 1, selftest_detail = $2, status = 2, updated_at = now()
+WHERE id = $1 AND status <> 3
+RETURNING id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at
+`
+
+type StartRuntimeSelftestParams struct {
+	ID             int64  `json:"id"`
+	SelftestDetail []byte `json:"selftest_detail"`
+}
+
+// 自检启动时写入唯一批次并退回接入中,并发契约更新或停用可使旧批次自然失效。
+func (q *Queries) StartRuntimeSelftest(ctx context.Context, arg StartRuntimeSelftestParams) (Runtime, error) {
+	row := q.db.QueryRow(ctx, startRuntimeSelftest, arg.ID, arg.SelftestDetail)
+	var i Runtime
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.Name,
+		&i.Eco,
+		&i.AdapterLevel,
+		&i.AdapterSpec,
+		&i.CapabilityImpl,
+		&i.PluginRef,
+		&i.SelftestStatus,
+		&i.SelftestDetail,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const statsByTenant = `-- name: StatsByTenant :one
 SELECT
   COUNT(*) FILTER (WHERE s.status IN (1, 2, 3, 4, 7, 8))::bigint AS active_sandbox_count,
@@ -1372,89 +1687,6 @@ func (q *Queries) StatsByTenant(ctx context.Context, tenantID int64) (StatsByTen
 		&i.MaxLifetimeMin,
 		&i.MaxKeepaliveMin,
 		&i.MaxSnapshotRetentionMin,
-	)
-	return i, err
-}
-
-const updateRuntimeImagePrepull = `-- name: UpdateRuntimeImagePrepull :one
-UPDATE runtime_image
-SET prepulled = $3, prepull_status = $4, prepull_detail = $5, prepulled_at = $6
-WHERE id = $1 AND runtime_id = $2 AND status = 1
-RETURNING id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
-`
-
-type UpdateRuntimeImagePrepullParams struct {
-	ID            int64              `json:"id"`
-	RuntimeID     int64              `json:"runtime_id"`
-	Prepulled     bool               `json:"prepulled"`
-	PrepullStatus int16              `json:"prepull_status"`
-	PrepullDetail []byte             `json:"prepull_detail"`
-	PrepulledAt   pgtype.Timestamptz `json:"prepulled_at"`
-}
-
-func (q *Queries) UpdateRuntimeImagePrepull(ctx context.Context, arg UpdateRuntimeImagePrepullParams) (RuntimeImage, error) {
-	row := q.db.QueryRow(ctx, updateRuntimeImagePrepull,
-		arg.ID,
-		arg.RuntimeID,
-		arg.Prepulled,
-		arg.PrepullStatus,
-		arg.PrepullDetail,
-		arg.PrepulledAt,
-	)
-	var i RuntimeImage
-	err := row.Scan(
-		&i.ID,
-		&i.RuntimeID,
-		&i.ImageUrl,
-		&i.Version,
-		&i.Status,
-		&i.Prepulled,
-		&i.PrepullStatus,
-		&i.PrepullDetail,
-		&i.PrepulledAt,
-		&i.GenesisBaked,
-		&i.IsDefault,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const updateRuntimeSelftest = `-- name: UpdateRuntimeSelftest :one
-UPDATE runtime
-SET selftest_status = $2, selftest_detail = $3, status = $4, updated_at = now()
-WHERE id = $1
-RETURNING id, code, name, eco, adapter_level, adapter_spec, capability_impl, plugin_ref, selftest_status, selftest_detail, status, created_at, updated_at
-`
-
-type UpdateRuntimeSelftestParams struct {
-	ID             int64  `json:"id"`
-	SelftestStatus int16  `json:"selftest_status"`
-	SelftestDetail []byte `json:"selftest_detail"`
-	Status         int16  `json:"status"`
-}
-
-func (q *Queries) UpdateRuntimeSelftest(ctx context.Context, arg UpdateRuntimeSelftestParams) (Runtime, error) {
-	row := q.db.QueryRow(ctx, updateRuntimeSelftest,
-		arg.ID,
-		arg.SelftestStatus,
-		arg.SelftestDetail,
-		arg.Status,
-	)
-	var i Runtime
-	err := row.Scan(
-		&i.ID,
-		&i.Code,
-		&i.Name,
-		&i.Eco,
-		&i.AdapterLevel,
-		&i.AdapterSpec,
-		&i.CapabilityImpl,
-		&i.PluginRef,
-		&i.SelftestStatus,
-		&i.SelftestDetail,
-		&i.Status,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 	)
 	return i, err
 }

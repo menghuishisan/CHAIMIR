@@ -100,11 +100,16 @@ func (o *K8sOrchestrator) CreateSandboxResources(ctx context.Context, plan Creat
 
 // DestroySandboxResources 删除普通沙箱资源。
 func (o *K8sOrchestrator) DestroySandboxResources(ctx context.Context, sb Sandbox) error {
-	policy := metav1.DeletePropagationForeground
-	if err := o.client.Clientset().CoreV1().Namespaces().Delete(ctx, sb.Namespace, metav1.DeleteOptions{PropagationPolicy: &policy}); err != nil && !apierrors.IsNotFound(err) {
+	if err := o.client.Clientset().CoreV1().Namespaces().Delete(ctx, sb.Namespace, namespaceDeleteOptions()); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("删除沙箱 Namespace 失败: %w", err)
 	}
 	return waitNamespaceDeleted(ctx, o.client.Clientset(), sb.Namespace, o.cfg.ReadyPollIntervalSeconds)
+}
+
+// namespaceDeleteOptions 使用后台级联触发命名空间回收;调用方仍需等待对象消失,保证业务状态不先行。
+func namespaceDeleteOptions() metav1.DeleteOptions {
+	policy := metav1.DeletePropagationBackground
+	return metav1.DeleteOptions{PropagationPolicy: &policy}
 }
 
 // StopComputeKeepSnapshot 释放计算工作负载但保留快照命名空间和 PVC。
@@ -297,6 +302,78 @@ func (o *K8sOrchestrator) ResourceUsage(ctx context.Context, sb Sandbox) (contra
 	return usage, nil
 }
 
+// EnsureWorkspaceAccess 恢复终态或已消失的运行时 Pod,让最终归档从原工作区 PVC 读取最新内容。
+func (o *K8sOrchestrator) EnsureWorkspaceAccess(ctx context.Context, plan CreateSandboxPlan) error {
+	cs := o.client.Clientset()
+	recreate := false
+	deleted := make([]string, 0)
+	for _, podName := range runtimePodNames(plan) {
+		pod, err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Get(ctx, podName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			recreate = true
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("查询工作区归档 Pod 失败: %w", err)
+		}
+		if !sandboxPodRequiresWorkspaceRecovery(pod) {
+			continue
+		}
+		gracePeriod := int64(0)
+		policy := metav1.DeletePropagationBackground
+		if err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Delete(ctx, podName, metav1.DeleteOptions{GracePeriodSeconds: &gracePeriod, PropagationPolicy: &policy}); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("删除已终止的工作区归档 Pod 失败: %w", err)
+		}
+		recreate = true
+		deleted = append(deleted, podName)
+	}
+	if !recreate {
+		return nil
+	}
+	for _, podName := range deleted {
+		if err := waitSandboxPodDeleted(ctx, cs, plan.Sandbox.Namespace, podName, o.cfg.ReadyPollIntervalSeconds); err != nil {
+			return err
+		}
+	}
+	if err := o.CreateSandboxResources(ctx, plan); err != nil {
+		return fmt.Errorf("重建工作区归档 Pod 失败: %w", err)
+	}
+	return nil
+}
+
+// sandboxPodRequiresWorkspaceRecovery 判断 Pod 已无法继续提供 exec,需要从原 PVC 重建。
+func sandboxPodRequiresWorkspaceRecovery(pod *corev1.Pod) bool {
+	if pod == nil || pod.DeletionTimestamp != nil {
+		return true
+	}
+	switch pod.Status.Phase {
+	case corev1.PodFailed, corev1.PodSucceeded, corev1.PodUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// waitSandboxPodDeleted 等待旧 Pod 对象消失,避免同名重建与终止中对象冲突。
+func waitSandboxPodDeleted(ctx context.Context, cs kubernetes.Interface, namespace, podName string, pollSeconds int) error {
+	ticker := time.NewTicker(sandboxPodReadyPollInterval(pollSeconds))
+	defer ticker.Stop()
+	for {
+		_, err := cs.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("等待旧工作区归档 Pod 删除失败: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("等待旧工作区归档 Pod 删除超时: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
 // metricsUnavailableError 识别 metrics.k8s.io 不可用,避免把缺失实时用量伪装成 0。
 func metricsUnavailableError(err error) error {
 	if err == nil {
@@ -372,7 +449,15 @@ func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, 
 		if err != nil {
 			return PrepullResult{DaemonSet: ds.Name}, fmt.Errorf("查询预拉取状态失败: %w", err)
 		}
-		detail, err := jsonBytes(map[string]any{"desired_nodes": current.Status.DesiredNumberScheduled, "ready_nodes": current.Status.NumberReady, "daemonset": ds.Name, "image_count": len(imageURLs), "images": imageURLs})
+		detail, err := jsonBytes(map[string]any{
+			"desired_nodes":       current.Status.DesiredNumberScheduled,
+			"ready_nodes":         current.Status.NumberReady,
+			"daemonset":           ds.Name,
+			"generation":          current.Generation,
+			"observed_generation": current.Status.ObservedGeneration,
+			"image_count":         len(imageURLs),
+			"images":              imageURLs,
+		})
 		if err != nil {
 			return PrepullResult{DaemonSet: ds.Name}, fmt.Errorf("编码预拉取状态失败: %w", err)
 		}
@@ -402,9 +487,7 @@ func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, 
 			result.Detail = detail
 			return result, err
 		}
-		if current.Status.DesiredNumberScheduled > 0 &&
-			current.Status.DesiredNumberScheduled == current.Status.NumberReady &&
-			current.Status.DesiredNumberScheduled == current.Status.UpdatedNumberScheduled {
+		if prepullDaemonSetReady(current) {
 			return result, nil
 		}
 		select {
@@ -415,6 +498,19 @@ func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, 
 		case <-ticker.C:
 		}
 	}
+}
+
+// prepullDaemonSetReady 只接受控制器已观察当前模板且全部目标节点运行当前版本的 DaemonSet。
+func prepullDaemonSetReady(ds *appsv1.DaemonSet) bool {
+	if ds == nil || ds.Status.ObservedGeneration < ds.Generation || ds.Status.DesiredNumberScheduled <= 0 {
+		return false
+	}
+	desired := ds.Status.DesiredNumberScheduled
+	return ds.Status.UpdatedNumberScheduled == desired &&
+		ds.Status.NumberReady == desired &&
+		ds.Status.NumberAvailable == desired &&
+		ds.Status.NumberUnavailable == 0 &&
+		ds.Status.NumberMisscheduled == 0
 }
 
 // DeletePrepullDaemonSet 删除镜像预拉取 DaemonSet,NotFound 视为幂等成功。
