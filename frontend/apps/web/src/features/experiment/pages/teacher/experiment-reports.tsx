@@ -6,14 +6,16 @@
 // 报告正文是对象存储引用,取件统一走 transfer/storage 授权,不暴露对象存储直链。
 // 小组分区只在协作方式为小组实验时出现 —— 后端 CreateGroup 对独立完成的实验直接拒绝。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
 import { useParams } from 'react-router'
 import {
+  ChevronLeft,
   ClipboardCheck,
   Download,
   FileText,
   LayoutTemplate,
   Plus,
+  Trash2,
   UserPlus,
   Users,
 } from 'lucide-react'
@@ -32,13 +34,12 @@ import {
   Breadcrumb,
   Button,
   Callout,
-  Card,
-  CardBody,
-  CardHeader,
-  DescriptionList,
+  cn,
+  DataPanel,
   Empty,
+  FilterBar,
+  FilterField,
   FormField,
-  IconButton,
   Input,
   Modal,
   ModalBody,
@@ -47,23 +48,27 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
-  PageBody,
   PageHeader,
   PageScaffold,
   PageSection,
   Pagination,
+  QueueDetailLayout,
+  SegmentedControl,
   Select,
-  Stat,
+  Skeleton,
   StatusIndicator,
-  Table,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   Textarea,
   toast,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
-import { formatDateTime, formatScore } from '../../../../utils/formatters'
+import type { PagedResourceState } from '../../../../hooks/usePagedResource'
+import { formatDateTime } from '../../../../utils/formatters'
 import { experimentCollabModeLabel, experimentReportStatusLabel } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { downloadAttachment } from '../../../../utils/downloadAttachment'
@@ -75,14 +80,11 @@ import { experimentReportStatusTone } from '../../statusPresentation'
 export default function TeacherExperimentReportsPage() {
   const { experimentId = '' } = useParams<{ experimentId: string }>()
 
-  // 教师侧没有单个实验的读取接口,从 teacher 组列表里定位(该列表返回完整定义)
+  // 单读:深链与刷新都直接读这一条,不再拉全量列表在浏览器里筛
   const experiment = useAsyncResource(
-    () =>
-      api.experiment
-        .getExperiments({ page: 1, size: PAGINATION_MAX_SIZE })
-        .then((page) => page.list.find((item) => item.id === experimentId)),
+    () => api.experiment.getExperiment(experimentId),
     [experimentId],
-    (value) => value === undefined,
+    () => false,
   )
 
   return (
@@ -93,25 +95,29 @@ export default function TeacherExperimentReportsPage() {
         emptyTitle="实验不存在"
         emptyDescription="这个实验可能已被删除,请回到实验编排查看。"
       >
-        {(data) => (data ? <ReportsContent experiment={data} /> : null)}
+        {(data) => <ReportsContent experiment={data} />}
       </ResourceState>
     </PageScaffold>
   )
 }
 
 /**
- * ReportsContent 渲染实验头部、报告列表与小组编排。
+ * ReportsContent 渲染实验头部、报告批改队列与小组编排。
  */
 function ReportsContent({ experiment }: { experiment: Experiment }) {
-  const [gradeTarget, setGradeTarget] = useState<ReportDTO>()
+  const [statusFilter, setStatusFilter] = useState<string>('')
   const isGroup = experiment.collab_mode === ExperimentCollabMode.GROUP
 
   const reports = usePagedResource<ReportDTO>(
-    (params) => api.experiment.listReports(experiment.id, params),
-    [experiment.id],
+    (params) =>
+      api.experiment.listReports(experiment.id, {
+        status: statusFilter ? (Number(statusFilter) as ExperimentReportStatus) : undefined,
+        ...params,
+      }),
+    [experiment.id, statusFilter],
   )
 
-  // 指标带取服务端全量口径:待批改是教师最常看的数字,不能用当前页数出来的近似值
+  // 待办摘要取服务端全量口径:待批改是教师最常看的数字,不能用当前页数出来的近似值
   const totalCount = useResourceTotal(
     (params) => api.experiment.listReports(experiment.id, params),
     [experiment.id],
@@ -144,75 +150,6 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
     }
   }, [])
 
-  const columns: TableColumn<ReportDTO>[] = [
-    {
-      key: 'student_id',
-      header: '提交人',
-      render: (report) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{report.student_name}</div>
-          {report.student_no ? (
-            <div className="truncate font-mono text-xs text-ink-sub">{report.student_no}</div>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      key: 'submitted_at',
-      header: '提交时间',
-      render: (report) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDateTime(report.submitted_at)}
-        </span>
-      ),
-    },
-    {
-      key: 'manual_score',
-      header: '批改得分',
-      align: 'right',
-      mono: true,
-      render: (report) =>
-        report.status === ExperimentReportStatus.GRADED ? formatScore(report.manual_score) : '—',
-    },
-    {
-      key: 'comment',
-      header: '批改意见',
-      render: (report) =>
-        report.comment ? (
-          <span className="line-clamp-2 text-sm text-ink-sub">{report.comment}</span>
-        ) : (
-          <span className="text-ink-sub">尚未批改</span>
-        ),
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (report) => (
-        <StatusIndicator
-          tone={experimentReportStatusTone(report.status)}
-          label={experimentReportStatusLabel(report.status)}
-        />
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (report) => (
-        <div className="flex items-center justify-end gap-1">
-          <IconButton
-            aria-label={`下载 ${report.student_name} 的实验报告`}
-            icon={Download}
-            size="sm"
-            onClick={() => void downloadReport(report)}
-          />
-          <Button variant="ghost" size="sm" onClick={() => setGradeTarget(report)}>
-            {report.status === ExperimentReportStatus.GRADED ? '修改评分' : '批改'}
-          </Button>
-        </div>
-      ),
-    },
-  ]
 
   return (
     <>
@@ -222,7 +159,6 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
             items={[
               { label: '实践' },
               { label: '实验编排', href: '/teacher/experiments' },
-              { label: experiment.name },
             ]}
           />
         }
@@ -234,75 +170,261 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="报告总数" value={totalCount ?? '—'} icon={FileText} />
-          <Stat label="待批改" value={pendingCount ?? '—'} icon={ClipboardCheck} />
-          <Stat label="已批改" value={gradedCount ?? '—'} icon={ClipboardCheck} />
-          <Stat
-            label="检查点合计"
-            value={experiment.components.checkpoints.reduce((sum, item) => sum + item.score, 0)}
-            icon={LayoutTemplate}
-            hint="报告分与检查点分合计即实验得分"
-          />
-        </div>
-      </PageSection>
+      {/*
+        待办摘要一行(§6.5.3 第 ⑤ 族:审阅队列不做指标带,待办数量放标题下一行)。
+        三个数字都取服务端全量口径(§6.5.4);检查点合计是实验定义的静态属性,
+        故与报告数量分开表述,不混进「待办」里。
+      */}
+      <p className="mb-4 text-sm text-ink-sub">
+        共 {totalCount ?? '—'} 份报告,待批改 {pendingCount ?? '—'} 份、已批改{' '}
+        {gradedCount ?? '—'} 份。检查点合计{' '}
+        {experiment.components.checkpoints.reduce((sum, item) => sum + item.score, 0)} 分,
+        与报告分相加即实验得分。
+      </p>
 
       {experiment.require_report ? null : (
-        <Callout tone="info">
+        <Callout tone="info" className="mb-4">
           这个实验没有要求提交报告,学生的得分只来自检查点。要收报告请在编排向导第 1 步勾选。
         </Callout>
       )}
 
-      <PageBody rail={isGroup ? <GroupsPanel experiment={experiment} /> : undefined}>
-        <PageSection title="实验报告" description={`共 ${reports.total} 份报告`}>
-          <ResourceState
-            resource={reports}
-            emptyIcon={FileText}
-            emptyTitle="还没有报告"
-            emptyDescription="学生在实验里提交报告后会出现在这里。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-          >
-            {(page) => (
-              <div className="flex flex-col gap-4">
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={reports.page}
-                  pageSize={reports.pageSize}
-                  total={reports.total}
-                  onPageChange={reports.setPage}
-                />
-              </div>
-            )}
-          </ResourceState>
-        </PageSection>
-      </PageBody>
-
-      {gradeTarget ? (
-        <GradeReportModal
-          report={gradeTarget}
-          onClose={() => setGradeTarget(undefined)}
-          onSaved={() => {
-            setGradeTarget(undefined)
-            reports.reload()
-          }}
+      {/*
+        小组实验多一件事(编排分组),故用 Tabs 把两件事分开而不是把小组塞进右栏 ——
+        右栏在这一族是「当前报告的批改表单」,再挤一个小组面板会让两栏都不够用。
+        独立完成的实验没有小组可编排,那时不出 Tabs:一个标签的标签栏是纯噪声。
+      */}
+      {isGroup ? (
+        <Tabs defaultValue="reports">
+          <TabsList aria-label="报告与小组">
+            <TabsTrigger value="reports">实验报告</TabsTrigger>
+            <TabsTrigger value="groups">小组编排</TabsTrigger>
+          </TabsList>
+          <TabsContent value="reports">
+            <ReportsQueue
+              reports={reports}
+              onDownload={downloadReport}
+              onSaved={reports.reload}
+              statusFilter={statusFilter}
+              onStatusFilterChange={setStatusFilter}
+            />
+          </TabsContent>
+          <TabsContent value="groups">
+            <GroupsSection experiment={experiment} />
+          </TabsContent>
+        </Tabs>
+      ) : (
+        <ReportsQueue
+          reports={reports}
+          onDownload={downloadReport}
+          onSaved={reports.reload}
+          statusFilter={statusFilter}
+          onStatusFilterChange={setStatusFilter}
         />
-      ) : null}
+      )}
     </>
   )
 }
 
-interface GradeReportModalProps {
+/** 状态筛选项:值为空串表示不过滤。 */
+const STATUS_FILTERS = [
+  { value: '', label: '全部' },
+  { value: String(ExperimentReportStatus.SUBMITTED), label: '待批改' },
+  { value: String(ExperimentReportStatus.GRADED), label: '已批改' },
+] as const
+
+interface ReportsQueueProps {
+  reports: PagedResourceState<ReportDTO>
+  onDownload: (report: ReportDTO) => void
+  onSaved: () => void
+  statusFilter: string
+  onStatusFilterChange: (value: string) => void
+}
+
+/**
+ * ReportsQueue 是报告批改的审阅队列(§6.5.3 第 ⑤ 族):左队列 + 右批改表单。
+ *
+ * 批改不走弹窗:一个班的报告要逐份看正文再给分,为每份开窗关窗会把主动作变成开窗动作
+ * (§7.2 只在不可撤销的批量后果时才要二次确认,给分不是)。
+ * 处理完自动落到下一份待批改报告。
+ */
+function ReportsQueue({
+  reports,
+  onDownload,
+  onSaved,
+  statusFilter,
+  onStatusFilterChange,
+}: ReportsQueueProps) {
+  const [selectedId, setSelectedId] = useState<string>()
+  /** <lg 走两级页面(§6.4.1 规则 4) */
+  const [mobileView, setMobileView] = useState<'queue' | 'detail'>('queue')
+
+  const list = useMemo(() => reports.data?.list ?? [], [reports.data])
+  const selected = list.find((item) => item.id === selectedId) ?? list[0]
+  const selectedIndex = selected ? list.findIndex((item) => item.id === selected.id) : -1
+
+  /** 批完一份直接落到下一份待批改报告;没有下一份就退回队列层 */
+  const advanceToNext = useCallback(() => {
+    const nextPending = list.find(
+      (item, index) => index > selectedIndex && item.status !== ExperimentReportStatus.GRADED,
+    )
+    setSelectedId(nextPending?.id ?? undefined)
+    if (!nextPending) setMobileView('queue')
+  }, [list, selectedIndex])
+
+  /** 键盘上下切条:整批批改靠键盘才快 */
+  const onQueueKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    event.preventDefault()
+    const step = event.key === 'ArrowDown' ? 1 : -1
+    const next = list[Math.min(Math.max(selectedIndex + step, 0), list.length - 1)]
+    if (next) setSelectedId(next.id)
+  }
+
+  return (
+    <QueueDetailLayout
+      view={mobileView}
+      detailHeader={
+        selected ? (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              leftIcon={ChevronLeft}
+              onClick={() => setMobileView('queue')}
+            >
+              返回队列
+            </Button>
+            <span className="text-sm text-ink-sub tabular-nums">
+              第 {selectedIndex + 1} 份 / 共 {reports.total} 份
+            </span>
+          </div>
+        ) : undefined
+      }
+      queue={
+        <DataPanel
+          label="报告队列"
+          className="min-h-0 flex-1"
+          filter={
+            <FilterBar label="报告筛选">
+              <FilterField label="批改状态" group>
+                <SegmentedControl
+                  aria-label="按批改状态筛选"
+                  size="sm"
+                  options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                  value={statusFilter}
+                  onValueChange={(value) => {
+                    onStatusFilterChange(value)
+                    setSelectedId(undefined)
+                  }}
+                />
+              </FilterField>
+            </FilterBar>
+          }
+          footer={
+            <Pagination
+              page={reports.page}
+              pageSize={reports.pageSize}
+              total={reports.total}
+              onPageChange={reports.setPage}
+            />
+          }
+        >
+          <ResourceState
+            resource={reports}
+            emptyIcon={FileText}
+            emptyTitle={statusFilter ? '这个状态下没有报告' : '还没有报告'}
+            emptyDescription={
+              statusFilter ? '换个状态看看,或查看全部报告。' : '学生在实验里提交报告后会出现在这里。'
+            }
+            skeleton={<Skeleton variant="line" lines={5} />}
+          >
+            {(page) => (
+              <div
+                role="listbox"
+                aria-label="报告队列"
+                aria-activedescendant={selected ? `report-${selected.id}` : undefined}
+                tabIndex={0}
+                onKeyDown={onQueueKeyDown}
+                className="focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
+              >
+                {page.list.map((report) => {
+                  const isActive = report.id === selected?.id
+                  return (
+                    <div
+                      key={report.id}
+                      id={`report-${report.id}`}
+                      role="option"
+                      aria-selected={isActive}
+                      onClick={() => {
+                        setSelectedId(report.id)
+                        setMobileView('detail')
+                      }}
+                      className={cn(
+                        'cursor-pointer border-t border-line px-4 py-3 first:border-t-0',
+                        isActive ? 'bg-primary-soft' : 'hover:bg-surface-hover',
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="truncate text-sm font-medium text-ink">
+                          {report.student_name}
+                        </span>
+                        <StatusIndicator
+                          tone={experimentReportStatusTone(report.status)}
+                          label={experimentReportStatusLabel(report.status)}
+                        />
+                      </div>
+                      {report.student_no ? (
+                        <p className="mt-1 truncate font-mono text-xs text-ink-sub">
+                          {report.student_no}
+                        </p>
+                      ) : null}
+                      <p className="mt-1 font-mono text-xs text-ink-faint">
+                        {formatDateTime(report.submitted_at)}
+                      </p>
+                    </div>
+                  )
+                })}
+                <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">↑↓ 切换条目</p>
+              </div>
+            )}
+          </ResourceState>
+        </DataPanel>
+      }
+      detail={
+        selected ? (
+          <ReportGradePane
+            key={selected.id}
+            report={selected}
+            onDownload={() => onDownload(selected)}
+            onSaved={() => {
+              advanceToNext()
+              onSaved()
+            }}
+          />
+        ) : (
+          <div className="flex min-h-48 items-center justify-center rounded-lg bg-surface p-6 text-sm text-ink-sub shadow-xs">
+            左侧选一份报告,先下载正文再在这里给分。
+          </div>
+        )
+      }
+    />
+  )
+}
+
+interface ReportGradePaneProps {
   report: ReportDTO
-  onClose: () => void
+  onDownload: () => void
   onSaved: () => void
 }
 
 /**
- * GradeReportModal 给单份报告打分写评语。
- * 报告文件在列表操作列通过一次性 storage 授权下载;弹窗只负责评分。
+ * ReportGradePane 是审阅队列族的右侧详情与批改表单(§6.5.3 第 ⑤ 族)。
+ * 报告正文是对象存储引用,故这里给的是取件按钮而不是内嵌预览:
+ * 报告格式不固定(文档/压缩包/笔记本),统一走一次性下载授权最可靠。
+ *
+ * key 由调用方按报告编号给出:切换条目时表单重建,上一份的草稿不会串到下一份。
  */
-function GradeReportModal({ report, onClose, onSaved }: GradeReportModalProps) {
+function ReportGradePane({ report, onDownload, onSaved }: ReportGradePaneProps) {
   const [score, setScore] = useState(String(report.manual_score || ''))
   const [comment, setComment] = useState(report.comment ?? '')
   const [formError, setFormError] = useState<string>()
@@ -332,75 +454,77 @@ function GradeReportModal({ report, onClose, onSaved }: GradeReportModalProps) {
   }, [comment, onSaved, report.id, score])
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="lg">
-        <ModalHeader>
-          <ModalTitle>批改实验报告</ModalTitle>
-          <ModalDescription>
-            报告分会与检查点得分相加成为实验总分。批改意见会展示给学生。
-          </ModalDescription>
-        </ModalHeader>
-        <ModalBody className="flex flex-col gap-4">
-          <DescriptionList
-            dense
-            columns={2}
-            items={[
-              { term: '提交时间', description: formatDateTime(report.submitted_at), mono: true },
-              {
-                term: '当前状态',
-                description: experimentReportStatusLabel(report.status),
-              },
-            ]}
-          />
+    <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg bg-surface p-5 shadow-xs">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="text-md font-semibold text-ink">{report.student_name}</h3>
+          <p className="mt-0.5 text-xs text-ink-sub">
+            {report.student_no ? `${report.student_no} · ` : ''}
+            {formatDateTime(report.submitted_at)}
+          </p>
+        </div>
+        <StatusIndicator
+          tone={experimentReportStatusTone(report.status)}
+          label={experimentReportStatusLabel(report.status)}
+        />
+      </div>
 
-          <FormField label="报告得分" htmlFor="report-score" required>
-            <Input
-              id="report-score"
-              type="number"
-              min="0"
-              step="0.5"
-              value={score}
-              onChange={(event) => setScore(event.target.value)}
-            />
-          </FormField>
+      <div>
+        <Button variant="outline" size="sm" leftIcon={Download} onClick={onDownload}>
+          下载报告正文
+        </Button>
+      </div>
 
-          <FormField
-            label="批改意见"
-            htmlFor="report-comment"
-            required
-            helper="说清楚得分依据与改进方向,学生会在实验详情里看到"
-          >
-            <Textarea
-              id="report-comment"
-              value={comment}
-              rows={5}
-              onChange={(event) => setComment(event.target.value)}
-            />
-          </FormField>
+      <FormField label="报告得分" htmlFor="report-score" required>
+        <Input
+          id="report-score"
+          type="number"
+          min="0"
+          step="0.5"
+          value={score}
+          onChange={(event) => setScore(event.target.value)}
+        />
+      </FormField>
 
-          {formError ? <Callout tone="danger">{formError}</Callout> : null}
-        </ModalBody>
-        <ModalFooter>
-          <Button variant="outline" onClick={onClose}>
-            取消
-          </Button>
-          <Button variant="primary" loading={working} onClick={() => void submit()}>
-            提交批改
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+      <FormField
+        label="批改意见"
+        htmlFor="report-comment"
+        required
+        error={formError}
+        helper="说清楚得分依据与改进方向,学生会在实验详情里看到"
+      >
+        <Textarea
+          id="report-comment"
+          value={comment}
+          rows={6}
+          invalid={Boolean(formError)}
+          onChange={(event) => setComment(event.target.value)}
+        />
+      </FormField>
+
+      {/* 动作条贴详情片底边;<lg 由 QueueDetailLayout 钉到屏幕底部 */}
+      <div className="mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
+        <span className="mr-auto text-sm text-ink-sub">报告分与检查点得分相加成为实验总分。</span>
+        <Button variant="primary" loading={working} onClick={() => void submit()}>
+          提交批改并看下一份
+        </Button>
+      </div>
+    </div>
   )
 }
 
 /**
- * GroupsPanel 编排小组与成员角色。
+ * GroupsSection 编排小组与成员角色(页内子视图,§6.5.5 B)。
  * 角色只能从实验定义的角色集合里选(后端 roleAllowed 同一口径);
  * 学生从账号档案里选,不让教师手填学生编号。
+ *
+ * 小组卡按网格排开而不是纵向堆一列:它从右栏窄条挪到了整幅宽度,
+ * 一列到底会让每张卡横向留出大片空白(§6.5.0 通则 3:不补版面,也不浪费版面)。
  */
-function GroupsPanel({ experiment }: { experiment: Experiment }) {
+function GroupsSection({ experiment }: { experiment: Experiment }) {
   const [createOpen, setCreateOpen] = useState(false)
   const [memberTarget, setMemberTarget] = useState<ExperimentGroup>()
+  const [removeTarget, setRemoveTarget] = useState<{ group: ExperimentGroup; studentId: string; studentName: string }>()
 
   const groups = useAsyncResource(
     () => api.experiment.listGroups(experiment.id),
@@ -409,17 +533,16 @@ function GroupsPanel({ experiment }: { experiment: Experiment }) {
   )
 
   return (
-    <Card>
-      <CardHeader
-        title="小组编排"
-        description={`每组 ${experiment.group_config?.size ?? 0} 人。同组成员共享同一套实验环境。`}
-        actions={
-          <Button variant="outline" size="sm" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
-            新建小组
-          </Button>
-        }
-      />
-      <CardBody className="flex flex-col gap-3">
+    <PageSection
+      title="小组编排"
+      description={`每组 ${experiment.group_config?.size ?? 0} 人。同组成员共享同一套实验环境。`}
+      actions={
+        <Button variant="outline" size="sm" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
+          新建小组
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-4">
         {(experiment.group_config?.roles ?? []).length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {(experiment.group_config?.roles ?? []).map((role) => (
@@ -446,9 +569,13 @@ function GroupsPanel({ experiment }: { experiment: Experiment }) {
           }
         >
           {(list) => (
-            <div className="flex flex-col gap-3">
+            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
               {list.map((group) => (
-                <div key={group.id} className="flex flex-col gap-2 well p-3">
+                // 每个小组自成一块抬起片:它们是并列的编排入口,不是表格行
+                <div
+                  key={group.id}
+                  className="flex flex-col gap-2 rounded-lg bg-surface p-4 shadow-xs"
+                >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="min-w-0 truncate text-base text-ink">{group.name}</span>
                     <Badge
@@ -474,7 +601,19 @@ function GroupsPanel({ experiment }: { experiment: Experiment }) {
                       {(group.members ?? []).map((member) => (
                         <li key={member.id} className="flex items-center justify-between gap-2 text-sm">
                           <span className="min-w-0 truncate text-ink">{member.student_name}</span>
-                          <Badge tone="neutral">{member.role}</Badge>
+                          <span className="flex items-center gap-2">
+                            <Badge tone="neutral">{member.role}</Badge>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`移除${member.student_name}`}
+                              title="移除成员"
+                              onClick={() => setRemoveTarget({ group, studentId: member.student_id, studentName: member.student_name })}
+                            >
+                              <Trash2 aria-hidden="true" />
+                            </Button>
+                          </span>
                         </li>
                       ))}
                     </ul>
@@ -493,7 +632,7 @@ function GroupsPanel({ experiment }: { experiment: Experiment }) {
             </div>
           )}
         </ResourceState>
-      </CardBody>
+      </div>
 
       {createOpen ? (
         <CreateGroupModal
@@ -517,7 +656,71 @@ function GroupsPanel({ experiment }: { experiment: Experiment }) {
           }}
         />
       ) : null}
-    </Card>
+      {removeTarget ? (
+        <RemoveMemberModal
+          group={removeTarget.group}
+          studentId={removeTarget.studentId}
+          studentName={removeTarget.studentName}
+          onClose={() => setRemoveTarget(undefined)}
+          onRemoved={() => {
+            setRemoveTarget(undefined)
+            groups.reload()
+          }}
+        />
+      ) : null}
+    </PageSection>
+  )
+}
+
+interface RemoveMemberModalProps {
+  group: ExperimentGroup
+  studentId: string
+  studentName: string
+  onClose: () => void
+  onRemoved: () => void
+}
+
+/** RemoveMemberModal 确认移除成员,让教师明确知道共享资源权限会被收回。 */
+function RemoveMemberModal({ group, studentId, studentName, onClose, onRemoved }: RemoveMemberModalProps) {
+  const [formError, setFormError] = useState<string>()
+  const [working, setWorking] = useState(false)
+
+  const remove = useCallback(async () => {
+    setFormError(undefined)
+    setWorking(true)
+    try {
+      await api.experiment.removeGroupMember(group.id, studentId)
+      toast.success('成员已移除')
+      onRemoved()
+    } catch (error) {
+      setFormError(userFacingErrorMessage(error, '移除没有成功,请稍后重试。'))
+    } finally {
+      setWorking(false)
+    }
+  }, [group.id, onRemoved, studentId])
+
+  return (
+    <Modal open onOpenChange={(open) => !open && onClose()}>
+      <ModalContent size="sm">
+        <ModalHeader>
+          <ModalTitle>确认移除成员</ModalTitle>
+          <ModalDescription>
+            将从「{group.name}」移除 {studentName},并立即收回其共享实验环境和仿真会话权限。
+          </ModalDescription>
+        </ModalHeader>
+        <ModalBody>
+          {formError ? <Callout tone="danger">{formError}</Callout> : null}
+        </ModalBody>
+        <ModalFooter>
+          <Button type="button" variant="outline" onClick={onClose} disabled={working}>
+            取消
+          </Button>
+          <Button type="button" variant="seal" onClick={() => void remove()} loading={working}>
+            移除成员
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
   )
 }
 
@@ -612,12 +815,23 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
 
   const classes = useAsyncResource(() => api.identity.listClasses(), [], () => false)
 
-  const students = usePagedResource<ClassStudent>(
-    (params) =>
+  /**
+   * 班内学生一次取齐(PAGINATION_MAX_SIZE)。
+   * 不给下拉配翻页控件:那等于让教师先翻页才能选到人,而下拉本身就该是可滚动的完整名单;
+   * 浮层里也不出现分页 —— 需要分页说明它其实是一页(规范 §6.5.5 A)。
+   */
+  const students = useAsyncResource(
+    () =>
       classId === ''
-        ? Promise.resolve({ list: [] as ClassStudent[], total: 0, page: params.page, size: params.size })
-        : api.identity.listClassStudents(classId, params),
+        ? Promise.resolve({
+            list: [] as ClassStudent[],
+            total: 0,
+            page: 1,
+            size: PAGINATION_MAX_SIZE,
+          })
+        : api.identity.listClassStudents(classId, { page: 1, size: PAGINATION_MAX_SIZE }),
     [classId],
+    (value) => value.list.length === 0,
   )
 
   const classOptions = useMemo(
@@ -706,18 +920,15 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
                 emptyDescription="换一个班级,或联系学校管理员核对班级名单。"
               >
                 {() => (
-                  <div className="flex flex-col gap-3">
-                    <FormField label="学生" htmlFor="member-student" required>
-                      <Select
-                        id="member-student"
-                        options={studentOptions}
-                        value={studentId}
-                        placeholder="选择学生"
-                        onValueChange={setStudentId}
-                      />
-                    </FormField>
-                    <Pagination page={students.page} pageSize={students.pageSize} total={students.total} onPageChange={students.setPage} />
-                  </div>
+                  <FormField label="学生" htmlFor="member-student" required>
+                    <Select
+                      id="member-student"
+                      options={studentOptions}
+                      value={studentId}
+                      placeholder="选择学生"
+                      onValueChange={setStudentId}
+                    />
+                  </FormField>
                 )}
               </ResourceState>
             )}

@@ -19,6 +19,7 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  DataPanel,
   FilterBar,
   FilterField,
   IconButton,
@@ -27,6 +28,7 @@ import {
   MenuItem,
   MenuSeparator,
   MenuTrigger,
+  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -36,10 +38,8 @@ import {
   ModalTitle,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
-  Stat,
   StatusIndicator,
   Table,
   Tabs,
@@ -220,7 +220,7 @@ export default function TeacherQuestionsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '资源' }, { label: '题库内容' }]} />}
+        kicker={<Breadcrumb items={[{ label: '资源' }]} />}
         title="题库内容"
         description="维护实验模板、竞赛题与理论题。题目按版本锁定,已被作业或实验引用的版本不会因后续修改而变化。"
         icon={Database}
@@ -231,14 +231,24 @@ export default function TeacherQuestionsPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="题目总数" value={totalCount ?? '—'} icon={Database} hint="不受题型筛选影响" />
-          <Stat label="已发布" value={publishedCount ?? '—'} icon={Send} hint="可被作业与实验引用" />
-          <Stat label="草稿" value={draftCount ?? '—'} icon={Pencil} />
-          <Stat label="已共享" value={sharedCount ?? '—'} icon={Share2} hint="其他学校可复用" />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是题目列表 */}
+      <MetricStrip
+        label="题库总量摘要"
+        className="mb-5"
+        items={[
+          { label: '题目总数', value: totalCount ?? '—', hint: '不受题型筛选影响' },
+          { label: '已发布', value: publishedCount ?? '—', hint: '可被作业与实验引用' },
+          { label: '草稿', value: draftCount ?? '—', hint: '发布后才可被引用' },
+          { label: '已共享', value: sharedCount ?? '—', hint: '其他学校可复用' },
+        ]}
+      />
+
+      {/* 动作失败就近内联(§6.7 C),排在 Tabs 之前 —— 它是页面级动作的结果,不属于某个 Tab */}
+      {actionError ? (
+        <Callout tone="danger" className="mb-4">
+          {actionError}
+        </Callout>
+      ) : null}
 
       <Tabs defaultValue="items">
         <TabsList>
@@ -251,8 +261,10 @@ export default function TeacherQuestionsPage() {
         </TabsList>
 
         <TabsContent value="items">
-          <PageSection title="题目列表" description={`共 ${items.total} 道题目`}>
-            <div className="flex flex-col gap-4">
+          {/* 子视图不自带页面头(§6.5.5 B);筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
+          <DataPanel
+            label="题目列表"
+            filter={
               <FilterBar label="题目筛选">
                 <FilterField label="题目类型" group>
                   <SegmentedControl
@@ -264,9 +276,16 @@ export default function TeacherQuestionsPage() {
                   />
                 </FilterField>
               </FilterBar>
-
-              {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
+            }
+            footer={
+              <Pagination
+                page={items.page}
+                pageSize={items.pageSize}
+                total={items.total}
+                onPageChange={items.setPage}
+              />
+            }
+          >
               <ResourceState
                 resource={items}
                 emptyIcon={Database}
@@ -281,22 +300,23 @@ export default function TeacherQuestionsPage() {
                     </Button>
                   )
                 }
-                skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+                skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
               >
                 {(page) => (
-                  <>
-                    <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                    <Pagination
-                      page={items.page}
-                      pageSize={items.pageSize}
-                      total={items.total}
-                      onPageChange={items.setPage}
-                    />
-                  </>
+                  <Table
+                    columns={columns}
+                    data={page.list}
+                    rowKey={(item) => item.id}
+                    elevated={false}
+                    // <md 换行卡(§6.4.1 规则 3):题目标题一行、类型编号版本一行
+                    mobileCard={(item) => ({
+                      title: item.title,
+                      meta: `${contentTypeLabel(item.type)} · ${item.code} · ${item.version}`,
+                    })}
+                  />
                 )}
               </ResourceState>
-            </div>
-          </PageSection>
+          </DataPanel>
         </TabsContent>
 
         <TabsContent value="categories">

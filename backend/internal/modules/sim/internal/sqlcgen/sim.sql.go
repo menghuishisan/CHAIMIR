@@ -64,20 +64,21 @@ func (q *Queries) ArchiveRetiredBuiltinSimPackages(ctx context.Context, liveKeys
 	return items, nil
 }
 
-const archiveSimSessionsBySourceRef = `-- name: ArchiveSimSessionsBySourceRef :many
+const archiveSimSessionsByScopeRef = `-- name: ArchiveSimSessionsByScopeRef :many
 UPDATE sim_session
 SET status = 5, updated_at = now()
-WHERE tenant_id = $1 AND source_ref = $2 AND status IN (1, 2, 3, 4)
-RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at
+WHERE tenant_id = $1 AND scope_ref = $2 AND source_ref = $3 AND status IN (1, 2, 3, 4)
+RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at
 `
 
-type ArchiveSimSessionsBySourceRefParams struct {
+type ArchiveSimSessionsByScopeRefParams struct {
 	TenantID  int64  `json:"tenant_id"`
+	ScopeRef  string `json:"scope_ref"`
 	SourceRef string `json:"source_ref"`
 }
 
-func (q *Queries) ArchiveSimSessionsBySourceRef(ctx context.Context, arg ArchiveSimSessionsBySourceRefParams) ([]SimSession, error) {
-	rows, err := q.db.Query(ctx, archiveSimSessionsBySourceRef, arg.TenantID, arg.SourceRef)
+func (q *Queries) ArchiveSimSessionsByScopeRef(ctx context.Context, arg ArchiveSimSessionsByScopeRefParams) ([]SimSession, error) {
+	rows, err := q.db.Query(ctx, archiveSimSessionsByScopeRef, arg.TenantID, arg.ScopeRef, arg.SourceRef)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +91,9 @@ func (q *Queries) ArchiveSimSessionsBySourceRef(ctx context.Context, arg Archive
 			&i.TenantID,
 			&i.PackageID,
 			&i.SourceRef,
+			&i.ScopeRef,
 			&i.OwnerAccountID,
+			&i.SharedAccountIds,
 			&i.Seed,
 			&i.InitParams,
 			&i.Compute,
@@ -320,6 +323,54 @@ func (q *Queries) CountSimPackages(ctx context.Context, arg CountSimPackagesPara
 	return column_1, err
 }
 
+const countSimPackagesByCategory = `-- name: CountSimPackagesByCategory :many
+SELECT category, COUNT(DISTINCT code)::bigint AS count
+FROM sim_package
+WHERE ($1::smallint = 0 OR status = $1)
+  AND ($2::text = '' OR category = $2)
+  AND ($3::text = '' OR code ILIKE '%' || $3 || '%' OR name ILIKE '%' || $3 || '%')
+  AND ($4::bigint = 0 OR (author_type = 2 AND author_id = $4))
+GROUP BY category
+ORDER BY category
+`
+
+type CountSimPackagesByCategoryParams struct {
+	Column1 int16  `json:"column_1"`
+	Column2 string `json:"column_2"`
+	Column3 string `json:"column_3"`
+	Column4 int64  `json:"column_4"`
+}
+
+type CountSimPackagesByCategoryRow struct {
+	Category string `json:"category"`
+	Count    int64  `json:"count"`
+}
+
+func (q *Queries) CountSimPackagesByCategory(ctx context.Context, arg CountSimPackagesByCategoryParams) ([]CountSimPackagesByCategoryRow, error) {
+	rows, err := q.db.Query(ctx, countSimPackagesByCategory,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountSimPackagesByCategoryRow{}
+	for rows.Next() {
+		var i CountSimPackagesByCategoryRow
+		if err := rows.Scan(&i.Category, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countSimReviews = `-- name: CountSimReviews :one
 SELECT COUNT(*)::bigint
 FROM sim_package_review
@@ -496,21 +547,23 @@ func (q *Queries) CreateSimPackageReview(ctx context.Context, arg CreateSimPacka
 }
 
 const createSimSession = `-- name: CreateSimSession :one
-INSERT INTO sim_session (id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
-RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at
+INSERT INTO sim_session (id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
+RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at
 `
 
 type CreateSimSessionParams struct {
-	ID             int64  `json:"id"`
-	TenantID       int64  `json:"tenant_id"`
-	PackageID      int64  `json:"package_id"`
-	SourceRef      string `json:"source_ref"`
-	OwnerAccountID int64  `json:"owner_account_id"`
-	Seed           int64  `json:"seed"`
-	InitParams     []byte `json:"init_params"`
-	Compute        int16  `json:"compute"`
-	Status         int16  `json:"status"`
+	ID               int64   `json:"id"`
+	TenantID         int64   `json:"tenant_id"`
+	PackageID        int64   `json:"package_id"`
+	SourceRef        string  `json:"source_ref"`
+	ScopeRef         string  `json:"scope_ref"`
+	OwnerAccountID   int64   `json:"owner_account_id"`
+	SharedAccountIds []int64 `json:"shared_account_ids"`
+	Seed             int64   `json:"seed"`
+	InitParams       []byte  `json:"init_params"`
+	Compute          int16   `json:"compute"`
+	Status           int16   `json:"status"`
 }
 
 func (q *Queries) CreateSimSession(ctx context.Context, arg CreateSimSessionParams) (SimSession, error) {
@@ -519,7 +572,9 @@ func (q *Queries) CreateSimSession(ctx context.Context, arg CreateSimSessionPara
 		arg.TenantID,
 		arg.PackageID,
 		arg.SourceRef,
+		arg.ScopeRef,
 		arg.OwnerAccountID,
+		arg.SharedAccountIds,
 		arg.Seed,
 		arg.InitParams,
 		arg.Compute,
@@ -531,7 +586,9 @@ func (q *Queries) CreateSimSession(ctx context.Context, arg CreateSimSessionPara
 		&i.TenantID,
 		&i.PackageID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.OwnerAccountID,
+		&i.SharedAccountIds,
 		&i.Seed,
 		&i.InitParams,
 		&i.Compute,
@@ -845,7 +902,7 @@ func (q *Queries) GetSimReviewByID(ctx context.Context, id int64) (GetSimReviewB
 }
 
 const getSimSession = `-- name: GetSimSession :one
-SELECT id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at
+SELECT id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at
 FROM sim_session
 WHERE tenant_id = $1 AND id = $2
 `
@@ -863,7 +920,9 @@ func (q *Queries) GetSimSession(ctx context.Context, arg GetSimSessionParams) (S
 		&i.TenantID,
 		&i.PackageID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.OwnerAccountID,
+		&i.SharedAccountIds,
 		&i.Seed,
 		&i.InitParams,
 		&i.Compute,
@@ -875,7 +934,7 @@ func (q *Queries) GetSimSession(ctx context.Context, arg GetSimSessionParams) (S
 }
 
 const getSimSessionWithPackage = `-- name: GetSimSessionWithPackage :one
-SELECT s.id, s.tenant_id, s.package_id, s.source_ref, s.owner_account_id, s.seed, s.init_params, s.compute, s.status, s.created_at, s.updated_at,
+SELECT s.id, s.tenant_id, s.package_id, s.source_ref, s.scope_ref, s.owner_account_id, s.shared_account_ids, s.seed, s.init_params, s.compute, s.status, s.created_at, s.updated_at,
        p.code, p.version, p.name, p.category, p.scale_limit, p.bundle_key, p.bundle_hash, p.entry, p.backend_adapter, p.backend_config,
        p.interaction_schema, p.status AS package_status
 FROM sim_session s
@@ -893,7 +952,9 @@ type GetSimSessionWithPackageRow struct {
 	TenantID          int64              `json:"tenant_id"`
 	PackageID         int64              `json:"package_id"`
 	SourceRef         string             `json:"source_ref"`
+	ScopeRef          string             `json:"scope_ref"`
 	OwnerAccountID    int64              `json:"owner_account_id"`
+	SharedAccountIds  []int64            `json:"shared_account_ids"`
 	Seed              int64              `json:"seed"`
 	InitParams        []byte             `json:"init_params"`
 	Compute           int16              `json:"compute"`
@@ -922,7 +983,9 @@ func (q *Queries) GetSimSessionWithPackage(ctx context.Context, arg GetSimSessio
 		&i.TenantID,
 		&i.PackageID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.OwnerAccountID,
+		&i.SharedAccountIds,
 		&i.Seed,
 		&i.InitParams,
 		&i.Compute,
@@ -1377,13 +1440,53 @@ func (q *Queries) UpdateSimPackageStatus(ctx context.Context, arg UpdateSimPacka
 	return i, err
 }
 
+const updateSimSessionAuthorizedAccounts = `-- name: UpdateSimSessionAuthorizedAccounts :one
+UPDATE sim_session
+SET shared_account_ids = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND source_ref = $4
+RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at
+`
+
+type UpdateSimSessionAuthorizedAccountsParams struct {
+	TenantID         int64   `json:"tenant_id"`
+	ID               int64   `json:"id"`
+	SharedAccountIds []int64 `json:"shared_account_ids"`
+	SourceRef        string  `json:"source_ref"`
+}
+
+func (q *Queries) UpdateSimSessionAuthorizedAccounts(ctx context.Context, arg UpdateSimSessionAuthorizedAccountsParams) (SimSession, error) {
+	row := q.db.QueryRow(ctx, updateSimSessionAuthorizedAccounts,
+		arg.TenantID,
+		arg.ID,
+		arg.SharedAccountIds,
+		arg.SourceRef,
+	)
+	var i SimSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.PackageID,
+		&i.SourceRef,
+		&i.ScopeRef,
+		&i.OwnerAccountID,
+		&i.SharedAccountIds,
+		&i.Seed,
+		&i.InitParams,
+		&i.Compute,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateSimSessionStatus = `-- name: UpdateSimSessionStatus :one
 UPDATE sim_session
 SET status = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
   AND status IN (1, 2, 3, 4)
   AND $3 IN (2, 3, 4, 5, 6)
-RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at
+RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at
 `
 
 type UpdateSimSessionStatusParams struct {
@@ -1400,7 +1503,9 @@ func (q *Queries) UpdateSimSessionStatus(ctx context.Context, arg UpdateSimSessi
 		&i.TenantID,
 		&i.PackageID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.OwnerAccountID,
+		&i.SharedAccountIds,
 		&i.Seed,
 		&i.InitParams,
 		&i.Compute,

@@ -11,6 +11,7 @@ import (
 type Querier interface {
 	CountContentItems(ctx context.Context, arg CountContentItemsParams) (int64, error)
 	CountPapers(ctx context.Context, tenantID int64) (int64, error)
+	CountPapersByGenMode(ctx context.Context, tenantID int64) ([]CountPapersByGenModeRow, error)
 	CreateContentBody(ctx context.Context, arg CreateContentBodyParams) (ContentBody, error)
 	CreateContentCategory(ctx context.Context, arg CreateContentCategoryParams) (ContentCategory, error)
 	CreateContentItem(ctx context.Context, arg CreateContentItemParams) (ContentItem, error)

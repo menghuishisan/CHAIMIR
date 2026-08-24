@@ -7,6 +7,7 @@ import type {
   RuntimeAdapterLevel,
   RuntimeSelftestStatus,
   RuntimeStatus,
+  SandboxComponentCategory,
   SandboxPhase,
   SandboxStatus,
   SandboxToolKind,
@@ -27,6 +28,7 @@ export interface SandboxInstance {
   tool_access: SandboxToolAccess[]
   capabilities: SandboxCapabilities
   resource_usage: SandboxResourceUsage
+  workspace_revision: number
 }
 
 export interface SandboxCapabilities {
@@ -70,6 +72,7 @@ export interface SandboxFileReadResponse {
   content_base64: string
   content_sha256: string
   content_size: number
+  workspace_revision: number
 }
 
 export interface SandboxFileEntry {
@@ -87,11 +90,13 @@ export interface SandboxFileListResponse {
 export interface SandboxFileWriteRequest {
   relative_path: string
   content_base64: string
+  expected_revision: number
 }
 
 export interface SandboxFileSaveResponse {
   code_storage_key: string
   code_hash: string
+  workspace_revision: number
 }
 
 export interface SandboxChainRequest {
@@ -125,16 +130,20 @@ export interface SandboxRuntimeImageRequest {
   version: string
   digest: string
   genesis_baked: boolean
-  is_default: boolean
 }
 
-export interface SandboxRuntimeImage extends SandboxRuntimeImageRequest {
+/**
+ * SandboxRuntimeImage 是镜像版本的读取投影。
+ * 它刻意不继承登记请求:digest 只在登记时提交(服务端按镜像地址二次校验),
+ * 读取时不回显 —— 前端也就无法把它当编辑输入再送回去(§7.5)。
+ */
+export interface SandboxRuntimeImage {
   id: SnowflakeID
   runtime_id: SnowflakeID
+  image_url: string
+  version: string
   status: RuntimeImageStatus
-  prepulled: boolean
-  prepull_status: ImagePrepullStatus
-  prepulled_at?: string
+  genesis_baked: boolean
 }
 
 export interface SandboxToolRequest {
@@ -147,6 +156,8 @@ export interface SandboxToolRequest {
 }
 
 export interface SandboxToolResourceSpec {
+  /** disabled_reason 是服务端给出的用户向不可用原因,只读展示,不由前端编造 */
+  disabled_reason?: string
   builtin_endpoint?: string
   components?: unknown[]
   services?: unknown[]
@@ -158,19 +169,41 @@ export interface SandboxToolResourceSpec {
     max_timeout_seconds: number
   }
   prepull_command?: string[]
+  /** required_bindings 列出必须由组合连接提供的配置绑定,未满足时组件不可部署 */
+  required_bindings?: string[]
+  capabilities?: SandboxComponentCapabilities
+}
+
+/** SandboxComponentCapabilities 是组件能力声明,供服务端编译器校验组合;前端只读展示。 */
+export interface SandboxComponentCapabilities {
+  provides?: string[] | null
+  requires?: string[] | null
+  conflicts?: string[] | null
+  cardinality?: string
+  placement?: string
+  config_schema?: Record<string, unknown> | null
+  student_access?: string
 }
 
 export interface SandboxToolDefinition extends SandboxToolRequest {
   id: SnowflakeID
+  /** category 区分教师可见工具(tool)与只参与编排的基础设施组件(infra) */
+  category: SandboxComponentCategory
 }
 
 /**
- * SandboxOrchestrationCatalog 是编排目录响应:业务模块选运行时与工具只需这些字段。
+ * SandboxOrchestrationCatalog 是编排目录响应:业务模块选运行时与组件只需这些字段。
  * 它刻意不是 SandboxRuntime / SandboxToolDefinition 的子集别名 —— 适配器清单、镜像地址、
  * 完整 argv 白名单与自检详情属平台运维面,后端也不下发,故编排面按独立类型对接。
+ *
+ * 目录只出真正可调度的项:运行时必须 status=available 且自检通过,被引用的镜像必须内置创世,
+ * 且已发布组合的完整镜像闭包必须有成功的组合预拉取证明。服务端在 SQL 层过滤这些条件,
+ * 故前端不再按状态二次筛(避免两边口径不一致)。
+ * 基础设施单独成组,不能混进学生工具入口(§7.2)。
  */
 export interface SandboxOrchestrationCatalog {
   runtimes: SandboxCatalogRuntime[]
+  infra: SandboxCatalogTool[]
   tools: SandboxCatalogTool[]
 }
 
@@ -179,18 +212,18 @@ export interface SandboxCatalogRuntime {
   name: string
   eco: string
   images: SandboxCatalogRuntimeImage[]
-  tool_codes: string[]
+  capabilities: SandboxComponentCapabilities
 }
 
 export interface SandboxCatalogRuntimeImage {
   version: string
-  is_default: boolean
 }
 
 export interface SandboxCatalogTool {
   code: string
   name: string
   kind: SandboxToolKind
+  capabilities: SandboxComponentCapabilities
 }
 
 export interface SandboxQuota {
@@ -207,6 +240,7 @@ export interface SandboxQuota {
 
 export interface SandboxPrepullStatus {
   image_id: SnowflakeID
+  composition_digest: string
   prepull_status: ImagePrepullStatus
   desired_nodes: number
   ready_nodes: number
@@ -220,9 +254,13 @@ export interface SandboxRuntimeSelftestStatus {
   detail: SandboxRuntimeSelftestDetail
 }
 
-/** SandboxRuntimeSelftestDetail 是可展示的自检摘要,不含命名空间或编排明细。 */
+/**
+ * SandboxRuntimeSelftestDetail 是可展示的自检摘要,不含命名空间或编排明细。
+ * reason 由服务端给出,可能是用户向说明也可能是稳定原因码,前端按码表转成用户向文案。
+ */
 export interface SandboxRuntimeSelftestDetail {
   result?: string
   stage?: string
+  reason?: string
   trace_id?: string
 }

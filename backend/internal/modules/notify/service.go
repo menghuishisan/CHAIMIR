@@ -240,42 +240,49 @@ func (s *Service) CreateAnnouncement(ctx context.Context, req AnnouncementReques
 }
 
 // ListAnnouncements 查询可见公告分页。
-func (s *Service) ListAnnouncements(ctx context.Context, page, size int) ([]AnnouncementDTO, int64, int, int, error) {
+func (s *Service) ListAnnouncements(ctx context.Context, page, size int) ([]AnnouncementDTO, int64, int, int, map[string]map[string]int64, error) {
 	id, err := currentIdentityAllowPlatform(ctx)
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
 	var out []AnnouncementDTO
 	var total int64
+	var byScope map[string]int64
 	if id.IsPlatform {
 		err = s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 			var err error
 			out, total, err = tx.ListAnnouncements(ctx, 0, id.AccountID, []int16{contracts.RoleNumPlatformAdmin}, page, size)
+			if err == nil {
+				byScope, err = tx.CountVisibleAnnouncementsByScope(ctx, 0, id.AccountID, []int16{contracts.RoleNumPlatformAdmin})
+			}
 			return err
 		})
 		if err != nil {
-			return nil, 0, page, size, err
+			return nil, 0, page, size, nil, err
 		}
-		return out, total, page, size, nil
+		return out, total, page, size, map[string]map[string]int64{"scope": byScope}, nil
 	}
 	roleNumbers, err := s.currentRoleNumbers(ctx, id.AccountID)
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		out, total, err = tx.ListAnnouncements(ctx, id.TenantID, id.AccountID, roleNumbers, page, size)
+		if err == nil {
+			byScope, err = tx.CountVisibleAnnouncementsByScope(ctx, id.TenantID, id.AccountID, roleNumbers)
+		}
 		return err
 	})
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	filtered, err := s.filterAnnouncementsByRole(ctx, id.AccountID, out)
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
-	return filtered, total, page, size, nil
+	return filtered, total, page, size, map[string]map[string]int64{"scope": byScope}, nil
 }
 
 // MarkAnnouncementRead 标记公告已读。

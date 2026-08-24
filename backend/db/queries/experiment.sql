@@ -27,6 +27,16 @@ WHERE tenant_id = $1
   AND ($2::bigint = 0 OR course_id = $2)
   AND ($3::smallint = 0 OR status = $3);
 
+-- name: CountPublishedExperimentsByShape :many
+SELECT collab_mode, require_report, COUNT(*)::bigint AS count
+FROM experiment
+WHERE tenant_id = $1
+  AND deleted_at IS NULL
+  AND status = 3
+  AND ($2::bigint = 0 OR course_id = $2)
+GROUP BY collab_mode, require_report
+ORDER BY collab_mode, require_report;
+
 -- name: UpdateExperiment :one
 UPDATE experiment
 SET course_id = $3,
@@ -58,6 +68,12 @@ RETURNING id, tenant_id, experiment_id, name, created_at;
 SELECT id, tenant_id, experiment_id, name, created_at
 FROM experiment_group
 WHERE tenant_id = $1 AND id = $2;
+
+-- name: GetExperimentGroupForUpdate :one
+SELECT id, tenant_id, experiment_id, name, created_at
+FROM experiment_group
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE;
 
 -- name: ListExperimentGroups :many
 -- 按实验列出全部分组,供教师编组视角一次取齐(小组编号只在创建响应出现过一次,无列表则无法再定位)。
@@ -98,8 +114,12 @@ VALUES ($1, $2, $3, $4, $5, now())
 ON CONFLICT (tenant_id, group_id, student_id) DO UPDATE SET role = EXCLUDED.role
 RETURNING id, tenant_id, group_id, student_id, role, created_at;
 
+-- name: DeleteGroupMember :exec
+DELETE FROM group_member
+WHERE tenant_id = $1 AND group_id = $2 AND student_id = $3;
+
 -- name: GetActiveGroupInstance :one
-SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 FROM experiment_instance
 WHERE tenant_id = $1 AND experiment_id = $2 AND group_id = $3 AND status IN (1, 2, 3, 7)
 ORDER BY started_at DESC, id DESC
@@ -107,7 +127,7 @@ LIMIT 1
 FOR UPDATE;
 
 -- name: GetActiveOwnerInstance :one
-SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 FROM experiment_instance
 WHERE tenant_id = $1 AND experiment_id = $2 AND owner_account_id = $3 AND group_id IS NULL AND status IN (1, 2, 3, 7)
 ORDER BY started_at DESC, id DESC
@@ -118,23 +138,23 @@ FOR UPDATE;
 SELECT pg_advisory_xact_lock(sqlc.arg(lock_key)::bigint);
 
 -- name: CreateExperimentInstance :one
-INSERT INTO experiment_instance (id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, score, started_at, finished_at, last_active_at)
-VALUES ($1, $2, $3, $4, $5, $6, '[]'::jsonb, '[]'::jsonb, 1, NULL, now(), NULL, now())
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
+INSERT INTO experiment_instance (id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, score, started_at, finished_at, last_active_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, '[]'::jsonb, '[]'::jsonb, 1, NULL, now(), NULL, now())
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
 
 -- name: GetExperimentInstance :one
-SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 FROM experiment_instance
 WHERE tenant_id = $1 AND id = $2;
 
 -- name: GetExperimentInstanceForUpdate :one
-SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 FROM experiment_instance
 WHERE tenant_id = $1 AND id = $2
 FOR UPDATE;
 
 -- name: GetExperimentInstanceBySourceRef :one
-SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 FROM experiment_instance
 WHERE tenant_id = $1 AND source_ref = $2;
 
@@ -145,14 +165,14 @@ SET sandbox_refs = $3,
     status = $5,
     last_active_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
 
 -- name: SetInstanceStatus :one
 UPDATE experiment_instance
 SET status = $3,
     last_active_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
 
 -- name: FinishExperimentInstance :one
 UPDATE experiment_instance
@@ -161,7 +181,7 @@ SET status = 4,
     finished_at = now(),
     last_active_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
 
 -- name: UpdateExperimentInstanceScoreIfChanged :one
 -- 仅在总分真正变化时写入,让重复 M3 事件不能生成新的得分 outbox 修订版。
@@ -171,13 +191,13 @@ SET score = $3::text::numeric,
 WHERE tenant_id = $1
   AND id = $2
   AND score IS DISTINCT FROM $3::text::numeric
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
 
 -- name: TouchExperimentInstance :one
 UPDATE experiment_instance
 SET last_active_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
 
 -- name: ClaimRecyclableInstancesAcrossTenants :many
 UPDATE experiment_instance
@@ -193,17 +213,40 @@ WHERE id IN (
     LIMIT $3
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
 
 -- name: ListLiveInstancesByCourse :many
 -- 列出某课程下仍占用引擎资源的实验实例,供课程结束时级联回收(M7 需求 D3)。
 -- 只取 creating/running/paused/released 四态:已完成、已回收与错误态不再持有沙箱或仿真会话。
 SELECT i.id, i.tenant_id, i.experiment_id, i.owner_account_id, i.group_id, i.source_ref, i.sandbox_refs, i.sim_session_refs, i.status,
-       COALESCE(i.score::float8, 0)::float8 AS score, i.started_at, i.finished_at, i.last_active_at
+       i.scope_ref, COALESCE(i.score::float8, 0)::float8 AS score, i.started_at, i.finished_at, i.last_active_at
 FROM experiment_instance i
 JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
 WHERE i.tenant_id = $1 AND e.course_id = $2 AND i.status IN (1, 2, 3, 7)
 ORDER BY i.id;
+
+-- name: ListTeacherInstances :many
+-- 教师只看本人实验实例,学校管理员由服务层传 teacher_id=0 查看本租户全部活跃实例。
+SELECT i.id, i.tenant_id, i.experiment_id, i.owner_account_id, i.group_id, i.source_ref, i.scope_ref,
+       i.sandbox_refs, i.sim_session_refs, i.status, COALESCE(i.score::float8, 0)::float8 AS score,
+       i.started_at, i.finished_at, i.last_active_at
+FROM experiment_instance i
+JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
+WHERE i.tenant_id = sqlc.arg(tenant_id)::bigint
+  AND (sqlc.arg(teacher_id)::bigint = 0 OR e.author_id = sqlc.arg(teacher_id)::bigint)
+  AND (sqlc.arg(status)::smallint = 0 OR i.status = sqlc.arg(status)::smallint)
+  AND i.status IN (1, 2, 3, 7)
+ORDER BY i.last_active_at DESC, i.id DESC
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountTeacherInstances :one
+SELECT COUNT(*)::bigint
+FROM experiment_instance i
+JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
+WHERE i.tenant_id = sqlc.arg(tenant_id)::bigint
+  AND (sqlc.arg(teacher_id)::bigint = 0 OR e.author_id = sqlc.arg(teacher_id)::bigint)
+  AND (sqlc.arg(status)::smallint = 0 OR i.status = sqlc.arg(status)::smallint)
+  AND i.status IN (1, 2, 3, 7);
 
 -- name: UpsertCheckpointResult :one
 INSERT INTO checkpoint_result (id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score, detail_ref, binding_output, judged_at)

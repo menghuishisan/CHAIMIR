@@ -12,12 +12,13 @@ import { Bell, BellOff, CheckCheck, Inbox, Lock, Megaphone, Settings2, Trash2 } 
 import type { Announcement, Notification, NotificationPreference } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   Card,
   CardBody,
   CardHeader,
+  DataPanel,
+  EventTimeline,
   FilterBar,
   FilterField,
   Icon,
@@ -30,15 +31,14 @@ import {
   SegmentedControl,
   Skeleton,
   Switch,
-  Table,
   toast,
-  type TableColumn,
+  type TimelineDay,
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
 import { invalidateAppResource } from '../../../app/resourceInvalidation'
 import { ResourceState } from '../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../hooks'
-import { formatShortDateTime } from '../../../utils/formatters'
+import { formatDate, formatShortDateTime, formatTime } from '../../../utils/formatters'
 import { safeInternalNavigation } from '../../../utils/safeNavigation'
 import {
   FORCED_PREFERENCE_HINT,
@@ -61,7 +61,6 @@ export default function NotificationInboxPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '通知收件箱' }]} />}
         title="通知收件箱"
         description="这里是与你相关的站内消息和学校公告。可以在右侧关掉不想收到的提醒类型。"
         icon={Inbox}
@@ -144,91 +143,110 @@ function NotificationList() {
     [refreshAll],
   )
 
-  const columns: TableColumn<Notification>[] = [
-    {
-      key: 'title',
-      header: '消息',
-      render: (item) => (
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            {!item.is_read ? (
-              <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-seal" />
+  /**
+   * groupByDay 把消息按天分组成事件轴的输入(§6.5.3 第 ⑥ 族)。
+   * 收件箱的读法是「从新到旧扫一遍」而不是「按列比对」,等宽四列表格逼读者横向读完才拼出一条消息;
+   * 时间轴把「什么时候、发生了什么、要不要点进去」纵向排成三层。
+   * 分组标签用「今天 / 昨天 / 具体日期」,比裸日期更快定位。
+   */
+  const groupByDay = (list: Notification[]): TimelineDay[] => {
+    const today = new Date()
+    const dayKey = (value: Date) =>
+      `${value.getFullYear()}-${value.getMonth()}-${value.getDate()}`
+    const todayKey = dayKey(today)
+    const yesterday = new Date(today)
+    yesterday.setDate(today.getDate() - 1)
+    const yesterdayKey = dayKey(yesterday)
+
+    const days: TimelineDay[] = []
+    for (const item of list) {
+      const at = new Date(item.created_at)
+      const key = dayKey(at)
+      const label =
+        key === todayKey
+          ? `今天 · ${formatDate(item.created_at)}`
+          : key === yesterdayKey
+            ? `昨天 · ${formatDate(item.created_at)}`
+            : formatDate(item.created_at)
+      let day = days.find((entry) => entry.label === label)
+      if (!day) {
+        day = { label, events: [] }
+        days.push(day)
+      }
+      day.events.push({
+        id: item.id,
+        time: formatTime(item.created_at),
+        // 未读用 success 点(玉)+ 加粗标题双通道表达,不靠颜色单一传达(FE-2)
+        tone: item.is_read ? 'normal' : 'success',
+        title: (
+          <span className={item.is_read ? 'text-ink-sub' : 'font-medium text-ink'}>
+            {item.title}
+            {!item.is_read ? <span className="sr-only">(未读)</span> : null}
+          </span>
+        ),
+        detail: `${notificationTypeLabel(item.type)} · ${item.content}`,
+        action: (
+          <div className="flex items-center gap-1">
+            {item.link || !item.is_read ? (
+              <Button variant="ghost" size="sm" onClick={() => void openNotification(item)}>
+                {item.link ? '查看' : '标记已读'}
+              </Button>
             ) : null}
-            <span className={item.is_read ? 'truncate text-ink-sub' : 'truncate font-medium text-ink'}>
-              {item.title}
-            </span>
-            {!item.is_read ? <span className="sr-only">未读</span> : null}
+            <IconButton
+              variant="ghost"
+              size="sm"
+              icon={Trash2}
+              aria-label={`删除消息 ${item.title}`}
+              onClick={() => void removeNotification(item)}
+            />
           </div>
-          <div className="line-clamp-2 text-xs text-ink-sub">{item.content}</div>
-        </div>
-      ),
-    },
-    {
-      key: 'type',
-      header: '类型',
-      render: (item) => <Badge tone="neutral">{notificationTypeLabel(item.type)}</Badge>,
-    },
-    {
-      key: 'created_at',
-      header: '时间',
-      render: (item) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatShortDateTime(item.created_at)}
-        </span>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (item) => (
-        <div className="flex justify-end gap-1">
-          {item.link ? (
-            <Button variant="ghost" size="sm" onClick={() => void openNotification(item)}>
-              查看
-            </Button>
-          ) : !item.is_read ? (
-            <Button variant="ghost" size="sm" onClick={() => void openNotification(item)}>
-              标记已读
-            </Button>
-          ) : null}
-          <IconButton
-            variant="ghost"
-            size="sm"
-            icon={Trash2}
-            aria-label={`删除消息 ${item.title}`}
-            onClick={() => void removeNotification(item)}
-          />
-        </div>
-      ),
-    },
-  ]
+        ),
+      })
+    }
+    return days
+  }
 
   return (
     <PageSection
       title="站内消息"
-      description={`共 ${notifications.total} 条`}
       actions={
         <Button variant="outline" size="sm" leftIcon={CheckCheck} loading={markingAll} onClick={() => void markAllRead()}>
           全部已读
         </Button>
       }
     >
-      <div className="flex flex-col gap-4">
-        <FilterBar label="站内消息筛选">
-          <FilterField label="已读状态" group>
-            <SegmentedControl
-              aria-label="按已读状态筛选"
-              size="sm"
-              options={READ_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-              value={readFilter}
-              onValueChange={setReadFilter}
-            />
-          </FilterField>
-        </FilterBar>
+      {/* 动作失败就近内联(§6.7 C) */}
+      {actionError ? (
+        <Callout tone="danger" className="mb-4">
+          {actionError}
+        </Callout>
+      ) : null}
 
-        {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
+      {/* 时间流族:筛选井 + 按天事件轴 + 分页同处一块抬起片(§6.5.3 第 ⑥ 族) */}
+      <DataPanel
+        label="站内消息"
+        filter={
+          <FilterBar label="站内消息筛选">
+            <FilterField label="已读状态" group>
+              <SegmentedControl
+                aria-label="按已读状态筛选"
+                size="sm"
+                options={READ_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={readFilter}
+                onValueChange={setReadFilter}
+              />
+            </FilterField>
+          </FilterBar>
+        }
+        footer={
+          <Pagination
+            page={notifications.page}
+            pageSize={notifications.pageSize}
+            total={notifications.total}
+            onPageChange={notifications.setPage}
+          />
+        }
+      >
         <ResourceState
           resource={notifications}
           emptyIcon={Inbox}
@@ -238,26 +256,11 @@ function NotificationList() {
               ? '所有消息都已读完。'
               : '作业发布、成绩更新、竞赛开始等消息会出现在这里。'
           }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+          skeleton={<Skeleton variant="line" lines={6} />}
         >
-          {(page) => (
-            <>
-              <Table
-                columns={columns}
-                data={page.list}
-                rowKey={(item) => item.id}
-                onRowClick={(item) => void openNotification(item)}
-              />
-              <Pagination
-                page={notifications.page}
-                pageSize={notifications.pageSize}
-                total={notifications.total}
-                onPageChange={notifications.setPage}
-              />
-            </>
-          )}
+          {(page) => <EventTimeline label="站内消息" days={groupByDay(page.list)} />}
         </ResourceState>
-      </div>
+      </DataPanel>
     </PageSection>
   )
 }

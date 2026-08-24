@@ -14,7 +14,7 @@
 //     自行登记(前端不重复上报)。自动推进的 tick 两边都不入记录 —— 它由 seed 决定,可复算。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { Dices, LoaderCircle, Lock, TriangleAlert } from 'lucide-react'
 import {
   Badge,
@@ -53,13 +53,23 @@ const DEFAULT_SEED = 1
 export default function StudentSimWorkspacePage() {
   const { packageCode = '' } = useParams<{ packageCode: string }>()
   const [searchParams] = useSearchParams()
-  const { exit } = useImmersive()
+  const navigate = useNavigate()
+  const { exit: defaultExit } = useImmersive()
 
   const version = searchParams.get('version') ?? ''
   const sessionId = searchParams.get('session') ?? undefined
+  const returnExperiment = searchParams.get('return_experiment') ?? ''
+  const returnInstance = searchParams.get('return_instance') ?? ''
+  const exit = useCallback(() => {
+    if (/^[1-9][0-9]*$/.test(returnExperiment) && /^[1-9][0-9]*$/.test(returnInstance)) {
+      navigate(`/student/experiments/${returnExperiment}/workspace?instance=${returnInstance}`)
+      return
+    }
+    defaultExit()
+  }, [defaultExit, navigate, returnExperiment, returnInstance])
 
   if (isBuiltinSimulationCode(packageCode)) {
-    return <SimSession packageCode={packageCode} version={version} sessionId={sessionId} />
+    return <SimSession packageCode={packageCode} version={version} sessionId={sessionId} onExit={exit} />
   }
 
   // 自建场景在服务端容器里运行,一个会话一个容器,而会话只能由课程实验编排产生。
@@ -80,13 +90,14 @@ export default function StudentSimWorkspacePage() {
     )
   }
 
-  return <IsolatedRuntime version={version} sessionId={sessionId} />
+  return <IsolatedRuntime version={version} sessionId={sessionId} onExit={exit} />
 }
 
 interface SimSessionProps {
   packageCode: string
   version: string
   sessionId?: string
+  onExit: () => void
 }
 
 /**
@@ -97,9 +108,7 @@ interface SimSessionProps {
  * 上报序号也从已有条数续上 —— 从 1 重开会与已有记录撞号,后端会拒。
  * 没有会话就是一次全新的本机推演,用默认随机条件开始。
  */
-function SimSession({ packageCode, version, sessionId }: SimSessionProps) {
-  const { exit } = useImmersive()
-
+function SimSession({ packageCode, version, sessionId, onExit }: SimSessionProps) {
   const replay = useAsyncResource(
     () => (sessionId ? api.sim.getReplay(sessionId) : Promise.resolve(undefined)),
     [sessionId],
@@ -126,7 +135,7 @@ function SimSession({ packageCode, version, sessionId }: SimSessionProps) {
             <Button variant="on-dark" onClick={replay.reload}>
               重试
             </Button>
-            <Button variant="on-dark" onClick={exit}>
+            <Button variant="on-dark" onClick={onExit}>
               返回仿真实验室
             </Button>
           </>
@@ -141,6 +150,7 @@ function SimSession({ packageCode, version, sessionId }: SimSessionProps) {
       version={version}
       sessionId={sessionId}
       restore={replay.data ?? undefined}
+      onExit={onExit}
     />
   )
 }
@@ -151,6 +161,7 @@ interface SimRuntimeProps {
   sessionId?: string
   /** 带会话时的服务端记录:据此恢复现场并续上上报序号 */
   restore?: SimReplay
+  onExit: () => void
 }
 
 /**
@@ -158,8 +169,8 @@ interface SimRuntimeProps {
  * 推演进度不另存一份:Worker 内的事件日志才是权威(snapshot.events),
  * 页面再记一个游标只会与后退、重播产生漂移。
  */
-function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProps) {
-  const { title, exit } = useImmersive()
+function SimRuntime({ packageCode, version, sessionId, restore, onExit }: SimRuntimeProps) {
+  const { title } = useImmersive()
   const reducedMotion = useReducedMotion()
 
   // 带会话时随记录走(seed 决定这条过程),否则用默认随机条件
@@ -343,7 +354,7 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
         description={error}
         fullScreen={false}
         actions={
-          <Button variant="on-dark" onClick={exit}>
+          <Button variant="on-dark" onClick={onExit}>
             返回仿真实验室
           </Button>
         }
@@ -382,7 +393,7 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
         version={version}
         descriptor={descriptor}
         snapshot={snapshot}
-        onExit={exit}
+        onExit={onExit}
         onShare={sessionId ? () => setShareOpen(true) : undefined}
         onSelectElement={selectElement}
         onInteract={interact}
@@ -448,6 +459,7 @@ function SimRuntime({ packageCode, version, sessionId, restore }: SimRuntimeProp
 interface IsolatedRuntimeProps {
   version: string
   sessionId: string
+  onExit: () => void
 }
 
 /**
@@ -457,8 +469,8 @@ interface IsolatedRuntimeProps {
  * 操作由服务端在执行成功后自行登记(前端不重复上报)、随机条件由会话决定(这里不能换)。
  * 舞台、面板与播放控制完全共用 —— 页面不为「跑在哪」写第二套渲染。
  */
-function IsolatedRuntime({ version, sessionId }: IsolatedRuntimeProps) {
-  const { title, exit } = useImmersive()
+function IsolatedRuntime({ version, sessionId, onExit }: IsolatedRuntimeProps) {
+  const { title } = useImmersive()
   const reducedMotion = useReducedMotion()
   const [shareOpen, setShareOpen] = useState(false)
 
@@ -524,7 +536,7 @@ function IsolatedRuntime({ version, sessionId }: IsolatedRuntimeProps) {
             <Button variant="on-dark" onClick={stream.reconnect}>
               重试
             </Button>
-            <Button variant="on-dark" onClick={exit}>
+            <Button variant="on-dark" onClick={onExit}>
               返回仿真实验室
             </Button>
           </>
@@ -552,7 +564,7 @@ function IsolatedRuntime({ version, sessionId }: IsolatedRuntimeProps) {
         version={version}
         descriptor={descriptor}
         snapshot={snapshot}
-        onExit={exit}
+        onExit={onExit}
         onShare={() => setShareOpen(true)}
         onSelectElement={selectElement}
         onInteract={interact}

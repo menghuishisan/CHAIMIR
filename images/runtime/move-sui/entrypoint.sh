@@ -2,7 +2,8 @@
 # 本脚本启动 Sui 本地网络。
 set -eu
 
-exec sui start \
-  --with-faucet \
-  --force-regenesis \
-  --network.config /runtime-state/sui/network.yaml
+CONFIG_DIR="${CHAIMIR_SUI_CONFIG_DIR:-/runtime-state/sui}"
+if [ ! -f "$CONFIG_DIR/network.yaml" ]; then
+  /usr/local/bin/sui genesis --working-dir "$CONFIG_DIR" --with-faucet -f
+fi
+exec /usr/local/bin/sui start --with-faucet --network.config "$CONFIG_DIR"

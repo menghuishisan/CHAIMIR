@@ -13,9 +13,10 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  DataPanel,
+  MetricStrip,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   Table,
   type TableColumn,
@@ -23,6 +24,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { usePagedResource } from '../../../../hooks'
+import { facetCount } from '../../../../utils/facets'
 import {
   experimentCollabModeLabel,
 } from '../../../../utils/labels/experiment'
@@ -41,6 +43,14 @@ export default function StudentExperimentsPage() {
     (params) => api.experiment.getPublishedExperiments(params),
     [],
   )
+
+  // 协作形态与报告要求取后端 facets:全量分组计数,不用当前页切片去数(§6.5.4)
+  const groupCount = facetCount(
+    experiments.data?.facets,
+    'collab_mode',
+    ExperimentCollabMode.GROUP,
+  )
+  const reportCount = facetCount(experiments.data?.facets, 'require_report', true)
 
   /**
    * enterExperiment 创建或恢复实例后进入沉浸式工作台。
@@ -136,39 +146,79 @@ export default function StudentExperimentsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '学习区' }, { label: '实验实训' }]} />}
+        kicker={<Breadcrumb items={[{ label: '学习区' }]} />}
         title="实验实训"
         description="进入实验会为你准备独立的实验环境,中途退出后再进入可以接着做。"
         icon={FlaskConical}
       />
 
-      {/* 不做指标带:可做实验数已在下方分组说明里给出,而「小组实验/需交报告」没有服务端聚合,
-          用当前页数出来就是错数(规范 §6.5);这两项在每一行的标签里逐条可见。 */}
-      <PageSection title="实验列表" description={`共 ${experiments.total} 个实验`}>
-        <div className="flex flex-col gap-4">
-          {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
+      {/*
+        归族:资源列表族(§6.5.3 第 ①)。指标退为一行内联摘要:
+        「小组实验/需交报告」走后端聚合契约(facets.collab_mode / facets.require_report),
+        是全量口径而非当前页切片(§6.5.4)。
+      */}
+      <MetricStrip
+        label="实验总量摘要"
+        className="mb-5"
+        items={[
+          { label: '可做实验', value: experiments.total, hint: '已发布给你的' },
+          { label: '小组实验', value: groupCount, hint: '要先加入小组' },
+          { label: '需交报告', value: reportCount, hint: '做完还要写报告' },
+        ]}
+      />
 
-          <ResourceState
-            resource={experiments}
-            emptyIcon={FlaskConical}
-            emptyTitle="暂无可做的实验"
-            emptyDescription="老师发布实验后会显示在这里,你可以直接进入实验环境动手做。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-          >
-            {(page) => (
-              <>
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={experiments.page}
-                  pageSize={experiments.pageSize}
-                  total={experiments.total}
-                  onPageChange={experiments.setPage}
-                />
-              </>
-            )}
-          </ResourceState>
-        </div>
-      </PageSection>
+      {actionError ? (
+        <Callout tone="danger" className="mb-4">
+          {actionError}
+        </Callout>
+      ) : null}
+
+      {/* 数据表与分页同处一块抬起片(§6.5.2)。学生投影接口没有筛选参数,故不排筛选井 */}
+      <DataPanel
+        label="实验列表"
+        footer={
+          <Pagination
+            page={experiments.page}
+            pageSize={experiments.pageSize}
+            total={experiments.total}
+            onPageChange={experiments.setPage}
+          />
+        }
+      >
+        <ResourceState
+          resource={experiments}
+          emptyIcon={FlaskConical}
+          emptyTitle="暂无可做的实验"
+          emptyDescription="老师发布实验后会显示在这里,你可以直接进入实验环境动手做。"
+          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+        >
+          {(page) => (
+            <Table
+              columns={columns}
+              data={page.list}
+              rowKey={(item) => item.id}
+              elevated={false}
+              // <md 换行卡(§6.4.1 规则 3):实验名一行、完成方式与检查点一行,进入按钮在右
+              mobileCard={(item) => ({
+                title: item.name,
+                meta: `${experimentCollabModeLabel(item.collab_mode)} · ${item.components.checkpoints.length} 个检查点 · ${item.require_report ? '需交报告' : '免交报告'}`,
+                badge: <ExperimentStatusCell experiment={item} />,
+                action: (
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    leftIcon={Play}
+                    loading={enteringId === item.id}
+                    onClick={() => void enterExperiment(item)}
+                  >
+                    进入
+                  </Button>
+                ),
+              })}
+            />
+          )}
+        </ResourceState>
+      </DataPanel>
     </PageScaffold>
   )
 }

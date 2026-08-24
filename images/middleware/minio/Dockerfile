@@ -8,12 +8,10 @@ ARG GO_MODULE_PROXY=
 ENV CGO_ENABLED=0
 ENV GOMAXPROCS=2
 
-# 固定官方源码 commit 构建可复现二进制;生产 digest 由 CI 推送后写入 image-digests.lock。
-RUN mkdir -p /src/minio \
-    && curl -fL --retry 5 --retry-delay 3 --connect-timeout 30 --max-time 900 \
-        -o /tmp/minio.tar.gz "https://github.com/minio/minio/archive/${MINIO_COMMIT}.tar.gz" \
-    && tar -xzf /tmp/minio.tar.gz -C /src/minio --strip-components=1 \
-    && rm -f /tmp/minio.tar.gz
+# 固定官方源码 commit 构建可复现二进制;浅克隆后必须验证实际 commit,防止下载内容漂移。
+RUN git clone --filter=blob:none --no-checkout --depth 1 "https://github.com/minio/minio.git" /src/minio \
+    && test "$(git -C /src/minio fetch --depth 1 origin "${MINIO_COMMIT}" >/dev/null 2>&1 && git -C /src/minio rev-parse FETCH_HEAD)" = "${MINIO_COMMIT}" \
+    && git -C /src/minio checkout --detach "${MINIO_COMMIT}"
 WORKDIR /src/minio
 RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}"; fi \
     && go get \

@@ -2,6 +2,7 @@
 package sandbox
 
 import (
+	"encoding/json"
 	"strings"
 
 	"chaimir/internal/modules/sandbox/internal/sqlcgen"
@@ -36,17 +37,31 @@ func runtimeFromRow(row sqlcgen.Runtime) (Runtime, error) {
 // runtimeImageFromRow 把 sqlc runtime_image 行转换为内部 RuntimeImage 模型。
 func runtimeImageFromRow(row sqlcgen.RuntimeImage) RuntimeImage {
 	return RuntimeImage{
-		ID:            row.ID,
-		RuntimeID:     row.RuntimeID,
-		ImageURL:      row.ImageUrl,
-		Version:       row.Version,
-		Status:        row.Status,
-		Prepulled:     row.Prepulled,
-		PrepullStatus: row.PrepullStatus,
-		PrepullDetail: jsonx.RawMessage(row.PrepullDetail),
-		PrepulledAt:   timex.FromTimestamptz(row.PrepulledAt),
-		GenesisBaked:  row.GenesisBaked,
-		IsDefault:     row.IsDefault,
+		ID:           row.ID,
+		RuntimeID:    row.RuntimeID,
+		ImageURL:     row.ImageUrl,
+		Version:      row.Version,
+		Status:       row.Status,
+		GenesisBaked: row.GenesisBaked,
+	}
+}
+
+func compositionPrepullFromRow(row sqlcgen.SandboxCompositionPrepull) CompositionPrepull {
+	return CompositionPrepull{
+		ID:                row.ID,
+		RuntimeImageID:    row.RuntimeImageID,
+		CompositionDigest: row.CompositionDigest,
+		Status:            row.Status,
+		AttemptID:         row.AttemptID,
+		DaemonsetName:     row.DaemonsetName,
+		ImageClosure:      jsonx.RawMessage(row.ImageClosure),
+		DesiredNodes:      row.DesiredNodes,
+		ReadyNodes:        row.ReadyNodes,
+		Detail:            jsonx.RawMessage(row.Detail),
+		StartedAt:         timex.FromTimestamptz(row.StartedAt),
+		CompletedAt:       timex.FromTimestamptz(row.CompletedAt),
+		CreatedAt:         timex.FromTimestamptz(row.CreatedAt),
+		UpdatedAt:         timex.FromTimestamptz(row.UpdatedAt),
 	}
 }
 
@@ -62,6 +77,7 @@ func toolFromRow(row sqlcgen.Tool) (Tool, error) {
 		ID:           row.ID,
 		Code:         row.Code,
 		Name:         row.Name,
+		Category:     row.Category,
 		Kind:         row.Kind,
 		EcoTags:      splitCSV(row.EcoTags),
 		ResourceSpec: spec,
@@ -76,30 +92,36 @@ func sandboxFromRow(row sqlcgen.Sandbox) (Sandbox, error) {
 		return Sandbox{}, err
 	}
 	return Sandbox{
-		ID:                row.ID,
-		TenantID:          row.TenantID,
-		RuntimeID:         row.RuntimeID,
-		ImageID:           row.ImageID,
-		Namespace:         row.Namespace,
-		SourceRef:         row.SourceRef,
-		OwnerAccountID:    row.OwnerAccountID,
-		Phase:             row.Phase,
-		Status:            row.Status,
-		KeepAlive:         row.KeepAlive,
-		SnapshotEnabled:   row.SnapshotEnabled,
-		CodeStorageKey:    row.CodeStorageKey,
-		CodeHash:          pgtypex.TextValue(row.CodeHash),
-		InitCodeRef:       pgtypex.TextValue(row.InitCodeRef),
-		InitScriptRef:     pgtypex.TextValue(row.InitScriptRef),
-		SnapshotRef:       pgtypex.TextValue(row.SnapshotRef),
-		SnapshotDomains:   domains,
-		SnapshotCreatedAt: timex.FromTimestamptz(row.SnapshotCreatedAt),
-		SnapshotExpireAt:  timex.FromTimestamptz(row.SnapshotExpireAt),
-		KeepAliveUntil:    timex.FromTimestamptz(row.KeepAliveUntil),
-		LastActiveAt:      timex.FromTimestamptz(row.LastActiveAt),
-		ExpireAt:          timex.FromTimestamptz(row.ExpireAt),
-		CreatedAt:         timex.FromTimestamptz(row.CreatedAt),
-		UpdatedAt:         timex.FromTimestamptz(row.UpdatedAt),
+		ID:                  row.ID,
+		TenantID:            row.TenantID,
+		RuntimeID:           row.RuntimeID,
+		ImageID:             row.ImageID,
+		Namespace:           row.Namespace,
+		SourceRef:           row.SourceRef,
+		ScopeRef:            row.ScopeRef,
+		CompositionDigest:   row.CompositionDigest,
+		CompositionSnapshot: json.RawMessage(row.CompositionSnapshot),
+		AccessProfile:       row.AccessProfile,
+		OwnerAccountID:      row.OwnerAccountID,
+		SharedAccountIDs:    row.SharedAccountIds,
+		Phase:               row.Phase,
+		Status:              row.Status,
+		KeepAlive:           row.KeepAlive,
+		SnapshotEnabled:     row.SnapshotEnabled,
+		CodeStorageKey:      row.CodeStorageKey,
+		CodeHash:            pgtypex.TextValue(row.CodeHash),
+		WorkspaceRevision:   row.WorkspaceRevision,
+		InitCodeRef:         pgtypex.TextValue(row.InitCodeRef),
+		InitScriptRef:       pgtypex.TextValue(row.InitScriptRef),
+		SnapshotRef:         pgtypex.TextValue(row.SnapshotRef),
+		SnapshotDomains:     domains,
+		SnapshotCreatedAt:   timex.FromTimestamptz(row.SnapshotCreatedAt),
+		SnapshotExpireAt:    timex.FromTimestamptz(row.SnapshotExpireAt),
+		KeepAliveUntil:      timex.FromTimestamptz(row.KeepAliveUntil),
+		LastActiveAt:        timex.FromTimestamptz(row.LastActiveAt),
+		ExpireAt:            timex.FromTimestamptz(row.ExpireAt),
+		CreatedAt:           timex.FromTimestamptz(row.CreatedAt),
+		UpdatedAt:           timex.FromTimestamptz(row.UpdatedAt),
 	}, nil
 }
 

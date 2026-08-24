@@ -16,7 +16,7 @@
 // 每次提交都会产生一条审核记录,记录里带包的编码、版本与当前状态。
 
 import { useCallback, useMemo, useState } from 'react'
-import { Archive, ArchiveRestore, CircleCheck, CircleX, Shield, ShieldCheck } from 'lucide-react'
+import { Archive, ArchiveRestore, CircleCheck, CircleX, Shield } from 'lucide-react'
 import {
   SIM_PACKAGE_STATUS,
   SIM_REVIEW_RESULT,
@@ -30,6 +30,7 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  MetricStrip,
   Card,
   CardBody,
   CardHeader,
@@ -50,7 +51,6 @@ import {
   Pagination,
   SegmentedControl,
   Skeleton,
-  Stat,
   StatusIndicator,
   Textarea,
   toast,
@@ -151,41 +151,34 @@ export default function PlatformSimulationsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }, { label: '仿真治理' }]} />}
+        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="仿真治理"
         description="教师提交的仿真场景包在这里审核。通过后上架给全平台使用,之后也可以下架或重新上架。"
         icon={Shield}
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Stat
-            label="待审核"
-            value={pendingCount ?? '—'}
-            icon={ShieldCheck}
-            hint={pendingCount === 0 ? '暂时没有积压' : '需要你处理'}
-          />
-          <Stat
-            label="已通过"
-            value={approvedCount ?? '—'}
-            icon={CircleCheck}
-            hint="通过即已上架"
-          />
-          <Stat
-            label="已退回"
-            value={rejectedCount ?? '—'}
-            icon={CircleX}
-            hint="教师可修改后重提"
-          />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要:本页主体是提交记录,不是这三个数字(§6.5.3 第 ① 族) */}
+      <MetricStrip
+        label="审核积压摘要"
+        className="mb-5"
+        items={[
+          {
+            label: '待审核',
+            value: pendingCount ?? '—',
+            hint: pendingCount === 0 ? '暂时没有积压' : '需要你处理',
+          },
+          { label: '已通过', value: approvedCount ?? '—', hint: '通过即已上架' },
+          { label: '已退回', value: rejectedCount ?? '—', hint: '教师可修改后重提' },
+        ]}
+      />
 
       <PageSection
         title="提交记录"
         description="每一条对应一次场景包提交。四项自动校验全过才能通过审核。"
       >
         <div className="flex flex-col gap-4">
-          <FilterBar label="提交记录筛选">
+          {/* 数据区是一排 ReviewCard(已是抬起片),筛选走 bare 无底形态,避免片里套片(§6.5.2) */}
+          <FilterBar label="提交记录筛选" bare>
             <FilterField label="审核状态" group>
               <SegmentedControl
                 aria-label="按审核状态筛选"

@@ -9,7 +9,7 @@
 
 import { useCallback, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { Building, Cpu, Gauge, MemoryStick, Save } from 'lucide-react'
+import { Building, Gauge, Save } from 'lucide-react'
 import { TenantStatus, type SandboxQuota, type Tenant } from '@chaimir/api-client'
 import {
   Badge,
@@ -22,11 +22,12 @@ import {
   DescriptionList,
   FormField,
   Input,
+  MetricStrip,
+  ObjectIdentity,
   PageHeader,
   PageScaffold,
   PageSection,
   Skeleton,
-  Stat,
   StatusIndicator,
   toast,
 } from '@chaimir/ui'
@@ -59,23 +60,18 @@ export default function PlatformSchoolDetailPage() {
 
   return (
     <PageScaffold>
+      {/*
+        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的学校名承担,
+        故页面头只出面包屑,末节到「学校管理」为止(§6.5.0 通则 1)。
+      */}
       <PageHeader
         kicker={
           <Breadcrumb
             items={[
               { label: '租户' },
               { label: '学校管理', href: '/platform-admin/schools' },
-              { label: tenant.data ? tenant.data.display_name || tenant.data.name : '学校详情' },
             ]}
           />
-        }
-        title={tenant.data ? tenant.data.display_name || tenant.data.name : '学校详情'}
-        description="这所学校的开通信息与沙箱资源配额。展示配置由该校管理员自行维护,平台端只读。"
-        icon={Building}
-        actions={
-          <Button variant="outline" onClick={() => navigate('/platform-admin/schools')}>
-            返回学校列表
-          </Button>
         }
       />
 
@@ -91,7 +87,7 @@ export default function PlatformSchoolDetailPage() {
           </div>
         }
       >
-        {(data) => <SchoolOverview tenant={data} />}
+        {(data) => <SchoolOverview tenant={data} onBack={() => navigate('/platform-admin/schools')} />}
       </ResourceState>
 
       <QuotaSection tenantId={tenantId} />
@@ -100,30 +96,51 @@ export default function PlatformSchoolDetailPage() {
 }
 
 /**
- * SchoolOverview 渲染学校的开通信息与当前配置快照。
+ * SchoolOverview 渲染学校的对象身份区与开通信息属性表。
  */
-function SchoolOverview({ tenant }: { tenant: Tenant }) {
+function SchoolOverview({ tenant, onBack }: { tenant: Tenant; onBack: () => void }) {
   return (
     <>
-      {/* 状态、到期与部署形态都是租户静态属性,归入开通信息属性表,不占指标位(规范 §6.5) */}
+      {/*
+        对象身份区:学校名 + 服务状态 + 关键属性横排。
+        状态、到期与部署形态都是租户静态属性,横排在这里;其余属性下沉到开通信息表(§6.5.3 第 ④)。
+      */}
+      <ObjectIdentity
+        name={tenant.display_name || tenant.name}
+        status={
+          <StatusIndicator
+            tone={tenantStatusTone(tenant.status)}
+            label={tenantStatusLabel(tenant.status)}
+          />
+        }
+        subtitle={
+          tenant.display_name
+            ? `学校全名 ${tenant.name} · 短名 ${tenant.code}`
+            : `短名 ${tenant.code}(未设置对外显示名)`
+        }
+        actions={
+          <Button variant="outline" onClick={onBack}>
+            返回学校列表
+          </Button>
+        }
+        properties={[
+          { label: '部署形态', value: deployModeLabel(tenant.deploy_mode) },
+          { label: '登录方式', value: authModeLabel(tenant.auth_mode) },
+          {
+            label: '服务到期',
+            value: tenant.expire_at ? formatDate(tenant.expire_at) : '不限期',
+          },
+          { label: '激活码开通', value: tenant.enable_activation_code ? '已启用' : '已关闭' },
+          { label: '开通时间', value: formatDate(tenant.created_at) },
+        ]}
+      />
+
       <PageSection
         title="开通信息"
-        description="学校短名在开通时确定,不能修改;状态与到期时间在学校列表页调整。"
+        description="学校短名在开通时确定,不能修改;状态与到期时间在学校列表页调整。展示配置由该校管理员自行维护,平台端只读。"
+        className="mt-6"
       >
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h3 className="text-base font-semibold text-ink">{tenant.name}</h3>
-              <p className="mt-0.5 text-sm text-ink-sub">
-                {tenant.display_name ? `对外显示为「${tenant.display_name}」` : '未设置对外显示名'}
-              </p>
-            </div>
-            <StatusIndicator
-              tone={tenantStatusTone(tenant.status)}
-              label={tenantStatusLabel(tenant.status)}
-            />
-          </div>
-
+        <div className="flex flex-col gap-4 rounded-lg bg-surface p-5 shadow-xs">
           <DescriptionList
             columns={2}
             items={[
@@ -139,13 +156,6 @@ function SchoolOverview({ tenant }: { tenant: Tenant }) {
                 description: tenant.expire_at
                   ? `${formatDate(tenant.expire_at)} 到期后自动停止服务`
                   : '不限期',
-              },
-              { term: '部署形态', description: deployModeLabel(tenant.deploy_mode) },
-              { term: '学校短名', description: tenant.code, mono: true },
-              { term: '登录方式', description: authModeLabel(tenant.auth_mode) },
-              {
-                term: '激活码开通',
-                description: tenant.enable_activation_code ? '已启用' : '已关闭',
               },
               { term: '开通时间', description: formatDateTime(tenant.created_at), mono: true },
               { term: '最近更新', description: formatDateTime(tenant.updated_at), mono: true },
@@ -320,16 +330,19 @@ function QuotaForm({ quota, tenantId, onSaved }: QuotaFormProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Stat
-          label="当前活跃实验环境"
-          value={quota.active_sandbox_count ?? 0}
-          icon={Cpu}
-          hint={`并发上限 ${quota.max_concurrent_sandbox}`}
-        />
-        <Stat label="CPU 上限" value={`${quota.max_cpu} 核`} icon={Cpu} />
-        <Stat label="内存上限" value={`${quota.max_memory_mb} MB`} icon={MemoryStick} />
-      </div>
+      {/* 配额现状降为内联摘要:本区块的主体是下面那张可改的表单,不是三个只读数字(§6.5.3 第 ③ 族) */}
+      <MetricStrip
+        label="配额现状摘要"
+        items={[
+          {
+            label: '当前活跃实验环境',
+            value: quota.active_sandbox_count ?? 0,
+            hint: `并发上限 ${quota.max_concurrent_sandbox}`,
+          },
+          { label: 'CPU 上限', value: `${quota.max_cpu} 核`, hint: '全校沙箱合计' },
+          { label: '内存上限', value: `${quota.max_memory_mb} MB`, hint: '全校沙箱合计' },
+        ]}
+      />
 
       <Card>
         <CardHeader

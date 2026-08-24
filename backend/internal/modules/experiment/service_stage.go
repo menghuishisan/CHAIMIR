@@ -86,6 +86,9 @@ func (s *Service) ActivateStage(ctx context.Context, instanceID int64, stageNo i
 			duplicateActivation = true
 			return nil
 		}
+		if err := s.reconcileCreatedResourceAuthorizations(ctx, tx, latest, sandboxes, simRefs); err != nil {
+			return err
+		}
 		latest.SandboxRefs = append(latest.SandboxRefs, sandboxes...)
 		latest.SimSessionRefs = append(latest.SimSessionRefs, simRefs...)
 		inst, err = tx.UpdateInstanceResources(ctx, id.TenantID, latest.ID, latest.SandboxRefs, latest.SimSessionRefs, InstanceStatusRunning)
@@ -108,8 +111,50 @@ func (s *Service) ActivateStage(ctx context.Context, instanceID int64, stageNo i
 	return instanceDTOFromModel(inst, checkpointDefaults(exp, checkpoints), stageDTOs(exp, inst, checkpoints)), nil
 }
 
+// reconcileCreatedResourceAuthorizations 在实例引用落库前锁住小组并读取最新成员。
+// 创建阶段先并发建资源,这里是最终一致性的闸门:成员变更与资源引用写入按同一小组行串行,
+// 从而不会把一个已创建但仍带旧成员快照的沙箱或仿真会话写进共享实例。
+func (s *Service) reconcileCreatedResourceAuthorizations(ctx context.Context, tx TxStore, inst ExperimentInstance, sandboxes []SandboxRef, sims []SimSessionRef) error {
+	if inst.GroupID <= 0 {
+		return nil
+	}
+	group, err := tx.GetGroupForUpdate(ctx, inst.TenantID, inst.GroupID)
+	if err != nil {
+		return err
+	}
+	if group.ExperimentID != inst.ExperimentID {
+		return apperr.ErrExperimentGroupInvalid
+	}
+	members, err := tx.ListGroupMembers(ctx, inst.TenantID, inst.GroupID)
+	if err != nil {
+		return err
+	}
+	accountIDs := groupMemberAccountIDs(members)
+	for _, ref := range sandboxes {
+		if s.sandbox == nil {
+			return apperr.ErrExperimentSandboxUnavailable
+		}
+		if err := s.sandbox.UpdateSandboxAuthorizedAccounts(ctx, contracts.SandboxAuthorizedAccountsRequest{TenantID: inst.TenantID, SandboxID: ref.SandboxID.Int64(), SourceRef: inst.SourceRef, AuthorizedAccountIDs: accountIDs}); err != nil {
+			return apperr.ErrExperimentSandboxUnavailable.WithCause(err)
+		}
+	}
+	for _, ref := range sims {
+		if s.sim == nil {
+			return apperr.ErrExperimentSimUnavailable
+		}
+		if err := s.sim.UpdateSessionAuthorizedAccounts(ctx, contracts.SimAuthorizedAccountsRequest{TenantID: inst.TenantID, SessionID: ref.SessionID.Int64(), SourceRef: inst.SourceRef, AuthorizedAccountIDs: accountIDs}); err != nil {
+			return apperr.ErrExperimentSimUnavailable.WithCause(err)
+		}
+	}
+	return nil
+}
+
 // createEngineResourcesForStage 并发创建单个阶段内的 M2/M4 资源。
 func (s *Service) createEngineResourcesForStage(ctx context.Context, inst ExperimentInstance, stageNo int32, envs []EnvComponent, sims []SimComponent) ([]SandboxRef, []SimSessionRef, error) {
+	authorizedAccountIDs, err := s.instanceAuthorizedAccountIDs(ctx, inst)
+	if err != nil {
+		return nil, nil, err
+	}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	var firstErr error
@@ -134,7 +179,8 @@ func (s *Service) createEngineResourcesForStage(ctx context.Context, inst Experi
 				setErr(apperr.ErrExperimentSandboxUnavailable)
 				return
 			}
-			info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: inst.TenantID, RuntimeCode: env.RuntimeCode, RuntimeImageVersion: env.RuntimeImageVersion, ToolCodes: env.Tools, InitCodeRef: env.InitCodeRef, InitScriptRef: env.InitScriptRef, OwnerAccountID: inst.OwnerAccountID, SourceRef: inst.SourceRef, KeepAlive: env.KeepAlive, SnapshotEnabled: env.SnapshotEnabled, KeepAliveMinutes: env.KeepAliveMinutes, SnapshotRetentionMinutes: env.SnapshotRetentionMinutes})
+			snapshot := env.CompositionSnapshot
+			info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: inst.TenantID, CompositionSnapshot: snapshot, InitCodeRef: env.InitCodeRef, InitScriptRef: env.InitScriptRef, OwnerAccountID: inst.OwnerAccountID, AuthorizedAccountIDs: authorizedAccountIDs, SourceRef: inst.SourceRef, ScopeRef: inst.ScopeRef, KeepAlive: env.KeepAlive, SnapshotEnabled: env.SnapshotEnabled, KeepAliveMinutes: env.KeepAliveMinutes, SnapshotRetentionMinutes: env.SnapshotRetentionMinutes})
 			if err != nil {
 				setErr(apperr.ErrExperimentSandboxUnavailable.WithCause(err))
 				return
@@ -155,7 +201,7 @@ func (s *Service) createEngineResourcesForStage(ctx context.Context, inst Experi
 				setErr(apperr.ErrExperimentSimUnavailable)
 				return
 			}
-			info, err := s.sim.CreateSession(ctx, contracts.SimCreateSessionRequest{TenantID: inst.TenantID, PackageCode: sim.PackageCode, Version: sim.Version, Seed: sim.Seed, InitParams: sim.Params, OwnerAccountID: inst.OwnerAccountID, SourceRef: inst.SourceRef})
+			info, err := s.sim.CreateSession(ctx, contracts.SimCreateSessionRequest{TenantID: inst.TenantID, PackageCode: sim.PackageCode, Version: sim.Version, Seed: sim.Seed, InitParams: sim.Params, OwnerAccountID: inst.OwnerAccountID, AuthorizedAccountIDs: authorizedAccountIDs, SourceRef: inst.SourceRef, ScopeRef: inst.ScopeRef})
 			if err != nil {
 				setErr(apperr.ErrExperimentSimUnavailable.WithCause(err))
 				return
@@ -175,6 +221,31 @@ func (s *Service) createEngineResourcesForStage(ctx context.Context, inst Experi
 		return nil, nil, firstErr
 	}
 	return sandboxes, simRefs, nil
+}
+
+// instanceAuthorizedAccountIDs 在创建阶段资源前固定小组账号集合,避免各环境并发读取出不同授权快照。
+func (s *Service) instanceAuthorizedAccountIDs(ctx context.Context, inst ExperimentInstance) ([]int64, error) {
+	if inst.GroupID <= 0 {
+		return nil, nil
+	}
+	var members []GroupMember
+	if err := s.store.TenantTx(ctx, inst.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		members, err = tx.ListGroupMembers(ctx, inst.TenantID, inst.GroupID)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	return groupMemberAccountIDs(members), nil
+}
+
+// groupMemberAccountIDs 把 M7 成员模型投影为 M2 稳定契约需要的账号列表。
+func groupMemberAccountIDs(members []GroupMember) []int64 {
+	out := make([]int64, 0, len(members))
+	for _, member := range members {
+		out = append(out, member.StudentID)
+	}
+	return out
 }
 
 // createInitialEngineResources 创建实例启动时应立即可用的资源。

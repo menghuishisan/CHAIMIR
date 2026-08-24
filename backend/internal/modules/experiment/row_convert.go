@@ -26,51 +26,56 @@ func experimentFromRow(row sqlcgen.Experiment) (Experiment, error) {
 
 // instanceFromCreateRow 转换创建实例返回行。
 func instanceFromCreateRow(row sqlcgen.CreateExperimentInstanceRow) (ExperimentInstance, error) {
-	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
 // instanceFromGetRow 转换查询实例返回行。
 func instanceFromGetRow(row sqlcgen.GetExperimentInstanceRow) (ExperimentInstance, error) {
-	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
 // instanceFromForUpdateRow 转换锁定读取实例返回行。
 func instanceFromForUpdateRow(row sqlcgen.GetExperimentInstanceForUpdateRow) (ExperimentInstance, error) {
-	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
 // instanceFromSourceRefRow 转换按 source_ref 查询实例返回行。
 func instanceFromSourceRefRow(row sqlcgen.GetExperimentInstanceBySourceRefRow) (ExperimentInstance, error) {
-	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
 // instanceFromUpdateResourcesRow 转换资源更新返回行。
 func instanceFromUpdateResourcesRow(row sqlcgen.UpdateInstanceResourcesRow) (ExperimentInstance, error) {
-	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
 // instanceFromStatusRow 转换状态更新返回行。
 func instanceFromStatusRow(row sqlcgen.SetInstanceStatusRow) (ExperimentInstance, error) {
-	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
 // instanceFromFinishRow 转换完成实例返回行。
 func instanceFromFinishRow(row sqlcgen.FinishExperimentInstanceRow) (ExperimentInstance, error) {
-	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
 // instanceFromRecycleRow 转换后台回收认领行。
 func instanceFromRecycleRow(row sqlcgen.ClaimRecyclableInstancesAcrossTenantsRow) (ExperimentInstance, error) {
-	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
 // instanceFromCourseRow 转换按课程查出的实例行,供课程结束级联回收使用。
 func instanceFromCourseRow(row sqlcgen.ListLiveInstancesByCourseRow) (ExperimentInstance, error) {
-	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+}
+
+// instanceFromTeacherRow 转换教师监控列表实例行。
+func instanceFromTeacherRow(row sqlcgen.ListTeacherInstancesRow) (ExperimentInstance, error) {
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
 // instanceFromFields 汇总实例行字段并解析资源引用 JSON。
-func instanceFromFields(id, tenantID, experimentID, ownerAccountID int64, groupID pgtype.Int8, sourceRef string, sandboxRaw, simRaw []byte, status int16, score float64, startedAt, finishedAt, lastActiveAt pgtype.Timestamptz) (ExperimentInstance, error) {
+func instanceFromFields(id, tenantID, experimentID, ownerAccountID int64, groupID pgtype.Int8, sourceRef, scopeRef string, sandboxRaw, simRaw []byte, status int16, score float64, startedAt, finishedAt, lastActiveAt pgtype.Timestamptz) (ExperimentInstance, error) {
 	sandboxes, err := decodeSandboxRefs(sandboxRaw)
 	if err != nil {
 		return ExperimentInstance{}, err
@@ -79,7 +84,7 @@ func instanceFromFields(id, tenantID, experimentID, ownerAccountID int64, groupI
 	if err != nil {
 		return ExperimentInstance{}, err
 	}
-	return ExperimentInstance{ID: id, TenantID: tenantID, ExperimentID: experimentID, OwnerAccountID: ownerAccountID, GroupID: pgtypex.Int8Value(groupID), SourceRef: sourceRef, SandboxRefs: sandboxes, SimSessionRefs: sims, Status: status, Score: score, StartedAt: timex.FromTimestamptz(startedAt), FinishedAt: timex.FromTimestamptz(finishedAt), LastActiveAt: timex.FromTimestamptz(lastActiveAt)}, nil
+	return ExperimentInstance{ID: id, TenantID: tenantID, ExperimentID: experimentID, OwnerAccountID: ownerAccountID, GroupID: pgtypex.Int8Value(groupID), SourceRef: sourceRef, ScopeRef: scopeRef, SandboxRefs: sandboxes, SimSessionRefs: sims, Status: status, Score: score, StartedAt: timex.FromTimestamptz(startedAt), FinishedAt: timex.FromTimestamptz(finishedAt), LastActiveAt: timex.FromTimestamptz(lastActiveAt)}, nil
 }
 
 // groupFromRows 组合小组和成员列表。
@@ -168,6 +173,11 @@ func decodeComponentConfig(raw []byte) (ComponentConfig, error) {
 	}
 	if out.Stages == nil {
 		out.Stages = []StageConfig{}
+	}
+	for _, env := range out.Envs {
+		if err := validatePersistedCompositionSnapshot(env); err != nil {
+			return ComponentConfig{}, apperr.ErrExperimentInvalid.WithCause(err)
+		}
 	}
 	return out, nil
 }

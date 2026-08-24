@@ -4,7 +4,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$FragmentsPath,
     [string]$DigestLockPath = "",
-    [string[]]$OverlayPaths = @(),
+    [string[]]$KustomizePaths = @(),
     [string[]]$EnvPaths = @(),
     [string]$SimAdapterEnvKey = "SIM_BACKEND_STDIO_ADAPTERS_JSON",
     [string[]]$AttestationEnvPaths = @(),
@@ -21,12 +21,10 @@ Import-Module (Join-Path $PSScriptRoot "lib\ImageMetadata.psm1") -Force
 if ([string]::IsNullOrWhiteSpace($DigestLockPath)) {
     $DigestLockPath = Join-Path $RepoRoot "images\image-digests.lock"
 }
-if ($OverlayPaths.Count -eq 0) {
-    $OverlayPaths = @(
-        (Join-Path $RepoRoot "deploy\overlays\acceptance\kustomization.yaml"),
-        (Join-Path $RepoRoot "deploy\overlays\staging\kustomization.yaml"),
-        (Join-Path $RepoRoot "deploy\overlays\prod-saas\kustomization.yaml"),
-        (Join-Path $RepoRoot "deploy\overlays\prod-school\kustomization.yaml")
+if ($KustomizePaths.Count -eq 0) {
+    $KustomizePaths = @(
+        (Join-Path $RepoRoot "deploy\base\kustomization.yaml"),
+        (Join-Path $RepoRoot "deploy\components\middleware\kustomization.yaml")
     )
 }
 if ($EnvPaths.Count -eq 0) {
@@ -97,7 +95,7 @@ function Get-KustomizeLogicalImage {
     return $suffix
 }
 
-# Update-KustomizeDigests 更新所有部署 overlay 的 images 条目,确保各环境只引用同一份 digest 锁。
+# Update-KustomizeDigests 更新资源所属 Kustomize 层的 images 条目,overlay 不复制 digest。
 function Update-KustomizeDigests {
     param(
         [string]$Path,
@@ -340,8 +338,8 @@ foreach ($image in $fragments.Keys) {
 }
 
 Write-ChaimirDigestLock -Path $DigestLockPath -Items $merged
-foreach ($overlayPath in $OverlayPaths) {
-    Update-KustomizeDigests -Path $overlayPath -Digests $merged
+foreach ($kustomizePath in $KustomizePaths) {
+    Update-KustomizeDigests -Path $kustomizePath -Digests $merged
 }
 foreach ($envPath in $EnvPaths) {
     Update-SimAdapterDigests -Path $envPath -Key $SimAdapterEnvKey -Digests $merged

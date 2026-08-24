@@ -161,6 +161,9 @@ func (s *Service) SyncVulnSource(ctx context.Context, sourceID int64) ([]VulnPro
 	var problems []VulnProblem
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		for _, item := range cases {
+			if !validateVulnDraftBody(item.DraftBody) {
+				return apperr.ErrContestVulnProblemInvalid
+			}
 			if item.Level == 0 {
 				item.Level = source.DefaultLevel
 			}
@@ -215,7 +218,7 @@ func (s *Service) ImportVulnProblem(ctx context.Context, req ImportVulnProblemRe
 }
 
 // ListVulnProblems 查询漏洞题草稿分页列表。
-func (s *Service) ListVulnProblems(ctx context.Context, sourceID int64, status int16, page, size int) ([]VulnProblemDTO, int64, int, int, error) {
+func (s *Service) ListVulnProblems(ctx context.Context, sourceID int64, status, prevalidateStatus int16, page, size int) ([]VulnProblemDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return nil, 0, page, size, err
@@ -225,7 +228,7 @@ func (s *Service) ListVulnProblems(ctx context.Context, sourceID int64, status i
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, total, err = tx.ListVulnProblems(ctx, id.TenantID, sourceID, status, page, size)
+		items, total, err = tx.ListVulnProblems(ctx, id.TenantID, sourceID, status, prevalidateStatus, page, size)
 		return err
 	}); err != nil {
 		return nil, 0, page, size, err
@@ -255,11 +258,25 @@ func (s *Service) SetVulnPrevalidate(ctx context.Context, problemID int64, req P
 	}); err != nil {
 		return VulnProblemDTO{}, err
 	}
-	status, detail := s.runVulnPrevalidation(ctx, id.TenantID, id.AccountID, current, req)
+	lockedSpec := req.Composition
+	lockedSpec.ID = fmt.Sprintf("contest:%04d:vuln:%s", timex.Now().Year(), ids.Format(problemID))
+	snapshot, err := s.sandbox.CompileSandboxComposition(ctx, id.TenantID, lockedSpec)
+	if err != nil {
+		return VulnProblemDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	status, detail := s.runVulnPrevalidation(ctx, id.TenantID, id.AccountID, current, req, snapshot)
+	digest := ""
+	var storedSnapshot *contracts.SandboxCompositionSnapshot
+	initCodeRef, initScriptRef := "", ""
+	if status == VulnPrevalidatePassed {
+		digest = snapshot.Digest
+		storedSnapshot = &snapshot
+		initCodeRef, initScriptRef = req.InitCodeRef, req.InitScriptRef
+	}
 	var item VulnProblem
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		item, err = tx.SetVulnProblemPrevalidate(ctx, id.TenantID, problemID, status, detail)
+		item, err = tx.SetVulnProblemPrevalidate(ctx, id.TenantID, problemID, status, detail, digest, storedSnapshot, initCodeRef, initScriptRef)
 		return err
 	}); err != nil {
 		return VulnProblemDTO{}, err
@@ -290,17 +307,41 @@ func (s *Service) FinalizeVulnProblem(ctx context.Context, problemID int64) (Vul
 	if item.Status != VulnProblemStatusDraft {
 		return VulnProblemDTO{}, apperr.ErrContestVulnPrevalidateFailed
 	}
+	if item.CompositionSnapshot == nil || item.CompositionDigest == "" {
+		return VulnProblemDTO{}, apperr.ErrContestVulnPrevalidateFailed
+	}
+	body, err := jsonx.CloneObjectStrict(item.DraftBody)
+	if err != nil {
+		return VulnProblemDTO{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
+	}
+	body["composition"] = item.CompositionSnapshot.Spec
+	body["init_code_ref"] = item.InitCodeRef
+	body["init_script_ref"] = item.InitScriptRef
+	judgeConfig, ok := body["judge_config"].(map[string]any)
+	if !ok {
+		return VulnProblemDTO{}, apperr.ErrContestVulnPrevalidateFailed
+	}
+	expectation, ok := judgeConfig["expectation"].(map[string]any)
+	if !ok {
+		expectation = map[string]any{}
+	}
+	chainSteps := append([]any{}, jsonx.SliceFromAny(body["init_steps"])...)
+	chainSteps = append(chainSteps, jsonx.SliceFromAny(body["positive_steps"])...)
+	expectation["chain_steps"] = chainSteps
+	expectation["assertions"] = jsonx.SliceFromAny(body["assertions"])
+	judgeConfig["expectation"] = expectation
+	body["judge_config"] = judgeConfig
 	importCtx, err := auth.WithServiceIdentity(ctx, id.TenantID, fmt.Sprintf("contest:%04d:vuln-finalize:%s", timex.Now().Year(), ids.Format(item.ID)))
 	if err != nil {
 		return VulnProblemDTO{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
 	}
-	snapshot, err := s.contentImport.SystemImportContent(importCtx, contracts.ContentSystemImportRequest{TenantID: id.TenantID, Code: stableContestCode(item), Version: "1.0.0", Type: contentTypeContestProblem, Title: item.Title, Difficulty: contentDifficultyBasic, AuthorID: id.AccountID, AuthorType: contentAuthorExternal, Visibility: contentVisibilityTenant, Body: item.DraftBody, SensitiveFields: []string{"answer", "flag", "judge"}, AutoPublish: true, SystemImportNote: map[string]any{"source": "contest_vuln_problem", "vuln_problem_id": item.ID}})
+	contentSnapshot, err := s.contentImport.SystemImportContent(importCtx, contracts.ContentSystemImportRequest{TenantID: id.TenantID, Code: stableContestCode(item), Version: "1.0.0", Type: contentTypeContestProblem, Title: item.Title, Difficulty: contentDifficultyBasic, AuthorID: id.AccountID, AuthorType: contentAuthorExternal, Visibility: contentVisibilityTenant, Body: body, SensitiveFields: []string{"answer", "flag", "judge"}, AutoPublish: true, SystemImportNote: map[string]any{"source": "contest_vuln_problem", "vuln_problem_id": item.ID}})
 	if err != nil {
 		return VulnProblemDTO{}, apperr.ErrContestVulnFinalizeFailed.WithCause(err)
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		item, err = tx.FinalizeVulnProblem(ctx, id.TenantID, problemID, snapshot.ItemCode, snapshot.ItemVersion)
+		item, err = tx.FinalizeVulnProblem(ctx, id.TenantID, problemID, contentSnapshot.ItemCode, contentSnapshot.ItemVersion)
 		return err
 	}); err != nil {
 		return VulnProblemDTO{}, err
@@ -382,15 +423,15 @@ func (s *Service) fetchVulnCases(ctx context.Context, source VulnSource) ([]Vuln
 }
 
 // runVulnPrevalidation 在隔离沙箱中执行正向 PoC 与反向不误判验证。
-func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID int64, problem VulnProblem, req PrevalidateRequest) (int16, map[string]any) {
+func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID int64, problem VulnProblem, req PrevalidateRequest, snapshot contracts.SandboxCompositionSnapshot) (int16, map[string]any) {
 	detail := map[string]any{"positive": map[string]any{}, "negative": map[string]any{}}
-	positive, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, req, "positive", true)
+	positive, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, req, snapshot, "positive", true)
 	detail["positive"] = positive
 	if err != nil {
 		detail["error"] = safeDetailError(err)
 		return VulnPrevalidateFailed, detail
 	}
-	negative, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, req, "negative", false)
+	negative, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, req, snapshot, "negative", false)
 	detail["negative"] = negative
 	if err != nil {
 		detail["error"] = safeDetailError(err)
@@ -403,14 +444,14 @@ func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID 
 }
 
 // runVulnValidationCase 执行一条正向或反向预验证用例。
-func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID int64, problem VulnProblem, req PrevalidateRequest, phase string, positive bool) (result map[string]any, retErr error) {
+func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID int64, problem VulnProblem, req PrevalidateRequest, snapshot contracts.SandboxCompositionSnapshot, phase string, positive bool) (result map[string]any, retErr error) {
 	sourceRef := fmt.Sprintf("contest:%04d:vuln-prevalidate-%s:%s", timex.Now().Year(), phase, ids.Format(problem.ID))
-	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: tenantID, RuntimeCode: req.RuntimeCode, RuntimeImageVersion: req.RuntimeImageVersion, ToolCodes: req.ToolCodes, InitCodeRef: req.InitCodeRef, InitScriptRef: req.InitScriptRef, OwnerAccountID: accountID, SourceRef: sourceRef, KeepAlive: false, SnapshotEnabled: false})
+	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: tenantID, CompositionSnapshot: snapshot, InitCodeRef: req.InitCodeRef, InitScriptRef: req.InitScriptRef, OwnerAccountID: accountID, SourceRef: sourceRef, ScopeRef: sourceRef, KeepAlive: false, SnapshotEnabled: false})
 	if err != nil {
 		return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	defer func() {
-		if recycleErr := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: tenantID, SourceRef: sourceRef, Reason: "vuln_prevalidate"}); recycleErr != nil {
+		if recycleErr := s.sandbox.RecycleByScopeRef(ctx, contracts.SandboxRecycleRequest{TenantID: tenantID, ScopeRef: sourceRef, SourceRef: sourceRef, Reason: "vuln_prevalidate"}); recycleErr != nil {
 			if retErr != nil {
 				retErr = apperr.ErrContestSandboxUnavailable.WithCause(fmt.Errorf("漏洞预验证失败: %w; 回收沙箱失败: %v", retErr, recycleErr))
 				return

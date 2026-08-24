@@ -21,6 +21,13 @@ const DATE_TIME_FORMAT = new Intl.DateTimeFormat('zh-CN', {
   minute: '2-digit',
 })
 
+/** 时间流族的事件轴按天分组,左列只需时刻(规范 §6.5.3 第 ⑥ 族)。 */
+const TIME_FORMAT = new Intl.DateTimeFormat('zh-CN', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+})
+
 /** 时间解析失败时的用户向占位,不把原始值抛到界面上。 */
 const UNKNOWN_TIME = '时间未知'
 
@@ -38,6 +45,12 @@ export function formatShortDateTime(value: string): string {
 export function formatDate(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? UNKNOWN_TIME : DATE_FORMAT.format(date)
+}
+
+/** formatTime 只展示时刻(HH:mm),给按天分组的事件轴当左列用(§6.5.3 第 ⑥ 族)。 */
+export function formatTime(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? '—' : TIME_FORMAT.format(date)
 }
 
 /** formatDateTime 展示含年份的完整日期时间(截止时间、提交时刻等)。 */

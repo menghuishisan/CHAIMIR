@@ -60,7 +60,10 @@ type UploadPlan struct {
 
 // IssueDownloadGrantRequest 描述统一文件服务为某个对象引用签发短时下载授权所需参数。
 type IssueDownloadGrantRequest struct {
-	TenantID           int64
+	// TenantID 是当前下载者租户;消费时与会话身份严格一致。
+	TenantID int64
+	// ResourceTenantID 是对象归属租户,用于验证对象键前缀。
+	ResourceTenantID   int64
 	AccountID          int64
 	AllowPlatformScope bool
 	ObjectRef          string
@@ -189,6 +192,7 @@ func (s Service) IssueDownloadGrant(req IssueDownloadGrantRequest) (string, Down
 	}
 	grant, err := BuildDownloadGrant(DownloadGrantRequest{
 		TenantID:           req.TenantID,
+		ResourceTenantID:   req.ResourceTenantID,
 		AccountID:          req.AccountID,
 		AllowPlatformScope: req.AllowPlatformScope,
 		ObjectRef:          req.ObjectRef,

@@ -1,7 +1,9 @@
 // MainLayout 日常页壳层(FE-6 底层曝光系统的「光面态」):
-// 侧栏与顶栏直接生长在墨色底层上,内容区是浮起的宣纸光面(四周可见底层)。
+// 侧栏与顶栏直接生长在墨色底层上,内容区是浮起的宣纸光面。
+// 光面的缝只留在**导航侧**(顶与左,由 pane-frame 取 --pane-inset),右下出血到视口边缘;
+// 圆角只在左上角(radius-lg)、投影只从顶左透出 —— 四周等宽的缝会把内容读作「被装进一个容器」(规范 §1.2)。
 // 断点行为(§6.4):≥lg 侧栏常驻可折叠 220↔64;<lg 侧栏抽屉化(汉堡触发,遮罩层级高于侧栏,
-// Esc 与焦点陷阱由 Radix Dialog 保证);<md 光面内距与圆角归零走全宽。
+// Esc 与焦点陷阱由 Radix Dialog 保证);<md 缝与圆角归零走全宽。
 // 路由切换只动光面内容的 opacity/translateY,底层与导航保持静止(§4.4)。
 
 import { useCallback, useEffect, useState } from 'react'
@@ -140,6 +142,13 @@ export function MainLayout({ config }: MainLayoutProps) {
               <span className="truncate text-sm font-semibold text-on-dark">Chaimir</span>
             </span>
           ) : (
+            /*
+              宽屏顶栏左侧刻意留空,这是决定而不是遗漏:
+              页面标题与面包屑归光面里的 PageHeader,顶栏再放一遍就是把同一件事说两遍
+              (§6.5.0 通则 1);全站检索没有对应的后端能力,放一个搜不到东西的框更糟。
+              这段裸露的墨色底层正是 FE-6 的「三种状态共用同一世界」——
+              它是层次信号,不是待填的空位,不得为填满而加装饰或重复导航(§1.2)。
+            */
             <span className="flex-1" />
           )}
 
@@ -151,15 +160,15 @@ export function MainLayout({ config }: MainLayoutProps) {
           </div>
         </header>
 
-        {/* 光面外框:四周底层曝光(上右下 14px,左侧 8px 适度分离);<md 归零全宽 */}
-        <div className="flex min-h-0 flex-1 flex-col p-0 md:pb-3.5 md:pl-2 md:pr-3.5 md:pt-3.5">
+        {/* 光面外框:缝只在导航侧(顶与左),右下出血到视口边;<md 归零全宽 */}
+        <div className="pane-frame flex min-h-0 flex-1 flex-col">
           <main
             id="main-content"
             /* key 绑定路径:切页时重放入场动画,只动 opacity/translateY(§4.4) */
             key={location.pathname}
             className={cn(
               'flex min-h-0 flex-1 flex-col overflow-hidden bg-canvas',
-              'rounded-none md:rounded-pane md:shadow-pane',
+              'rounded-none md:rounded-tl-lg md:shadow-pane',
               'animate-pane-in',
             )}
           >

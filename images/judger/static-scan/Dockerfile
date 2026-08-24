@@ -13,7 +13,7 @@ LABEL org.opencontainers.image.title="judger/static-scan"
 LABEL org.opencontainers.image.description="Chaimir static scan judger image"
 
 USER root
-ADD https://binaries.soliditylang.org/linux-amd64/${SOLC_PATH} /usr/local/bin/solc-${SOLC_VERSION}
+ADD --checksum=sha256:d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef https://binaries.soliditylang.org/linux-amd64/${SOLC_PATH} /usr/local/bin/solc-${SOLC_VERSION}
 RUN for attempt in 1 2 3 4 5; do \
         if apk upgrade --no-cache --timeout 300; then break; fi; \
         if [ "$attempt" -eq 5 ]; then echo "apk upgrade failed after 5 attempts" >&2; exit 1; fi; \

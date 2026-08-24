@@ -15,7 +15,7 @@ import { useNavigate, useParams } from 'react-router'
 import { ClipboardList, FileText, Send } from 'lucide-react'
 import { GradingMode, type AssignmentDetail, type AssignmentItem } from '@chaimir/api-client'
 import {
-  Autosave,
+  AnchorNav,
   Badge,
   Breadcrumb,
   Button,
@@ -32,12 +32,11 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
-  PageBody,
   PageHeader,
   PageScaffold,
-  PageSection,
   RadioGroup,
   RadioItem,
+  StickySaveBar,
   Textarea,
   toast,
   type AutosaveState,
@@ -45,7 +44,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
-import { formatDateTime, formatRelativeDeadline } from '../../../../utils/formatters'
+import { formatDateTime, formatRelativeDeadline, formatTime } from '../../../../utils/formatters'
 import { contentDifficultyLabel } from '../../../../utils/labels/content'
 import { latePolicyLabel } from '../../../../utils/labels/teaching'
 import { errorDiagnostics, userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -137,6 +136,8 @@ function AssignmentForm({
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string>()
+  /** 已落库的作答快照:与当前作答逐题比对,得出「有几处改动未保存」 */
+  const [savedAnswers, setSavedAnswers] = useState<AnswerMap>(initialAnswers)
 
   // 未同步标记:只有真正改动过才写服务端,避免定时器空跑
   const dirtyRef = useRef(false)
@@ -154,6 +155,8 @@ function AssignmentForm({
     try {
       const result = await api.teaching.saveDraft(assignmentId, { content: answersRef.current })
       dirtyRef.current = false
+      // 快照与写回体取同一份引用:保存后「未保存改动数」必然归零,不会因异步竞态错算
+      setSavedAnswers(answersRef.current)
       setSavedAt(new Date(result.updated_at))
       setAutosaveState('saved')
     } catch (error) {
@@ -198,62 +201,125 @@ function AssignmentForm({
 
   const answeredCount = detail.items.filter((item) => (answers[item.id] ?? '').trim() !== '').length
 
+  /** 未保存改动数:逐题与已落库快照比对 —— 「改了 2 处」比「有改动」信息量更足(§6.5.3 第 ③ 族) */
+  const dirtyCount = useMemo(
+    () =>
+      detail.items.filter((item) => (answers[item.id] ?? '') !== (savedAnswers[item.id] ?? ''))
+        .length,
+    [answers, detail.items, savedAnswers],
+  )
+
+  /** 锚点导航项:每题一个分组,点了跳到那题(§6.5.3 第 ③ 族左侧锚点) */
+  const anchorItems = useMemo(
+    () =>
+      detail.items.map((item, index) => ({
+        id: `assignment-item-${item.id}`,
+        label: `第 ${index + 1} 题`,
+      })),
+    [detail.items],
+  )
+
   return (
     <>
+      {/*
+        归族:配置表单族(§6.5.3 第 ③)。本页主体是一批可改字段(逐题作答),
+        故走该族骨架:左侧题目锚点 + 右侧逐题表单 + 底部粘性保存条。
+        保存态常显是这一族的硬要求,也正是 FE-7 要的 —— 学生任何时候都能看到
+        「改了几处、存没存」,而不是把它藏在右栏、窄屏还要滚到最底才看见。
+      */}
       <PageHeader
         kicker={
           <Breadcrumb
             items={[
               { label: '我的课程', href: '/student/courses' },
               { label: '课程详情', href: `/student/courses/${courseId}` },
-              { label: assignment.title },
             ]}
           />
         }
         title={assignment.title}
         description="作答内容每分钟自动保存到服务器,刷新或换设备都能接着写。"
         icon={ClipboardList}
-        actions={<Badge tone={ASSIGNMENT_DUE_TONE[deadline.urgency]}>{deadline.text}</Badge>}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={ASSIGNMENT_DUE_TONE[deadline.urgency]}>{deadline.text}</Badge>
+            <Button
+              variant="ghost"
+              leftIcon={FileText}
+              onClick={() =>
+                navigate(`/student/courses/${courseId}/assignments/${assignmentId}/submissions`)
+              }
+            >
+              查看历次提交
+            </Button>
+          </div>
+        }
       />
 
-      <PageBody
-        rail={
-          <AssignmentRail
-            assignment={assignment}
-            answeredCount={answeredCount}
-            itemCount={detail.items.length}
-            autosaveState={autosaveState}
-            savedAt={savedAt}
-            submitError={submitError}
-            onSaveDraft={() => void saveDraft()}
-            onRequestSubmit={() => setConfirmOpen(true)}
-            onViewSubmissions={() =>
-              navigate(`/student/courses/${courseId}/assignments/${assignmentId}/submissions`)
+      {/*
+        只读的作业规则单独一块,不混在题目表单里(§6.5.3 第 ③:只读信息与可改字段分开)。
+        这里用抬起片而不是井:它直接落在光面上,而井只能出现在抬起片内部(§6.5.1 红线第 3 条)。
+      */}
+      <div className="mb-5 rounded-lg bg-surface p-4 shadow-xs">
+        <DescriptionList
+          dense
+          columns={3}
+          items={[
+            { term: '截止时间', description: formatDateTime(assignment.due_at), mono: true },
+            { term: '可提交次数', description: assignment.max_attempts, mono: true },
+            { term: '迟交规则', description: latePolicyLabel(assignment.late_policy) },
+          ]}
+        />
+      </div>
+
+      {hasProgrammingItem ? (
+        <Callout tone="info" title="这次作业含编程题" className="mb-5">
+          编程题需要在实验工作台的代码环境里完成并保存代码,再回到这里提交。
+        </Callout>
+      ) : null}
+
+      <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
+        <div className="min-w-0 lg:w-48 lg:shrink-0">
+          <AnchorNav label="作业题目" items={anchorItems} />
+        </div>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          {detail.items.map((item, index) => (
+            <AssignmentItemCard
+              key={item.id}
+              item={item}
+              seq={index + 1}
+              value={answers[item.id] ?? ''}
+              onChange={(value) => updateAnswer(item.id, value)}
+              onBlur={() => void saveDraft()}
+            />
+          ))}
+
+          {autosaveState === 'error' ? (
+            <Callout tone="danger" title="作答还没有保存到服务器">
+              请点「立即保存」重试,或稍后再试;这段时间请不要关闭页面。
+            </Callout>
+          ) : null}
+          {submitError ? <Callout tone="danger">{submitError}</Callout> : null}
+
+          <StickySaveBar
+            dirtyCount={dirtyCount}
+            saving={autosaveState === 'saving'}
+            hint={`已作答 ${answeredCount} / ${detail.items.length} 题${
+              savedAt ? ` · 上次保存 ${formatTime(savedAt.toISOString())}` : ''
+            }`}
+            saveAction={
+              <>
+                <Button variant="outline" onClick={() => void saveDraft()}>
+                  立即保存
+                </Button>
+                <Button variant="seal" leftIcon={Send} onClick={() => setConfirmOpen(true)}>
+                  提交作业
+                </Button>
+              </>
             }
           />
-        }
-      >
-        {hasProgrammingItem ? (
-          <Callout tone="info" title="这次作业含编程题" className="mb-6">
-            编程题需要在实验工作台的代码环境里完成并保存代码,再回到这里提交。
-          </Callout>
-        ) : null}
-
-        <PageSection title="题目" description={`共 ${detail.items.length} 题`}>
-          <div className="flex flex-col gap-4">
-            {detail.items.map((item, index) => (
-              <AssignmentItemCard
-                key={item.id}
-                item={item}
-                seq={index + 1}
-                value={answers[item.id] ?? ''}
-                onChange={(value) => updateAnswer(item.id, value)}
-                onBlur={() => void saveDraft()}
-              />
-            ))}
-          </div>
-        </PageSection>
-      </PageBody>
+        </div>
+      </div>
 
       <Modal open={confirmOpen} onOpenChange={setConfirmOpen}>
         <ModalContent size="sm">
@@ -309,7 +375,8 @@ function AssignmentItemCard({ item, seq, value, onChange, onBlur }: AssignmentIt
   const choices = itemChoices(item)
 
   return (
-    <Card>
+    // id 供左侧锚点跳转;scroll-mt 让跳转后标题不被吸顶的顶栏盖住
+    <Card id={`assignment-item-${item.id}`} className="scroll-mt-20">
       <CardHeader
         title={
           <span className="flex flex-wrap items-center gap-2">
@@ -367,75 +434,5 @@ function AssignmentItemCard({ item, seq, value, onChange, onBlur }: AssignmentIt
         )}
       </CardBody>
     </Card>
-  )
-}
-
-interface AssignmentRailProps {
-  assignment: AssignmentDetail['assignment']
-  answeredCount: number
-  itemCount: number
-  autosaveState: AutosaveState
-  savedAt: Date | undefined
-  submitError: string | undefined
-  onSaveDraft: () => void
-  onRequestSubmit: () => void
-  onViewSubmissions: () => void
-}
-
-/**
- * AssignmentRail 是右侧动作区:作业档案 + 保存状态 + 提交入口。
- */
-function AssignmentRail({
-  assignment,
-  answeredCount,
-  itemCount,
-  autosaveState,
-  savedAt,
-  submitError,
-  onSaveDraft,
-  onRequestSubmit,
-  onViewSubmissions,
-}: AssignmentRailProps) {
-  const items = useMemo(
-    () => [
-      { term: '截止时间', description: formatDateTime(assignment.due_at), mono: true },
-      { term: '可提交次数', description: assignment.max_attempts, mono: true },
-      { term: '迟交规则', description: latePolicyLabel(assignment.late_policy) },
-      { term: '已作答', description: `${answeredCount} / ${itemCount}`, mono: true },
-    ],
-    [answeredCount, assignment.due_at, assignment.late_policy, assignment.max_attempts, itemCount],
-  )
-
-  return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader title="作业信息" />
-        <CardBody className="flex flex-col gap-4">
-          <DescriptionList dense items={items} />
-          <Autosave state={autosaveState} savedAt={savedAt} onRetry={onSaveDraft} />
-          {autosaveState === 'error' ? (
-            <Callout tone="danger">
-              作答内容还没有保存到服务器,请点击「重试」或稍后再试;这段时间请不要关闭页面。
-            </Callout>
-          ) : null}
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader title="提交作答" description="提交后进入批改流程,可提交次数会减少一次。" />
-        <CardBody className="flex flex-col gap-3">
-          {submitError ? <Callout tone="danger">{submitError}</Callout> : null}
-          <Button variant="outline" onClick={onSaveDraft}>
-            立即保存草稿
-          </Button>
-          <Button variant="seal" leftIcon={Send} onClick={onRequestSubmit}>
-            提交作业
-          </Button>
-          <Button variant="ghost" leftIcon={FileText} onClick={onViewSubmissions}>
-            查看历次提交
-          </Button>
-        </CardBody>
-      </Card>
-    </div>
   )
 }

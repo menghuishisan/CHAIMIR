@@ -127,10 +127,11 @@ export default function SsoCallbackPage() {
       <div className="w-full max-w-sm">
         <AuthHeading title="学校统一认证" description={`学校代号 ${tenantCode}`} />
 
-        {/* 主通路是去学校的认证系统:这是一次离站导航,不是本页表单的提交 */}
+        {/* 主通路是去学校的认证系统:这是一次离站导航,不是本页表单的提交。
+            用玉不用朱砂 —— 认证页的主 CTA 是全页最大色块,朱砂只留给品牌章与落印(§1.2) */}
         <Button
           type="button"
-          variant="seal"
+          variant="primary"
           size="lg"
           loading={redirecting}
           onClick={handleCasRedirect}

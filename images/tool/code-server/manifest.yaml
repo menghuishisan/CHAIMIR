@@ -1,4 +1,4 @@
-# 本文件声明 tool/code-server 镜像的职责、端口、安全、资源和供应链约束。
+﻿# 本文件声明 tool/code-server 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: tool
 name: code-server
@@ -30,10 +30,16 @@ upstream:
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
-  - web-ide
-  - code-editing
-  - git-client
-  - dependency-download
+  provides:
+    - web-ide
+    - code-editing
+    - git-client
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: public
 tool:
   kind: web-embed
   eco_tags:

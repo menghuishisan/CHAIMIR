@@ -50,6 +50,8 @@ const (
 	CodeExperimentRoleInvalid = "73004"
 	// CodeExperimentGroupFull 表示协作小组人数已达到上限。
 	CodeExperimentGroupFull = "73005"
+	// CodeExperimentGroupOwnerLocked 表示共享实例发起人在实例生命周期内不能被移除。
+	CodeExperimentGroupOwnerLocked = "73006"
 )
 
 const (
@@ -114,6 +116,8 @@ var (
 	ErrExperimentRoleInvalid = New(CodeExperimentRoleInvalid, "实验角色设置不正确")
 	// ErrExperimentGroupFull 表示协作小组人数已达到上限。
 	ErrExperimentGroupFull = New(CodeExperimentGroupFull, "实验小组人数已达到上限")
+	// ErrExperimentGroupOwnerLocked 表示实例 owner 仍承担不可撤销的资源权限。
+	ErrExperimentGroupOwnerLocked = New(CodeExperimentGroupOwnerLocked, "该成员是当前共享实验环境的发起人,请先结束并回收环境后再移除")
 	// ErrExperimentCheckpointInvalid 表示检查点请求非法。
 	ErrExperimentCheckpointInvalid = New(CodeExperimentCheckpointInvalid, "检查点信息不正确")
 	// ErrExperimentJudgeUnavailable 表示判分暂不可用。

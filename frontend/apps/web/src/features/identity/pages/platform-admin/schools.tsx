@@ -9,18 +9,20 @@
 
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Building, CalendarClock, CircleSlash, Search, ShieldCheck } from 'lucide-react'
+import { Building, CircleSlash, Search, ShieldCheck } from 'lucide-react'
 import { TenantStatus, type Tenant } from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
   Button,
   Callout,
+  DataPanel,
   DescriptionList,
   FilterBar,
   FilterField,
   FormField,
   Input,
+  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -30,11 +32,9 @@ import {
   ModalTitle,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
   Select,
-  Stat,
   StatusIndicator,
   Table,
   toast,
@@ -177,26 +177,28 @@ export default function PlatformSchoolsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '租户' }, { label: '学校管理' }]} />}
+        kicker={<Breadcrumb items={[{ label: '租户' }]} />}
         title="学校管理"
         description="平台上已开通的学校。停用与到期会立即影响该校师生登录,调整前请确认。"
         icon={Building}
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="学校总数" value={totalCount ?? '—'} icon={Building} hint="不受下方筛选影响" />
-          <Stat label="正常使用" value={activeCount ?? '—'} icon={ShieldCheck} />
-          <Stat label="已停用" value={disabledCount ?? '—'} icon={Building} hint="该校师生无法登录" />
-          <Stat label="已到期" value={expiredCount ?? '—'} icon={CalendarClock} hint="需要关注续期" />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是学校列表 */}
+      <MetricStrip
+        label="学校总量摘要"
+        className="mb-5"
+        items={[
+          { label: '学校总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
+          { label: '正常使用', value: activeCount ?? '—', hint: '师生可正常登录' },
+          { label: '已停用', value: disabledCount ?? '—', hint: '该校师生无法登录' },
+          { label: '已到期', value: expiredCount ?? '—', hint: '需要关注续期' },
+        ]}
+      />
 
-      <PageSection
-        title="学校列表"
-        description={`共 ${tenants.total} 所学校。`}
-      >
-        <div className="flex flex-col gap-4">
+      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
+      <DataPanel
+        label="学校列表"
+        filter={
           <FilterBar label="学校筛选" onSubmit={() => setSearchTerm(keyword.trim())} submitLabel="搜索">
             <FilterField label="学校状态" group>
               <SegmentedControl
@@ -223,7 +225,16 @@ export default function PlatformSchoolsPage() {
               />
             </FilterField>
           </FilterBar>
-
+        }
+        footer={
+          <Pagination
+            page={tenants.page}
+            pageSize={tenants.pageSize}
+            total={tenants.total}
+            onPageChange={tenants.setPage}
+          />
+        }
+      >
           <ResourceState
             resource={tenants}
             emptyIcon={Building}
@@ -240,22 +251,24 @@ export default function PlatformSchoolsPage() {
                 </Button>
               )
             }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (
-              <div className="flex flex-col gap-4">
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={tenants.page}
-                  pageSize={tenants.pageSize}
-                  total={page.total}
-                  onPageChange={tenants.setPage}
-                />
-              </div>
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):校名一行、短码与到期一行,状态在右
+                mobileCard={(item) => ({
+                  title: item.name,
+                  meta: `${item.code} · ${item.expire_at ? `到期 ${formatDate(item.expire_at)}` : '长期有效'}`,
+                  badge: <StatusIndicator tone={tenantStatusTone(item.status)} label={tenantStatusLabel(item.status)} />,
+                })}
+              />
             )}
           </ResourceState>
-        </div>
-      </PageSection>
+      </DataPanel>
 
       {target ? (
         <TenantStatusModal

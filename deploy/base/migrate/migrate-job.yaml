@@ -37,7 +37,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: migrate
-          image: chaimir/migrate:placeholder  # overlay images: 覆盖。
+          image: chaimir/migrate:placeholder  # 由 base 的 images 变换锁定 digest。
           # 子命令:迁移(建表+RLS策略+索引)→ seed(镜像元信息 runtime/tool/judger + 首个管理员)。
           args: ["migrate-and-seed"]
           envFrom:

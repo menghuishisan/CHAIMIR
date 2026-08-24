@@ -108,6 +108,12 @@ type WarningScanRequest struct {
 	SemesterID ids.ID `json:"semester_id,omitempty"`
 }
 
+// WarningRulesRequest 是学业预警阈值更新请求,指针用于区分缺失字段与显式零值。
+type WarningRulesRequest struct {
+	FailCount *int     `json:"fail_count"`
+	MinGPA    *float64 `json:"min_gpa"`
+}
+
 // WarningScanResultDTO 表示一次学业预警扫描结果。
 type WarningScanResultDTO struct {
 	Scanned int `json:"scanned"`

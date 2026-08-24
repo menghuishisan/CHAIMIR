@@ -4,12 +4,13 @@
 
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Bug, Flag, Lock, MoreVertical, Play, Plus, Snowflake, Trophy } from 'lucide-react'
+import { Bug, Lock, MoreVertical, Play, Plus, Snowflake, Trophy } from 'lucide-react'
 import { ContestStatus, type Contest } from '@chaimir/api-client'
 import {
   Breadcrumb,
   Button,
   Callout,
+  DataPanel,
   FilterBar,
   FilterField,
   IconButton,
@@ -18,6 +19,7 @@ import {
   MenuItem,
   MenuSeparator,
   MenuTrigger,
+  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -27,10 +29,8 @@ import {
   ModalTitle,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
-  Stat,
   StatusIndicator,
   Table,
   toast,
@@ -204,7 +204,7 @@ export default function TeacherContestsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '实践' }, { label: '赛事组织' }]} />}
+        kicker={<Breadcrumb items={[{ label: '实践' }]} />}
         title="赛事组织"
         description="创建赛事、编排赛题,并按赛程推进报名、开赛、封榜与结束。"
         icon={Trophy}
@@ -220,17 +220,29 @@ export default function TeacherContestsPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="赛事总数" value={totalCount ?? '—'} icon={Trophy} hint="不受下方筛选影响" />
-          <Stat label="报名中" value={signupCount ?? '—'} icon={Flag} />
-          <Stat label="进行中" value={runningCount ?? '—'} icon={Play} hint="含封榜中" />
-          <Stat label="草稿" value={draftCount ?? '—'} icon={Plus} hint="发布后学生可见" />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是赛事列表 */}
+      <MetricStrip
+        label="赛事总量摘要"
+        className="mb-5"
+        items={[
+          { label: '赛事总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
+          { label: '报名中', value: signupCount ?? '—', hint: '学生可报名' },
+          { label: '进行中', value: runningCount ?? '—', hint: '含封榜中' },
+          { label: '草稿', value: draftCount ?? '—', hint: '发布后学生可见' },
+        ]}
+      />
 
-      <PageSection title="赛事列表" description={`共 ${contests.total} 场赛事`}>
-        <div className="flex flex-col gap-4">
+      {/* 动作失败就近内联(§6.7 C) */}
+      {actionError ? (
+        <Callout tone="danger" className="mb-4">
+          {actionError}
+        </Callout>
+      ) : null}
+
+      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
+      <DataPanel
+        label="赛事列表"
+        filter={
           <FilterBar label="赛事筛选">
             <FilterField label="赛事状态" group>
               <SegmentedControl
@@ -242,9 +254,16 @@ export default function TeacherContestsPage() {
               />
             </FilterField>
           </FilterBar>
-
-          {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
+        }
+        footer={
+          <Pagination
+            page={contests.page}
+            pageSize={contests.pageSize}
+            total={contests.total}
+            onPageChange={contests.setPage}
+          />
+        }
+      >
           <ResourceState
             resource={contests}
             emptyIcon={Trophy}
@@ -259,22 +278,29 @@ export default function TeacherContestsPage() {
                 </Button>
               )
             }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (
-              <>
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={contests.page}
-                  pageSize={contests.pageSize}
-                  total={contests.total}
-                  onPageChange={contests.setPage}
-                />
-              </>
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):赛事名一行、赛制与起止时间一行
+                mobileCard={(item) => ({
+                  title: item.name,
+                  meta: `${formatDateTime(item.start_at)} 开赛`,
+                  badge: (
+                    <StatusIndicator
+                      tone={contestStatusTone(item.status)}
+                      label={contestStatusLabel(item.status)}
+                    />
+                  ),
+                })}
+              />
             )}
           </ResourceState>
-        </div>
-      </PageSection>
+      </DataPanel>
 
       {createOpen ? (
         <ContestFormModal

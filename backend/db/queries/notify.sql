@@ -110,6 +110,15 @@ WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
   AND (a.expire_at IS NULL OR a.expire_at > now())
   AND (a.scope <> 3 OR a.target_roles && sqlc.arg(role_numbers)::smallint[] OR a.publisher_id = sqlc.arg(account_id));
 
+-- name: CountVisibleAnnouncementsByScope :many
+SELECT a.scope, COUNT(*)::bigint AS count
+FROM system_announcement a
+WHERE (a.tenant_id IS NULL OR a.tenant_id = sqlc.arg(tenant_id))
+  AND (a.expire_at IS NULL OR a.expire_at > now())
+  AND (a.scope <> 3 OR a.target_roles && sqlc.arg(role_numbers)::smallint[] OR a.publisher_id = sqlc.arg(account_id))
+GROUP BY a.scope
+ORDER BY a.scope;
+
 -- name: GetVisibleAnnouncement :one
 SELECT a.id, a.tenant_id, a.title, a.content, a.scope, a.target_roles, a.publisher_id, a.published_at, a.expire_at,
        (r.id IS NOT NULL)::boolean AS is_read

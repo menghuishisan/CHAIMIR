@@ -116,6 +116,15 @@ func WritePage(c *gin.Context, list any, total int64, page, size int, err error)
 	response.OKPage(c, list, total, page, size)
 }
 
+// WritePageWithFacets 写出带聚合分组计数的统一分页响应。
+func WritePageWithFacets(c *gin.Context, list any, total int64, page, size int, facets map[string]map[string]int64, err error) {
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	response.OKPageWithFacets(c, list, total, page, size, facets)
+}
+
 // WriteAttachment 统一输出小型附件内容,避免各模块手写不安全的 Content-Disposition。
 func WriteAttachment(c *gin.Context, fileName, contentType string, data []byte) {
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeAttachmentName(fileName)))

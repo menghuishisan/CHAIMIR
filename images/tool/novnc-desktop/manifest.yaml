@@ -1,4 +1,4 @@
-# 本文件声明 tool/novnc-desktop 镜像的职责、端口、安全、资源和供应链约束。
+﻿# 本文件声明 tool/novnc-desktop 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: tool
 name: novnc-desktop
@@ -19,12 +19,20 @@ source:
   type: thin-wrapper
 upstream:
   image: alpine:3.23
+  version: "3.23"
   digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
-  - remote-desktop
-  - gui-tooling
+  provides:
+    - remote-desktop
+    - gui-tooling
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: public
 tool:
   kind: web-embed
   eco_tags:

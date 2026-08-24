@@ -3,8 +3,11 @@ package sandbox
 
 import (
 	"context"
+	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/storage"
+	"chaimir/pkg/apperr"
 )
 
 // ValidateSandboxTemplate 校验沙箱模板可调度性,但不创建资源。
@@ -22,6 +25,79 @@ func (s *Service) GetSandbox(ctx context.Context, tenantID, sandboxID int64) (co
 	return s.getSandboxContract(ctx, tenantID, sandboxID)
 }
 
+// UpdateSandboxAuthorizedAccounts 原子替换沙箱共享账号集合。
+func (s *Service) UpdateSandboxAuthorizedAccounts(ctx context.Context, req contracts.SandboxAuthorizedAccountsRequest) error {
+	if req.TenantID <= 0 || req.SandboxID <= 0 || strings.TrimSpace(req.SourceRef) == "" {
+		return apperr.ErrSandboxContractRequestInvalid
+	}
+	var revoked []int64
+	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
+		sb, err := tx.GetSandbox(ctx, req.TenantID, req.SandboxID)
+		if err != nil {
+			return apperr.ErrSandboxNotFound.WithCause(err)
+		}
+		if sb.SourceRef != strings.TrimSpace(req.SourceRef) {
+			return apperr.ErrSandboxOwnershipInvalid
+		}
+		accountIDs := append([]int64(nil), req.AuthorizedAccountIDs...)
+		if err := s.validateSandboxSharedAccounts(ctx, req.TenantID, accountIDs); err != nil {
+			return err
+		}
+		accountIDs = append(accountIDs, sb.OwnerAccountID)
+		accountIDs, err = normalizeSandboxSharedAccountIDs(sb.OwnerAccountID, accountIDs)
+		if err != nil {
+			return err
+		}
+		previous := make(map[int64]struct{}, len(sb.SharedAccountIDs)+1)
+		previous[sb.OwnerAccountID] = struct{}{}
+		for _, accountID := range sb.SharedAccountIDs {
+			previous[accountID] = struct{}{}
+		}
+		next := make(map[int64]struct{}, len(accountIDs))
+		for _, accountID := range accountIDs {
+			next[accountID] = struct{}{}
+		}
+		for accountID := range previous {
+			if _, ok := next[accountID]; !ok {
+				revoked = append(revoked, accountID)
+			}
+		}
+		_, err = tx.UpdateSandboxAuthorizedAccounts(ctx, req.TenantID, req.SandboxID, accountIDs)
+		return err
+	}); err != nil {
+		return err
+	}
+	for _, accountID := range revoked {
+		if err := s.closeSandboxSessions(req.TenantID, accountID, req.SandboxID); err != nil {
+			return apperr.ErrSandboxToolProxyUnavailable.WithCause(err)
+		}
+	}
+	return nil
+}
+
+// GetSandboxWorkspaceArchive 返回已保存工作区的内部对象引用,仅供实例重建恢复使用。
+func (s *Service) GetSandboxWorkspaceArchive(ctx context.Context, tenantID, sandboxID int64) (string, error) {
+	if tenantID <= 0 || sandboxID <= 0 {
+		return "", apperr.ErrSandboxContractRequestInvalid
+	}
+	var sb Sandbox
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		sb, err = tx.GetSandbox(ctx, tenantID, sandboxID)
+		return err
+	}); err != nil {
+		return "", apperr.ErrSandboxNotFound.WithCause(err)
+	}
+	if strings.TrimSpace(sb.CodeHash) == "" || strings.TrimSpace(sb.CodeStorageKey) == "" {
+		return "", nil
+	}
+	ref, err := storage.ObjectRefString(s.minio.BucketCode(), sb.CodeStorageKey)
+	if err != nil {
+		return "", apperr.ErrSandboxFilePersistFailed.WithCause(err)
+	}
+	return ref, nil
+}
+
 // PauseSandbox 暂停单个沙箱。
 func (s *Service) PauseSandbox(ctx context.Context, req contracts.SandboxControlRequest) error {
 	return s.pauseSandboxContract(ctx, req)
@@ -37,13 +113,13 @@ func (s *Service) DestroySandbox(ctx context.Context, req contracts.SandboxContr
 	return s.destroySandboxContract(ctx, req)
 }
 
-// RecycleBySourceRef 按来源标识级联回收沙箱。
-func (s *Service) RecycleBySourceRef(ctx context.Context, req contracts.SandboxRecycleRequest) error {
-	return s.recycleBySourceRefContract(ctx, req)
+// RecycleByScopeRef 按生命周期作用域级联回收沙箱。
+func (s *Service) RecycleByScopeRef(ctx context.Context, req contracts.SandboxRecycleRequest) error {
+	return s.recycleByScopeRefContract(ctx, req)
 }
 
 // PutSandboxFile 把公开文件写入沙箱工作区。
-func (s *Service) PutSandboxFile(ctx context.Context, req contracts.SandboxFileWriteRequest) error {
+func (s *Service) PutSandboxFile(ctx context.Context, req contracts.SandboxFileWriteRequest) (int64, error) {
 	return s.putSandboxFileContract(ctx, req)
 }
 

@@ -254,16 +254,18 @@ func (s *Service) resolveSandbox(ctx context.Context, task JudgeTask) (int64, bo
 		if info.TenantID != task.TenantID || info.Status == contracts.SandboxStatusDestroyed || info.Status == contracts.SandboxStatusFailed {
 			return 0, false, apperr.ErrJudgeTaskStateInvalid
 		}
+		if info.SourceRef != strings.TrimSpace(task.InputSnapshot.SandboxSourceRef) {
+			return 0, false, apperr.ErrJudgeTaskStateInvalid
+		}
 		return id, false, nil
 	}
 	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{
 		TenantID:            task.TenantID,
-		RuntimeCode:         task.InputSnapshot.RuntimeCode,
-		RuntimeImageVersion: task.InputSnapshot.RuntimeImageVersion,
-		ToolCodes:           task.InputSnapshot.ToolCodes,
+		CompositionSnapshot: task.InputSnapshot.CompositionSnapshot,
 		InitScriptRef:       task.InputSnapshot.InitScriptRef,
 		OwnerAccountID:      task.SubmitterID,
 		SourceRef:           task.SourceRef,
+		ScopeRef:            task.SourceRef,
 		KeepAlive:           false,
 		SnapshotEnabled:     false,
 		PrivateSidecars:     privateSidecarsForSandbox(task.InputSnapshot.ExecutionSidecars),
@@ -283,6 +285,14 @@ func (s *Service) resolveSandbox(ctx context.Context, task JudgeTask) (int64, bo
 		return info.SandboxID, true, err
 	}
 	return info.SandboxID, true, nil
+}
+
+// sandboxSourceRef 返回 M2 资源所有权来源; reuse 判题不能使用本次任务事件来源。
+func sandboxSourceRef(task JudgeTask) string {
+	if task.SandboxMode == JudgeSandboxModeReuse && strings.TrimSpace(task.InputSnapshot.SandboxSourceRef) != "" {
+		return task.InputSnapshot.SandboxSourceRef
+	}
+	return task.SourceRef
 }
 
 // privateSidecarsForSandbox 把 M3 判题器内部 WorkloadSpec 转为 M2 跨模块 DTO。
@@ -622,6 +632,9 @@ func (s *Service) markOutboxFailed(ctx context.Context, item JudgeEventOutbox, c
 
 // executeJudgerSelftest 用判题器声明的自检样例验证配置可执行性。
 func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
+	if err := validateJudgerResourceSpecForUse(j); err != nil {
+		return err
+	}
 	if len(j.ResourceSpec.Selftest) == 0 {
 		return apperr.ErrJudgerConfigInvalid
 	}
@@ -646,10 +659,8 @@ func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
 		SourceRef:   strings.TrimSpace(jsonx.StringFromAny(j.ResourceSpec.Selftest["source_ref"])),
 		InputSnapshot: JudgeInputSnapshot{
 			JudgerType:               j.Type,
-			RuntimeCode:              j.ResourceSpec.RuntimeCode,
-			RuntimeImageVersion:      j.ResourceSpec.RuntimeImageVersion,
+			CompositionSnapshot:      j.ResourceSpec.CompositionSnapshot,
 			GenesisRef:               j.ResourceSpec.GenesisRef,
-			ToolCodes:                append([]string(nil), j.ResourceSpec.ToolCodes...),
 			InitScriptRef:            j.ResourceSpec.InitScriptRef,
 			Command:                  append([]string(nil), j.ResourceSpec.Command...),
 			ExecTarget:               strings.TrimSpace(j.ResourceSpec.ExecTarget),

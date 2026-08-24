@@ -58,6 +58,8 @@ const (
 	SandboxToolKindWebEmbed = contracts.SandboxToolKindWebEmbed
 	// SandboxToolKindCommand 表示受控命令类工具。
 	SandboxToolKindCommand = contracts.SandboxToolKindCommand
+	// SandboxToolKindInfra 表示仅参与沙箱编排的基础设施组件。
+	SandboxToolKindInfra = contracts.SandboxToolKindInfra
 )
 
 const (
@@ -163,6 +165,8 @@ const (
 	WorkspacePlaceholderPath = "{{path}}"
 	// WorkspacePlaceholderScript 表示初始化脚本临时路径模板变量。
 	WorkspacePlaceholderScript = "{{script}}"
+	// WorkspacePlaceholderDomain 表示私有卷安全域的绝对挂载路径模板变量。
+	WorkspacePlaceholderDomain = "{{domain}}"
 )
 
 const (

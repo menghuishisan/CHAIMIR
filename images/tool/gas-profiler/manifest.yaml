@@ -19,12 +19,20 @@ source:
   type: platform-built
 upstream:
   image: python:3.13-alpine
+  version: 3.13-alpine
   digest: sha256:399babc8b49529dabfd9c922f2b5eea81d611e4512e3ed250d75bd2e7683f4b0
   reuse_policy: self-developed-tool
 data_driven: true
 capabilities:
-  - gas-analysis
-  - contract-profiling
+  provides:
+    - gas-analysis
+    - contract-profiling
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: public
 tool:
   kind: command-tool
   eco_tags:

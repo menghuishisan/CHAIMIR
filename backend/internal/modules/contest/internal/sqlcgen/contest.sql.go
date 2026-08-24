@@ -227,7 +227,7 @@ SET status = 2,
     attempt_count = m.attempt_count + 1
 FROM candidates c
 WHERE m.id = c.id
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
 `
 
 type ClaimPendingBattleMatchesAcrossTenantsParams struct {
@@ -261,6 +261,7 @@ func (q *Queries) ClaimPendingBattleMatchesAcrossTenants(ctx context.Context, ar
 			&i.EntryAID,
 			&i.EntryBID,
 			&i.SourceRef,
+			&i.ScopeRef,
 			&i.SandboxRef,
 			&i.JudgeTaskRef,
 			&i.Result,
@@ -517,17 +518,26 @@ func (q *Queries) CountStudentContests(ctx context.Context, arg CountStudentCont
 const countVulnProblems = `-- name: CountVulnProblems :one
 SELECT count(*)::bigint
 FROM vuln_problem
-WHERE tenant_id = $1 AND ($2::bigint = 0 OR source_id = $2) AND ($3::smallint = 0 OR status = $3)
+WHERE tenant_id = $1::bigint
+  AND ($2::bigint = 0 OR source_id = $2::bigint)
+  AND ($3::smallint = 0 OR status = $3::smallint)
+  AND ($4::smallint = 0 OR prevalidate_status = $4::smallint)
 `
 
 type CountVulnProblemsParams struct {
-	TenantID int64 `json:"tenant_id"`
-	Column2  int64 `json:"column_2"`
-	Column3  int16 `json:"column_3"`
+	TenantID          int64 `json:"tenant_id"`
+	SourceID          int64 `json:"source_id"`
+	Status            int16 `json:"status"`
+	PrevalidateStatus int16 `json:"prevalidate_status"`
 }
 
 func (q *Queries) CountVulnProblems(ctx context.Context, arg CountVulnProblemsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countVulnProblems, arg.TenantID, arg.Column2, arg.Column3)
+	row := q.db.QueryRow(ctx, countVulnProblems,
+		arg.TenantID,
+		arg.SourceID,
+		arg.Status,
+		arg.PrevalidateStatus,
+	)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -581,13 +591,13 @@ func (q *Queries) CreateBattleEntry(ctx context.Context, arg CreateBattleEntryPa
 }
 
 const createBattleMatch = `-- name: CreateBattleMatch :one
-INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until)
+INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until)
 SELECT $1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL, '{}'::jsonb, NULL, 1, now(), NULL, '', NULL
 WHERE EXISTS (
     SELECT 1 FROM contest c
     WHERE c.tenant_id = $2 AND c.id = $3 AND c.status IN (3, 4) AND c.end_at > now()
 )
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
 `
 
 type CreateBattleMatchParams struct {
@@ -619,6 +629,7 @@ func (q *Queries) CreateBattleMatch(ctx context.Context, arg CreateBattleMatchPa
 		&i.EntryAID,
 		&i.EntryBID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRef,
 		&i.JudgeTaskRef,
 		&i.Result,
@@ -800,22 +811,24 @@ func (q *Queries) CreateOrUpdateLadderRank(ctx context.Context, arg CreateOrUpda
 }
 
 const createSolveSubmission = `-- name: CreateSolveSubmission :one
-INSERT INTO solve_submission (id, tenant_id, contest_id, problem_id, team_id, submitter_id, content_ref, source_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, 0, $10, now())
-RETURNING id, tenant_id, contest_id, problem_id, team_id, submitter_id, content_ref, source_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at
+INSERT INTO solve_submission (id, tenant_id, contest_id, problem_id, team_id, submitter_tenant_id, submitter_id, content_ref, source_ref, scope_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, false, 0, $12, now())
+RETURNING id, tenant_id, contest_id, problem_id, team_id, submitter_tenant_id, submitter_id, content_ref, source_ref, scope_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at
 `
 
 type CreateSolveSubmissionParams struct {
-	ID           int64       `json:"id"`
-	TenantID     int64       `json:"tenant_id"`
-	ContestID    int64       `json:"contest_id"`
-	ProblemID    int64       `json:"problem_id"`
-	TeamID       int64       `json:"team_id"`
-	SubmitterID  int64       `json:"submitter_id"`
-	ContentRef   []byte      `json:"content_ref"`
-	SourceRef    string      `json:"source_ref"`
-	JudgeTaskRef pgtype.Text `json:"judge_task_ref"`
-	SandboxRef   pgtype.Text `json:"sandbox_ref"`
+	ID                int64       `json:"id"`
+	TenantID          int64       `json:"tenant_id"`
+	ContestID         int64       `json:"contest_id"`
+	ProblemID         int64       `json:"problem_id"`
+	TeamID            int64       `json:"team_id"`
+	SubmitterTenantID int64       `json:"submitter_tenant_id"`
+	SubmitterID       int64       `json:"submitter_id"`
+	ContentRef        []byte      `json:"content_ref"`
+	SourceRef         string      `json:"source_ref"`
+	ScopeRef          string      `json:"scope_ref"`
+	JudgeTaskRef      pgtype.Text `json:"judge_task_ref"`
+	SandboxRef        pgtype.Text `json:"sandbox_ref"`
 }
 
 func (q *Queries) CreateSolveSubmission(ctx context.Context, arg CreateSolveSubmissionParams) (SolveSubmission, error) {
@@ -825,9 +838,11 @@ func (q *Queries) CreateSolveSubmission(ctx context.Context, arg CreateSolveSubm
 		arg.ContestID,
 		arg.ProblemID,
 		arg.TeamID,
+		arg.SubmitterTenantID,
 		arg.SubmitterID,
 		arg.ContentRef,
 		arg.SourceRef,
+		arg.ScopeRef,
 		arg.JudgeTaskRef,
 		arg.SandboxRef,
 	)
@@ -838,9 +853,11 @@ func (q *Queries) CreateSolveSubmission(ctx context.Context, arg CreateSolveSubm
 		&i.ContestID,
 		&i.ProblemID,
 		&i.TeamID,
+		&i.SubmitterTenantID,
 		&i.SubmitterID,
 		&i.ContentRef,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.JudgeTaskRef,
 		&i.Passed,
 		&i.Score,
@@ -916,7 +933,7 @@ SET status = 4, finished_at = now(), lease_token = '', lease_until = NULL
 WHERE status = 2 AND COALESCE(judge_task_ref, '') = ''
   AND lease_until <= $1::timestamptz
   AND attempt_count >= $2::int
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
 `
 
 type ExhaustUnstartedBattleMatchesParams struct {
@@ -942,6 +959,7 @@ func (q *Queries) ExhaustUnstartedBattleMatches(ctx context.Context, arg Exhaust
 			&i.EntryAID,
 			&i.EntryBID,
 			&i.SourceRef,
+			&i.ScopeRef,
 			&i.SandboxRef,
 			&i.JudgeTaskRef,
 			&i.Result,
@@ -973,7 +991,7 @@ WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.judge_task_ref = $3
       WHERE c.tenant_id = m.tenant_id AND c.id = m.contest_id
         AND (c.status IN (3, 4) OR (c.status = 5 AND c.archive_lease_token = ''))
   )
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
 `
 
 type FailBattleMatchByJudgeTaskParams struct {
@@ -993,6 +1011,7 @@ func (q *Queries) FailBattleMatchByJudgeTask(ctx context.Context, arg FailBattle
 		&i.EntryAID,
 		&i.EntryBID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRef,
 		&i.JudgeTaskRef,
 		&i.Result,
@@ -1013,7 +1032,7 @@ UPDATE battle_match AS m
 SET status = 4, finished_at = now(), lease_token = '', lease_until = NULL
 WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.lease_token = $3 AND m.lease_until > now()
   AND COALESCE(m.judge_task_ref, '') = ''
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
 `
 
 type FailBattleMatchStartParams struct {
@@ -1033,6 +1052,7 @@ func (q *Queries) FailBattleMatchStart(ctx context.Context, arg FailBattleMatchS
 		&i.EntryAID,
 		&i.EntryBID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRef,
 		&i.JudgeTaskRef,
 		&i.Result,
@@ -1055,7 +1075,7 @@ SET content_item_code = $3,
     status = 2,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND prevalidate_status = 2 AND status = 1
-RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at
+RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at, composition_digest, composition_snapshot, init_code_ref, init_script_ref
 `
 
 type FinalizeVulnProblemParams struct {
@@ -1065,14 +1085,36 @@ type FinalizeVulnProblemParams struct {
 	ContentItemVersion pgtype.Text `json:"content_item_version"`
 }
 
-func (q *Queries) FinalizeVulnProblem(ctx context.Context, arg FinalizeVulnProblemParams) (VulnProblem, error) {
+type FinalizeVulnProblemRow struct {
+	ID                  int64              `json:"id"`
+	TenantID            int64              `json:"tenant_id"`
+	SourceID            pgtype.Int8        `json:"source_id"`
+	ExternalRef         pgtype.Text        `json:"external_ref"`
+	Title               string             `json:"title"`
+	Level               int16              `json:"level"`
+	RuntimeMode         int16              `json:"runtime_mode"`
+	DraftBody           []byte             `json:"draft_body"`
+	PrevalidateStatus   int16              `json:"prevalidate_status"`
+	PrevalidateDetail   []byte             `json:"prevalidate_detail"`
+	ContentItemCode     pgtype.Text        `json:"content_item_code"`
+	ContentItemVersion  pgtype.Text        `json:"content_item_version"`
+	Status              int16              `json:"status"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	CompositionDigest   pgtype.Text        `json:"composition_digest"`
+	CompositionSnapshot []byte             `json:"composition_snapshot"`
+	InitCodeRef         pgtype.Text        `json:"init_code_ref"`
+	InitScriptRef       pgtype.Text        `json:"init_script_ref"`
+}
+
+func (q *Queries) FinalizeVulnProblem(ctx context.Context, arg FinalizeVulnProblemParams) (FinalizeVulnProblemRow, error) {
 	row := q.db.QueryRow(ctx, finalizeVulnProblem,
 		arg.TenantID,
 		arg.ID,
 		arg.ContentItemCode,
 		arg.ContentItemVersion,
 	)
-	var i VulnProblem
+	var i FinalizeVulnProblemRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -1089,8 +1131,100 @@ func (q *Queries) FinalizeVulnProblem(ctx context.Context, arg FinalizeVulnProbl
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.InitCodeRef,
+		&i.InitScriptRef,
 	)
 	return i, err
+}
+
+const findBattleMatchTenant = `-- name: FindBattleMatchTenant :one
+SELECT tenant_id
+FROM battle_match
+WHERE id = $1
+`
+
+func (q *Queries) FindBattleMatchTenant(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, findBattleMatchTenant, id)
+	var tenant_id int64
+	err := row.Scan(&tenant_id)
+	return tenant_id, err
+}
+
+const findContestAccessGrantForSubject = `-- name: FindContestAccessGrantForSubject :one
+SELECT id, tenant_id, contest_id, team_id, sandbox_id, member_tenant_id, member_account_id, capabilities, source_ref, grant_version, status, expires_at, created_at, updated_at
+FROM contest_access_grant
+WHERE sandbox_id = $1 AND member_tenant_id = $2 AND member_account_id = $3
+`
+
+type FindContestAccessGrantForSubjectParams struct {
+	SandboxID       int64 `json:"sandbox_id"`
+	MemberTenantID  int64 `json:"member_tenant_id"`
+	MemberAccountID int64 `json:"member_account_id"`
+}
+
+// M8 网关跨租户读取当前成员的唯一沙箱授权；只在受控特权事务中使用。
+func (q *Queries) FindContestAccessGrantForSubject(ctx context.Context, arg FindContestAccessGrantForSubjectParams) (ContestAccessGrant, error) {
+	row := q.db.QueryRow(ctx, findContestAccessGrantForSubject, arg.SandboxID, arg.MemberTenantID, arg.MemberAccountID)
+	var i ContestAccessGrant
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ContestID,
+		&i.TeamID,
+		&i.SandboxID,
+		&i.MemberTenantID,
+		&i.MemberAccountID,
+		&i.Capabilities,
+		&i.SourceRef,
+		&i.GrantVersion,
+		&i.Status,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const findPublishedContestTenant = `-- name: FindPublishedContestTenant :one
+SELECT tenant_id
+FROM contest
+WHERE id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6
+`
+
+// 学生入口允许跨校发现已发布竞赛,但只返回竞赛所属租户;后续读写仍必须进入该租户事务。
+func (q *Queries) FindPublishedContestTenant(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, findPublishedContestTenant, id)
+	var tenant_id int64
+	err := row.Scan(&tenant_id)
+	return tenant_id, err
+}
+
+const findSolveSubmissionTenant = `-- name: FindSolveSubmissionTenant :one
+SELECT tenant_id
+FROM solve_submission
+WHERE id = $1
+`
+
+func (q *Queries) FindSolveSubmissionTenant(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, findSolveSubmissionTenant, id)
+	var tenant_id int64
+	err := row.Scan(&tenant_id)
+	return tenant_id, err
+}
+
+const findTeamTenant = `-- name: FindTeamTenant :one
+SELECT tenant_id
+FROM team
+WHERE id = $1
+`
+
+func (q *Queries) FindTeamTenant(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, findTeamTenant, id)
+	var tenant_id int64
+	err := row.Scan(&tenant_id)
+	return tenant_id, err
 }
 
 const finishBattleMatch = `-- name: FinishBattleMatch :one
@@ -1108,7 +1242,7 @@ WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.judge_task_ref = $4
       WHERE c.tenant_id = m.tenant_id AND c.id = m.contest_id
         AND (c.status IN (3, 4) OR (c.status = 5 AND c.archive_lease_token = ''))
   )
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
 `
 
 type FinishBattleMatchParams struct {
@@ -1140,6 +1274,7 @@ func (q *Queries) FinishBattleMatch(ctx context.Context, arg FinishBattleMatchPa
 		&i.EntryAID,
 		&i.EntryBID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRef,
 		&i.JudgeTaskRef,
 		&i.Result,
@@ -1186,7 +1321,7 @@ func (q *Queries) GetBattleEntry(ctx context.Context, arg GetBattleEntryParams) 
 }
 
 const getBattleMatch = `-- name: GetBattleMatch :one
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
 FROM battle_match
 WHERE tenant_id = $1 AND id = $2
 `
@@ -1207,6 +1342,7 @@ func (q *Queries) GetBattleMatch(ctx context.Context, arg GetBattleMatchParams) 
 		&i.EntryAID,
 		&i.EntryBID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRef,
 		&i.JudgeTaskRef,
 		&i.Result,
@@ -1223,7 +1359,7 @@ func (q *Queries) GetBattleMatch(ctx context.Context, arg GetBattleMatchParams) 
 }
 
 const getBattleMatchByJudgeTask = `-- name: GetBattleMatchByJudgeTask :one
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
 FROM battle_match
 WHERE tenant_id = $1 AND judge_task_ref = $2
 `
@@ -1244,6 +1380,7 @@ func (q *Queries) GetBattleMatchByJudgeTask(ctx context.Context, arg GetBattleMa
 		&i.EntryAID,
 		&i.EntryBID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRef,
 		&i.JudgeTaskRef,
 		&i.Result,
@@ -1363,8 +1500,81 @@ func (q *Queries) GetContest(ctx context.Context, arg GetContestParams) (Contest
 	return i, err
 }
 
+const getContestAccessGrant = `-- name: GetContestAccessGrant :one
+SELECT id, tenant_id, contest_id, team_id, sandbox_id, member_tenant_id, member_account_id, capabilities, source_ref, grant_version, status, expires_at, created_at, updated_at
+FROM contest_access_grant
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetContestAccessGrantParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) GetContestAccessGrant(ctx context.Context, arg GetContestAccessGrantParams) (ContestAccessGrant, error) {
+	row := q.db.QueryRow(ctx, getContestAccessGrant, arg.TenantID, arg.ID)
+	var i ContestAccessGrant
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ContestID,
+		&i.TeamID,
+		&i.SandboxID,
+		&i.MemberTenantID,
+		&i.MemberAccountID,
+		&i.Capabilities,
+		&i.SourceRef,
+		&i.GrantVersion,
+		&i.Status,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getContestAccessGrantForSubject = `-- name: GetContestAccessGrantForSubject :one
+SELECT id, tenant_id, contest_id, team_id, sandbox_id, member_tenant_id, member_account_id, capabilities, source_ref, grant_version, status, expires_at, created_at, updated_at
+FROM contest_access_grant
+WHERE tenant_id = $1 AND sandbox_id = $2 AND member_tenant_id = $3 AND member_account_id = $4
+`
+
+type GetContestAccessGrantForSubjectParams struct {
+	TenantID        int64 `json:"tenant_id"`
+	SandboxID       int64 `json:"sandbox_id"`
+	MemberTenantID  int64 `json:"member_tenant_id"`
+	MemberAccountID int64 `json:"member_account_id"`
+}
+
+func (q *Queries) GetContestAccessGrantForSubject(ctx context.Context, arg GetContestAccessGrantForSubjectParams) (ContestAccessGrant, error) {
+	row := q.db.QueryRow(ctx, getContestAccessGrantForSubject,
+		arg.TenantID,
+		arg.SandboxID,
+		arg.MemberTenantID,
+		arg.MemberAccountID,
+	)
+	var i ContestAccessGrant
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ContestID,
+		&i.TeamID,
+		&i.SandboxID,
+		&i.MemberTenantID,
+		&i.MemberAccountID,
+		&i.Capabilities,
+		&i.SourceRef,
+		&i.GrantVersion,
+		&i.Status,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getContestProblem = `-- name: GetContestProblem :one
-SELECT id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq
+SELECT id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq, composition_digest, composition_snapshot
 FROM contest_problem
 WHERE tenant_id = $1 AND id = $2
 `
@@ -1388,6 +1598,8 @@ func (q *Queries) GetContestProblem(ctx context.Context, arg GetContestProblemPa
 		&i.BattleConfig,
 		&i.BattleRule,
 		&i.Seq,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
 	)
 	return i, err
 }
@@ -1460,7 +1672,7 @@ func (q *Queries) GetLadderSnapshot(ctx context.Context, arg GetLadderSnapshotPa
 }
 
 const getSolveSubmission = `-- name: GetSolveSubmission :one
-SELECT id, tenant_id, contest_id, problem_id, team_id, submitter_id, content_ref, source_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at
+SELECT id, tenant_id, contest_id, problem_id, team_id, submitter_tenant_id, submitter_id, content_ref, source_ref, scope_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at
 FROM solve_submission
 WHERE tenant_id = $1 AND id = $2
 `
@@ -1479,9 +1691,11 @@ func (q *Queries) GetSolveSubmission(ctx context.Context, arg GetSolveSubmission
 		&i.ContestID,
 		&i.ProblemID,
 		&i.TeamID,
+		&i.SubmitterTenantID,
 		&i.SubmitterID,
 		&i.ContentRef,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.JudgeTaskRef,
 		&i.Passed,
 		&i.Score,
@@ -1492,7 +1706,7 @@ func (q *Queries) GetSolveSubmission(ctx context.Context, arg GetSolveSubmission
 }
 
 const getSolveSubmissionByJudgeTask = `-- name: GetSolveSubmissionByJudgeTask :one
-SELECT id, tenant_id, contest_id, problem_id, team_id, submitter_id, content_ref, source_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at
+SELECT id, tenant_id, contest_id, problem_id, team_id, submitter_tenant_id, submitter_id, content_ref, source_ref, scope_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at
 FROM solve_submission
 WHERE tenant_id = $1 AND judge_task_ref = $2
 `
@@ -1511,9 +1725,11 @@ func (q *Queries) GetSolveSubmissionByJudgeTask(ctx context.Context, arg GetSolv
 		&i.ContestID,
 		&i.ProblemID,
 		&i.TeamID,
+		&i.SubmitterTenantID,
 		&i.SubmitterID,
 		&i.ContentRef,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.JudgeTaskRef,
 		&i.Passed,
 		&i.Score,
@@ -1612,7 +1828,7 @@ func (q *Queries) GetTeamForAccount(ctx context.Context, arg GetTeamForAccountPa
 }
 
 const getVulnProblem = `-- name: GetVulnProblem :one
-SELECT id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at
+SELECT id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at, composition_digest, composition_snapshot, init_code_ref, init_script_ref
 FROM vuln_problem
 WHERE tenant_id = $1 AND id = $2
 `
@@ -1622,9 +1838,31 @@ type GetVulnProblemParams struct {
 	ID       int64 `json:"id"`
 }
 
-func (q *Queries) GetVulnProblem(ctx context.Context, arg GetVulnProblemParams) (VulnProblem, error) {
+type GetVulnProblemRow struct {
+	ID                  int64              `json:"id"`
+	TenantID            int64              `json:"tenant_id"`
+	SourceID            pgtype.Int8        `json:"source_id"`
+	ExternalRef         pgtype.Text        `json:"external_ref"`
+	Title               string             `json:"title"`
+	Level               int16              `json:"level"`
+	RuntimeMode         int16              `json:"runtime_mode"`
+	DraftBody           []byte             `json:"draft_body"`
+	PrevalidateStatus   int16              `json:"prevalidate_status"`
+	PrevalidateDetail   []byte             `json:"prevalidate_detail"`
+	ContentItemCode     pgtype.Text        `json:"content_item_code"`
+	ContentItemVersion  pgtype.Text        `json:"content_item_version"`
+	Status              int16              `json:"status"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	CompositionDigest   pgtype.Text        `json:"composition_digest"`
+	CompositionSnapshot []byte             `json:"composition_snapshot"`
+	InitCodeRef         pgtype.Text        `json:"init_code_ref"`
+	InitScriptRef       pgtype.Text        `json:"init_script_ref"`
+}
+
+func (q *Queries) GetVulnProblem(ctx context.Context, arg GetVulnProblemParams) (GetVulnProblemRow, error) {
 	row := q.db.QueryRow(ctx, getVulnProblem, arg.TenantID, arg.ID)
-	var i VulnProblem
+	var i GetVulnProblemRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -1641,6 +1879,10 @@ func (q *Queries) GetVulnProblem(ctx context.Context, arg GetVulnProblemParams) 
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.InitCodeRef,
+		&i.InitScriptRef,
 	)
 	return i, err
 }
@@ -1834,7 +2076,7 @@ func (q *Queries) ListBattleEntriesForTeam(ctx context.Context, arg ListBattleEn
 }
 
 const listBattleMatchesForTeam = `-- name: ListBattleMatchesForTeam :many
-SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
 FROM battle_match m
 JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
@@ -1877,6 +2119,7 @@ func (q *Queries) ListBattleMatchesForTeam(ctx context.Context, arg ListBattleMa
 			&i.EntryAID,
 			&i.EntryBID,
 			&i.SourceRef,
+			&i.ScopeRef,
 			&i.SandboxRef,
 			&i.JudgeTaskRef,
 			&i.Result,
@@ -1903,7 +2146,7 @@ const listBattleReplayMatchesForTeam = `-- name: ListBattleReplayMatchesForTeam 
 WITH visible AS (
     SELECT
         m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id,
-        m.source_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta,
+        m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta,
         m.replay_ref, m.status, m.matched_at, m.finished_at,
         ROW_NUMBER() OVER (ORDER BY m.finished_at ASC, m.id ASC)::bigint AS sequence_no,
         CASE WHEN a.team_id = $5::bigint THEN 'a' ELSE 'b' END AS my_side,
@@ -1929,7 +2172,7 @@ WITH visible AS (
       AND (a.team_id = $5::bigint OR b.team_id = $5::bigint)
 )
 SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id,
-       source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref,
+       source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref,
        status, matched_at, finished_at, sequence_no, my_side,
        active_entry_id, active_entry_role, active_entry_version_no, active_entry_submitted_at
 FROM visible
@@ -1954,6 +2197,7 @@ type ListBattleReplayMatchesForTeamRow struct {
 	EntryAID               int64              `json:"entry_a_id"`
 	EntryBID               int64              `json:"entry_b_id"`
 	SourceRef              string             `json:"source_ref"`
+	ScopeRef               string             `json:"scope_ref"`
 	SandboxRef             pgtype.Text        `json:"sandbox_ref"`
 	JudgeTaskRef           pgtype.Text        `json:"judge_task_ref"`
 	Result                 pgtype.Int2        `json:"result"`
@@ -1994,6 +2238,7 @@ func (q *Queries) ListBattleReplayMatchesForTeam(ctx context.Context, arg ListBa
 			&i.EntryAID,
 			&i.EntryBID,
 			&i.SourceRef,
+			&i.ScopeRef,
 			&i.SandboxRef,
 			&i.JudgeTaskRef,
 			&i.Result,
@@ -2069,8 +2314,102 @@ func (q *Queries) ListCheatRecords(ctx context.Context, arg ListCheatRecordsPara
 	return items, nil
 }
 
+const listContestAccessGrantsForContest = `-- name: ListContestAccessGrantsForContest :many
+SELECT id, tenant_id, contest_id, team_id, sandbox_id, member_tenant_id, member_account_id, capabilities, source_ref, grant_version, status, expires_at, created_at, updated_at
+FROM contest_access_grant
+WHERE tenant_id = $1 AND contest_id = $2 AND status = 1
+ORDER BY sandbox_id, id
+`
+
+type ListContestAccessGrantsForContestParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	ContestID int64 `json:"contest_id"`
+}
+
+func (q *Queries) ListContestAccessGrantsForContest(ctx context.Context, arg ListContestAccessGrantsForContestParams) ([]ContestAccessGrant, error) {
+	rows, err := q.db.Query(ctx, listContestAccessGrantsForContest, arg.TenantID, arg.ContestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ContestAccessGrant{}
+	for rows.Next() {
+		var i ContestAccessGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ContestID,
+			&i.TeamID,
+			&i.SandboxID,
+			&i.MemberTenantID,
+			&i.MemberAccountID,
+			&i.Capabilities,
+			&i.SourceRef,
+			&i.GrantVersion,
+			&i.Status,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listContestAccessGrantsForSandbox = `-- name: ListContestAccessGrantsForSandbox :many
+SELECT id, tenant_id, contest_id, team_id, sandbox_id, member_tenant_id, member_account_id, capabilities, source_ref, grant_version, status, expires_at, created_at, updated_at
+FROM contest_access_grant
+WHERE tenant_id = $1 AND sandbox_id = $2
+ORDER BY id
+`
+
+type ListContestAccessGrantsForSandboxParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	SandboxID int64 `json:"sandbox_id"`
+}
+
+func (q *Queries) ListContestAccessGrantsForSandbox(ctx context.Context, arg ListContestAccessGrantsForSandboxParams) ([]ContestAccessGrant, error) {
+	rows, err := q.db.Query(ctx, listContestAccessGrantsForSandbox, arg.TenantID, arg.SandboxID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ContestAccessGrant{}
+	for rows.Next() {
+		var i ContestAccessGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ContestID,
+			&i.TeamID,
+			&i.SandboxID,
+			&i.MemberTenantID,
+			&i.MemberAccountID,
+			&i.Capabilities,
+			&i.SourceRef,
+			&i.GrantVersion,
+			&i.Status,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listContestProblems = `-- name: ListContestProblems :many
-SELECT id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq
+SELECT id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq, composition_digest, composition_snapshot
 FROM contest_problem
 WHERE tenant_id = $1 AND contest_id = $2
 ORDER BY seq ASC, id ASC
@@ -2101,6 +2440,8 @@ func (q *Queries) ListContestProblems(ctx context.Context, arg ListContestProble
 			&i.BattleConfig,
 			&i.BattleRule,
 			&i.Seq,
+			&i.CompositionDigest,
+			&i.CompositionSnapshot,
 		); err != nil {
 			return nil, err
 		}
@@ -2242,7 +2583,7 @@ func (q *Queries) ListLadder(ctx context.Context, arg ListLadderParams) ([]ListL
 }
 
 const listRunningBattleMatchesWithJudgeTask = `-- name: ListRunningBattleMatchesWithJudgeTask :many
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
 FROM battle_match
 WHERE status = 2 AND COALESCE(judge_task_ref, '') <> ''
 ORDER BY matched_at ASC, id ASC
@@ -2266,6 +2607,7 @@ func (q *Queries) ListRunningBattleMatchesWithJudgeTask(ctx context.Context, lim
 			&i.EntryAID,
 			&i.EntryBID,
 			&i.SourceRef,
+			&i.ScopeRef,
 			&i.SandboxRef,
 			&i.JudgeTaskRef,
 			&i.Result,
@@ -2294,7 +2636,7 @@ FROM team_member tm
 JOIN team t ON t.tenant_id = tm.tenant_id AND t.id = tm.team_id
 JOIN contest c ON c.tenant_id = t.tenant_id AND c.id = t.contest_id
 LEFT JOIN ladder_rank l ON l.tenant_id = t.tenant_id AND l.contest_id = t.contest_id AND l.team_id = t.id
-WHERE tm.tenant_id = $1 AND tm.member_tenant_id = $1 AND tm.account_id = $2 AND c.deleted_at IS NULL
+WHERE tm.member_tenant_id = $1 AND tm.account_id = $2 AND c.deleted_at IS NULL
   AND NOT EXISTS (
       SELECT 1 FROM cheat_record cr
       WHERE cr.tenant_id = t.tenant_id
@@ -2306,8 +2648,8 @@ ORDER BY c.end_at DESC, c.id DESC
 `
 
 type ListStudentContestRecordsParams struct {
-	TenantID  int64 `json:"tenant_id"`
-	AccountID int64 `json:"account_id"`
+	MemberTenantID int64 `json:"member_tenant_id"`
+	AccountID      int64 `json:"account_id"`
 }
 
 type ListStudentContestRecordsRow struct {
@@ -2320,7 +2662,7 @@ type ListStudentContestRecordsRow struct {
 }
 
 func (q *Queries) ListStudentContestRecords(ctx context.Context, arg ListStudentContestRecordsParams) ([]ListStudentContestRecordsRow, error) {
-	rows, err := q.db.Query(ctx, listStudentContestRecords, arg.TenantID, arg.AccountID)
+	rows, err := q.db.Query(ctx, listStudentContestRecords, arg.MemberTenantID, arg.AccountID)
 	if err != nil {
 		return nil, err
 	}
@@ -2449,36 +2791,63 @@ func (q *Queries) ListTeamMembers(ctx context.Context, arg ListTeamMembersParams
 }
 
 const listVulnProblems = `-- name: ListVulnProblems :many
-SELECT id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at
+SELECT id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at, composition_digest, composition_snapshot, init_code_ref, init_script_ref
 FROM vuln_problem
-WHERE tenant_id = $1 AND ($2::bigint = 0 OR source_id = $2) AND ($3::smallint = 0 OR status = $3)
+WHERE tenant_id = $1::bigint
+  AND ($2::bigint = 0 OR source_id = $2::bigint)
+  AND ($3::smallint = 0 OR status = $3::smallint)
+  AND ($4::smallint = 0 OR prevalidate_status = $4::smallint)
 ORDER BY updated_at DESC, id DESC
-LIMIT $4 OFFSET $5
+LIMIT $6::int OFFSET $5::int
 `
 
 type ListVulnProblemsParams struct {
-	TenantID int64 `json:"tenant_id"`
-	Column2  int64 `json:"column_2"`
-	Column3  int16 `json:"column_3"`
-	Limit    int32 `json:"limit"`
-	Offset   int32 `json:"offset"`
+	TenantID          int64 `json:"tenant_id"`
+	SourceID          int64 `json:"source_id"`
+	Status            int16 `json:"status"`
+	PrevalidateStatus int16 `json:"prevalidate_status"`
+	PageOffset        int32 `json:"page_offset"`
+	PageLimit         int32 `json:"page_limit"`
 }
 
-func (q *Queries) ListVulnProblems(ctx context.Context, arg ListVulnProblemsParams) ([]VulnProblem, error) {
+type ListVulnProblemsRow struct {
+	ID                  int64              `json:"id"`
+	TenantID            int64              `json:"tenant_id"`
+	SourceID            pgtype.Int8        `json:"source_id"`
+	ExternalRef         pgtype.Text        `json:"external_ref"`
+	Title               string             `json:"title"`
+	Level               int16              `json:"level"`
+	RuntimeMode         int16              `json:"runtime_mode"`
+	DraftBody           []byte             `json:"draft_body"`
+	PrevalidateStatus   int16              `json:"prevalidate_status"`
+	PrevalidateDetail   []byte             `json:"prevalidate_detail"`
+	ContentItemCode     pgtype.Text        `json:"content_item_code"`
+	ContentItemVersion  pgtype.Text        `json:"content_item_version"`
+	Status              int16              `json:"status"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	CompositionDigest   pgtype.Text        `json:"composition_digest"`
+	CompositionSnapshot []byte             `json:"composition_snapshot"`
+	InitCodeRef         pgtype.Text        `json:"init_code_ref"`
+	InitScriptRef       pgtype.Text        `json:"init_script_ref"`
+}
+
+func (q *Queries) ListVulnProblems(ctx context.Context, arg ListVulnProblemsParams) ([]ListVulnProblemsRow, error) {
 	rows, err := q.db.Query(ctx, listVulnProblems,
 		arg.TenantID,
-		arg.Column2,
-		arg.Column3,
-		arg.Limit,
-		arg.Offset,
+		arg.SourceID,
+		arg.Status,
+		arg.PrevalidateStatus,
+		arg.PageOffset,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []VulnProblem{}
+	items := []ListVulnProblemsRow{}
 	for rows.Next() {
-		var i VulnProblem
+		var i ListVulnProblemsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -2495,6 +2864,10 @@ func (q *Queries) ListVulnProblems(ctx context.Context, arg ListVulnProblemsPara
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.CompositionDigest,
+			&i.CompositionSnapshot,
+			&i.InitCodeRef,
+			&i.InitScriptRef,
 		); err != nil {
 			return nil, err
 		}
@@ -2752,6 +3125,22 @@ func (q *Queries) RenewBattleMatchStartLease(ctx context.Context, arg RenewBattl
 	return result.RowsAffected(), nil
 }
 
+const revokeContestAccessGrantsForSandbox = `-- name: RevokeContestAccessGrantsForSandbox :exec
+UPDATE contest_access_grant
+SET status = 2, grant_version = grant_version + 1, updated_at = now()
+WHERE tenant_id = $1 AND sandbox_id = $2 AND status = 1
+`
+
+type RevokeContestAccessGrantsForSandboxParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	SandboxID int64 `json:"sandbox_id"`
+}
+
+func (q *Queries) RevokeContestAccessGrantsForSandbox(ctx context.Context, arg RevokeContestAccessGrantsForSandboxParams) error {
+	_, err := q.db.Exec(ctx, revokeContestAccessGrantsForSandbox, arg.TenantID, arg.SandboxID)
+	return err
+}
+
 const setContestStatus = `-- name: SetContestStatus :one
 UPDATE contest
 SET status = $3, updated_at = now()
@@ -2796,26 +3185,60 @@ const setVulnProblemPrevalidate = `-- name: SetVulnProblemPrevalidate :one
 UPDATE vuln_problem
 SET prevalidate_status = $3,
     prevalidate_detail = $4,
+    composition_digest = $5,
+    composition_snapshot = $6,
+    init_code_ref = $7,
+    init_script_ref = $8,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 1
-RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at
+RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at, composition_digest, composition_snapshot, init_code_ref, init_script_ref
 `
 
 type SetVulnProblemPrevalidateParams struct {
-	TenantID          int64  `json:"tenant_id"`
-	ID                int64  `json:"id"`
-	PrevalidateStatus int16  `json:"prevalidate_status"`
-	PrevalidateDetail []byte `json:"prevalidate_detail"`
+	TenantID            int64       `json:"tenant_id"`
+	ID                  int64       `json:"id"`
+	PrevalidateStatus   int16       `json:"prevalidate_status"`
+	PrevalidateDetail   []byte      `json:"prevalidate_detail"`
+	CompositionDigest   pgtype.Text `json:"composition_digest"`
+	CompositionSnapshot []byte      `json:"composition_snapshot"`
+	InitCodeRef         pgtype.Text `json:"init_code_ref"`
+	InitScriptRef       pgtype.Text `json:"init_script_ref"`
 }
 
-func (q *Queries) SetVulnProblemPrevalidate(ctx context.Context, arg SetVulnProblemPrevalidateParams) (VulnProblem, error) {
+type SetVulnProblemPrevalidateRow struct {
+	ID                  int64              `json:"id"`
+	TenantID            int64              `json:"tenant_id"`
+	SourceID            pgtype.Int8        `json:"source_id"`
+	ExternalRef         pgtype.Text        `json:"external_ref"`
+	Title               string             `json:"title"`
+	Level               int16              `json:"level"`
+	RuntimeMode         int16              `json:"runtime_mode"`
+	DraftBody           []byte             `json:"draft_body"`
+	PrevalidateStatus   int16              `json:"prevalidate_status"`
+	PrevalidateDetail   []byte             `json:"prevalidate_detail"`
+	ContentItemCode     pgtype.Text        `json:"content_item_code"`
+	ContentItemVersion  pgtype.Text        `json:"content_item_version"`
+	Status              int16              `json:"status"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	CompositionDigest   pgtype.Text        `json:"composition_digest"`
+	CompositionSnapshot []byte             `json:"composition_snapshot"`
+	InitCodeRef         pgtype.Text        `json:"init_code_ref"`
+	InitScriptRef       pgtype.Text        `json:"init_script_ref"`
+}
+
+func (q *Queries) SetVulnProblemPrevalidate(ctx context.Context, arg SetVulnProblemPrevalidateParams) (SetVulnProblemPrevalidateRow, error) {
 	row := q.db.QueryRow(ctx, setVulnProblemPrevalidate,
 		arg.TenantID,
 		arg.ID,
 		arg.PrevalidateStatus,
 		arg.PrevalidateDetail,
+		arg.CompositionDigest,
+		arg.CompositionSnapshot,
+		arg.InitCodeRef,
+		arg.InitScriptRef,
 	)
-	var i VulnProblem
+	var i SetVulnProblemPrevalidateRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -2832,6 +3255,10 @@ func (q *Queries) SetVulnProblemPrevalidate(ctx context.Context, arg SetVulnProb
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.InitCodeRef,
+		&i.InitScriptRef,
 	)
 	return i, err
 }
@@ -2844,7 +3271,7 @@ SET sandbox_ref = $3,
     lease_token = '',
     lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $5 AND lease_until > now()
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
 `
 
 type StartBattleMatchParams struct {
@@ -2872,6 +3299,7 @@ func (q *Queries) StartBattleMatch(ctx context.Context, arg StartBattleMatchPara
 		&i.EntryAID,
 		&i.EntryBID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRef,
 		&i.JudgeTaskRef,
 		&i.Result,
@@ -2993,7 +3421,7 @@ UPDATE solve_submission
 SET passed = $3,
     score = $4
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, contest_id, problem_id, team_id, submitter_id, content_ref, source_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at
+RETURNING id, tenant_id, contest_id, problem_id, team_id, submitter_tenant_id, submitter_id, content_ref, source_ref, scope_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at
 `
 
 type UpdateSolveSubmissionResultParams struct {
@@ -3017,9 +3445,11 @@ func (q *Queries) UpdateSolveSubmissionResult(ctx context.Context, arg UpdateSol
 		&i.ContestID,
 		&i.ProblemID,
 		&i.TeamID,
+		&i.SubmitterTenantID,
 		&i.SubmitterID,
 		&i.ContentRef,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.JudgeTaskRef,
 		&i.Passed,
 		&i.Score,
@@ -3029,29 +3459,92 @@ func (q *Queries) UpdateSolveSubmissionResult(ctx context.Context, arg UpdateSol
 	return i, err
 }
 
+const upsertContestAccessGrant = `-- name: UpsertContestAccessGrant :one
+INSERT INTO contest_access_grant (id, tenant_id, contest_id, team_id, sandbox_id, member_tenant_id, member_account_id, capabilities, source_ref, grant_version, status, expires_at, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, 1, $10, now(), now())
+ON CONFLICT (tenant_id, sandbox_id, member_tenant_id, member_account_id) DO UPDATE
+SET capabilities = EXCLUDED.capabilities,
+    source_ref = EXCLUDED.source_ref,
+    grant_version = contest_access_grant.grant_version + 1,
+    status = 1,
+    expires_at = EXCLUDED.expires_at,
+    updated_at = now()
+RETURNING id, tenant_id, contest_id, team_id, sandbox_id, member_tenant_id, member_account_id, capabilities, source_ref, grant_version, status, expires_at, created_at, updated_at
+`
+
+type UpsertContestAccessGrantParams struct {
+	ID              int64              `json:"id"`
+	TenantID        int64              `json:"tenant_id"`
+	ContestID       int64              `json:"contest_id"`
+	TeamID          int64              `json:"team_id"`
+	SandboxID       int64              `json:"sandbox_id"`
+	MemberTenantID  int64              `json:"member_tenant_id"`
+	MemberAccountID int64              `json:"member_account_id"`
+	Capabilities    []byte             `json:"capabilities"`
+	SourceRef       string             `json:"source_ref"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+}
+
+func (q *Queries) UpsertContestAccessGrant(ctx context.Context, arg UpsertContestAccessGrantParams) (ContestAccessGrant, error) {
+	row := q.db.QueryRow(ctx, upsertContestAccessGrant,
+		arg.ID,
+		arg.TenantID,
+		arg.ContestID,
+		arg.TeamID,
+		arg.SandboxID,
+		arg.MemberTenantID,
+		arg.MemberAccountID,
+		arg.Capabilities,
+		arg.SourceRef,
+		arg.ExpiresAt,
+	)
+	var i ContestAccessGrant
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ContestID,
+		&i.TeamID,
+		&i.SandboxID,
+		&i.MemberTenantID,
+		&i.MemberAccountID,
+		&i.Capabilities,
+		&i.SourceRef,
+		&i.GrantVersion,
+		&i.Status,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const upsertContestProblem = `-- name: UpsertContestProblem :one
-INSERT INTO contest_problem (id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO contest_problem (id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq, composition_digest, composition_snapshot)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (tenant_id, contest_id, item_code, item_version) DO UPDATE
 SET score = EXCLUDED.score,
     dynamic_score = EXCLUDED.dynamic_score,
     battle_config = EXCLUDED.battle_config,
     battle_rule = EXCLUDED.battle_rule,
-    seq = EXCLUDED.seq
-RETURNING id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq
+    seq = EXCLUDED.seq,
+    composition_digest = EXCLUDED.composition_digest,
+    composition_snapshot = EXCLUDED.composition_snapshot
+RETURNING id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq, composition_digest, composition_snapshot
 `
 
 type UpsertContestProblemParams struct {
-	ID           int64       `json:"id"`
-	TenantID     int64       `json:"tenant_id"`
-	ContestID    int64       `json:"contest_id"`
-	ItemCode     string      `json:"item_code"`
-	ItemVersion  string      `json:"item_version"`
-	Score        int32       `json:"score"`
-	DynamicScore []byte      `json:"dynamic_score"`
-	BattleConfig []byte      `json:"battle_config"`
-	BattleRule   pgtype.Int2 `json:"battle_rule"`
-	Seq          int32       `json:"seq"`
+	ID                  int64       `json:"id"`
+	TenantID            int64       `json:"tenant_id"`
+	ContestID           int64       `json:"contest_id"`
+	ItemCode            string      `json:"item_code"`
+	ItemVersion         string      `json:"item_version"`
+	Score               int32       `json:"score"`
+	DynamicScore        []byte      `json:"dynamic_score"`
+	BattleConfig        []byte      `json:"battle_config"`
+	BattleRule          pgtype.Int2 `json:"battle_rule"`
+	Seq                 int32       `json:"seq"`
+	CompositionDigest   pgtype.Text `json:"composition_digest"`
+	CompositionSnapshot []byte      `json:"composition_snapshot"`
 }
 
 func (q *Queries) UpsertContestProblem(ctx context.Context, arg UpsertContestProblemParams) (ContestProblem, error) {
@@ -3066,6 +3559,8 @@ func (q *Queries) UpsertContestProblem(ctx context.Context, arg UpsertContestPro
 		arg.BattleConfig,
 		arg.BattleRule,
 		arg.Seq,
+		arg.CompositionDigest,
+		arg.CompositionSnapshot,
 	)
 	var i ContestProblem
 	err := row.Scan(
@@ -3079,6 +3574,8 @@ func (q *Queries) UpsertContestProblem(ctx context.Context, arg UpsertContestPro
 		&i.BattleConfig,
 		&i.BattleRule,
 		&i.Seq,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
 	)
 	return i, err
 }
@@ -3128,8 +3625,17 @@ SET title = EXCLUDED.title,
     level = EXCLUDED.level,
     runtime_mode = EXCLUDED.runtime_mode,
     draft_body = EXCLUDED.draft_body,
+    prevalidate_status = 1,
+    prevalidate_detail = '{}'::jsonb,
+    composition_digest = NULL,
+    composition_snapshot = NULL,
+    init_code_ref = NULL,
+    init_script_ref = NULL,
+    content_item_code = NULL,
+    content_item_version = NULL,
+    status = 1,
     updated_at = now()
-RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at
+RETURNING id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status, created_at, updated_at, composition_digest, composition_snapshot, init_code_ref, init_script_ref
 `
 
 type UpsertVulnProblemParams struct {
@@ -3143,7 +3649,29 @@ type UpsertVulnProblemParams struct {
 	DraftBody   []byte      `json:"draft_body"`
 }
 
-func (q *Queries) UpsertVulnProblem(ctx context.Context, arg UpsertVulnProblemParams) (VulnProblem, error) {
+type UpsertVulnProblemRow struct {
+	ID                  int64              `json:"id"`
+	TenantID            int64              `json:"tenant_id"`
+	SourceID            pgtype.Int8        `json:"source_id"`
+	ExternalRef         pgtype.Text        `json:"external_ref"`
+	Title               string             `json:"title"`
+	Level               int16              `json:"level"`
+	RuntimeMode         int16              `json:"runtime_mode"`
+	DraftBody           []byte             `json:"draft_body"`
+	PrevalidateStatus   int16              `json:"prevalidate_status"`
+	PrevalidateDetail   []byte             `json:"prevalidate_detail"`
+	ContentItemCode     pgtype.Text        `json:"content_item_code"`
+	ContentItemVersion  pgtype.Text        `json:"content_item_version"`
+	Status              int16              `json:"status"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	CompositionDigest   pgtype.Text        `json:"composition_digest"`
+	CompositionSnapshot []byte             `json:"composition_snapshot"`
+	InitCodeRef         pgtype.Text        `json:"init_code_ref"`
+	InitScriptRef       pgtype.Text        `json:"init_script_ref"`
+}
+
+func (q *Queries) UpsertVulnProblem(ctx context.Context, arg UpsertVulnProblemParams) (UpsertVulnProblemRow, error) {
 	row := q.db.QueryRow(ctx, upsertVulnProblem,
 		arg.ID,
 		arg.TenantID,
@@ -3154,7 +3682,7 @@ func (q *Queries) UpsertVulnProblem(ctx context.Context, arg UpsertVulnProblemPa
 		arg.RuntimeMode,
 		arg.DraftBody,
 	)
-	var i VulnProblem
+	var i UpsertVulnProblemRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -3171,6 +3699,10 @@ func (q *Queries) UpsertVulnProblem(ctx context.Context, arg UpsertVulnProblemPa
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.InitCodeRef,
+		&i.InitScriptRef,
 	)
 	return i, err
 }

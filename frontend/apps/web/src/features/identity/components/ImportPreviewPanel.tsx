@@ -38,7 +38,13 @@ export function ImportPreviewPanel({ preview, emptyDescription }: ImportPreviewP
           <Callout tone="warning" title="有问题的行不会被导入">
             修正这些行后重新上传,或直接提交只导入没有问题的行。
           </Callout>
-          <Table columns={errorColumns} data={errorRows} rowKey={(row) => String(row.line)} />
+          {/* elevated={false}:本组件根节点已是井、井又在 ModalBody 里,表格再画一层就成了第三级(§6.5.1) */}
+          <Table
+            columns={errorColumns}
+            data={errorRows}
+            rowKey={(row) => String(row.line)}
+            elevated={false}
+          />
         </>
       ) : (
         <Callout tone="success" title="校验通过">

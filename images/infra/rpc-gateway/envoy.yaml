@@ -38,5 +38,5 @@ static_resources:
               - endpoint:
                   address:
                     socket_address:
-                      address: ${CHAIMIR_RPC_UPSTREAM_HOST}
-                      port_value: ${CHAIMIR_RPC_UPSTREAM_PORT}
+                      address: __UPSTREAM_HOST__
+                      port_value: __UPSTREAM_PORT__

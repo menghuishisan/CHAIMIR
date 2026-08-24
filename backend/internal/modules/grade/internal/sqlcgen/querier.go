@@ -16,7 +16,7 @@ type Querier interface {
 	ClearDefaultLevelConfigs(ctx context.Context) error
 	CountAcademicWarnings(ctx context.Context, arg CountAcademicWarningsParams) (int64, error)
 	CountGradeAppeals(ctx context.Context, status int16) (int64, error)
-	CountGradeReviews(ctx context.Context, status int16) (int64, error)
+	CountGradeReviews(ctx context.Context, arg CountGradeReviewsParams) (int64, error)
 	CountOwnGradeReviews(ctx context.Context, arg CountOwnGradeReviewsParams) (int64, error)
 	CreateAcademicWarning(ctx context.Context, arg CreateAcademicWarningParams) (AcademicWarning, error)
 	CreateGradeAppeal(ctx context.Context, arg CreateGradeAppealParams) (GradeAppeal, error)
@@ -49,6 +49,7 @@ type Querier interface {
 	MarkGradeLockOutboxPublished(ctx context.Context, arg MarkGradeLockOutboxPublishedParams) (GradeLockOutbox, error)
 	RejectGradeReview(ctx context.Context, arg RejectGradeReviewParams) (GradeReview, error)
 	RelockGradeReview(ctx context.Context, arg RelockGradeReviewParams) (GradeReview, error)
+	RequeueExhaustedGradeLockOutbox(ctx context.Context, dollar_1 int64) (int64, error)
 	UnlockGradeReview(ctx context.Context, arg UnlockGradeReviewParams) (GradeReview, error)
 	UpdateGradeAppealStatus(ctx context.Context, arg UpdateGradeAppealStatusParams) (GradeAppeal, error)
 	UpdateLevelConfig(ctx context.Context, arg UpdateLevelConfigParams) (GradeLevelConfig, error)

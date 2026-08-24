@@ -59,7 +59,7 @@ func (s *Service) ListMyContestRecords(ctx context.Context) ([]ContestRecordDTO,
 		return nil, err
 	}
 	var records []StudentContestRecord
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
 		records, err = tx.ListStudentContestRecords(ctx, id.TenantID, id.AccountID)
 		return err

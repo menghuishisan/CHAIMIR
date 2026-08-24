@@ -12,6 +12,7 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  DataPanel,
   DescriptionList,
   FilterBar,
   FilterField,
@@ -27,7 +28,6 @@ import {
   ModalTitle,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
   Skeleton,
@@ -150,16 +150,17 @@ export default function TeacherSharedLibraryPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '资源' }, { label: '共享资源库' }]} />}
+        kicker={<Breadcrumb items={[{ label: '资源' }]} />}
         title="共享资源库"
         description="其他学校共享出来的题目。克隆到本校后成为你的独立草稿,可以自由修改。"
         icon={Share2}
       />
 
-      {/* 不做指标带:共享题目数已在下方分组说明里给出,而「涵盖类型/涵盖知识点」需要跨全库去重统计,
-          服务端没有这个聚合,用当前页数出来就是错数(规范 §6.5);类型与知识点在每一行里可见。 */}
-      <PageSection title="共享题目" description={`共 ${shared.total} 道题目`}>
-        <div className="flex flex-col gap-4">
+      {/* 不做指标带:共享题目数由 Pagination 的「共 N 条」给出,而「涵盖类型/涵盖知识点」需要跨全库去重统计,
+          服务端没有这个聚合,用当前页数出来就是错数(§6.5.4 全量口径);类型与知识点在每一行里可见。 */}
+      <DataPanel
+        label="共享题目"
+        filter={
           <FilterBar label="共享题目筛选" onSubmit={handleSearch} submitLabel="搜索">
             <FilterField label="题目类型" group>
               <SegmentedControl
@@ -180,7 +181,16 @@ export default function TeacherSharedLibraryPage() {
               />
             </FilterField>
           </FilterBar>
-
+        }
+        footer={
+          <Pagination
+            page={shared.page}
+            pageSize={shared.pageSize}
+            total={shared.total}
+            onPageChange={shared.setPage}
+          />
+        }
+      >
           <ResourceState
             resource={shared}
             emptyIcon={Share2}
@@ -204,22 +214,23 @@ export default function TeacherSharedLibraryPage() {
                 </Button>
               ) : undefined
             }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (
-              <div className="flex flex-col gap-4">
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={shared.page}
-                  pageSize={shared.pageSize}
-                  total={shared.total}
-                  onPageChange={shared.setPage}
-                />
-              </div>
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):题目标题一行、类型与来源学校一行
+                mobileCard={(item) => ({
+                  title: item.title,
+                  meta: `${contentTypeLabel(item.type)} · ${item.code} · ${item.version}`,
+                })}
+              />
             )}
           </ResourceState>
-        </div>
-      </PageSection>
+      </DataPanel>
 
       {previewTarget ? (
         <SharedFaceModal item={previewTarget} onClose={() => setPreviewTarget(undefined)} />

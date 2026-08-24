@@ -102,11 +102,42 @@ export function ContentItemPicker({
             emptyIcon={FileText}
             emptyTitle="题库里还没有题目"
             emptyDescription="先在题库内容里创建题目,再回来选择。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (
               <div className="max-h-96 overflow-y-auto">
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
+                <Table
+                  columns={columns}
+                  data={page.list}
+                  rowKey={(item) => item.id}
+                  elevated={false}
+                  // <md 换行卡(§6.4.1 规则 3):题名一行、分类一行,选择按钮在右
+                  mobileCard={(item) => {
+                    const alreadyInTarget = selectedCodes.has(item.code)
+                    const isPicked = picked.some((candidate) => candidate.code === item.code)
+                    return {
+                      title: item.title,
+                      meta: <ContentItemClassificationCell item={item} />,
+                      action: (
+                        <Button
+                          type="button"
+                          variant={isPicked ? 'outline' : 'ghost'}
+                          size="sm"
+                          disabled={alreadyInTarget}
+                          onClick={() =>
+                            setPicked((current) =>
+                              isPicked
+                                ? current.filter((candidate) => candidate.code !== item.code)
+                                : [...current, item],
+                            )
+                          }
+                        >
+                          {alreadyInTarget ? `已在${targetName}中` : isPicked ? '取消选择' : '选择'}
+                        </Button>
+                      ),
+                    }
+                  }}
+                />
               </div>
             )}
           </ResourceState>

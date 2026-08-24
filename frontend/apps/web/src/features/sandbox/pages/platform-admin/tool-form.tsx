@@ -674,6 +674,7 @@ const KIND_HINTS: Record<SandboxToolKind, string> = {
   [SandboxToolKind.TERMINAL]: '直接连接运行时环境的终端,不需要任何额外声明',
   [SandboxToolKind.WEB_EMBED]: '独立环境提供网页界面,要声明组件、服务与代理路由',
   [SandboxToolKind.COMMAND]: '在白名单内执行命令,要声明一个执行环境与允许的命令',
+  [SandboxToolKind.INFRA]: '只参与组合编排的基础设施,不提供学生工具入口',
 }
 
 function CommandArgvEditor({

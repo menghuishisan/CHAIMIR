@@ -1,4 +1,4 @@
-﻿# 本文件声明 infra/thegraph-node 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 infra/thegraph-node 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: infra
 name: thegraph-node
@@ -25,12 +25,67 @@ upstream:
   runtime_digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
   reuse_policy: thin-wrapper
 data_driven: true
+env_keys:
+  config:
+    - CHAIMIR_GRAPH_RPC_URL
+    - CHAIMIR_GRAPH_POSTGRES_ADDRESS
+    - CHAIMIR_GRAPH_POSTGRES_DB
+    - CHAIMIR_GRAPH_POSTGRES_USER
+    - CHAIMIR_GRAPH_IPFS_ADDRESS
+    - CHAIMIR_GRAPH_NETWORK
+  secret:
+    - POSTGRES_PASSWORD
+secrets_required:
+  - env: POSTGRES_PASSWORD
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
 capabilities:
-  - chain-indexer
-  - subgraph-runner
+  provides:
+    - chain-indexer
+    - subgraph-runner
+  requires:
+    - evm-json-rpc
+    - graph-datastore
+    - ipfs-http-api
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      network_name:
+        type: string
+        x-chaimir-env: infra/CHAIMIR_GRAPH_NETWORK
+      postgres_database:
+        type: string
+        x-chaimir-env: infra/CHAIMIR_GRAPH_POSTGRES_DB
+      postgres_user:
+        type: string
+        x-chaimir-env: infra/CHAIMIR_GRAPH_POSTGRES_USER
+  student_access: private
 infra:
   eco_tags:
     - evm
+  bindings:
+    - name: chain_rpc
+      capability: evm-json-rpc
+      endpoint: rpc
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:CHAIMIR_GRAPH_RPC_URL
+    - name: graph_database
+      capability: graph-datastore
+      endpoint: postgres
+      protocol: TCP
+      required_at_start: true
+      config_binding: env:CHAIMIR_GRAPH_POSTGRES_ADDRESS
+    - name: content_store
+      capability: ipfs-http-api
+      endpoint: api
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:CHAIMIR_GRAPH_IPFS_ADDRESS
   roles:
     - indexer
     - subgraph

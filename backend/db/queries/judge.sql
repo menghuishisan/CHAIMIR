@@ -45,36 +45,36 @@ RETURNING id, code, name, type, executor_ref, runtime_required, default_timeout_
 WITH inserted AS (
     INSERT INTO judge_task (
         id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope,
-        submitter_id, problem_ref, code_storage_key, code_hash,
+        submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash,
         input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error,
         created_at, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 0, $17, NULL, now(), now())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $18, $9, $10, $11, $12, $13, $14, $15, $16, 0, $17, NULL, now(), now())
     ON CONFLICT (tenant_id, source_ref, problem_ref) DO NOTHING
-    RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+    RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 )
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM inserted
 UNION ALL
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $2 AND source_ref = $4 AND problem_ref = $9 AND NOT EXISTS (SELECT 1 FROM inserted)
 LIMIT 1;
 
 -- name: GetJudgeTask :one
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND id = $2;
 
 -- name: GetJudgeTaskBySourceRef :one
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND source_ref = $2 AND problem_ref = $3;
 
 -- name: GetJudgeTaskWithResult :one
 SELECT
     t.id, t.tenant_id, t.judger_id, t.source_ref, t.source_owner_id, t.source_course_id, t.source_scope,
-    t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
+    t.submitter_id, t.submitter_tenant_id, t.problem_ref, t.code_storage_key, t.code_hash,
     t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until,
     COALESCE(r.id, 0)::bigint AS result_id,
     COALESCE(r.version, 0)::int AS result_version,
@@ -97,21 +97,21 @@ LEFT JOIN LATERAL (
 WHERE t.tenant_id = $1 AND t.id = $2;
 
 -- name: ListJudgeTasksBySourceRef :many
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND source_ref = $2
 ORDER BY created_at DESC, id DESC;
 
 -- name: ListRecentJudgeTasksBySubmitterProblem :many
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
-WHERE tenant_id = $1 AND submitter_id = $2 AND problem_ref = $3 AND created_at >= now() - make_interval(secs => $4::int)
+WHERE tenant_id = $1 AND submitter_tenant_id = $2 AND submitter_id = $3 AND problem_ref = $4 AND created_at >= now() - make_interval(secs => $5::int)
 ORDER BY created_at DESC, id DESC;
 
 -- name: ListJudgeTasks :many
 SELECT
     t.id, t.tenant_id, t.judger_id, t.source_ref, t.source_owner_id, t.source_course_id, t.source_scope,
-    t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
+    t.submitter_id, t.submitter_tenant_id, t.problem_ref, t.code_storage_key, t.code_hash,
     t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until,
     COALESCE(r.id, 0)::bigint AS result_id,
     COALESCE(r.version, 0)::int AS result_version,
@@ -160,7 +160,7 @@ WHERE judge_task.tenant_id = $1
 UPDATE judge_task
 SET status = 5, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 1
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: ResetJudgeTaskForRejudge :one
 UPDATE judge_task
@@ -170,7 +170,7 @@ SET status = 1,
     last_error = NULL,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status IN (3, 4)
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: DequeueJudgeTasks :many
 UPDATE judge_task t
@@ -190,7 +190,7 @@ WHERE t.id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: FailExpiredJudgeTasks :many
 UPDATE judge_task t
@@ -209,13 +209,13 @@ WHERE t.id IN (
     LIMIT sqlc.arg(page_limit)::int
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: CompleteJudgeTask :one
 UPDATE judge_task
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: RenewJudgeTaskLease :execrows
 -- 执行期心跳仅允许当前持有者延长未过期租约,避免长时判题被另一 worker 重领。
@@ -231,19 +231,19 @@ WHERE tenant_id = $1
 UPDATE judge_task
 SET status = 1, retry_count = retry_count + 1, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: FailJudgeTask :one
 UPDATE judge_task
 SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: CompleteManualJudgeTask :one
 UPDATE judge_task
 SET status = 3, last_error = NULL, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = '' AND lease_until IS NULL
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: UpsertJudgeResult :one
 INSERT INTO judge_result (id, task_id, tenant_id, version, passed, score, max_score, details, replay_trace, judge_sandbox_ref, judged_at, is_rejudge)
@@ -304,18 +304,18 @@ WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_u
 RETURNING id, tenant_id, task_id, subject, payload, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: CreateSubmissionFingerprint :one
-INSERT INTO submission_fingerprint (id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-RETURNING id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector, created_at;
+INSERT INTO submission_fingerprint (id, tenant_id, source_ref, problem_ref, submitter_id, submitter_tenant_id, code_hash, sim_vector, created_at)
+VALUES ($1, $2, $3, $4, $5, $8, $6, $7, now())
+RETURNING id, tenant_id, source_ref, problem_ref, submitter_id, submitter_tenant_id, code_hash, sim_vector, created_at;
 
 -- name: FindExactFingerprints :many
-SELECT id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector, created_at
+SELECT id, tenant_id, source_ref, problem_ref, submitter_id, submitter_tenant_id, code_hash, sim_vector, created_at
 FROM submission_fingerprint
 WHERE tenant_id = $1 AND problem_ref = $2 AND code_hash = $3
 ORDER BY created_at DESC, id DESC;
 
 -- name: ListFingerprintsForProblem :many
-SELECT id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector, created_at
+SELECT id, tenant_id, source_ref, problem_ref, submitter_id, submitter_tenant_id, code_hash, sim_vector, created_at
 FROM submission_fingerprint
 WHERE tenant_id = $1 AND problem_ref = $2 AND ($3::text = '' OR source_ref <> $3)
 ORDER BY created_at DESC, id DESC;

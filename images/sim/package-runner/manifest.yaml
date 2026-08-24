@@ -18,9 +18,8 @@ description: M4 扩展仿真包通用运行器镜像;镜像内只有平台装配
 source:
   type: platform-built
 upstream:
-  image: base/node-builder
-  digest: ""
   reuse_policy: build-base-runtime
+  builder: base/node-builder
 data_driven: false
 capabilities:
   - simulation-isolated-execution

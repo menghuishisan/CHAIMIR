@@ -2,9 +2,10 @@
  * Table:列定义驱动的泛型数据表格(§5.1)。
  * 支持列对齐/等宽数字列/可排序表头(aria-sort)/行点击(键盘可达)/
  * 加载骨架与空态插槽;宽屏溢出时在容器内独立横向滚动,不带动整页。
+ * 传 `mobileCard` 时 `<md` 改渲行卡(§6.4.1 规则 3),两种形态同源一份 data 与一份列定义。
  */
 import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Icon } from "../../lib/icon";
 
@@ -19,6 +20,18 @@ export interface TableColumn<T> {
   mono?: boolean;
   sortable?: boolean;
   render?: (row: T) => ReactNode;
+}
+
+/** 窄屏行卡的内容(§6.4.1 规则 3):主字段一行、次要信息一行、状态徽标与箭头在右 */
+export interface TableMobileCard {
+  /** 主字段,如课程名 */
+  title: ReactNode;
+  /** 次要信息一行,如「3 学分 · 2026/09/01 起 · CHAIN26A」 */
+  meta?: ReactNode;
+  /** 状态徽标槽位 */
+  badge?: ReactNode;
+  /** 行尾动作槽位;不传且有 onRowClick 时显示右向箭头示意可进入 */
+  action?: ReactNode;
 }
 
 export interface TableProps<T> {
@@ -36,6 +49,19 @@ export interface TableProps<T> {
   onSortChange?: (key: string) => void;
   /** 传入后整行可点、可聚焦、可回车触发 */
   onRowClick?: (row: T) => void;
+  /**
+   * `<md` 的行卡渲染(§6.4.1 规则 3)。传入后窄屏改渲染行卡、不再横滚表格 ——
+   * 把六列挤进 343px 或让用户横滚去找「状态」列,两者都不算可用。
+   * 列定义与行卡同源于一份 data,不产生第二套列表实现。
+   * 不传时窄屏仍走表格并在容器内独立横滚(兼容尚未分族整改的页面)。
+   */
+  mobileCard?: (row: T) => TableMobileCard;
+  /**
+   * 是否自带抬起片外观(底色 + 落影 + 圆角),默认 true。
+   * 放进 `DataPanel` 时传 false —— 那时容器本身就是抬起片,
+   * 表格再画一层就成了片里套片(§6.5.1「不出现第三级」)。
+   */
+  elevated?: boolean;
   className?: string;
 }
 
@@ -70,13 +96,14 @@ export function Table<T>({
   sort,
   onSortChange,
   onRowClick,
+  mobileCard,
+  elevated = true,
   className,
 }: TableProps<T>) {
   // 交互元素守卫:事件源自行内按钮/链接/输入等交互子元素时不触发整行动作,
-  // 防止单元格内操作冒泡误触 onRowClick、防止输入框空格被 preventDefault 吞掉
-  const isFromInteractiveChild = (
-    event: MouseEvent<HTMLTableRowElement> | KeyboardEvent<HTMLTableRowElement>,
-  ) => {
+  // 防止单元格内操作冒泡误触 onRowClick、防止输入框空格被 preventDefault 吞掉。
+  // 泛化到 HTMLElement:同一套守卫既服务 ≥md 的 <tr>,也服务 <md 的行卡容器。
+  const isFromInteractiveChild = (event: MouseEvent<HTMLElement> | KeyboardEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
     const hit = target.closest(
       'button, a, input, select, textarea, [role="button"], [role="menuitem"]',
@@ -85,12 +112,12 @@ export function Table<T>({
   };
 
   // 行点击:守卫通过后触发整行动作
-  const handleRowClick = (event: MouseEvent<HTMLTableRowElement>, row: T) => {
+  const handleRowClick = (event: MouseEvent<HTMLElement>, row: T) => {
     if (isFromInteractiveChild(event)) return;
     onRowClick?.(row);
   };
   // 行键盘激活:onRowClick 存在时行可聚焦,Enter/Space 等同点击(仅守卫通过后才阻止默认滚动)
-  const handleRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, row: T) => {
+  const handleRowKeyDown = (event: KeyboardEvent<HTMLElement>, row: T) => {
     if (isFromInteractiveChild(event)) return;
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
@@ -99,11 +126,66 @@ export function Table<T>({
   };
 
   return (
-    // 容器内独立横向滚动(overflow-x-auto):列过宽时只滚表格,不带动整页。
-    // 整表是抬起片(规范 §6.5.1 第 1 级):不画外框,层次靠底色与落影;
-    // 表头与行的分界由表头下边线和行分隔线表达。
-    <div className={cn("overflow-x-auto rounded-lg bg-surface shadow-xs", className)}>
-      <table className="w-full border-collapse">
+    // 抬起片(规范 §6.5.1 第 1 级):不画外框,层次靠底色与落影;elevated=false 时交给外层容器。
+    // 容器内独立横向滚动(overflow-x-auto):列过宽时只滚表格,不带动整页;
+    // 给了 mobileCard 的表在 <md 改渲行卡,那时不需要横滚。
+    <div
+      className={cn(
+        "min-w-0 rounded-lg",
+        elevated && "bg-surface shadow-xs",
+        mobileCard ? "md:overflow-x-auto" : "overflow-x-auto",
+        className,
+      )}
+    >
+      {/* 窄屏行卡(§6.4.1 规则 3):与表格同源一份 data,列定义不复制第二遍 */}
+      {mobileCard && (
+        <ul className="md:hidden">
+          {loading
+            ? Array.from({ length: skeletonRows }, (_, index) => (
+                <li key={`card-skeleton-${index}`} className="border-b border-line px-4 py-3 last:border-b-0">
+                  <div className="h-4 w-2/3 rounded-sm skeleton-shimmer" />
+                  <div className="mt-2 h-3 w-1/2 rounded-sm skeleton-shimmer" />
+                </li>
+              ))
+            : data.length === 0
+              ? (
+                  <li className="px-4 py-12 text-center text-ink-sub">{empty}</li>
+                )
+              : data.map((row) => {
+                  const card = mobileCard(row);
+                  return (
+                    <li key={rowKey(row)}>
+                      {/* 整卡可点时用 button 而不是给 li 挂 tabIndex:原生按钮自带角色与键盘行为 */}
+                      <div
+                        role={onRowClick ? "button" : undefined}
+                        tabIndex={onRowClick ? 0 : undefined}
+                        onClick={onRowClick ? (event) => handleRowClick(event, row) : undefined}
+                        onKeyDown={onRowClick ? (event) => handleRowKeyDown(event, row) : undefined}
+                        className={cn(
+                          "flex items-center gap-3 border-b border-line px-4 py-3",
+                          onRowClick &&
+                            "cursor-pointer focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2",
+                        )}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-base text-ink">{card.title}</div>
+                          {card.meta && (
+                            <div className="mt-0.5 truncate text-xs text-ink-sub">{card.meta}</div>
+                          )}
+                        </div>
+                        {card.badge && <div className="shrink-0">{card.badge}</div>}
+                        {card.action ??
+                          (onRowClick ? (
+                            <Icon icon={ChevronRight} size="sm" className="shrink-0 text-ink-faint" />
+                          ) : null)}
+                      </div>
+                    </li>
+                  );
+                })}
+        </ul>
+      )}
+
+      <table className={cn("w-full border-collapse", mobileCard && "hidden md:table")}>
         <thead>
           <tr className="border-b border-line bg-surface-sunken">
             {columns.map((column) => {

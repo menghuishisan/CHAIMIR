@@ -23,11 +23,24 @@ export enum SandboxStatus {
   IDLE = 8,
 }
 
+/**
+ * SANDBOX_COMPONENT_CATEGORY 区分教师可见的学生工具与只参与编排的基础设施组件。
+ * 平台工具目录与编排目录都按它分组:基础设施不是学生工具入口(§7.2)。
+ */
+export const SANDBOX_COMPONENT_CATEGORY = {
+  TOOL: 'tool',
+  INFRA: 'infra',
+} as const
+
+export type SandboxComponentCategory =
+  (typeof SANDBOX_COMPONENT_CATEGORY)[keyof typeof SANDBOX_COMPONENT_CATEGORY]
+
 export enum SandboxToolKind {
   BUILTIN = 1,
   TERMINAL = 2,
   WEB_EMBED = 3,
   COMMAND = 4,
+  INFRA = 5,
 }
 
 export enum RuntimeAdapterLevel {

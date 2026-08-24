@@ -233,6 +233,15 @@
         $ref: "#/components/responses/Standard"
       default:
         $ref: "#/components/responses/Error"
+/api/v1/platform/applications/{id}:
+  get:
+    tags: [identity]
+    summary: 入驻申请详情
+    operationId: identityGetApplication
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/platform/applications/{id}/approve:
   post:
     tags: [identity]

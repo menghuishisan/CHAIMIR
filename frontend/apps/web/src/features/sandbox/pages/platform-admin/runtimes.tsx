@@ -1,7 +1,7 @@
 // 链运行时页(平台侧栏,/platform-admin/runtimes)。
 //
 // 一条链要能给学生用,得走完四步:登记声明 → 登记镜像 → 预拉取到各节点 → 自检通过。
-// 后端把这条链路做成硬前置(RunRuntimeSelftest 要求默认镜像已预拉取成功且内置创世,
+// 后端把这条链路做成硬前置(自检要求可用且内置创世的镜像;组合预拉取只绑定已发布组合摘要,
 // 自检通过后运行时才转为可用),所以本页把它当作一条进度呈现,而不是一堆互不相关的按钮 ——
 // 管理员看一眼就知道卡在第几步。
 //
@@ -10,7 +10,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { CircleCheck, Plus, Server, Settings2, ShieldCheck } from 'lucide-react'
+import { Plus, Server, Settings2 } from 'lucide-react'
 import { RuntimeSelftestStatus, RuntimeStatus, type SandboxRuntime } from '@chaimir/api-client'
 import {
   Badge,
@@ -25,20 +25,17 @@ import {
   FilterBar,
   FilterField,
   PageHeader,
+  MetricStrip,
   PageScaffold,
   PageSection,
   SegmentedControl,
   Skeleton,
-  Stat,
   StatusIndicator,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
-import {
-  runtimeSelftestStatusLabel,
-  runtimeStatusLabel,
-} from '../../../../utils/labels/sandbox'
+import { runtimeSelftestStatusLabel, runtimeStatusLabel } from '../../../../utils/labels/sandbox'
 import { runtimeSelftestStatusTone, runtimeStatusTone } from '../../statusPresentation'
 import { RuntimeFormModal } from './runtime-form'
 import { runtimeHasDeployCommand, runtimeWorkspaceDir } from '../../runtimeSpec'
@@ -68,13 +65,17 @@ export default function PlatformRuntimesPage() {
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [formTarget, setFormTarget] = useState<{ runtime?: SandboxRuntime } | undefined>()
 
-  const runtimes = useAsyncResource(() => api.sandbox.listRuntimes(), [], (value) => value.length === 0)
+  const runtimes = useAsyncResource(
+    () => api.sandbox.listRuntimes(),
+    [],
+    (value) => value.length === 0
+  )
 
   const list = useMemo(() => runtimes.data ?? [], [runtimes.data])
 
   const visible = useMemo(
     () => (statusFilter ? list.filter((item) => item.status === Number(statusFilter)) : list),
-    [list, statusFilter],
+    [list, statusFilter]
   )
 
   const stats = useMemo(
@@ -83,13 +84,13 @@ export default function PlatformRuntimesPage() {
       onboarding: list.filter((item) => item.status === RuntimeStatus.ONBOARDING).length,
       failed: list.filter((item) => item.selftest_status === RuntimeSelftestStatus.FAILED).length,
     }),
-    [list],
+    [list]
   )
 
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }, { label: '链运行时' }]} />}
+        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="链运行时"
         description="学生做实验和答题时使用的链环境。填写配置后还要登记镜像、预拉取并自检通过,才会开放给学校。"
         icon={Server}
@@ -100,26 +101,30 @@ export default function PlatformRuntimesPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="运行时总数" value={list.length} icon={Server} />
-          <Stat label="可用" value={stats.available} icon={CircleCheck} hint="学校可以选用" />
-          <Stat label="接入中" value={stats.onboarding} icon={Settings2} hint="还没通过自检" />
-          <Stat
-            label="自检未通过"
-            value={stats.failed}
-            icon={ShieldCheck}
-            hint={stats.failed > 0 ? '需要查看失败原因' : '暂无失败记录'}
-          />
-        </div>
-      </PageSection>
+      {/*
+        归族:资源列表族的卡片网格形态(§6.5.3 第 ① 族)。指标降为内联摘要 ——
+        Stat 大卡属看板族,四张大卡在这一族会挤掉真正的主角,`<md` 竖排更违反 §6.4.1 规则 2。
+        四项由一次取齐的全量运行时算出(接口不分页,故是全量口径,§6.5.4)。
+      */}
+      <MetricStrip
+        label="运行时总量摘要"
+        className="mb-5"
+        items={[
+          { label: '运行时总数', value: list.length, hint: '含接入中与已停用' },
+          { label: '可用', value: stats.available, hint: '学校可以选用' },
+          { label: '接入中', value: stats.onboarding, hint: '还没通过自检' },
+          {
+            label: '自检未通过',
+            value: stats.failed,
+            hint: stats.failed > 0 ? '需要查看失败原因' : '暂无失败记录',
+          },
+        ]}
+      />
 
-      <PageSection
-        title="运行时列表"
-        description="按状态筛选。点进详情做镜像登记、预拉取与自检。"
-      >
+      <PageSection title="运行时列表" description="按状态筛选。点进详情做镜像登记、预拉取与自检。">
         <div className="flex flex-col gap-4">
-          <FilterBar label="运行时筛选">
+          {/* 数据区是一排 RuntimeCard(已是抬起片),筛选走 bare 无底形态,避免片里套片(§6.5.2) */}
+          <FilterBar label="运行时筛选" bare>
             <FilterField label="运行时状态" group>
               <SegmentedControl
                 aria-label="按运行时状态筛选"
@@ -161,7 +166,7 @@ export default function PlatformRuntimesPage() {
           </ResourceState>
 
           <Callout tone="info">
-            停用运行时不影响已创建的环境,只是之后不再分配。要换镜像版本请在详情里登记新版本并设为默认。
+            停用运行时不影响已创建的环境,只是之后不再分配。要换镜像版本请在详情里登记新版本,并为使用它的已发布组合重新预拉取。
           </Callout>
         </div>
       </PageSection>
@@ -191,8 +196,7 @@ interface RuntimeCardProps {
 function RuntimeCard({ runtime, onEdit }: RuntimeCardProps) {
   const navigate = useNavigate()
 
-  // 接入进度:登记必然已完成;镜像与预拉取的细节在详情页,列表用自检结果反推 ——
-  // 自检的硬前置就是默认镜像预拉取成功,所以自检通过即意味着前两步都过了。
+  // 接入进度:登记必然已完成;镜像与组合预拉取的细节在详情页,列表只展示自检与开放状态。
   const done = useMemo(() => {
     if (runtime.status === RuntimeStatus.AVAILABLE) return ONBOARDING_STEPS.length
     if (runtime.selftest_status === RuntimeSelftestStatus.PASSED) return 3
@@ -203,7 +207,7 @@ function RuntimeCard({ runtime, onEdit }: RuntimeCardProps) {
 
   const openDetail = useCallback(
     () => navigate(`/platform-admin/runtimes/${runtime.id}`),
-    [navigate, runtime.id],
+    [navigate, runtime.id]
   )
 
   return (
@@ -258,7 +262,7 @@ function RuntimeCard({ runtime, onEdit }: RuntimeCardProps) {
             镜像与自检
           </Button>
           <Button variant="ghost" size="sm" leftIcon={Settings2} onClick={onEdit}>
-              修改配置
+            修改配置
           </Button>
         </div>
       </CardBody>

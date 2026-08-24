@@ -16,6 +16,7 @@ type Querier interface {
 	// 业务事件重投时先识别已持久化的同一收件人集合,避免重复投递被限流当作失败。
 	CountNotificationsBySource(ctx context.Context, arg CountNotificationsBySourceParams) (int64, error)
 	CountUnreadNotifications(ctx context.Context, receiverID int64) (int64, error)
+	CountVisibleAnnouncementsByScope(ctx context.Context, arg CountVisibleAnnouncementsByScopeParams) ([]CountVisibleAnnouncementsByScopeRow, error)
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (SystemAnnouncement, error)
 	CreateNotification(ctx context.Context, arg CreateNotificationParams) error
 	DeleteExpiredNotifications(ctx context.Context, createdAt pgtype.Timestamptz) error

@@ -12,4 +12,5 @@ exec bitcoind \
   -rpcbind=0.0.0.0 \
   -rpcallowip=0.0.0.0/0 \
   -rpcport="${CHAIMIR_RUNTIME_RPC_PORT:-18443}" \
+  -fallbackfee="${CHAIMIR_BITCOIN_FALLBACK_FEE:-0.0001}" \
   -printtoconsole=1

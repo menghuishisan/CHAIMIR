@@ -8,7 +8,7 @@
 //
 // 后端只有列表接口(GET /platform/applications),没有单条读取;故本页从全量列表里定位。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { CircleCheck, CircleX, Inbox, ShieldCheck } from 'lucide-react'
 import { ApplicationStatus, type TenantApplication } from '@chaimir/api-client'
@@ -27,9 +27,9 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
+  ObjectIdentity,
   PageHeader,
   PageScaffold,
-  PageSection,
   Skeleton,
   StatusIndicator,
   Textarea,
@@ -55,42 +55,37 @@ const TENANT_CODE_PATTERN = /^[a-z][a-z0-9-]{1,30}[a-z0-9]$/
  */
 export default function PlatformApplicationDetailPage() {
   const { applicationId = '' } = useParams<{ applicationId: string }>()
-  const navigate = useNavigate()
 
-  const applications = useAsyncResource(() => api.identity.getApplications(), [], () => false)
-
-  const application = useMemo(
-    () => (applications.data ?? []).find((item) => item.application_id === applicationId),
-    [applicationId, applications.data],
+  // 单读走 getApplication:深链首屏不再拉全量申请列表在浏览器里筛这一份;
+  // 审核与回滚都以这次单读返回的对象为当前版本(对齐清单 §6.1)
+  const application = useAsyncResource(
+    () => api.identity.getApplication(applicationId),
+    [applicationId],
+    () => false,
   )
 
   return (
     <PageScaffold>
+      {/*
+        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的学校名承担,
+        故页面头只出面包屑,末节到「入驻申请」为止(§6.5.0 通则 1)。
+      */}
       <PageHeader
         kicker={
           <Breadcrumb
             items={[
               { label: '租户' },
               { label: '入驻申请', href: '/platform-admin/applications' },
-              { label: application ? application.school_name : '审核详情' },
             ]}
           />
-        }
-        title={application ? application.school_name : '审核详情'}
-        description="核对申请资料后决定是否开通。通过会立即创建学校与首个管理员账号,不能撤销。"
-        icon={Inbox}
-        actions={
-          <Button variant="outline" onClick={() => navigate('/platform-admin/applications')}>
-            返回申请列表
-          </Button>
         }
       />
 
       <ResourceState
-        resource={applications}
+        resource={application}
         emptyIcon={Inbox}
-        emptyTitle="还没有入驻申请"
-        emptyDescription="学校在公共入驻页提交申请后会出现在这里。"
+        emptyTitle="申请不存在"
+        emptyDescription="这份申请可能已被移除,回申请列表重新选择一份。"
         skeleton={
           <div className="flex flex-col gap-4">
             <Skeleton variant="block" />
@@ -98,15 +93,7 @@ export default function PlatformApplicationDetailPage() {
           </div>
         }
       >
-        {() =>
-          application ? (
-            <ApplicationReview application={application} onReviewed={applications.reload} />
-          ) : (
-            <Callout tone="warning" title="没有找到这份申请">
-              申请可能已被移除。回申请列表重新选择一份。
-            </Callout>
-          )
-        }
+        {(data) => <ApplicationReview application={data} onReviewed={application.reload} />}
       </ResourceState>
     </PageScaffold>
   )
@@ -128,85 +115,79 @@ function ApplicationReview({ application, onReviewed }: ApplicationReviewProps) 
 
   return (
     <>
-      <PageSection title="申请资料" description="联系方式由学校自行填写,开通前请另行核实身份。">
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h3 className="text-base font-semibold text-ink">{application.school_name}</h3>
-              <p className="mt-0.5 text-sm text-ink-sub">{schoolTypeLabel(application.school_type)}</p>
-            </div>
-            <StatusIndicator
-              tone={applicationStatusTone(application.status)}
-              label={applicationStatusLabel(application.status)}
-            />
-          </div>
-
-          <DescriptionList
-            columns={2}
-            items={[
-              { term: '联系人', description: application.contact_name },
-              { term: '联系电话', description: application.contact_phone, mono: true },
-              { term: '联系邮箱', description: application.contact_email, mono: true },
-              { term: '提交时间', description: formatDateTime(application.submitted_at), mono: true },
-              ...(application.reviewed_at
-                ? [
-                    {
-                      term: '处理时间',
-                      description: formatDateTime(application.reviewed_at),
-                      mono: true,
-                    },
-                  ]
-                : []),
-            ]}
+      {/*
+        对象身份区:学校名 + 申请状态 + 联系方式横排 + 审核动作(§6.5.3 第 ④)。
+        两个动作都不可撤销(通过会在一个事务里建租户与首个管理员),故它们仍走弹窗二次确认(§7.2 B),
+        弹窗里才是逐项填写开通信息的地方 —— 身份区只负责「决定做哪件事」。
+      */}
+      <ObjectIdentity
+        name={application.school_name}
+        status={
+          <StatusIndicator
+            tone={applicationStatusTone(application.status)}
+            label={applicationStatusLabel(application.status)}
           />
-
-          {application.reject_reason ? (
-            <Callout tone="warning" title="驳回理由">
-              {application.reject_reason}
-            </Callout>
-          ) : null}
-
-          {application.tenant_id ? (
-            <div className="flex flex-wrap items-center gap-2 well p-3">
-              <Badge tone="success">已开通</Badge>
-              <span className="text-sm text-ink-sub">这份申请对应的学校已经创建。</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate(`/platform-admin/schools/${application.tenant_id}`)}
-              >
-                去学校详情
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      </PageSection>
-
-      <PageSection
-        title="审核决定"
-        description={
-          pending
-            ? '通过需要指定学校短名与首个管理员;驳回需要写明理由,学校会看到这段话。'
-            : '这份申请已经处理过,不能再改判。'
         }
-      >
-        {pending ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="primary" leftIcon={CircleCheck} onClick={() => setAction('approve')}>
-              通过并开通学校
+        subtitle={`${schoolTypeLabel(application.school_type)} · 提交于 ${formatDateTime(application.submitted_at)}`}
+        actions={
+          pending ? (
+            <>
+              <Button variant="outline" leftIcon={CircleX} onClick={() => setAction('reject')}>
+                驳回申请
+              </Button>
+              <Button variant="primary" leftIcon={CircleCheck} onClick={() => setAction('approve')}>
+                通过并开通学校
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" onClick={() => navigate('/platform-admin/applications')}>
+              返回申请列表
             </Button>
-            <Button variant="outline" leftIcon={CircleX} onClick={() => setAction('reject')}>
-              驳回申请
-            </Button>
-          </div>
-        ) : (
-          <Callout tone="info">
-            {application.status === ApplicationStatus.APPROVED
-              ? '学校已开通。后续的停用、续期与配额调整在学校管理里做。'
-              : '申请已驳回。学校可以按驳回理由修改后重新提交。'}
-          </Callout>
-        )}
-      </PageSection>
+          )
+        }
+        properties={[
+          { label: '联系人', value: application.contact_name },
+          { label: '联系电话', value: <span className="font-mono">{application.contact_phone}</span> },
+          { label: '联系邮箱', value: <span className="font-mono">{application.contact_email}</span> },
+          {
+            label: '处理时间',
+            value: application.reviewed_at ? formatDateTime(application.reviewed_at) : '尚未处理',
+          },
+        ]}
+      />
+
+      {pending ? (
+        <Callout tone="warning" title="通过后不能撤销" className="mt-4">
+          通过会在一个事务里创建学校租户、开通首个学校管理员并签发一次性激活码。
+          联系方式由学校自行填写,开通前请另行核实身份。
+        </Callout>
+      ) : (
+        <Callout tone="info" className="mt-4">
+          {application.status === ApplicationStatus.APPROVED
+            ? '学校已开通。后续的停用、续期与配额调整在学校管理里做。'
+            : '申请已驳回。学校可以按驳回理由修改后重新提交。'}
+        </Callout>
+      )}
+
+      {application.reject_reason ? (
+        <Callout tone="warning" title="驳回理由" className="mt-4">
+          {application.reject_reason}
+        </Callout>
+      ) : null}
+
+      {application.tenant_id ? (
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg bg-surface p-4 shadow-xs">
+          <Badge tone="success">已开通</Badge>
+          <span className="text-sm text-ink-sub">这份申请对应的学校已经创建。</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate(`/platform-admin/schools/${application.tenant_id}`)}
+          >
+            去学校详情
+          </Button>
+        </div>
+      ) : null}
 
       {action === 'approve' ? (
         <ApproveModal

@@ -163,32 +163,31 @@ func (q *Queries) ClaimJudgeOutboxAcrossTenants(ctx context.Context, arg ClaimJu
 }
 
 const claimPendingTeachingGradeEventOutbox = `-- name: ClaimPendingTeachingGradeEventOutbox :many
-WITH exhausted AS (
-    UPDATE teaching_grade_event_outbox AS expired
-    SET status = 4, last_error = 'grade event lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
-    WHERE expired.status = 2 AND expired.lease_until <= $3::timestamptz AND expired.retry_count >= $4
-    RETURNING expired.id
+WITH expired AS (
+    UPDATE teaching_grade_event_outbox AS item
+    SET status = 4, updated_at = now(), lease_token = '', lease_until = NULL, next_attempt_at = now()
+    WHERE item.status = 2 AND item.lease_until <= $3::timestamptz
+    RETURNING item.id
 ), candidates AS (
     SELECT o.id
     FROM teaching_grade_event_outbox o
-    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= $3::timestamptz))
-      AND o.retry_count < $4
+    WHERE ((o.status IN (1, 4) AND o.next_attempt_at <= now())
+       OR (o.status = 2 AND o.lease_until <= $3::timestamptz))
     ORDER BY o.created_at ASC, o.id ASC
-    LIMIT $5
+    LIMIT $4
     FOR UPDATE SKIP LOCKED
 )
 UPDATE teaching_grade_event_outbox AS outbox
 SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = $1, lease_until = $2::timestamptz
 FROM candidates
 WHERE outbox.id = candidates.id
-RETURNING outbox.id, outbox.tenant_id, outbox.course_id, outbox.student_id, outbox.trace_id, outbox.event_updated_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
+RETURNING outbox.id, outbox.tenant_id, outbox.course_id, outbox.student_id, outbox.trace_id, outbox.event_updated_at, outbox.status, outbox.retry_count, outbox.next_attempt_at, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
 `
 
 type ClaimPendingTeachingGradeEventOutboxParams struct {
 	LeaseToken  string             `json:"lease_token"`
 	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
 	StaleBefore pgtype.Timestamptz `json:"stale_before"`
-	MaxAttempts int32              `json:"max_attempts"`
 	PageLimit   int32              `json:"page_limit"`
 }
 
@@ -197,7 +196,6 @@ func (q *Queries) ClaimPendingTeachingGradeEventOutbox(ctx context.Context, arg 
 		arg.LeaseToken,
 		arg.LeaseUntil,
 		arg.StaleBefore,
-		arg.MaxAttempts,
 		arg.PageLimit,
 	)
 	if err != nil {
@@ -216,6 +214,7 @@ func (q *Queries) ClaimPendingTeachingGradeEventOutbox(ctx context.Context, arg 
 			&i.EventUpdatedAt,
 			&i.Status,
 			&i.RetryCount,
+			&i.NextAttemptAt,
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -431,17 +430,27 @@ const countStudentCourses = `-- name: CountStudentCourses :one
 SELECT COUNT(*)::bigint
 FROM course c
 JOIN course_member m ON m.tenant_id = c.tenant_id AND m.course_id = c.id
-WHERE c.tenant_id = $1 AND m.student_id = $2 AND c.deleted_at IS NULL AND ($3::smallint = 0 OR c.status = $3)
+WHERE c.tenant_id = $1::bigint AND m.student_id = $2::bigint AND c.deleted_at IS NULL
+  AND ($3::smallint = 0 OR c.status = $3::smallint)
+  AND ($4::smallint = 0
+    OR ($4::smallint = 1 AND c.visibility = 2)
+    OR ($4::smallint = 2 AND c.visibility = 1))
 `
 
 type CountStudentCoursesParams struct {
 	TenantID  int64 `json:"tenant_id"`
 	StudentID int64 `json:"student_id"`
-	Column3   int16 `json:"column_3"`
+	Status    int16 `json:"status"`
+	IsShared  int16 `json:"is_shared"`
 }
 
 func (q *Queries) CountStudentCourses(ctx context.Context, arg CountStudentCoursesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countStudentCourses, arg.TenantID, arg.StudentID, arg.Column3)
+	row := q.db.QueryRow(ctx, countStudentCourses,
+		arg.TenantID,
+		arg.StudentID,
+		arg.Status,
+		arg.IsShared,
+	)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -474,6 +483,7 @@ WHERE tenant_id = $1
   AND assignment_id = $2
   AND ($3::bigint = 0 OR submission.student_id = $3::bigint)
   AND ($4::smallint = 0 OR submission.status = $4::smallint)
+  AND ($5::smallint = 0 OR submission.is_late = ($5::smallint = 1))
 `
 
 type CountSubmissionsByAssignmentParams struct {
@@ -481,6 +491,7 @@ type CountSubmissionsByAssignmentParams struct {
 	AssignmentID int64 `json:"assignment_id"`
 	StudentID    int64 `json:"student_id"`
 	Status       int16 `json:"status"`
+	IsLate       int16 `json:"is_late"`
 }
 
 func (q *Queries) CountSubmissionsByAssignment(ctx context.Context, arg CountSubmissionsByAssignmentParams) (int64, error) {
@@ -489,6 +500,7 @@ func (q *Queries) CountSubmissionsByAssignment(ctx context.Context, arg CountSub
 		arg.AssignmentID,
 		arg.StudentID,
 		arg.Status,
+		arg.IsLate,
 	)
 	var column_1 int64
 	err := row.Scan(&column_1)
@@ -498,17 +510,27 @@ func (q *Queries) CountSubmissionsByAssignment(ctx context.Context, arg CountSub
 const countTeacherCourses = `-- name: CountTeacherCourses :one
 SELECT COUNT(*)::bigint
 FROM course
-WHERE tenant_id = $1 AND teacher_id = $2 AND deleted_at IS NULL AND ($3::smallint = 0 OR status = $3)
+WHERE tenant_id = $1::bigint AND teacher_id = $2::bigint AND deleted_at IS NULL
+  AND ($3::smallint = 0 OR status = $3::smallint)
+  AND ($4::smallint = 0
+    OR ($4::smallint = 1 AND visibility = 2)
+    OR ($4::smallint = 2 AND visibility = 1))
 `
 
 type CountTeacherCoursesParams struct {
 	TenantID  int64 `json:"tenant_id"`
 	TeacherID int64 `json:"teacher_id"`
-	Column3   int16 `json:"column_3"`
+	Status    int16 `json:"status"`
+	IsShared  int16 `json:"is_shared"`
 }
 
 func (q *Queries) CountTeacherCourses(ctx context.Context, arg CountTeacherCoursesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countTeacherCourses, arg.TenantID, arg.TeacherID, arg.Column3)
+	row := q.db.QueryRow(ctx, countTeacherCourses,
+		arg.TenantID,
+		arg.TeacherID,
+		arg.Status,
+		arg.IsShared,
+	)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -1101,9 +1123,9 @@ func (q *Queries) CreateSubmission(ctx context.Context, arg CreateSubmissionPara
 }
 
 const createTeachingGradeEventOutbox = `-- name: CreateTeachingGradeEventOutbox :one
-INSERT INTO teaching_grade_event_outbox (id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
-VALUES ($1, $2, $3, $4, $5, $6, 1, 0, NULL, now(), now(), '', NULL)
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+INSERT INTO teaching_grade_event_outbox (id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, $6, 1, 0, now(), NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CreateTeachingGradeEventOutboxParams struct {
@@ -1134,6 +1156,7 @@ func (q *Queries) CreateTeachingGradeEventOutbox(ctx context.Context, arg Create
 		&i.EventUpdatedAt,
 		&i.Status,
 		&i.RetryCount,
+		&i.NextAttemptAt,
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -2559,17 +2582,22 @@ const listStudentCourses = `-- name: ListStudentCourses :many
 SELECT c.id, c.tenant_id, c.teacher_id, c.name, c.description, c.type, c.difficulty, c.cover_ref, c.semester, c.credits::float8 AS credits, c.schedule, c.start_at, c.end_at, c.invite_code, c.status, c.visibility, c.created_at, c.updated_at, c.deleted_at
 FROM course c
 JOIN course_member m ON m.tenant_id = c.tenant_id AND m.course_id = c.id
-WHERE c.tenant_id = $1 AND m.student_id = $2 AND c.deleted_at IS NULL AND ($3::smallint = 0 OR c.status = $3)
+WHERE c.tenant_id = $1::bigint AND m.student_id = $2::bigint AND c.deleted_at IS NULL
+  AND ($3::smallint = 0 OR c.status = $3::smallint)
+  AND ($4::smallint = 0
+    OR ($4::smallint = 1 AND c.visibility = 2)
+    OR ($4::smallint = 2 AND c.visibility = 1))
 ORDER BY c.updated_at DESC, c.id DESC
-LIMIT $4 OFFSET $5
+LIMIT $6::int OFFSET $5::int
 `
 
 type ListStudentCoursesParams struct {
-	TenantID  int64 `json:"tenant_id"`
-	StudentID int64 `json:"student_id"`
-	Column3   int16 `json:"column_3"`
-	Limit     int32 `json:"limit"`
-	Offset    int32 `json:"offset"`
+	TenantID   int64 `json:"tenant_id"`
+	StudentID  int64 `json:"student_id"`
+	Status     int16 `json:"status"`
+	IsShared   int16 `json:"is_shared"`
+	PageOffset int32 `json:"page_offset"`
+	PageLimit  int32 `json:"page_limit"`
 }
 
 type ListStudentCoursesRow struct {
@@ -2598,9 +2626,10 @@ func (q *Queries) ListStudentCourses(ctx context.Context, arg ListStudentCourses
 	rows, err := q.db.Query(ctx, listStudentCourses,
 		arg.TenantID,
 		arg.StudentID,
-		arg.Column3,
-		arg.Limit,
-		arg.Offset,
+		arg.Status,
+		arg.IsShared,
+		arg.PageOffset,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -2759,6 +2788,7 @@ WHERE tenant_id = $1
   AND assignment_id = $2
   AND ($5::bigint = 0 OR submission.student_id = $5::bigint)
   AND ($6::smallint = 0 OR submission.status = $6::smallint)
+  AND ($7::smallint = 0 OR submission.is_late = ($7::smallint = 1))
 ORDER BY submitted_at DESC, id DESC
 LIMIT $3 OFFSET $4
 `
@@ -2770,6 +2800,7 @@ type ListSubmissionsByAssignmentParams struct {
 	Offset       int32 `json:"offset"`
 	StudentID    int64 `json:"student_id"`
 	Status       int16 `json:"status"`
+	IsLate       int16 `json:"is_late"`
 }
 
 // student_id 传 0 回该作业全部学生提交(授课教师批改视角);传具体学生只回其本人提交
@@ -2783,6 +2814,7 @@ func (q *Queries) ListSubmissionsByAssignment(ctx context.Context, arg ListSubmi
 		arg.Offset,
 		arg.StudentID,
 		arg.Status,
+		arg.IsLate,
 	)
 	if err != nil {
 		return nil, err
@@ -2820,17 +2852,22 @@ func (q *Queries) ListSubmissionsByAssignment(ctx context.Context, arg ListSubmi
 const listTeacherCourses = `-- name: ListTeacherCourses :many
 SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
-WHERE tenant_id = $1 AND teacher_id = $2 AND deleted_at IS NULL AND ($3::smallint = 0 OR status = $3)
+WHERE tenant_id = $1::bigint AND teacher_id = $2::bigint AND deleted_at IS NULL
+  AND ($3::smallint = 0 OR status = $3::smallint)
+  AND ($4::smallint = 0
+    OR ($4::smallint = 1 AND visibility = 2)
+    OR ($4::smallint = 2 AND visibility = 1))
 ORDER BY updated_at DESC, id DESC
-LIMIT $4 OFFSET $5
+LIMIT $6::int OFFSET $5::int
 `
 
 type ListTeacherCoursesParams struct {
-	TenantID  int64 `json:"tenant_id"`
-	TeacherID int64 `json:"teacher_id"`
-	Column3   int16 `json:"column_3"`
-	Limit     int32 `json:"limit"`
-	Offset    int32 `json:"offset"`
+	TenantID   int64 `json:"tenant_id"`
+	TeacherID  int64 `json:"teacher_id"`
+	Status     int16 `json:"status"`
+	IsShared   int16 `json:"is_shared"`
+	PageOffset int32 `json:"page_offset"`
+	PageLimit  int32 `json:"page_limit"`
 }
 
 type ListTeacherCoursesRow struct {
@@ -2859,9 +2896,10 @@ func (q *Queries) ListTeacherCourses(ctx context.Context, arg ListTeacherCourses
 	rows, err := q.db.Query(ctx, listTeacherCourses,
 		arg.TenantID,
 		arg.TeacherID,
-		arg.Column3,
-		arg.Limit,
-		arg.Offset,
+		arg.Status,
+		arg.IsShared,
+		arg.PageOffset,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -3009,9 +3047,10 @@ func (q *Queries) MarkJudgeOutboxResult(ctx context.Context, arg MarkJudgeOutbox
 
 const markTeachingGradeEventOutboxFailed = `-- name: MarkTeachingGradeEventOutboxFailed :one
 UPDATE teaching_grade_event_outbox
-SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL,
+    next_attempt_at = now() + LEAST(interval '1 hour', power(2::numeric, LEAST(retry_count, 10)) * interval '1 second')
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkTeachingGradeEventOutboxFailedParams struct {
@@ -3038,6 +3077,7 @@ func (q *Queries) MarkTeachingGradeEventOutboxFailed(ctx context.Context, arg Ma
 		&i.EventUpdatedAt,
 		&i.Status,
 		&i.RetryCount,
+		&i.NextAttemptAt,
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -3051,7 +3091,7 @@ const markTeachingGradeEventOutboxPublished = `-- name: MarkTeachingGradeEventOu
 UPDATE teaching_grade_event_outbox
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkTeachingGradeEventOutboxPublishedParams struct {
@@ -3072,6 +3112,7 @@ func (q *Queries) MarkTeachingGradeEventOutboxPublished(ctx context.Context, arg
 		&i.EventUpdatedAt,
 		&i.Status,
 		&i.RetryCount,
+		&i.NextAttemptAt,
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,

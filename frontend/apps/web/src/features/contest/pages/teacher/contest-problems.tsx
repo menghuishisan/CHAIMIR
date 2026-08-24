@@ -23,7 +23,9 @@ import {
   Badge,
   Button,
   Callout,
+  DataPanel,
   Checkbox,
+  DescriptionList,
   FormField,
   Input,
   Modal,
@@ -45,11 +47,10 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { toContentItemVersionOptions } from '../../../content/contentItemOptions'
-import { SandboxToolChecklist } from '../../../sandbox/components/SandboxToolChecklist'
-import { useOrchestrationCatalog } from '../../../sandbox/useOrchestrationCatalog'
-import { battleRuleLabel } from '../../../../utils/labels/contest'
+import { battleRoleLabel, battleRuleLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { BATTLE_RULES } from '../../options'
+import { battleEntryRoles, battleRuntimeConfig } from '../../rules'
 
 export interface ContestProblemsProps {
   contest: Contest
@@ -140,7 +141,9 @@ export function ContestProblems({ contest }: ContestProblemsProps) {
         </div>
       }
     >
-      <div className="flex flex-col gap-4">
+      {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):与同父页的防作弊标签同构;
+          赛题一次回齐,不分页也不筛选,故只用片本身 */}
+      <DataPanel label="赛题">
         <ResourceState
           resource={problems}
           emptyIcon={Swords}
@@ -151,11 +154,30 @@ export function ContestProblems({ contest }: ContestProblemsProps) {
               添加赛题
             </Button>
           }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
         >
-          {(list) => <Table columns={columns} data={list} rowKey={(item) => item.id} />}
+          {(list) => (
+            <Table
+              columns={columns}
+              data={list}
+              rowKey={(item) => item.id}
+              elevated={false}
+              onRowClick={(item) => setModal({ problem: item })}
+              // <md 换行卡(§6.4.1 规则 3):题名一行、题源与分值一行,题目类型在右
+              mobileCard={(item) => ({
+                title:
+                  typeof item.face?.title === 'string' ? item.face.title : `第 ${item.seq} 题`,
+                meta: `第 ${item.seq} 题 · ${item.score} 分 · ${item.item_code}`,
+                badge: item.battle_rule ? (
+                  <Badge tone="cinnabar">{battleRuleLabel(item.battle_rule)}</Badge>
+                ) : (
+                  <Badge tone="neutral">解题</Badge>
+                ),
+              })}
+            />
+          )}
         </ResourceState>
-      </div>
+      </DataPanel>
 
       {modal ? (
         <ProblemFormModal
@@ -183,7 +205,8 @@ interface ProblemFormModalProps {
 
 /**
  * ProblemFormModal 配置单道赛题。
- * 对抗赛的运行时与工具从 M2 已注册清单里选:手填运行时代码要等学生开局才发现拼错。
+ * 对抗题的执行环境来自题库锁定版本的组合声明,竞赛侧只决定赛制:
+ * 规则、入场角色与回放方式 —— 环境参数不在这里重复一遍,也就不会与题目版本对不上。
  */
 function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: ProblemFormModalProps) {
   const editing = problem !== undefined
@@ -200,11 +223,6 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
   const [minScore, setMinScore] = useState(String(problem?.dynamic_score?.min_score ?? 60))
   const [decay, setDecay] = useState(String(problem?.dynamic_score?.decay_per_solve ?? 5))
   const [battleRule, setBattleRule] = useState(String(problem?.battle_rule ?? BATTLE_RULES[0]))
-  const [runtimeCode, setRuntimeCode] = useState(problem?.battle_config?.runtime_code ?? '')
-  const [imageVersion, setImageVersion] = useState(
-    problem?.battle_config?.runtime_image_version ?? ''
-  )
-  const [toolCodes, setToolCodes] = useState<string[]>(problem?.battle_config?.tool_codes ?? [])
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
 
@@ -220,14 +238,14 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
     () => false
   )
 
-  // 对抗题才需要执行环境:解题赛题目不起环境,故目录只在对抗分支取
-  const catalog = useOrchestrationCatalog(isBattle)
-  const imageOptions = catalog.imageOptions(runtimeCode)
-  const compatibleTools = catalog.tools(runtimeCode)
-
   const itemOptions = useMemo(
     () => toContentItemVersionOptions(items.data?.list ?? []),
     [items.data]
+  )
+
+  const entryRoles = useMemo(
+    () => battleEntryRoles(Number(battleRule) as BattleRule),
+    [battleRule]
   )
 
   const submit = useCallback(
@@ -259,12 +277,9 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
           return
         }
       }
-      if (isBattle && (runtimeCode === '' || imageVersion === '')) {
-        setFormError('对抗题需要指定执行环境的运行时与镜像版本')
-        return
-      }
 
       const [itemCode, itemVersion] = itemRef.split('|')
+      const rule = Number(battleRule) as BattleRule
       const payload: ContestProblemRequest = {
         item_code: itemCode,
         item_version: itemVersion,
@@ -274,14 +289,8 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
         dynamic_score: dynamicEnabled
           ? { min_score: Number(minScore), decay_per_solve: Number(decay) }
           : undefined,
-        battle_rule: isBattle ? (Number(battleRule) as BattleRule) : undefined,
-        battle_config: isBattle
-          ? {
-              runtime_code: runtimeCode,
-              runtime_image_version: imageVersion,
-              ...(toolCodes.length > 0 ? { tool_codes: toolCodes } : {}),
-            }
-          : undefined,
+        battle_rule: isBattle ? rule : undefined,
+        battle_config: isBattle ? battleRuntimeConfig(rule) : undefined,
       }
 
       setFormError(undefined)
@@ -302,15 +311,12 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
       decay,
       dynamicEnabled,
       editing,
-      imageVersion,
       isBattle,
       itemRef,
       minScore,
       onSaved,
-      runtimeCode,
       score,
       seq,
-      toolCodes,
     ]
   )
 
@@ -438,66 +444,24 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                   />
                 </FormField>
 
-                <ResourceState
-                  resource={catalog.resource}
-                  emptyIcon={Target}
-                  emptyTitle="平台还没有可用运行时"
-                  emptyDescription="请联系平台管理员在链运行时里注册并自检运行时。"
-                  skeleton={<Skeleton variant="line" lines={2} />}
-                >
-                  {() => (
-                    <div className="flex flex-col gap-4">
-                      <div className="grid gap-4 sm:grid-cols-2">
-                        <FormField label="运行时" htmlFor="problem-runtime" required>
-                          <Select
-                            id="problem-runtime"
-                            options={catalog.runtimeOptions}
-                            value={runtimeCode}
-                            placeholder="选择运行时"
-                            onValueChange={(value) => {
-                              setRuntimeCode(value)
-                              setImageVersion('')
-                              setToolCodes([])
-                            }}
-                          />
-                        </FormField>
-                        <FormField label="镜像版本" htmlFor="problem-image" required>
-                          <Select
-                            id="problem-image"
-                            options={imageOptions}
-                            value={imageVersion}
-                            placeholder={
-                              runtimeCode === ''
-                                ? '请先选择运行时'
-                                : imageOptions.length > 0
-                                  ? '选择镜像版本'
-                                  : '该运行时暂无镜像'
-                            }
-                            disabled={imageOptions.length === 0}
-                            onValueChange={setImageVersion}
-                          />
-                        </FormField>
-                      </div>
-
-                      <FormField
-                        label="可用工具"
-                        helper="对局执行时可用的命令工具,不选则只有运行时自带能力"
-                      >
-                        {compatibleTools.length > 0 ? (
-                          <SandboxToolChecklist
-                            tools={compatibleTools}
-                            selectedCodes={toolCodes}
-                            onChange={setToolCodes}
-                          />
-                        ) : (
-                          <p className="text-sm text-ink-sub">
-                            该运行时没有兼容的可用工具,可只使用运行时能力或联系平台管理员检查工具配置。
-                          </p>
-                        )}
-                      </FormField>
-                    </div>
-                  )}
-                </ResourceState>
+                {/* 入场角色与回放方式由规则决定,故只呈现结果不给重复输入(改规则即改这两项) */}
+                <DescriptionList
+                  dense
+                  items={[
+                    {
+                      term: '可参战角色',
+                      description: entryRoles.map(battleRoleLabel).join('、'),
+                    },
+                    { term: '对局回放', description: '完整记录链上交易,赛后可回放复盘' },
+                    {
+                      term: '执行环境',
+                      description: '取自题目锁定版本里的环境声明,赛题不另外指定',
+                    },
+                  ]}
+                />
+                <Callout tone="info">
+                  对抗题的链与工具在题库里随题目版本一起锁定。要换环境请改题目版本,不要在赛题里另配一套。
+                </Callout>
               </div>
             ) : null}
 

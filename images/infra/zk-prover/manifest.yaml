@@ -1,4 +1,4 @@
-﻿# 本文件声明 infra/zk-prover 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 infra/zk-prover 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: infra
 name: zk-prover
@@ -19,12 +19,20 @@ source:
   type: platform-built
 upstream:
   image: node:24-alpine3.23
+  version: 24-alpine3.23
   digest: sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
   reuse_policy: self-developed-toolchain
 data_driven: true
 capabilities:
-  - zk-prover
-  - proof-generation
+  provides:
+    - zk-prover
+    - proof-generation
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 infra:
   eco_tags:
     - evm

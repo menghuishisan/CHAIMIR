@@ -19,14 +19,31 @@ source:
   type: platform-built
 upstream:
   image: fiscoorg/fiscobcos:v3.12.1
+  version: v3.12.1
   digest: sha256:93db5277a5c896fde402f2165d133cc3d346effef4165ec417ef098eb2ede74b
   reuse_policy: official-static-binary-on-supported-base
 data_driven: true
 capabilities:
-  - judger
-  - fisco-contract-testcase-runner
+  provides:
+    - judger
+    - fisco-contract-testcase-runner
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 judger:
   type: testcase
+  runtime_code: fisco-bcos
+  genesis_ref: genesis/fisco-bcos/platform-selftest.json
+  command:
+    - run-fisco-tests
+  exec_target: sandbox/testcase-fisco
+  env:
+    - name: CHAIMIR_TEST_SCRIPT
+      value: /judge-private/tests/run.sh
+  suite_archive_name: platform-selftest.tar
   modes:
     - fisco-contract
   output_contract:

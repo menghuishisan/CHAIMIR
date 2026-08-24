@@ -19,18 +19,57 @@ source:
   type: thin-wrapper
 upstream:
   image: blockscout/blockscout:6.9.2
+  version: 6.9.2
   digest: sha256:1d3f8fc81c5719e5b1ce37427ebb04082d9d6a57f8c49d0c693a21fbcfecc34d
   reuse_policy: thin-wrapper
+env_keys:
+  config:
+    - CHAIMIR_BLOCKSCOUT_DATABASE_ADDRESS
+    - CHAIMIR_BLOCKSCOUT_DATABASE_NAME
+    - CHAIMIR_BLOCKSCOUT_DATABASE_USER
+    - ETHEREUM_JSONRPC_HTTP_URL
+  secret:
+    - SECRET_KEY_BASE
+    - POSTGRES_PASSWORD
+secrets_required:
+  - env: SECRET_KEY_BASE
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
+  - env: POSTGRES_PASSWORD
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
 data_driven: true
 capabilities:
-  - chain-explorer
-  - evm-browser
+  provides:
+    - chain-explorer
+    - evm-browser
+  requires:
+    - evm-json-rpc
+    - postgres-compatible
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: public
 tool:
   kind: web-embed
   eco_tags:
     - evm
   mount_workspace: false
-  runtime_config_required: false
+  runtime_config_required: true
+  bindings:
+    - name: chain_rpc
+      capability: evm-json-rpc
+      endpoint: rpc
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:ETHEREUM_JSONRPC_HTTP_URL
+    - name: database
+      capability: postgres-compatible
+      endpoint: postgres
+      protocol: TCP
+      required_at_start: true
+      config_binding: env:CHAIMIR_BLOCKSCOUT_DATABASE_ADDRESS
   resource_spec:
     components:
       - name: web
@@ -38,12 +77,6 @@ tool:
         command:
           - /usr/local/bin/chaimir-blockscout-entrypoint
         env:
-          - name: DATABASE_URL
-            value: postgresql://postgres:postgres@tool-blockscout-postgres:5432/blockscout
-          - name: ETHEREUM_JSONRPC_HTTP_URL
-            value: http://runtime-sandbox:8545
-          - name: ETHEREUM_JSONRPC_TRACE_URL
-            value: http://runtime-sandbox:8545
           - name: ETHEREUM_JSONRPC_VARIANT
             value: geth
           - name: ECTO_USE_SSL
@@ -83,39 +116,6 @@ tool:
             mount_path: /tmp
           - name: blockscout-cache
             mount_path: /tmp/blockscout
-      - name: postgres
-        image_url: "@image:infra/postgres-graph"
-        env:
-          - name: POSTGRES_DB
-            value: blockscout
-          - name: POSTGRES_USER
-            value: postgres
-          - name: POSTGRES_HOST_AUTH_METHOD
-            value: trust
-          - name: PGDATA
-            value: /tmp/postgres-graph
-        ports:
-          - name: postgres
-            container_port: 5432
-            service_port: 5432
-            protocol: TCP
-        resources:
-          requests:
-            cpu: 250m
-            memory: 512Mi
-          limits:
-            cpu: "1"
-            memory: 2Gi
-        readiness_probe:
-          type: tcp
-          port: postgres
-          period_seconds: 2
-          failure_threshold: 60
-        read_only_root_filesystem: false
-        mount_workspace: false
-        ephemeral_mounts:
-          - name: postgres-graph-data
-            mount_path: /tmp
     services:
       - name: tool-blockscout-web
         component: web
@@ -124,28 +124,10 @@ tool:
             port: 4000
             target_port: http
             protocol: TCP
-      - name: tool-blockscout-postgres
-        component: postgres
-        ports:
-          - name: postgres
-            port: 5432
-            target_port: postgres
-            protocol: TCP
     routes:
       - path_prefix: /
         service: tool-blockscout-web
         port: http
-    network_rules:
-      - name: blockscout-runtime-rpc
-        from: web
-        to: sandbox
-        ports:
-          - name: rpc
-      - name: blockscout-postgres
-        from: web
-        to: postgres
-        ports:
-          - name: postgres
 ports:
   - name: http
     container_port: 4000

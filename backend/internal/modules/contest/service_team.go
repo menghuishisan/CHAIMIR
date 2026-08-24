@@ -19,19 +19,23 @@ func (s *Service) Signup(ctx context.Context, contestID int64, req SignupRequest
 	if err != nil {
 		return TeamDTO{}, err
 	}
+	organizerTenantID, err := s.resolvePublishedContestTenant(ctx, contestID)
+	if err != nil {
+		return TeamDTO{}, err
+	}
 	var contest Contest
 	var team Team
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		contest, err = tx.GetContest(ctx, id.TenantID, contestID)
+		contest, err = tx.GetContest(ctx, organizerTenantID, contestID)
 		if err != nil {
 			return err
 		}
 		if err := validateSignupWindow(contest, timex.Now()); err != nil {
 			return err
 		}
-		if existing, err := tx.GetTeamForAccount(ctx, id.TenantID, contestID, id.TenantID, id.AccountID); err == nil {
-			team, err = tx.GetTeam(ctx, id.TenantID, existing.ID)
+		if existing, err := tx.GetTeamForAccount(ctx, organizerTenantID, contestID, id.TenantID, id.AccountID); err == nil {
+			team, err = tx.GetTeam(ctx, organizerTenantID, existing.ID)
 			return err
 		} else if !isNoRows(err) {
 			return err
@@ -51,14 +55,14 @@ func (s *Service) Signup(ctx context.Context, contestID int64, req SignupRequest
 		if contest.TeamMode == TeamModeSolo {
 			inviteCode = ""
 		}
-		team, err = tx.CreateTeam(ctx, Team{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, Name: name, InviteCode: inviteCode})
+		team, err = tx.CreateTeam(ctx, Team{ID: s.ids.Generate(), TenantID: organizerTenantID, ContestID: contestID, Name: name, InviteCode: inviteCode})
 		if err != nil {
 			return err
 		}
-		if _, err = tx.AddTeamMember(ctx, TeamMember{ID: s.ids.Generate(), TenantID: id.TenantID, TeamID: team.ID, AccountID: id.AccountID, MemberTenantID: id.TenantID, IsLeader: true}); err != nil {
+		if _, err = tx.AddTeamMember(ctx, TeamMember{ID: s.ids.Generate(), TenantID: organizerTenantID, TeamID: team.ID, AccountID: id.AccountID, MemberTenantID: id.TenantID, IsLeader: true}); err != nil {
 			return err
 		}
-		team, err = tx.GetTeam(ctx, id.TenantID, team.ID)
+		team, err = tx.GetTeam(ctx, organizerTenantID, team.ID)
 		return err
 	}); err != nil {
 		return TeamDTO{}, err
@@ -79,9 +83,13 @@ func (s *Service) JoinTeam(ctx context.Context, contestID int64, req JoinTeamReq
 	if code == "" {
 		return TeamDTO{}, apperr.ErrContestTeamInvalid
 	}
+	organizerTenantID, err := s.resolvePublishedContestTenant(ctx, contestID)
+	if err != nil {
+		return TeamDTO{}, err
+	}
 	var team Team
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		contest, err := tx.GetContest(ctx, id.TenantID, contestID)
+	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
+		contest, err := tx.GetContest(ctx, organizerTenantID, contestID)
 		if err != nil {
 			return err
 		}
@@ -91,22 +99,22 @@ func (s *Service) JoinTeam(ctx context.Context, contestID int64, req JoinTeamReq
 		if err := validateSignupWindow(contest, timex.Now()); err != nil {
 			return err
 		}
-		if ids, err := tx.AccountTeamIDs(ctx, id.TenantID, contestID, id.TenantID, id.AccountID); err != nil {
+		if ids, err := tx.AccountTeamIDs(ctx, organizerTenantID, contestID, id.TenantID, id.AccountID); err != nil {
 			return err
 		} else if len(ids) > 0 {
 			return apperr.ErrContestTeamInvalid
 		}
-		team, err = tx.GetTeamByInviteCode(ctx, id.TenantID, code)
+		team, err = tx.GetTeamByInviteCode(ctx, organizerTenantID, code)
 		if err != nil {
 			return err
 		}
 		if team.ContestID != contestID || team.Status != TeamStatusBuilding {
 			return apperr.ErrContestTeamInvalid
 		}
-		if _, err = tx.AddTeamMember(ctx, TeamMember{ID: s.ids.Generate(), TenantID: id.TenantID, TeamID: team.ID, AccountID: id.AccountID, MemberTenantID: id.TenantID, IsLeader: false}); err != nil {
+		if _, err = tx.AddTeamMember(ctx, TeamMember{ID: s.ids.Generate(), TenantID: organizerTenantID, TeamID: team.ID, AccountID: id.AccountID, MemberTenantID: id.TenantID, IsLeader: false}); err != nil {
 			return err
 		}
-		team, err = tx.GetTeam(ctx, id.TenantID, team.ID)
+		team, err = tx.GetTeam(ctx, organizerTenantID, team.ID)
 		return err
 	}); err != nil {
 		return TeamDTO{}, err
@@ -120,10 +128,14 @@ func (s *Service) GetTeam(ctx context.Context, teamID int64) (TeamDTO, error) {
 	if err != nil {
 		return TeamDTO{}, err
 	}
+	organizerTenantID, err := s.resolveTeamTenant(ctx, teamID)
+	if err != nil {
+		return TeamDTO{}, err
+	}
 	var team Team
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		team, err = tx.GetTeam(ctx, id.TenantID, teamID)
+		team, err = tx.GetTeam(ctx, organizerTenantID, teamID)
 		if err != nil {
 			return err
 		}
@@ -140,20 +152,24 @@ func (s *Service) LockTeam(ctx context.Context, teamID int64) (TeamDTO, error) {
 	if err != nil {
 		return TeamDTO{}, err
 	}
+	organizerTenantID, err := s.resolveTeamTenant(ctx, teamID)
+	if err != nil {
+		return TeamDTO{}, err
+	}
 	var team Team
-	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetTeam(ctx, id.TenantID, teamID)
+	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
+		current, err := tx.GetTeam(ctx, organizerTenantID, teamID)
 		if err != nil {
 			return err
 		}
 		if !isTeamLeader(id.TenantID, id.AccountID, current) {
 			return apperr.ErrContestTeamAccessDenied
 		}
-		team, err = tx.LockTeam(ctx, id.TenantID, teamID)
+		team, err = tx.LockTeam(ctx, organizerTenantID, teamID)
 		if err != nil {
 			return err
 		}
-		team.Members, err = tx.ListTeamMembers(ctx, id.TenantID, teamID)
+		team.Members, err = tx.ListTeamMembers(ctx, organizerTenantID, teamID)
 		return err
 	}); err != nil {
 		return TeamDTO{}, err

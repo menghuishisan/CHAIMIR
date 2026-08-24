@@ -18,6 +18,15 @@
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/instances:
+  get:
+    tags: [experiment]
+    summary: 教师活跃实验实例列表
+    operationId: experimentListTeacherInstances
+    x-chaimir-audience: teacher-or-school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/StatusQuery" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/experiment/student/experiments:
   get:
     tags: [experiment]
@@ -40,6 +49,14 @@
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/experiment/experiments/{id}:
+  get:
+    tags: [experiment]
+    summary: 教师实验详情
+    operationId: experimentGetExperiment
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   patch:
     tags: [experiment]
     summary: 编辑实验组件编排
@@ -224,6 +241,17 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/experiment/groups/{id}/members/{student_id}:
+  delete:
+    tags: [experiment]
+    summary: 移除实验小组成员并收回资源权限
+    operationId: experimentRemoveGroupMember
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { $ref: "#/components/parameters/IDPath" }
+      - { name: student_id, in: path, required: true, schema: { $ref: "#/components/schemas/SnowflakeID" } }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/experiment/internal/instances/{id}/score:
   get:

@@ -15,7 +15,7 @@ deploy/
 │                            容器化 Trivy/Cosign/Helm 工具入口
 ├── config/                  「唯一」环境变量源(单一来源)
 │   ├── chaimir.env          全平台非密配置(每项带注释)
-│   ├── secret.env.example   密钥模板(复制为 secret.env,被 .gitignore 忽略)
+│   ├── secret.env.example   受控密钥源输入模板(不直接注入应用 Pod)
 │   ├── supply-chain.secret.env.example
 │   │                       供应链工具专用密钥模板(不注入应用 Pod)
 │   ├── external-secret/      SaaS ExternalSecret 统一模板(overlay 只覆盖环境差异)
@@ -70,19 +70,29 @@ Kustomize component 同时生成两个命名空间的 ConfigMap:
 各 overlay 仅用 `behavior: merge` 覆盖差异键(如 `DEPLOY_MODE`、`PLATFORM_LAYER_ENABLED`、
 中间件外接端点),不重写整份配置。
 
-`backend/.env`、`frontend/.env` 与 `config/secret.env` 都是被 Git 忽略的私有文件,不得提交。Kubernetes 运行中的后端不读取工作区 `backend/.env`:非密配置只由 `config/chaimir.env` 生成 ConfigMap,密钥只由 `config/secret.env` 生成 Secret。`frontend/.env` 仅作为前端镜像构建期的 `VITE_*` 输入;`VITE_*` 会进入浏览器静态资源,严禁放密码、token 或私钥。前端部署形态和工具 origin 继续由 overlay 的 `/runtime-config.js` 注入。
+`backend/.env`、`frontend/.env` 与 `config/secret.env` 都是被 Git 忽略的私有文件,不得提交。Kubernetes 运行中的后端不直接读取这些工作区文件:非密配置只由 `config/chaimir.env` 生成 ConfigMap,密钥统一由 External Secrets Operator 从受控 SecretStore 同步。`config/secret.env` 是私有化和验收密钥源的受控运维输入,也供浏览器验收读取账号凭据;它只更新 `chaimir-secrets/chaimir` 源 Secret,不会直接生成或注入应用 Secret。`frontend/.env` 仅作为前端镜像构建期的 `VITE_*` 输入;`VITE_*` 会进入浏览器静态资源,严禁放密码、token 或私钥。前端部署形态和工具 origin 由初始化容器从同一个 `chaimir-config` 生成 `/runtime-config.js`,不再维护 overlay 专用配置文件。
 
-**密钥**走 `secret.env`(从 `config/secret.env.example` 复制,被 `.gitignore` 忽略):
+**密钥**统一走 ExternalSecret + SecretStore/KMS。`secret.env.example` 仅列出受控验收账号需要的键名,实际部署值必须先写入环境对应的密钥提供方:
 
 `make tls` 会在 `config/chaimir-tls/` 持久化生成有效期 825 天的 `www.chaimir.io` 自签证书，并创建统一名称 `chaimir-tls`。证书文件被 `.gitignore` 忽略，不会上传到 GitHub；文件存在且仍有效时，重复启动不会重新生成。浏览器入口统一使用 `https://www.chaimir.io`，需将域名解析到 `127.0.0.1` 并信任 `config/chaimir-tls/tls.crt`；Cookie 不提供 HTTP 降级。
 
 staging 和 prod-saas 部署流水线会在应用资源后等待 `chaimir-system/chaimir-tls`，并校验 Secret 类型为 `kubernetes.io/tls` 且同时包含证书和私钥；缺失或不完整会阻断部署。prod-school 交付前必须由学校运维在同一命名空间预创建同名 TLS Secret，再执行清单应用和 `bash deploy/scripts/wait-tls-secret.sh chaimir-system chaimir-tls 300` 验收。
 
-- `acceptance` / `prod-school`:overlay 用 `secretGenerator` 从受控 `secret.env` 生成
-  `chaimir-secret`(系统层)+ `chaimir-data-secret`(数据层)。
-- `staging` / `prod-saas`:不提交任何密钥 —— overlay 引用 `config/external-secret/`
-  统一模板,由 External Secrets Operator 从 KMS/Secret Manager 同步出 `chaimir-secret`。
-  集群侧 `ClusterSecretStore` 由运维以 Secret/KMS 管理方式创建,仓库不硬编码第三方端点或凭据。
+- 所有 overlay 都引用 `config/external-secret/` 统一模板,由 External Secrets Operator 同步出 `chaimir-secret`。
+- 包含内置中间件的部署形态同时引用 `config/external-secret-middleware/`,同步 `chaimir-data-secret` 和 `postgres-tls`。
+  各目标命名空间的 `SecretStore` 由运维以 Kubernetes Secret/KMS/Vault 管理方式创建,仓库不硬编码第三方端点或凭据。
+
+私有化和验收使用同一 Kubernetes Provider 契约。首次安装固定版本 Operator 后,运维在被忽略的 `config/secret.env` 填写全部真实值,准备 PostgreSQL 受信任证书和私钥,执行:
+
+```bash
+make external-secrets-up
+make tls
+make secret-source-up
+```
+
+`secret-source-up` 会校验必填键、拒绝模板占位值,把输入写入独立命名空间的唯一源 Secret,随后等待 `SecretStore` 与三个 `ExternalSecret` 全部 `Ready=True`;命令输出不包含敏感值。后续轮换仍修改同一受控输入并再次执行 `make secret-source-up`,不得手工修改 `chaimir-system/chaimir-secret` 或 `chaimir-data/chaimir-data-secret`。
+
+SaaS 生产的 `chaimir-staging-secret-store`、`chaimir-prod-secret-store` 由基础设施团队连接 KMS/Vault;每个环境的密钥后端保存一个名为 `chaimir` 的结构化对象,对象字段与 `config/secret.env.example` 的键一致。应用、前端构建和部署清单均不保存这些真实值。
 
 ## 统一部署与验收环境
 
@@ -112,9 +122,11 @@ make dev-up
 
 该目标会验证外部 Harbor、创建或校验无默认 CNI 的 `kind-chaimir-cilium`、安装正式 digest 的 Cilium 并通过 NetworkPolicy 数据面测试,再安装 gVisor 并实际运行隔离 Pod 验证用户态内核、安装 ingress、metrics-server、policy-controller,部署完整 overlay 并运行迁移任务。启动完成后将 `www.chaimir.io` 解析到 `127.0.0.1`,信任 `config/chaimir-tls/tls.crt`,通过 `https://www.chaimir.io` 访问。验收 seed 只由明确的 seed Job 生成,不会进入 SaaS/学校交付 overlay;CNI、证书、签名、隔离运行时、日志级别和网络策略全部执行生产标准。
 
-`make dev-up` 是完整环境的唯一首次入口,不会接受 Kindnet 集群作为运行目标。集群已完成 bootstrap 后,代码或镜像刷新使用 `make dev-refresh`,该目标固定校验 Cilium context 与数据面后再刷新应用。所有环境只使用 `make metrics-up`;Kind 节点由集群入口为 kubelet 启用服务证书轮换,并只批准节点身份、主体和 SAN 均匹配的请求,不提供 `--kubelet-insecure-tls` 入口。
+`make dev-up` 是完整环境的唯一首次入口,不会接受 Kindnet 集群作为运行目标。已有环境的日常生命周期分为三个明确入口:`make dev-start` 只恢复现有 Kind 节点、动态地址、Cilium 健康状态与 HTTPS 入口,不执行 Helm upgrade、NetworkPolicy smoke、gVisor smoke、迁移或验收 seed;`make dev-refresh` 只在镜像、配置或数据库源码变化后恢复现有集群并重新应用唯一 overlay、迁移和验收 seed,不重新安装 Cilium;`make dev-stop` 通过 Docker pause 暂停项目 Kind 节点的 CPU 执行并保留内存、volume、数据库进程与节点镜像缓存,避免用强制退出中断数据库。完整 Cilium 数据面与 gVisor 验收保留在首次 `dev-up` 和显式检查目标中,不会降级或形成第二套配置。所有环境只使用 `make metrics-up`;Kind 节点由集群入口为 kubelet 启用服务证书轮换,并只批准节点身份、主体和 SAN 均匹配的请求,不提供 `--kubelet-insecure-tls` 入口。
 
-Docker Desktop 重启不会删除 Kind 节点 `/var` Docker volume 或 Harbor PVC,因此同一 digest 的 Harbor 数据和节点 containerd 缓存会保留。集群入口把项目 Kind 节点的 Docker restart policy 固定为 `unless-stopped`,并会主动启动仍存在但已停止的节点;若节点容器地址在重启后变化,入口只删除节点归属失效的派生 `CiliumEndpoint`,等待当前 Agent 以新地址重新发布,不重建业务 Pod 或清空镜像缓存。Docker 恢复后执行 `make dev-refresh` 即可重新校验并刷新平台。应用滚动完成后,该入口还会按当前控制器和 Pod 引用精确清理未使用的 Kustomize 哈希 ConfigMap/Secret,不保留旧配置副本。不得执行 `make cilium-cluster-down`、删除 Harbor PVC、删除 Kind 节点 volume 或带 volume 的全局 Docker prune,否则相应集群数据或镜像缓存会被明确删除并需要重新拉取。
+Docker Desktop 重启不会删除 Kind 节点 `/var` Docker volume 或 Harbor PVC,因此同一 digest 的 Harbor 数据和节点 containerd 缓存会保留。集群入口把项目 Kind 节点的 Docker restart policy 固定为 `unless-stopped`,并会主动启动仍存在但已停止的节点;若节点容器地址在重启后变化,入口只删除节点归属失效的派生 `CiliumEndpoint`,等待当前 Agent 以新地址重新发布,不重建业务 Pod 或清空镜像缓存。恢复验收从当前 `CiliumNode` 读取全部主机地址与健康端点地址,由每个 Kind 节点主动探测完整地址矩阵,不等待仍可能保留重启前结果的 Cilium 后台健康缓存。Docker 恢复后执行 `make dev-start` 即可恢复网站;只有镜像、配置或数据库源码变化时才执行 `make dev-refresh`。应用滚动完成后,刷新入口会按当前控制器和 Pod 引用精确清理未使用的 Kustomize 哈希 ConfigMap/Secret,不保留旧配置副本。不得执行 `make cilium-cluster-down`、删除 Harbor PVC、删除 Kind 节点 volume 或带 volume 的全局 Docker prune,否则相应集群数据或镜像缓存会被明确删除并需要重新拉取。
+
+上述目标都是前台一次性运维命令,完成后会返回 PowerShell 提示符,网站继续由 Docker/Kubernetes 托管,不需要保持终端命令运行。执行中可用 `Ctrl+C` 停止等待;已经提交给 Kubernetes 的幂等变更不会自动回滚,重新执行同一目标即可继续收敛。需要停止网站时使用 `make dev-stop`,不要用全局 Docker 清理命令。
 
 M2 运行时预拉取不拉取 `images/image-digests.lock` 的全部镜像。平台管理员针对一个运行时触发预拉取时,M2 只把该运行时主镜像、其基础设施组件和兼容可用工具组成的默认工作负载集合拉到每个可调度沙箱节点,并执行镜像自检;成功 DaemonSet 常驻以便新节点自动补拉。现有节点重启且 `/var` volume 未删除时,`imagePullPolicy=IfNotPresent` 会复用 digest 缓存。
 
@@ -122,7 +134,9 @@ M2 运行时预拉取不拉取 `images/image-digests.lock` 的全部镜像。平
 
 ```bash
 make cilium-cluster-up       # 创建/修复无默认 CNI 集群并安装生产同版 Cilium
+make cilium-cluster-start    # 恢复现有集群、动态网络地址和外部 HTTPS 入口
 make cilium-cluster-check    # 校验 Cilium 状态与真实 NetworkPolicy 阻断/放行
+make cilium-cluster-stop     # 暂停项目 Kind 节点并保留进程、数据与镜像缓存
 make cilium-cluster-down     # 删除项目 Kind 集群,不删除外部 Harbor
 ```
 
@@ -135,10 +149,10 @@ M2 快照能力分为两层:通用 `VolumeSnapshot` CRD/snapshot-controller 与�
 中填写真实类名。`rancher.io/local-path`、普通 Docker volume 或演示用 hostpath CSI 不作为生产
 快照方案。
 
-将 `www.chaimir.io` 指向 `127.0.0.1`(hosts)后,前端经 `https://www.chaimir.io` 访问,并信任 `config/chaimir-tls/tls.crt`。首次环境使用 `dev-up`,后续浏览器联调和 E2E 使用 `dev-refresh`;两个入口都会先验证 Cilium 基线、维护节点到 canonical Harbor 的 split-DNS并重新应用唯一 overlay。
+将 `www.chaimir.io` 指向 `127.0.0.1`(hosts)后,前端经 `https://www.chaimir.io` 访问,并信任 `config/chaimir-tls/tls.crt`。首次环境使用 `dev-up`;Docker 重启或此前执行过 `dev-stop` 时使用 `dev-start`;只有镜像、配置或数据库源码变化后才使用 `dev-refresh`。三个入口共用同一 Cilium 集群、生产安全基线和 acceptance overlay,不存在本地 CNI 或应用清单分叉。
 
 > 应用镜像就绪前(目录2/3 未产出),backend/frontend/migrate Pod 会处于 ImagePull 待命 —— 属预期。
-> 镜像必须由统一供应链直接推送 Harbor、按 digest 回拉并通过门禁,再由 `image-metadata-promotion` 晋升到权威锁和 acceptance overlay;不得导入 `:dev` tag 绕过该流程。
+> 镜像必须由统一供应链直接推送 Harbor、按 digest 回拉并通过门禁,再由 `image-metadata-promotion` 晋升到权威锁及资源所属的 base/component;不得导入 `:dev` tag 绕过该流程。
 
 ### 本地代码变更的选择性镜像刷新
 
@@ -149,7 +163,7 @@ M2 快照能力分为两层:通用 `VolumeSnapshot` CRD/snapshot-controller 与�
 - 只改 `images/service/backend/**`、`images/service/migrate/**` 或 `images/service/cron/**` 时,只更新对应服务。
 - 共享构建基座 digest 变化时,按 Dockerfile 的真实 `FROM` 依赖扩展受影响集合;未受影响镜像继续使用正式锁中的原 digest。
 
-选定集合必须使用 `images/build-images.ps1 -Images` 生成候选锁,再用 `images/pull-images.ps1 -Images` 按候选锁回拉。候选集合必须通过 `deploy/scripts/image-attestations-generate.ps1 -Images -NoEnvWrite -DigestFragmentsDir <证据目录>\\fragments`;脚本只有在选定集合全部验证成功时才写出 `verified-images.lock`。把该片段交给 `images/sync-image-metadata.ps1` 后,才更新正式 `images/image-digests.lock`、四个环境 overlay、`deploy/config/chaimir.env` 和存在时的本地 `backend/.env` 准入证明。禁止把候选锁直接复制成正式锁,也禁止用 tag、手工 digest、`kubectl set image` 或临时本地镜像绕过流程。最后仍执行 `make dev-refresh`;该命令只会因 digest 变化滚动更新对应工作负载,未变更服务继续使用原镜像。
+选定集合必须使用 `images/build-images.ps1 -Images` 生成候选锁,再用 `images/pull-images.ps1 -Images` 按候选锁回拉。候选集合必须通过 `deploy/scripts/image-attestations-generate.ps1 -Images -NoEnvWrite -DigestFragmentsDir <证据目录>\\fragments`;脚本只有在选定集合全部验证成功时才写出 `verified-images.lock`。把该片段交给 `images/sync-image-metadata.ps1` 后,才更新正式 `images/image-digests.lock`、`deploy/base` 与资源所属 component 的镜像引用、`deploy/config/chaimir.env` 和存在时的环境 `backend/.env` 准入证明。禁止把候选锁直接复制成正式锁,也禁止用 tag、手工 digest、`kubectl set image` 或临时本地镜像绕过流程。最后仍执行 `make dev-refresh`;该命令只会因 digest 变化滚动更新对应工作负载,未变更服务继续使用原镜像。
 
 ## Harbor 与供应链工具
 
@@ -201,6 +215,7 @@ Desktop 做其他项目时不会占用额外 Harbor 端口。生产与本地不�
 
 `SUPPLY_CHAIN_TRIVY_IMAGE`、`SUPPLY_CHAIN_COSIGN_IMAGE`、`SUPPLY_CHAIN_HELM_IMAGE` 使用 digest 固定。当前 Trivy 固定为 0.72.0,Cosign 固定为 2.4.3（与 policy-controller 0.13.1 的 legacy 签名格式契约一致）;GitHub 工作流也显式安装同一 Cosign 版本。本地、私有化与 CI 使用项目私钥且不上传公共透明日志。需要升级工具时,先拉取目标稳定版本并确认 digest与命令参数,再同步更新 `config/chaimir.env` 和工作流版本,不得提交可变 `latest`。
 
+
 ## 校验(无需集群)
 
 ```bash
@@ -208,7 +223,7 @@ make render      # 渲染四个 overlay,检查 kustomize 构建
 make validate    # 渲染 + kubeconform 校验(需安装 kubeconform)
 ```
 
-或单独渲染:`kubectl kustomize --load-restrictor=LoadRestrictionsNone overlays/acceptance`。
+或单独渲染:`kubectl kustomize overlays/acceptance`。所有 overlay 必须在默认加载限制下通过。
 
 ## CI/CD
 
@@ -216,7 +231,7 @@ GitHub Actions(`.github/workflows/`)+ 可复用配置(`deploy/ci/`):
 
 - `backend.yml` / `frontend.yml` / `images.yml`:路径触发 → lint+测试 → 构建 →
   Trivy 扫描(高危阻断)+ CycloneDX SBOM → 推 Harbor并解析 digest → Cosign 镜像签名、SBOM 证明和双重验证。三者共用 `ci/build-scan-sign-push` composite action;backend 独占 backend/migrate/cron,frontend 独占 frontend,通用 images 不重复构建四个服务镜像。缺少 registry/robot/Cosign Secret 时在构建前显式失败。
-- `image-metadata-promotion.yml`:串行消费三条产物流水线的 digest 片段,同步权威 lock、acceptance digest 和受控配置引用,再由机器人 PR 自动合并;业务流水线不直接写 `main`。
+- `image-metadata-promotion.yml`:串行消费三条产物流水线的 digest 片段,同步权威 lock、base/component 镜像引用和受控配置引用,再由机器人 PR 自动合并;业务流水线不直接写 `main`。
 - `deploy.yml`:`images/image-digests.lock` 合入 `main` 后,从同一权威锁按 digest 自动部署 staging;打 `v*` tag 后从该发布提交的锁按 digest 渲染,经 GitHub Environment 人工审批部署 prod-saas。
 
 README、docs 或普通应用提交不直接创建 staging Deployment。只有已完成扫描、推送、签名、验签并由机器人 PR 晋升的权威锁变更才触发部署;backend、frontend、migrate、cron 必须同时存在有效 digest,不按 SHA tag、版本 tag 或 `latest` 降级。

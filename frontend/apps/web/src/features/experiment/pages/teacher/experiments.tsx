@@ -8,11 +8,9 @@ import { useNavigate } from 'react-router'
 import {
   CircleCheck,
   ClipboardCheck,
-  FlaskConical,
   LayoutTemplate,
   Pencil,
   Plus,
-  Send,
   Undo2,
 } from 'lucide-react'
 import {
@@ -25,8 +23,10 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  DataPanel,
   FilterBar,
   FilterField,
+  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -36,10 +36,8 @@ import {
   ModalTitle,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
-  Stat,
   Table,
   toast,
   type TableColumn,
@@ -238,7 +236,7 @@ export default function TeacherExperimentsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '实践' }, { label: '实验编排' }]} />}
+        kicker={<Breadcrumb items={[{ label: '实践' }]} />}
         title="实验编排"
         description="配置实验的代码环境、仿真场景、阶段与检查点。发布前会先校验依赖是否完整。"
         icon={LayoutTemplate}
@@ -253,27 +251,29 @@ export default function TeacherExperimentsPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat
-            label="实验总数"
-            value={totalCount ?? '—'}
-            icon={FlaskConical}
-            hint="不受下方筛选影响"
-          />
-          <Stat label="已发布" value={publishedCount ?? '—'} icon={Send} hint="学生可进入" />
-          <Stat label="草稿" value={draftCount ?? '—'} icon={Pencil} />
-          <Stat
-            label="已下架"
-            value={unpublishedCount ?? '—'}
-            icon={CircleCheck}
-            hint="学生不可再进入"
-          />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是实验列表 */}
+      <MetricStrip
+        label="实验总量摘要"
+        className="mb-5"
+        items={[
+          { label: '实验总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
+          { label: '已发布', value: publishedCount ?? '—', hint: '学生可进入' },
+          { label: '草稿', value: draftCount ?? '—', hint: '校验通过后才能发布' },
+          { label: '已下架', value: unpublishedCount ?? '—', hint: '学生不可再进入' },
+        ]}
+      />
 
-      <PageSection title="实验列表" description={`共 ${experiments.total} 个实验`}>
-        <div className="flex flex-col gap-4">
+      {/* 动作失败就近内联(§6.7 C) */}
+      {actionError ? (
+        <Callout tone="danger" className="mb-4">
+          {actionError}
+        </Callout>
+      ) : null}
+
+      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
+      <DataPanel
+        label="实验列表"
+        filter={
           <FilterBar label="实验筛选">
             <FilterField label="实验状态" group>
               <SegmentedControl
@@ -285,9 +285,16 @@ export default function TeacherExperimentsPage() {
               />
             </FilterField>
           </FilterBar>
-
-          {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
+        }
+        footer={
+          <Pagination
+            page={experiments.page}
+            pageSize={experiments.pageSize}
+            total={experiments.total}
+            onPageChange={experiments.setPage}
+          />
+        }
+      >
           <ResourceState
             resource={experiments}
             emptyIcon={LayoutTemplate}
@@ -308,22 +315,24 @@ export default function TeacherExperimentsPage() {
                 </Button>
               )
             }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (
-              <>
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={experiments.page}
-                  pageSize={experiments.pageSize}
-                  total={experiments.total}
-                  onPageChange={experiments.setPage}
-                />
-              </>
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):实验名一行、所属课程与检查点数一行
+                mobileCard={(item) => ({
+                  title: item.name,
+                  meta: `${experimentCollabModeLabel(item.collab_mode)} · 检查点 ${item.components.checkpoints.length} · ${formatShortDateTime(item.updated_at)}`,
+                  badge: <ExperimentStatusCell experiment={item} />,
+                })}
+              />
             )}
           </ResourceState>
-        </div>
-      </PageSection>
+      </DataPanel>
 
       <Modal
         open={validateResult !== undefined}

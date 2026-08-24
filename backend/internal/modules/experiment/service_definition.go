@@ -34,16 +34,39 @@ func (s *Service) ListExperiments(ctx context.Context, courseID int64, status in
 	return out, total, page, size, nil
 }
 
-// ListPublishedExperiments 查询学生可发现的已发布实验，并返回最小安全投影。
-func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, page, size int) ([]StudentExperimentDTO, int64, int, int, error) {
+// GetExperimentForTeacher 读取教师可管理的单个实验定义,避免详情页搬运全量列表。
+func (s *Service) GetExperimentForTeacher(ctx context.Context, experimentID int64) (ExperimentDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return ExperimentDTO{}, err
+	}
+	if experimentID <= 0 {
+		return ExperimentDTO{}, apperr.ErrExperimentNotFound
+	}
+	var item Experiment
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		item, err = tx.GetExperiment(ctx, id.TenantID, experimentID)
+		if err != nil {
+			return apperr.ErrExperimentNotFound.WithCause(err)
+		}
+		return s.ensureTeacherCanManage(ctx, id.AccountID, item)
+	}); err != nil {
+		return ExperimentDTO{}, err
+	}
+	return experimentDTOFromModel(item), nil
+}
+
+// ListPublishedExperiments 查询学生可发现的已发布实验，并返回最小安全投影。
+func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, page, size int) ([]StudentExperimentDTO, int64, int, int, map[string]map[string]int64, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return nil, 0, 0, 0, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
 	items := []Experiment{}
 	var total int64
 	groupByExperiment := map[int64]int64{}
+	var facets map[string]map[string]int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		items, total, err = tx.ListExperiments(ctx, id.TenantID, courseID, ExperimentStatusPublished, page, size)
 		if err != nil {
@@ -54,15 +77,19 @@ func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, 
 			experimentIDs = append(experimentIDs, item.ID)
 		}
 		groupByExperiment, err = tx.ListStudentGroupsForExperiments(ctx, id.TenantID, id.AccountID, experimentIDs)
+		if err != nil {
+			return err
+		}
+		facets, err = tx.CountPublishedExperimentsByShape(ctx, id.TenantID, courseID)
 		return err
 	}); err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, 0, 0, nil, err
 	}
 	out := make([]StudentExperimentDTO, 0, len(items))
 	for _, item := range items {
 		out = append(out, studentExperimentDTOFromModel(item, groupByExperiment[item.ID]))
 	}
-	return out, total, page, size, nil
+	return out, total, page, size, facets, nil
 }
 
 // GetPublishedExperimentForStudent 读取单个已发布实验的学生投影。
@@ -105,7 +132,11 @@ func (s *Service) CreateExperiment(ctx context.Context, req ExperimentRequest) (
 	if err != nil {
 		return ExperimentDTO{}, err
 	}
-	item := Experiment{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: req.CourseID.Int64(), AuthorID: id.AccountID, TemplateRef: req.TemplateRef, TemplateVersion: req.TemplateVersion, Name: req.Name, Description: req.Description, Components: req.Components, CollabMode: req.CollabMode, GroupConfig: req.GroupConfig, RequireReport: req.RequireReport, WizardStep: req.WizardStep}
+	compiledComponents, err := s.compileEnvironmentComponents(ctx, id.TenantID, req.Components)
+	if err != nil {
+		return ExperimentDTO{}, err
+	}
+	item := Experiment{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: req.CourseID.Int64(), AuthorID: id.AccountID, TemplateRef: req.TemplateRef, TemplateVersion: req.TemplateVersion, Name: req.Name, Description: req.Description, Components: compiledComponents, CollabMode: req.CollabMode, GroupConfig: req.GroupConfig, RequireReport: req.RequireReport, WizardStep: req.WizardStep}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		item, err = tx.CreateExperiment(ctx, item)
@@ -129,6 +160,10 @@ func (s *Service) UpdateExperiment(ctx context.Context, experimentID int64, req 
 	if err != nil {
 		return ExperimentDTO{}, err
 	}
+	compiledComponents, err := s.compileEnvironmentComponents(ctx, id.TenantID, req.Components)
+	if err != nil {
+		return ExperimentDTO{}, err
+	}
 	var item Experiment
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetExperiment(ctx, id.TenantID, experimentID)
@@ -143,7 +178,7 @@ func (s *Service) UpdateExperiment(ctx context.Context, experimentID int64, req 
 		current.TemplateVersion = req.TemplateVersion
 		current.Name = req.Name
 		current.Description = req.Description
-		current.Components = req.Components
+		current.Components = compiledComponents
 		current.CollabMode = req.CollabMode
 		current.GroupConfig = req.GroupConfig
 		current.RequireReport = req.RequireReport
@@ -258,8 +293,13 @@ func (s *Service) validateExperimentComponents(ctx context.Context, item Experim
 	if !hasExecutableComponent(item.Components) {
 		add(ValidationLevelError, "实验至少需要配置一个环境、仿真或检查点")
 	}
-	if err := validateComponentConfig(item.Components, item.CollabMode, item.GroupConfig, isValidJudgeSandboxMode); err != nil {
+	if err := validateComponentConfig(componentConfigRequestFromModel(item.Components), item.CollabMode, item.GroupConfig, isValidJudgeSandboxMode); err != nil {
 		add(ValidationLevelError, "实验组件配置不完整")
+	}
+	for _, env := range item.Components.Envs {
+		if err := validatePersistedCompositionSnapshot(env); err != nil {
+			add(ValidationLevelError, fmt.Sprintf("环境 %s 的组合快照无效", env.ID))
+		}
 	}
 	if s.sandbox == nil && len(item.Components.Envs) > 0 {
 		add(ValidationLevelError, "实验环境服务暂时不可用")
@@ -268,13 +308,12 @@ func (s *Service) validateExperimentComponents(ctx context.Context, item Experim
 		for _, env := range item.Components.Envs {
 			req := contracts.SandboxCreateRequest{
 				TenantID:                 item.TenantID,
-				RuntimeCode:              env.RuntimeCode,
-				RuntimeImageVersion:      env.RuntimeImageVersion,
-				ToolCodes:                env.Tools,
+				CompositionSnapshot:      env.CompositionSnapshot,
 				InitCodeRef:              env.InitCodeRef,
 				InitScriptRef:            env.InitScriptRef,
 				OwnerAccountID:           item.AuthorID,
 				SourceRef:                fmt.Sprintf("experiment:%d:definition:%s", item.CreatedAt.Year(), ids.Format(item.ID)),
+				ScopeRef:                 fmt.Sprintf("experiment:%d:definition:%s", item.CreatedAt.Year(), ids.Format(item.ID)),
 				KeepAlive:                env.KeepAlive,
 				SnapshotEnabled:          env.SnapshotEnabled,
 				KeepAliveMinutes:         env.KeepAliveMinutes,

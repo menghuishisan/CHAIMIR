@@ -17,7 +17,7 @@ ARG HARDHAT_VERSION=3.9.0
 ARG SOLC_0_8_20_SHA256=0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782
 
 USER root
-ADD https://github.com/ethereum/solidity/releases/download/v0.8.20/solc-static-linux /tmp/solc-0.8.20
+ADD --checksum=sha256:0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782 https://github.com/ethereum/solidity/releases/download/v0.8.20/solc-static-linux /tmp/solc-0.8.20
 
 COPY --from=foundry /usr/local/bin/forge /usr/local/bin/forge
 COPY --from=foundry /usr/local/bin/anvil /usr/local/bin/anvil

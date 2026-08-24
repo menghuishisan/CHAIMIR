@@ -133,8 +133,8 @@ func (a simAPI) listPackages(c *gin.Context) {
 		}
 		authorID = current.AccountID
 	}
-	items, total, p, s, err := a.svc.ListPackages(c.Request.Context(), status, c.Query("category"), c.Query("keyword"), authorID, page, size)
-	httpx.WritePage(c, items, total, p, s, err)
+	items, total, p, s, facets, err := a.svc.ListPackages(c.Request.Context(), status, c.Query("category"), c.Query("keyword"), authorID, page, size)
+	httpx.WritePageWithFacets(c, items, total, p, s, facets, err)
 }
 
 // listPackageVersions 查询某包所有版本。
@@ -327,7 +327,7 @@ func (a simAPI) destroySession(c *gin.Context) {
 	httpx.Write(c, struct{}{}, err)
 }
 
-// recycleSessions 按来源批量归档内部会话。
+// recycleSessions 按生命周期作用域批量归档内部会话。
 func (a simAPI) recycleSessions(c *gin.Context) {
 	var req RecycleRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSimSessionInvalid) {
@@ -343,7 +343,7 @@ func (a simAPI) recycleSessions(c *gin.Context) {
 		return
 	}
 	req.SourceRef = sourceRef
-	err := a.svc.RecycleBySourceRef(c.Request.Context(), contracts.SimRecycleRequest{TenantID: tenantID, SourceRef: req.SourceRef, Reason: req.Reason})
+	err := a.svc.RecycleByScopeRef(c.Request.Context(), contracts.SimRecycleRequest{TenantID: tenantID, SourceRef: req.SourceRef, ScopeRef: req.ScopeRef, Reason: req.Reason})
 	httpx.Write(c, struct{}{}, err)
 }
 

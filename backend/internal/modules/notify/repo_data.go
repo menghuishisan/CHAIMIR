@@ -3,6 +3,7 @@ package notify
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
@@ -194,6 +195,19 @@ func (t *txStore) ListAnnouncements(ctx context.Context, tenantID, accountID int
 		out = append(out, announcementRowDTO(row))
 	}
 	return out, total, nil
+}
+
+// CountVisibleAnnouncementsByScope 按当前用户可见边界统计公告范围。
+func (t *txStore) CountVisibleAnnouncementsByScope(ctx context.Context, tenantID, accountID int64, roleNumbers []int16) (map[string]int64, error) {
+	rows, err := t.q.CountVisibleAnnouncementsByScope(ctx, sqlcgen.CountVisibleAnnouncementsByScopeParams{TenantID: pgtypex.Int8(tenantID), AccountID: accountID, RoleNumbers: roleNumbers})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		out[strconv.Itoa(int(row.Scope))] = row.Count
+	}
+	return out, nil
 }
 
 // GetVisibleAnnouncement 查询当前用户可见公告。

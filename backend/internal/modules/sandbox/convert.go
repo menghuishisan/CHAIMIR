@@ -8,7 +8,6 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
-	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 )
@@ -20,12 +19,15 @@ func sandboxInfoFromModel(sb Sandbox, runtime Runtime, image RuntimeImage, tools
 		TenantID:            sb.TenantID,
 		Namespace:           sb.Namespace,
 		SourceRef:           sb.SourceRef,
+		ScopeRef:            sb.ScopeRef,
+		CompositionDigest:   sb.CompositionDigest,
 		OwnerAccountID:      sb.OwnerAccountID,
 		RuntimeCode:         runtime.Code,
 		RuntimeImageVersion: image.Version,
 		Phase:               sb.Phase,
 		Status:              sb.Status,
 		ToolAccess:          sandboxToolAccessFromModel(tools),
+		WorkspaceRevision:   sb.WorkspaceRevision,
 	}
 }
 
@@ -57,6 +59,7 @@ func sandboxResponseFromInfo(info contracts.SandboxInfo) SandboxResponse {
 		ToolAccess:          info.ToolAccess,
 		Capabilities:        info.Capabilities,
 		ResourceUsage:       info.ResourceUsage,
+		WorkspaceRevision:   info.WorkspaceRevision,
 	}
 }
 
@@ -130,16 +133,12 @@ func runtimeResponsesFromModels(items []Runtime) ([]RuntimeResponse, error) {
 // runtimeImageResponseFromModel 将运行时镜像内部模型转换为 HTTP 稳定字段名。
 func runtimeImageResponseFromModel(item RuntimeImage) RuntimeImageResponse {
 	return RuntimeImageResponse{
-		ID:            ids.ID(item.ID),
-		RuntimeID:     ids.ID(item.RuntimeID),
-		ImageURL:      item.ImageURL,
-		Version:       item.Version,
-		Status:        item.Status,
-		Prepulled:     item.Prepulled,
-		PrepullStatus: item.PrepullStatus,
-		PrepulledAt:   timex.RFC3339OrEmpty(item.PrepulledAt),
-		GenesisBaked:  item.GenesisBaked,
-		IsDefault:     item.IsDefault,
+		ID:           ids.ID(item.ID),
+		RuntimeID:    ids.ID(item.RuntimeID),
+		ImageURL:     item.ImageURL,
+		Version:      item.Version,
+		Status:       item.Status,
+		GenesisBaked: item.GenesisBaked,
 	}
 }
 
@@ -163,6 +162,7 @@ func toolResponseFromModel(item Tool) (ToolResponse, error) {
 		ID:           ids.ID(item.ID),
 		Code:         item.Code,
 		Name:         item.Name,
+		Category:     item.Category,
 		Kind:         item.Kind,
 		EcoTags:      item.EcoTags,
 		ResourceSpec: json.RawMessage(resourceSpec),
@@ -187,56 +187,70 @@ func toolResponsesFromModels(items []Tool) ([]ToolResponse, error) {
 func orchestrationCatalogResponse(runtimes []CatalogRuntime, tools []CatalogTool) OrchestrationCatalogResponse {
 	out := OrchestrationCatalogResponse{
 		Runtimes: make([]CatalogRuntimeResponse, 0, len(runtimes)),
+		Infra:    make([]CatalogToolResponse, 0),
 		Tools:    make([]CatalogToolResponse, 0, len(tools)),
 	}
 	for _, runtime := range runtimes {
 		images := make([]CatalogRuntimeImageResponse, 0, len(runtime.Images))
 		for _, image := range runtime.Images {
-			images = append(images, CatalogRuntimeImageResponse(image))
+			images = append(images, CatalogRuntimeImageResponse{Version: image.Version})
 		}
 		out.Runtimes = append(out.Runtimes, CatalogRuntimeResponse{
-			Code:      runtime.Code,
-			Name:      runtime.Name,
-			Eco:       runtime.Eco,
-			Images:    images,
-			ToolCodes: append([]string(nil), runtime.ToolCodes...),
+			Code:   runtime.Code,
+			Name:   runtime.Name,
+			Eco:    runtime.Eco,
+			Images: images,
 		})
 	}
 	for _, tool := range tools {
-		out.Tools = append(out.Tools, CatalogToolResponse{Code: tool.Code, Name: tool.Name, Kind: tool.Kind})
+		item := CatalogToolResponse{Code: tool.Code, Name: tool.Name, Kind: tool.Kind, Capabilities: tool.Capabilities}
+		if tool.Category == "infra" {
+			out.Infra = append(out.Infra, item)
+			continue
+		}
+		out.Tools = append(out.Tools, item)
 	}
 	return out
 }
 
 // contractCreateFromDTO 把内部 HTTP 创建请求转换为跨模块创建契约。
-func contractCreateFromDTO(req CreateSandboxRequest) contracts.SandboxCreateRequest {
+func contractCreateFromDTO(req CreateSandboxRequest) (contracts.SandboxCreateRequest, error) {
+	authorizedAccountIDs := make([]int64, 0, len(req.AuthorizedAccountIDs))
+	for _, accountID := range req.AuthorizedAccountIDs {
+		authorizedAccountIDs = append(authorizedAccountIDs, accountID.Int64())
+	}
+	snapshot := req.CompositionSnapshot
+	if snapshot.Spec.InitCodeRef == "" {
+		snapshot.Spec.InitCodeRef = strings.TrimSpace(req.CompositionSnapshot.Spec.InitCodeRef)
+	}
+	snapshot.Digest = strings.TrimSpace(snapshot.Digest)
 	return contracts.SandboxCreateRequest{
 		TenantID:                 req.TenantID.Int64(),
-		RuntimeCode:              strings.TrimSpace(req.RuntimeCode),
-		RuntimeImageVersion:      strings.TrimSpace(req.RuntimeImageVersion),
-		ToolCodes:                req.Tools,
-		InitCodeRef:              strings.TrimSpace(req.InitCodeRef),
-		InitScriptRef:            strings.TrimSpace(req.InitScriptRef),
+		CompositionSnapshot:      snapshot,
+		InitCodeRef:              strings.TrimSpace(snapshot.Spec.InitCodeRef),
+		InitScriptRef:            strings.TrimSpace(snapshot.Spec.InitScriptRef),
 		OwnerAccountID:           req.OwnerAccountID.Int64(),
+		AuthorizedAccountIDs:     authorizedAccountIDs,
 		SourceRef:                strings.TrimSpace(req.SourceRef),
+		ScopeRef:                 strings.TrimSpace(req.ScopeRef),
 		KeepAlive:                req.KeepAlive,
 		SnapshotEnabled:          req.SnapshotEnabled,
 		KeepAliveMinutes:         req.KeepAliveMinutes,
 		SnapshotRetentionMinutes: req.SnapshotRetentionMinutes,
-	}
+	}, nil
 }
 
 // createInputFromContract 把跨模块创建契约转换为规则层使用的本模块模型。
 func createInputFromContract(req contracts.SandboxCreateRequest) CreateSandboxInputModel {
 	return CreateSandboxInputModel{
 		TenantID:                 req.TenantID,
-		RuntimeCode:              strings.TrimSpace(req.RuntimeCode),
-		RuntimeImageVersion:      strings.TrimSpace(req.RuntimeImageVersion),
-		ToolCodes:                req.ToolCodes,
+		CompositionSnapshot:      req.CompositionSnapshot,
 		InitCodeRef:              strings.TrimSpace(req.InitCodeRef),
 		InitScriptRef:            strings.TrimSpace(req.InitScriptRef),
 		OwnerAccountID:           req.OwnerAccountID,
+		AuthorizedAccountIDs:     append([]int64(nil), req.AuthorizedAccountIDs...),
 		SourceRef:                strings.TrimSpace(req.SourceRef),
+		ScopeRef:                 strings.TrimSpace(req.ScopeRef),
 		KeepAlive:                req.KeepAlive,
 		SnapshotEnabled:          req.SnapshotEnabled,
 		KeepAliveMinutes:         req.KeepAliveMinutes,
@@ -268,6 +282,7 @@ func privateSidecarsFromContract(items []contracts.SandboxPrivateSidecarSpec) []
 			ReadOnlyRootFilesystem: item.ReadOnlyRootFilesystem,
 			Labels:                 copyStringMap(item.Labels),
 			MountWorkspace:         item.MountWorkspace,
+			MountDomains:           append([]string(nil), item.MountDomains...),
 			EphemeralMounts:        mounts,
 		})
 	}

@@ -8,13 +8,15 @@ USER root
 
 # 创建固定 UID/GID 的沙箱用户,避免 K8s 强制 1000:1000 后丢失 home 和目录权限。
 RUN apk upgrade --no-cache \
+    && apk add --no-cache jq \
     && groupadd --gid 1000 chaimir \
     && useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir \
     && mkdir -p /runtime-state/bitcoin \
     && chown -R 1000:1000 /workspace /runtime-state
 
 COPY entrypoint.sh /usr/local/bin/chaimir-bitcoin-entrypoint
-RUN chmod +x /usr/local/bin/chaimir-bitcoin-entrypoint
+COPY chaimir-bitcoin-adapter /usr/local/bin/chaimir-bitcoin-adapter
+RUN chmod +x /usr/local/bin/chaimir-bitcoin-entrypoint /usr/local/bin/chaimir-bitcoin-adapter
 
 USER 1000:1000
 WORKDIR /workspace

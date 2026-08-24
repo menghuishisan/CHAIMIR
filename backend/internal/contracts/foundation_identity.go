@@ -106,10 +106,11 @@ type AuditQuery struct {
 
 // AuditQueryResult 是审计查询中心统一返回的分页结果。
 type AuditQueryResult struct {
-	List  []AuditLogEntry `json:"list"`
-	Total int64           `json:"total"`
-	Page  int32           `json:"page"`
-	Size  int32           `json:"size"`
+	List   []AuditLogEntry             `json:"list"`
+	Total  int64                       `json:"total"`
+	Page   int32                       `json:"page"`
+	Size   int32                       `json:"size"`
+	Facets map[string]map[string]int64 `json:"facets,omitempty"`
 }
 
 // IdentityAuditReadService 是 M1 对 M9 审计中心开放的审计只读契约。

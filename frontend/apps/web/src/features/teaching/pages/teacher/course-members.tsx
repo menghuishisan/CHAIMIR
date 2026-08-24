@@ -10,6 +10,7 @@ import {
   Badge,
   Button,
   Callout,
+  DataPanel,
   FormField,
   IconButton,
   Modal,
@@ -114,7 +115,7 @@ export function CourseMembers({ courseId }: CourseMembersProps) {
   return (
     <PageSection
       title="选课成员"
-      description={`共 ${members.total} 名学生。学生也可以用邀请码自行加入。`}
+      description="学生也可以用邀请码自行加入。"
       actions={
         <Button variant="primary" leftIcon={UserPlus} onClick={() => setAddOpen(true)}>
           按班级添加
@@ -124,30 +125,54 @@ export function CourseMembers({ courseId }: CourseMembersProps) {
       <div className="flex flex-col gap-4">
         {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
-        <ResourceState
-          resource={members}
-          emptyIcon={Users}
-          emptyTitle="还没有学生加入"
-          emptyDescription="把课程邀请码发给学生,或按班级批量添加。"
-          emptyAction={
-            <Button variant="primary" leftIcon={UserPlus} onClick={() => setAddOpen(true)}>
-              按班级添加
-            </Button>
+        {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):数据表与分页同处一块抬起片 */}
+        <DataPanel
+          label="选课成员"
+          footer={
+            <Pagination
+              page={members.page}
+              pageSize={members.pageSize}
+              total={members.total}
+              onPageChange={members.setPage}
+            />
           }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
         >
-          {(page) => (
-            <>
-              <Table columns={columns} data={page.list} rowKey={(member) => member.id} />
-              <Pagination
-                page={members.page}
-                pageSize={members.pageSize}
-                total={members.total}
-                onPageChange={members.setPage}
+          <ResourceState
+            resource={members}
+            emptyIcon={Users}
+            emptyTitle="还没有学生加入"
+            emptyDescription="把课程邀请码发给学生,或按班级批量添加。"
+            emptyAction={
+              <Button variant="primary" leftIcon={UserPlus} onClick={() => setAddOpen(true)}>
+                按班级添加
+              </Button>
+            }
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+          >
+            {(page) => (
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(member) => member.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):学生名一行、学号与加入方式一行,移出按钮在右
+                mobileCard={(member) => ({
+                  title: member.student_name,
+                  meta: `${member.student_no ? `${member.student_no} · ` : ''}${joinModeLabel(member.join_mode)} · ${formatShortDateTime(member.joined_at)}`,
+                  action: (
+                    <IconButton
+                      variant="ghost"
+                      size="sm"
+                      icon={UserMinus}
+                      aria-label="把该学生移出课程"
+                      onClick={() => setRemoveTarget(member)}
+                    />
+                  ),
+                })}
               />
-            </>
-          )}
-        </ResourceState>
+            )}
+          </ResourceState>
+        </DataPanel>
       </div>
 
       {addOpen ? (

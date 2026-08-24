@@ -29,14 +29,14 @@ type TxFunc func(ctx context.Context, tx pgx.Tx) error
 
 // New 创建 app 与可选 priv 连接池,并在启动阶段检查连通性。
 func New(ctx context.Context, cfg config.PostgresConfig) (*DB, error) {
-	app, err := openPool(ctx, cfg, cfg.User, cfg.Password)
+	app, err := openPool(ctx, cfg, cfg.User, cfg.Password, cfg.AppMaxConns, cfg.AppMinConns)
 	if err != nil {
 		return nil, fmt.Errorf("创建 app 连接池失败: %w", err)
 	}
 	database := &DB{app: app}
 
 	if strings.TrimSpace(cfg.PrivUser) != "" {
-		priv, err := openPool(ctx, cfg, cfg.PrivUser, cfg.PrivPassword)
+		priv, err := openPool(ctx, cfg, cfg.PrivUser, cfg.PrivPassword, cfg.PrivMaxConns, cfg.PrivMinConns)
 		if err != nil {
 			app.Close()
 			return nil, fmt.Errorf("创建 priv 连接池失败: %w", err)
@@ -46,9 +46,9 @@ func New(ctx context.Context, cfg config.PostgresConfig) (*DB, error) {
 	return database, nil
 }
 
-// WaitForPostgres 使用与应用连接池相同的配置执行有界就绪等待,供迁移命令在建库前复用。
+// WaitForPostgres 使用单连接执行有界就绪等待,避免迁移启动阶段占用应用连接预算。
 func WaitForPostgres(ctx context.Context, cfg config.PostgresConfig, user, password string) error {
-	pool, err := openPool(ctx, cfg, user, password)
+	pool, err := openPool(ctx, cfg, user, password, 1, 0)
 	if err != nil {
 		return err
 	}
@@ -141,8 +141,8 @@ func (d *DB) WithPrivilegedModuleTx(ctx context.Context, module string, fn TxFun
 }
 
 // openPool 构造连接池并在配置时限内等待 PostgreSQL 就绪。
-func openPool(ctx context.Context, cfg config.PostgresConfig, user, password string) (*pgxpool.Pool, error) {
-	pc, err := buildPoolConfig(cfg, user, password)
+func openPool(ctx context.Context, cfg config.PostgresConfig, user, password string, maxConns, minConns int) (*pgxpool.Pool, error) {
+	pc, err := buildPoolConfig(cfg, user, password, maxConns, minConns)
 	if err != nil {
 		return nil, fmt.Errorf("解析连接配置失败: %w", err)
 	}
@@ -186,7 +186,7 @@ func waitUntilReady(ctx context.Context, retryInterval time.Duration, check func
 }
 
 // buildPoolConfig 通过结构化字段构造连接池配置,避免凭据特殊字符破坏 DSN。
-func buildPoolConfig(cfg config.PostgresConfig, user, password string) (*pgxpool.Config, error) {
+func buildPoolConfig(cfg config.PostgresConfig, user, password string, maxConns, minConns int) (*pgxpool.Config, error) {
 	dsn := &url.URL{
 		Scheme: "postgres",
 		User:   url.UserPassword(user, password),
@@ -195,21 +195,21 @@ func buildPoolConfig(cfg config.PostgresConfig, user, password string) (*pgxpool
 	}
 	q := dsn.Query()
 	q.Set("sslmode", cfg.SSLMode)
-	q.Set("pool_max_conns", fmt.Sprintf("%d", cfg.MaxConns))
-	q.Set("pool_min_conns", fmt.Sprintf("%d", cfg.MinConns))
+	q.Set("pool_max_conns", fmt.Sprintf("%d", maxConns))
+	q.Set("pool_min_conns", fmt.Sprintf("%d", minConns))
 	dsn.RawQuery = q.Encode()
 
 	pc, err := pgxpool.ParseConfig(dsn.String())
 	if err != nil {
 		return nil, err
 	}
-	maxConns, maxOK := intx.Int32(cfg.MaxConns)
-	minConns, minOK := intx.Int32(cfg.MinConns)
-	if !maxOK || !minOK || minConns < 0 || maxConns <= 0 || minConns > maxConns {
+	maxValue, maxOK := intx.Int32(maxConns)
+	minValue, minOK := intx.Int32(minConns)
+	if !maxOK || !minOK || minValue < 0 || maxValue <= 0 || minValue > maxValue {
 		return nil, fmt.Errorf("数据库连接池配置超出 int32 范围或无效")
 	}
-	pc.MaxConns = maxConns
-	pc.MinConns = minConns
+	pc.MaxConns = maxValue
+	pc.MinConns = minValue
 	return pc, nil
 }
 

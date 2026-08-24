@@ -51,6 +51,7 @@ type sandboxAPI struct {
 // registerPlatformRoutes 注册运行时、镜像和工具管理接口。
 func (a sandboxAPI) registerPlatformRoutes(g gin.IRouter) {
 	g.GET("/runtimes", a.listRuntimes)
+	g.GET("/runtimes/:id", a.getRuntime)
 	g.POST("/runtimes", a.registerRuntime)
 	g.PATCH("/runtimes/:id", a.updateRuntime)
 	g.POST("/runtimes/:id/selftest", a.runRuntimeSelftest)
@@ -62,6 +63,20 @@ func (a sandboxAPI) registerPlatformRoutes(g gin.IRouter) {
 	g.GET("/runtimes/:id/images/:img/prepull", a.getRuntimeImagePrepull)
 	g.GET("/tools", a.listTools)
 	g.POST("/tools", a.registerTool)
+}
+
+// getRuntime 按 ID 返回单个运行时的公开管理投影。
+func (a sandboxAPI) getRuntime(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetRuntime(c.Request.Context(), id)
+	runtimeResponse, convertErr := runtimeResponseFromModel(out)
+	if err == nil {
+		err = convertErr
+	}
+	httpx.Write(c, runtimeResponse, err)
 }
 
 // registerCatalogRoutes 注册编排目录入口:教师/校管编排环境要选运行时与工具,
@@ -103,7 +118,7 @@ func (a sandboxAPI) getRuntimeSelftest(c *gin.Context) {
 // registerInternalRoutes 注册内部服务签名保护的生命周期接口。
 func (a sandboxAPI) registerInternalRoutes(g gin.IRouter) {
 	g.POST("/sandboxes", a.createSandbox)
-	g.POST("/sandboxes/recycle", a.recycleBySourceRef)
+	g.POST("/sandboxes/recycle", a.recycleByScopeRef)
 	g.POST("/sandboxes/:id/pause", a.pauseSandbox)
 	g.POST("/sandboxes/:id/resume", a.resumeSandbox)
 	g.DELETE("/sandboxes/:id", a.destroySandbox)
@@ -233,7 +248,11 @@ func (a sandboxAPI) prepullRuntimeImage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.PrepullRuntimeImage(c.Request.Context(), runtimeID, imageID)
+	var req PrepullRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxImagePrepullParamInvalid) {
+		return
+	}
+	out, err := a.svc.PrepullRuntimeImage(c.Request.Context(), runtimeID, imageID, req.CompositionDigest)
 	httpx.Write(c, out, err)
 }
 
@@ -247,7 +266,7 @@ func (a sandboxAPI) getRuntimeImagePrepull(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.GetRuntimeImagePrepull(c.Request.Context(), runtimeID, imageID)
+	out, err := a.svc.GetRuntimeImagePrepull(c.Request.Context(), runtimeID, imageID, c.Query("composition_digest"))
 	httpx.Write(c, out, err)
 }
 
@@ -291,7 +310,12 @@ func (a sandboxAPI) createSandbox(c *gin.Context) {
 		return
 	}
 	req.SourceRef = sourceRef
-	out, err := a.svc.CreateSandbox(c.Request.Context(), contractCreateFromDTO(req))
+	contractReq, err := contractCreateFromDTO(req)
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	out, err := a.svc.CreateSandbox(c.Request.Context(), contractReq)
 	httpx.Write(c, out, err)
 }
 
@@ -364,8 +388,8 @@ func (a sandboxAPI) destroySandbox(c *gin.Context) {
 	httpx.Write(c, struct{}{}, a.svc.DestroySandbox(c.Request.Context(), contracts.SandboxControlRequest{TenantID: tenantID, SandboxID: id, SourceRef: sourceRef}))
 }
 
-// recycleBySourceRef 绑定来源级联回收请求。
-func (a sandboxAPI) recycleBySourceRef(c *gin.Context) {
+// recycleByScopeRef 绑定来源作用域级联回收请求。
+func (a sandboxAPI) recycleByScopeRef(c *gin.Context) {
 	var req RecycleRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxRecycleRequestInvalid) {
 		return
@@ -380,7 +404,7 @@ func (a sandboxAPI) recycleBySourceRef(c *gin.Context) {
 		return
 	}
 	req.SourceRef = sourceRef
-	httpx.Write(c, struct{}{}, a.svc.RecycleBySourceRef(c.Request.Context(), contracts.SandboxRecycleRequest{TenantID: req.TenantID.Int64(), SourceRef: req.SourceRef, Reason: req.Reason}))
+	httpx.Write(c, struct{}{}, a.svc.RecycleByScopeRef(c.Request.Context(), contracts.SandboxRecycleRequest{TenantID: req.TenantID.Int64(), SourceRef: req.SourceRef, ScopeRef: req.ScopeRef, Reason: req.Reason}))
 }
 
 // getFiles 绑定工作区文件读取或目录列表请求。
@@ -420,7 +444,10 @@ func (a sandboxAPI) writeFile(c *gin.Context) {
 	if strings.TrimSpace(req.RelativePath) == "" {
 		req.RelativePath = c.Query("path")
 	}
-	httpx.Write(c, struct{}{}, a.svc.PutSandboxFileForOwner(c.Request.Context(), current.TenantID, current.AccountID, id, req))
+	revision, err := a.svc.PutSandboxFileForOwner(c.Request.Context(), current.TenantID, current.AccountID, id, req)
+	httpx.Write(c, struct {
+		WorkspaceRevision int64 `json:"workspace_revision"`
+	}{WorkspaceRevision: revision}, err)
 }
 
 // saveFiles 绑定立即持久化工作区请求。
@@ -456,7 +483,7 @@ func (a sandboxAPI) progress(c *gin.Context) {
 		if err != nil {
 			return err
 		}
-		if err := conn.BindSession(ws.SessionKey{TenantID: current.TenantID, AccountID: current.AccountID}); err != nil {
+		if err := conn.BindSession(ws.SessionKey{TenantID: current.TenantID, AccountID: current.AccountID, Scope: sandboxProgressSessionScope(id)}); err != nil {
 			return apperr.ErrSandboxOwnershipInvalid.WithCause(err)
 		}
 		if err := a.svc.wsHub.Subscribe(conn, topic); err != nil {
@@ -489,7 +516,7 @@ func (a sandboxAPI) terminal(c *gin.Context) {
 		return
 	}
 	if err := a.svc.wsHub.ServeInteractive(c.Writer, c.Request, func(conn *ws.Conn) error {
-		if err := conn.BindSession(ws.SessionKey{TenantID: current.TenantID, AccountID: current.AccountID}); err != nil {
+		if err := conn.BindSession(ws.SessionKey{TenantID: current.TenantID, AccountID: current.AccountID, Scope: sandboxTerminalSessionScope(id)}); err != nil {
 			return apperr.ErrSandboxOwnershipInvalid.WithCause(err)
 		}
 		return a.svc.AttachTerminal(c.Request.Context(), target, conn.Reader(), conn.Writer())

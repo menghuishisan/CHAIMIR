@@ -26,8 +26,11 @@ RUN corepack enable && corepack prepare pnpm@9.1.0 --activate
 
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml frontend/turbo.json frontend/tsconfig.base.json ./
 COPY frontend/eslint.config.js frontend/.prettierrc.json ./
-COPY frontend/packages ./packages
-COPY frontend/apps ./apps
+COPY frontend/packages/api-client/package.json ./packages/api-client/package.json
+COPY frontend/packages/ide/package.json ./packages/ide/package.json
+COPY frontend/packages/sim-sdk/package.json ./packages/sim-sdk/package.json
+COPY frontend/packages/ui/package.json ./packages/ui/package.json
+COPY frontend/apps/web/package.json ./apps/web/package.json
 # Vite 与 Nginx 共同读取同一份生产安全头配置,构建阶段只复制该真相源供 Vite 解析。
 COPY images/service/frontend/security-headers.conf /src/images/service/frontend/security-headers.conf
 
@@ -40,7 +43,10 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
     TURBO_CONCURRENCY=${TURBO_CONCURRENCY} \
     NODE_OPTIONS=--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}
 
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
+COPY frontend/packages ./packages
+COPY frontend/apps ./apps
 RUN pnpm build && \
     mkdir -p /out && \
     cp -a apps/web/dist/. /out/
@@ -66,6 +72,7 @@ RUN apk upgrade --no-cache \
 
 COPY images/service/frontend/nginx.conf /etc/nginx/nginx.conf
 COPY images/service/frontend/security-headers.conf /etc/nginx/security-headers.conf
+COPY --chmod=0555 images/service/frontend/runtime-config.sh /usr/local/bin/chaimir-runtime-config
 COPY --from=builder --chown=101:101 /out/ /usr/share/nginx/html/
 
 USER 101:101

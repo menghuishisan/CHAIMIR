@@ -19,9 +19,9 @@ export async function mountTerminal(
     fontFamily: 'var(--font-mono)',
     fontSize: 14,
     theme: {
-      background: cssColor('--color-terminal-bg'),
-      foreground: cssColor('--color-dark-text'),
-      cursor: cssColor('--color-on-dark-accent'),
+      background: cssColor('--color-terminal'),
+      foreground: cssColor('--color-on-dark'),
+      cursor: cssColor('--color-accent'),
     },
   })
 
@@ -29,17 +29,6 @@ export async function mountTerminal(
   terminal.loadAddon(fitAddon)
 
   terminal.open(container)
-
-  try {
-    const { WebglAddon } = await import('@xterm/addon-webgl')
-    const webglAddon = new WebglAddon()
-    terminal.loadAddon(webglAddon)
-  } catch (error) {
-    // WebGL 不可用时回退到 xterm 默认渲染器。
-    console.warn('终端增强渲染不可用,已回退到标准渲染器', {
-      kind: error instanceof Error ? error.name : typeof error,
-    })
-  }
 
   // 等容器完成首次绘制后再适配终端尺寸。
   let disposed = false

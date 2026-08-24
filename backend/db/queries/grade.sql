@@ -84,13 +84,15 @@ ORDER BY created_at DESC;
 SELECT id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at
 FROM grade_review
 WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(is_locked)::smallint = 0 OR is_locked = (sqlc.arg(is_locked)::smallint = 1))
 ORDER BY submitted_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountGradeReviews :one
 SELECT count(*)::bigint
 FROM grade_review
-WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint);
+WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(is_locked)::smallint = 0 OR is_locked = (sqlc.arg(is_locked)::smallint = 1));
 
 -- name: ListOwnGradeReviews :many
 SELECT id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at
@@ -155,6 +157,17 @@ SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_
 FROM candidates
 WHERE outbox.id = candidates.id
 RETURNING outbox.id, outbox.tenant_id, outbox.review_id, outbox.course_id, outbox.locked, outbox.reason, outbox.trace_id, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
+
+-- name: RequeueExhaustedGradeLockOutbox :execrows
+UPDATE grade_lock_outbox
+SET status = 1,
+    retry_count = 0,
+    last_error = NULL,
+    updated_at = now(),
+    lease_token = '',
+    lease_until = NULL
+WHERE status = 4
+  AND updated_at <= now() - ($1::bigint * interval '1 second');
 
 -- name: MarkGradeLockOutboxPublished :one
 UPDATE grade_lock_outbox

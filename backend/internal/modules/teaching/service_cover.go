@@ -114,13 +114,14 @@ func (s *Service) IssueCourseCoverAccess(ctx context.Context, courseID int64) (C
 		return CourseCoverAccessDTO{}, apperr.ErrTeachingCourseCoverMissing
 	}
 	token, grant, err := s.files.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
-		TenantID:     id.TenantID,
-		AccountID:    id.AccountID,
-		ObjectRef:    course.CoverRef,
-		Module:       teachingModuleName,
-		ResourceType: courseCoverResourceType,
-		ResourceID:   ids.Format(courseID),
-		Mode:         storage.DownloadModeStream,
+		TenantID:         id.TenantID,
+		ResourceTenantID: id.TenantID,
+		AccountID:        id.AccountID,
+		ObjectRef:        course.CoverRef,
+		Module:           teachingModuleName,
+		ResourceType:     courseCoverResourceType,
+		ResourceID:       ids.Format(courseID),
+		Mode:             storage.DownloadModeStream,
 	})
 	if err != nil {
 		return CourseCoverAccessDTO{}, apperr.ErrTeachingCourseCoverInvalid.WithCause(err)

@@ -41,7 +41,7 @@ type TxStore interface {
 	ListAlertRules(context.Context, int16, int64) ([]AlertRuleDTO, error)
 	UpdateAlertRule(context.Context, int64, AlertRuleRequest) (AlertRuleDTO, error)
 	CreateAlertEvent(context.Context, int64, int64, int64, int16, string) (AlertEventDTO, error)
-	ListAlertEvents(context.Context, int16, int64, int, int) ([]AlertEventDTO, int64, error)
+	ListAlertEvents(context.Context, int16, int16, int64, int, int) ([]AlertEventDTO, int64, error)
 	HandleAlertEvent(context.Context, int64, int64, int16, int64) (AlertEventDTO, error)
 	ListPlatformStatistics(context.Context, int16, int64, string, string) ([]StatisticsDTO, error)
 	UpsertPlatformStatistics(context.Context, int64, int16, int64, string, map[string]any) (StatisticsDTO, error)

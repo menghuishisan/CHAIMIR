@@ -15,10 +15,12 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  DataPanel,
   FilterBar,
   FilterField,
   FormField,
   Input,
+  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -28,7 +30,6 @@ import {
   ModalTitle,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   Select,
   Skeleton,
@@ -39,6 +40,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { facetGroup, facetTopEntries } from '../../../../utils/facets'
 import { formatDate } from '../../../../utils/formatters'
 import {
   simCategoryLabel,
@@ -64,6 +66,13 @@ export default function StudentSimulationsPage() {
         ...params,
       }),
     [submittedKeyword],
+  )
+
+  // 分类分布取后端 facets.category:与当前筛选同口径的全量分组计数,不用当前页切片去数(§6.5.4)
+  const categoryKinds = Object.keys(facetGroup(packages.data?.facets, 'category')).length
+  const topCategory = useMemo(
+    () => facetTopEntries(packages.data?.facets, 'category', 1)[0],
+    [packages.data],
   )
 
   // FilterBar 自己是 form 并接住回车,故这里只需要提交动作本身
@@ -133,23 +142,31 @@ export default function StudentSimulationsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '学习区' }, { label: '仿真实验室' }]} />}
+        kicker={<Breadcrumb items={[{ label: '学习区' }]} />}
         title="仿真实验室"
         description="选一个场景进入推演。推演在你的浏览器里按固定随机种子运行,每次结果都可复现。"
         icon={Network}
       />
 
-      {/* 不做指标带:可用场景数已在下方分组说明里给出,而「涵盖分类/本机推演」没有服务端聚合,
-          用第 1 页的 20 条数出来就是错数(规范 §6.5);分类与算力位置在每一行里逐条可见。 */}
-      <PageSection
-        title="场景列表"
-        description={
-          submittedKeyword
-            ? `共 ${packages.total} 个匹配「${submittedKeyword}」的场景`
-            : `共 ${packages.total} 个可用场景`
-        }
-      >
-        <div className="flex flex-col gap-4">
+      {/* 指标退为一行内联摘要:分类分布走后端聚合契约(facets.category),
+          是全量口径而非当前页切片(§6.5.4);算力位置在每一行里逐条可见。 */}
+      <MetricStrip
+        label="场景总量摘要"
+        className="mb-5"
+        items={[
+          { label: '可用场景', value: packages.total, hint: '已发布给你的' },
+          { label: '涵盖分类', value: categoryKinds, hint: '按当前搜索统计' },
+          {
+            label: '最多的分类',
+            value: topCategory ? simCategoryLabel(topCategory.value) : '—',
+            hint: topCategory ? `共 ${topCategory.count} 个场景` : '暂无场景',
+          },
+        ]}
+      />
+
+      <DataPanel
+        label="场景列表"
+        filter={
           <FilterBar label="场景筛选" onSubmit={handleSearch} submitLabel="搜索">
             <FilterField label="场景名称" htmlFor="sim-keyword">
               <Input
@@ -161,7 +178,16 @@ export default function StudentSimulationsPage() {
               />
             </FilterField>
           </FilterBar>
-
+        }
+        footer={
+          <Pagination
+            page={packages.page}
+            pageSize={packages.pageSize}
+            total={packages.total}
+            onPageChange={packages.setPage}
+          />
+        }
+      >
           <ResourceState
             resource={packages}
             emptyIcon={Network}
@@ -184,22 +210,23 @@ export default function StudentSimulationsPage() {
                 </Button>
               ) : undefined
             }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (
-              <div className="flex flex-col gap-4">
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={packages.page}
-                  pageSize={packages.pageSize}
-                  total={packages.total}
-                  onPageChange={packages.setPage}
-                />
-              </div>
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):场景名一行、分类与版本一行
+                mobileCard={(item) => ({
+                  title: item.name,
+                  meta: `${simCategoryLabel(item.category)} · 版本 ${item.version}`,
+                })}
+              />
             )}
           </ResourceState>
-        </div>
-      </PageSection>
+      </DataPanel>
 
       {versionPickerCode ? (
         <VersionPickerModal

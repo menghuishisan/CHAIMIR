@@ -282,6 +282,7 @@ CREATE TABLE IF NOT EXISTS teaching_grade_event_outbox (
     event_updated_at TIMESTAMPTZ NOT NULL,
     status SMALLINT NOT NULL DEFAULT 1,
     retry_count INT NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_error VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -308,7 +309,7 @@ CREATE INDEX IF NOT EXISTS idx_discussion_course_parent ON discussion_post(tenan
 CREATE INDEX IF NOT EXISTS idx_announcement_course ON announcement(tenant_id, course_id, is_pinned, created_at) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_course_grade_student ON course_grade(tenant_id, student_id);
 CREATE INDEX IF NOT EXISTS idx_course_grade_export_request_due ON course_grade_export_request(next_check_at, created_at);
-CREATE INDEX IF NOT EXISTS idx_teaching_grade_event_outbox_status ON teaching_grade_event_outbox(status, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_teaching_grade_event_outbox_status ON teaching_grade_event_outbox(status, next_attempt_at ASC, created_at ASC);
 
 ALTER TABLE course ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chapter ENABLE ROW LEVEL SECURITY;

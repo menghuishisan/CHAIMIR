@@ -82,6 +82,7 @@ RETURNING id, rule_id, tenant_id, level, message, status, handler_id, triggered_
 SELECT id, rule_id, tenant_id, level, message, status, handler_id, triggered_at, handled_at
 FROM alert_event
 WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(level)::smallint = 0 OR level = sqlc.arg(level)::smallint)
   AND ((sqlc.narg(tenant_id)::bigint IS NULL) OR tenant_id = sqlc.narg(tenant_id)::bigint)
 ORDER BY triggered_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
@@ -90,6 +91,7 @@ LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 SELECT count(*)::bigint
 FROM alert_event
 WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(level)::smallint = 0 OR level = sqlc.arg(level)::smallint)
   AND ((sqlc.narg(tenant_id)::bigint IS NULL) OR tenant_id = sqlc.narg(tenant_id)::bigint);
 
 -- name: HandleAlertEvent :one

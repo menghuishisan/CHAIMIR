@@ -30,7 +30,7 @@ UPDATE sandbox_recycle_outbox AS outbox
 SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = $1, lease_until = $2::timestamptz
 FROM candidates
 WHERE outbox.id = candidates.id
-RETURNING outbox.id, outbox.tenant_id, outbox.sandbox_id, outbox.source_ref, outbox.owner_account_id, outbox.reason, outbox.trace_id, outbox.recycled_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
+RETURNING outbox.id, outbox.tenant_id, outbox.sandbox_id, outbox.source_ref, outbox.scope_ref, outbox.owner_account_id, outbox.reason, outbox.trace_id, outbox.recycled_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
 `
 
 type ClaimPendingSandboxRecycleOutboxParams struct {
@@ -61,6 +61,7 @@ func (q *Queries) ClaimPendingSandboxRecycleOutbox(ctx context.Context, arg Clai
 			&i.TenantID,
 			&i.SandboxID,
 			&i.SourceRef,
+			&i.ScopeRef,
 			&i.OwnerAccountID,
 			&i.Reason,
 			&i.TraceID,
@@ -83,6 +84,29 @@ func (q *Queries) ClaimPendingSandboxRecycleOutbox(ctx context.Context, arg Clai
 	return items, nil
 }
 
+const claimSandboxWorkspaceRevision = `-- name: ClaimSandboxWorkspaceRevision :one
+UPDATE sandbox
+SET workspace_revision = workspace_revision + 1,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+  AND workspace_revision = $3::bigint
+RETURNING workspace_revision
+`
+
+type ClaimSandboxWorkspaceRevisionParams struct {
+	TenantID         int64 `json:"tenant_id"`
+	ID               int64 `json:"id"`
+	ExpectedRevision int64 `json:"expected_revision"`
+}
+
+// 用户写入必须携带最近一次读取到的 revision;不一致时不更新,由 service 返回冲突。
+func (q *Queries) ClaimSandboxWorkspaceRevision(ctx context.Context, arg ClaimSandboxWorkspaceRevisionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, claimSandboxWorkspaceRevision, arg.TenantID, arg.ID, arg.ExpectedRevision)
+	var workspace_revision int64
+	err := row.Scan(&workspace_revision)
+	return workspace_revision, err
+}
+
 const countActiveSandboxes = `-- name: CountActiveSandboxes :one
 SELECT COUNT(*)::bigint
 FROM sandbox
@@ -97,9 +121,9 @@ func (q *Queries) CountActiveSandboxes(ctx context.Context, tenantID int64) (int
 }
 
 const createRuntimeImage = `-- name: CreateRuntimeImage :one
-INSERT INTO runtime_image (id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at)
-VALUES ($1, $2, $3, $4, 1, false, 1, '{}'::jsonb, NULL, $5, $6, now())
-RETURNING id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+INSERT INTO runtime_image (id, runtime_id, image_url, version, status, genesis_baked, created_at)
+VALUES ($1, $2, $3, $4, 1, $5, now())
+RETURNING id, runtime_id, image_url, version, status, genesis_baked, created_at
 `
 
 type CreateRuntimeImageParams struct {
@@ -108,7 +132,6 @@ type CreateRuntimeImageParams struct {
 	ImageUrl     string `json:"image_url"`
 	Version      string `json:"version"`
 	GenesisBaked bool   `json:"genesis_baked"`
-	IsDefault    bool   `json:"is_default"`
 }
 
 func (q *Queries) CreateRuntimeImage(ctx context.Context, arg CreateRuntimeImageParams) (RuntimeImage, error) {
@@ -118,7 +141,6 @@ func (q *Queries) CreateRuntimeImage(ctx context.Context, arg CreateRuntimeImage
 		arg.ImageUrl,
 		arg.Version,
 		arg.GenesisBaked,
-		arg.IsDefault,
 	)
 	var i RuntimeImage
 	err := row.Scan(
@@ -127,12 +149,7 @@ func (q *Queries) CreateRuntimeImage(ctx context.Context, arg CreateRuntimeImage
 		&i.ImageUrl,
 		&i.Version,
 		&i.Status,
-		&i.Prepulled,
-		&i.PrepullStatus,
-		&i.PrepullDetail,
-		&i.PrepulledAt,
 		&i.GenesisBaked,
-		&i.IsDefault,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -140,40 +157,45 @@ func (q *Queries) CreateRuntimeImage(ctx context.Context, arg CreateRuntimeImage
 
 const createSandbox = `-- name: CreateSandbox :one
 INSERT INTO sandbox (
-    id, tenant_id, runtime_id, image_id, namespace, source_ref, owner_account_id, phase, status,
+    id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status,
     keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains,
     snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9,
-    $10, $11, $12, $13, $14, $15, $16, $17,
-    $18, $19, $20, now(), $21, now(), now()
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+    $22, $23, $24, $25, now(), $26, now(), now()
 )
-RETURNING id, tenant_id, runtime_id, image_id, namespace, source_ref, owner_account_id, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+RETURNING id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
 `
 
 type CreateSandboxParams struct {
-	ID                int64              `json:"id"`
-	TenantID          int64              `json:"tenant_id"`
-	RuntimeID         int64              `json:"runtime_id"`
-	ImageID           int64              `json:"image_id"`
-	Namespace         string             `json:"namespace"`
-	SourceRef         string             `json:"source_ref"`
-	OwnerAccountID    int64              `json:"owner_account_id"`
-	Phase             int16              `json:"phase"`
-	Status            int16              `json:"status"`
-	KeepAlive         bool               `json:"keep_alive"`
-	SnapshotEnabled   bool               `json:"snapshot_enabled"`
-	CodeStorageKey    string             `json:"code_storage_key"`
-	CodeHash          pgtype.Text        `json:"code_hash"`
-	InitCodeRef       pgtype.Text        `json:"init_code_ref"`
-	InitScriptRef     pgtype.Text        `json:"init_script_ref"`
-	SnapshotRef       pgtype.Text        `json:"snapshot_ref"`
-	SnapshotDomains   []byte             `json:"snapshot_domains"`
-	SnapshotCreatedAt pgtype.Timestamptz `json:"snapshot_created_at"`
-	SnapshotExpireAt  pgtype.Timestamptz `json:"snapshot_expire_at"`
-	KeepAliveUntil    pgtype.Timestamptz `json:"keep_alive_until"`
-	ExpireAt          pgtype.Timestamptz `json:"expire_at"`
+	ID                  int64              `json:"id"`
+	TenantID            int64              `json:"tenant_id"`
+	RuntimeID           int64              `json:"runtime_id"`
+	ImageID             int64              `json:"image_id"`
+	Namespace           string             `json:"namespace"`
+	SourceRef           string             `json:"source_ref"`
+	ScopeRef            string             `json:"scope_ref"`
+	CompositionDigest   string             `json:"composition_digest"`
+	CompositionSnapshot []byte             `json:"composition_snapshot"`
+	AccessProfile       string             `json:"access_profile"`
+	OwnerAccountID      int64              `json:"owner_account_id"`
+	SharedAccountIds    []int64            `json:"shared_account_ids"`
+	Phase               int16              `json:"phase"`
+	Status              int16              `json:"status"`
+	KeepAlive           bool               `json:"keep_alive"`
+	SnapshotEnabled     bool               `json:"snapshot_enabled"`
+	CodeStorageKey      string             `json:"code_storage_key"`
+	CodeHash            pgtype.Text        `json:"code_hash"`
+	InitCodeRef         pgtype.Text        `json:"init_code_ref"`
+	InitScriptRef       pgtype.Text        `json:"init_script_ref"`
+	SnapshotRef         pgtype.Text        `json:"snapshot_ref"`
+	SnapshotDomains     []byte             `json:"snapshot_domains"`
+	SnapshotCreatedAt   pgtype.Timestamptz `json:"snapshot_created_at"`
+	SnapshotExpireAt    pgtype.Timestamptz `json:"snapshot_expire_at"`
+	KeepAliveUntil      pgtype.Timestamptz `json:"keep_alive_until"`
+	ExpireAt            pgtype.Timestamptz `json:"expire_at"`
 }
 
 func (q *Queries) CreateSandbox(ctx context.Context, arg CreateSandboxParams) (Sandbox, error) {
@@ -184,7 +206,12 @@ func (q *Queries) CreateSandbox(ctx context.Context, arg CreateSandboxParams) (S
 		arg.ImageID,
 		arg.Namespace,
 		arg.SourceRef,
+		arg.ScopeRef,
+		arg.CompositionDigest,
+		arg.CompositionSnapshot,
+		arg.AccessProfile,
 		arg.OwnerAccountID,
+		arg.SharedAccountIds,
 		arg.Phase,
 		arg.Status,
 		arg.KeepAlive,
@@ -208,13 +235,19 @@ func (q *Queries) CreateSandbox(ctx context.Context, arg CreateSandboxParams) (S
 		&i.ImageID,
 		&i.Namespace,
 		&i.SourceRef,
+		&i.ScopeRef,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.AccessProfile,
 		&i.OwnerAccountID,
+		&i.SharedAccountIds,
 		&i.Phase,
 		&i.Status,
 		&i.KeepAlive,
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
 		&i.SnapshotRef,
@@ -265,9 +298,9 @@ func (q *Queries) CreateSandboxEvent(ctx context.Context, arg CreateSandboxEvent
 }
 
 const createSandboxRecycleOutbox = `-- name: CreateSandboxRecycleOutbox :one
-INSERT INTO sandbox_recycle_outbox (id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 0, NULL, now(), now(), '', NULL)
-RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+INSERT INTO sandbox_recycle_outbox (id, tenant_id, sandbox_id, source_ref, scope_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, 0, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CreateSandboxRecycleOutboxParams struct {
@@ -275,6 +308,7 @@ type CreateSandboxRecycleOutboxParams struct {
 	TenantID       int64              `json:"tenant_id"`
 	SandboxID      int64              `json:"sandbox_id"`
 	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
 	OwnerAccountID int64              `json:"owner_account_id"`
 	Reason         string             `json:"reason"`
 	TraceID        string             `json:"trace_id"`
@@ -287,6 +321,7 @@ func (q *Queries) CreateSandboxRecycleOutbox(ctx context.Context, arg CreateSand
 		arg.TenantID,
 		arg.SandboxID,
 		arg.SourceRef,
+		arg.ScopeRef,
 		arg.OwnerAccountID,
 		arg.Reason,
 		arg.TraceID,
@@ -298,6 +333,7 @@ func (q *Queries) CreateSandboxRecycleOutbox(ctx context.Context, arg CreateSand
 		&i.TenantID,
 		&i.SandboxID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.OwnerAccountID,
 		&i.Reason,
 		&i.TraceID,
@@ -349,26 +385,29 @@ func (q *Queries) CreateSandboxTool(ctx context.Context, arg CreateSandboxToolPa
 	return i, err
 }
 
+const deleteCompositionPrepullByRuntimeImage = `-- name: DeleteCompositionPrepullByRuntimeImage :exec
+DELETE FROM sandbox_composition_prepull WHERE runtime_image_id = $1
+`
+
+func (q *Queries) DeleteCompositionPrepullByRuntimeImage(ctx context.Context, runtimeImageID int64) error {
+	_, err := q.db.Exec(ctx, deleteCompositionPrepullByRuntimeImage, runtimeImageID)
+	return err
+}
+
 const disableRuntimeImage = `-- name: DisableRuntimeImage :one
 UPDATE runtime_image
-SET status = 2,
-    prepulled = false,
-    prepull_status = 1,
-    prepull_detail = $3,
-    prepulled_at = NULL,
-    is_default = false
+SET status = 2
 WHERE id = $1 AND runtime_id = $2
-RETURNING id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+RETURNING id, runtime_id, image_url, version, status, genesis_baked, created_at
 `
 
 type DisableRuntimeImageParams struct {
-	ID            int64  `json:"id"`
-	RuntimeID     int64  `json:"runtime_id"`
-	PrepullDetail []byte `json:"prepull_detail"`
+	ID        int64 `json:"id"`
+	RuntimeID int64 `json:"runtime_id"`
 }
 
 func (q *Queries) DisableRuntimeImage(ctx context.Context, arg DisableRuntimeImageParams) (RuntimeImage, error) {
-	row := q.db.QueryRow(ctx, disableRuntimeImage, arg.ID, arg.RuntimeID, arg.PrepullDetail)
+	row := q.db.QueryRow(ctx, disableRuntimeImage, arg.ID, arg.RuntimeID)
 	var i RuntimeImage
 	err := row.Scan(
 		&i.ID,
@@ -376,12 +415,7 @@ func (q *Queries) DisableRuntimeImage(ctx context.Context, arg DisableRuntimeIma
 		&i.ImageUrl,
 		&i.Version,
 		&i.Status,
-		&i.Prepulled,
-		&i.PrepullStatus,
-		&i.PrepullDetail,
-		&i.PrepulledAt,
 		&i.GenesisBaked,
-		&i.IsDefault,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -452,52 +486,53 @@ func (q *Queries) EnsureTenantQuota(ctx context.Context, arg EnsureTenantQuotaPa
 	return i, err
 }
 
-const finishRuntimeImagePrepull = `-- name: FinishRuntimeImagePrepull :one
-UPDATE runtime_image
-SET prepulled = $3, prepull_status = $4, prepull_detail = $5, prepulled_at = $6
-WHERE id = $1
-  AND runtime_id = $2
-  AND status = 1
-  AND prepull_status = 4
-  AND prepull_detail->>'attempt_id' = $7::text
-RETURNING id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+const finishCompositionPrepull = `-- name: FinishCompositionPrepull :one
+UPDATE sandbox_composition_prepull
+SET status = $3, daemonset_name = $4, desired_nodes = $5, ready_nodes = $6, detail = $7,
+    completed_at = CASE WHEN $3 = 2 OR $3 = 3 THEN now() ELSE NULL END, updated_at = now()
+WHERE runtime_image_id = $1 AND composition_digest = $2 AND status = 4 AND attempt_id = $8::text
+RETURNING id, runtime_image_id, composition_digest, status, attempt_id, daemonset_name, image_closure,
+          desired_nodes, ready_nodes, detail, started_at, completed_at, created_at, updated_at
 `
 
-type FinishRuntimeImagePrepullParams struct {
-	ID            int64              `json:"id"`
-	RuntimeID     int64              `json:"runtime_id"`
-	Prepulled     bool               `json:"prepulled"`
-	PrepullStatus int16              `json:"prepull_status"`
-	PrepullDetail []byte             `json:"prepull_detail"`
-	PrepulledAt   pgtype.Timestamptz `json:"prepulled_at"`
-	AttemptID     string             `json:"attempt_id"`
+type FinishCompositionPrepullParams struct {
+	RuntimeImageID    int64  `json:"runtime_image_id"`
+	CompositionDigest string `json:"composition_digest"`
+	Status            int16  `json:"status"`
+	DaemonsetName     string `json:"daemonset_name"`
+	DesiredNodes      int32  `json:"desired_nodes"`
+	ReadyNodes        int32  `json:"ready_nodes"`
+	Detail            []byte `json:"detail"`
+	AttemptID         string `json:"attempt_id"`
 }
 
-// 只允许启动本轮 DaemonSet 的同一次尝试写回结果;中途失效或后发尝试不得被旧结果覆盖。
-func (q *Queries) FinishRuntimeImagePrepull(ctx context.Context, arg FinishRuntimeImagePrepullParams) (RuntimeImage, error) {
-	row := q.db.QueryRow(ctx, finishRuntimeImagePrepull,
-		arg.ID,
-		arg.RuntimeID,
-		arg.Prepulled,
-		arg.PrepullStatus,
-		arg.PrepullDetail,
-		arg.PrepulledAt,
+func (q *Queries) FinishCompositionPrepull(ctx context.Context, arg FinishCompositionPrepullParams) (SandboxCompositionPrepull, error) {
+	row := q.db.QueryRow(ctx, finishCompositionPrepull,
+		arg.RuntimeImageID,
+		arg.CompositionDigest,
+		arg.Status,
+		arg.DaemonsetName,
+		arg.DesiredNodes,
+		arg.ReadyNodes,
+		arg.Detail,
 		arg.AttemptID,
 	)
-	var i RuntimeImage
+	var i SandboxCompositionPrepull
 	err := row.Scan(
 		&i.ID,
-		&i.RuntimeID,
-		&i.ImageUrl,
-		&i.Version,
+		&i.RuntimeImageID,
+		&i.CompositionDigest,
 		&i.Status,
-		&i.Prepulled,
-		&i.PrepullStatus,
-		&i.PrepullDetail,
-		&i.PrepulledAt,
-		&i.GenesisBaked,
-		&i.IsDefault,
+		&i.AttemptID,
+		&i.DaemonsetName,
+		&i.ImageClosure,
+		&i.DesiredNodes,
+		&i.ReadyNodes,
+		&i.Detail,
+		&i.StartedAt,
+		&i.CompletedAt,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -548,55 +583,58 @@ func (q *Queries) FinishRuntimeSelftest(ctx context.Context, arg FinishRuntimeSe
 	return i, err
 }
 
-const getDefaultRuntimeImage = `-- name: GetDefaultRuntimeImage :one
-SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
-FROM runtime_image
-WHERE runtime_id = $1 AND is_default = true AND status = 1
+const getCompositionPrepullForUpdate = `-- name: GetCompositionPrepullForUpdate :one
+SELECT id, runtime_image_id, composition_digest, status, attempt_id, daemonset_name, image_closure,
+       desired_nodes, ready_nodes, detail, started_at, completed_at, created_at, updated_at
+FROM sandbox_composition_prepull
+WHERE runtime_image_id = $1 AND composition_digest = $2
+FOR UPDATE
 `
 
-func (q *Queries) GetDefaultRuntimeImage(ctx context.Context, runtimeID int64) (RuntimeImage, error) {
-	row := q.db.QueryRow(ctx, getDefaultRuntimeImage, runtimeID)
-	var i RuntimeImage
+type GetCompositionPrepullForUpdateParams struct {
+	RuntimeImageID    int64  `json:"runtime_image_id"`
+	CompositionDigest string `json:"composition_digest"`
+}
+
+func (q *Queries) GetCompositionPrepullForUpdate(ctx context.Context, arg GetCompositionPrepullForUpdateParams) (SandboxCompositionPrepull, error) {
+	row := q.db.QueryRow(ctx, getCompositionPrepullForUpdate, arg.RuntimeImageID, arg.CompositionDigest)
+	var i SandboxCompositionPrepull
 	err := row.Scan(
 		&i.ID,
-		&i.RuntimeID,
-		&i.ImageUrl,
-		&i.Version,
+		&i.RuntimeImageID,
+		&i.CompositionDigest,
 		&i.Status,
-		&i.Prepulled,
-		&i.PrepullStatus,
-		&i.PrepullDetail,
-		&i.PrepulledAt,
-		&i.GenesisBaked,
-		&i.IsDefault,
+		&i.AttemptID,
+		&i.DaemonsetName,
+		&i.ImageClosure,
+		&i.DesiredNodes,
+		&i.ReadyNodes,
+		&i.Detail,
+		&i.StartedAt,
+		&i.CompletedAt,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
-const getDefaultRuntimeImageForShare = `-- name: GetDefaultRuntimeImageForShare :one
-SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
-FROM runtime_image
-WHERE runtime_id = $1 AND is_default = true AND status = 1
-FOR SHARE
+const getPublishedCompositionSnapshot = `-- name: GetPublishedCompositionSnapshot :one
+SELECT composition_digest, runtime_id, runtime_image_id, snapshot, status, created_at, updated_at
+FROM sandbox_composition
+WHERE composition_digest = $1 AND status = 1
 `
 
-func (q *Queries) GetDefaultRuntimeImageForShare(ctx context.Context, runtimeID int64) (RuntimeImage, error) {
-	row := q.db.QueryRow(ctx, getDefaultRuntimeImageForShare, runtimeID)
-	var i RuntimeImage
+func (q *Queries) GetPublishedCompositionSnapshot(ctx context.Context, compositionDigest string) (SandboxComposition, error) {
+	row := q.db.QueryRow(ctx, getPublishedCompositionSnapshot, compositionDigest)
+	var i SandboxComposition
 	err := row.Scan(
-		&i.ID,
+		&i.CompositionDigest,
 		&i.RuntimeID,
-		&i.ImageUrl,
-		&i.Version,
+		&i.RuntimeImageID,
+		&i.Snapshot,
 		&i.Status,
-		&i.Prepulled,
-		&i.PrepullStatus,
-		&i.PrepullDetail,
-		&i.PrepulledAt,
-		&i.GenesisBaked,
-		&i.IsDefault,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -685,7 +723,7 @@ func (q *Queries) GetRuntimeByIDForUpdate(ctx context.Context, id int64) (Runtim
 }
 
 const getRuntimeImageByID = `-- name: GetRuntimeImageByID :one
-SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+SELECT id, runtime_id, image_url, version, status, genesis_baked, created_at
 FROM runtime_image
 WHERE id = $1 AND runtime_id = $2
 `
@@ -704,19 +742,14 @@ func (q *Queries) GetRuntimeImageByID(ctx context.Context, arg GetRuntimeImageBy
 		&i.ImageUrl,
 		&i.Version,
 		&i.Status,
-		&i.Prepulled,
-		&i.PrepullStatus,
-		&i.PrepullDetail,
-		&i.PrepulledAt,
 		&i.GenesisBaked,
-		&i.IsDefault,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getRuntimeImageByIDForUpdate = `-- name: GetRuntimeImageByIDForUpdate :one
-SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+SELECT id, runtime_id, image_url, version, status, genesis_baked, created_at
 FROM runtime_image
 WHERE id = $1 AND runtime_id = $2
 FOR UPDATE
@@ -737,19 +770,14 @@ func (q *Queries) GetRuntimeImageByIDForUpdate(ctx context.Context, arg GetRunti
 		&i.ImageUrl,
 		&i.Version,
 		&i.Status,
-		&i.Prepulled,
-		&i.PrepullStatus,
-		&i.PrepullDetail,
-		&i.PrepulledAt,
 		&i.GenesisBaked,
-		&i.IsDefault,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getRuntimeImageByVersion = `-- name: GetRuntimeImageByVersion :one
-SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+SELECT id, runtime_id, image_url, version, status, genesis_baked, created_at
 FROM runtime_image
 WHERE runtime_id = $1 AND version = $2 AND status = 1
 `
@@ -768,19 +796,14 @@ func (q *Queries) GetRuntimeImageByVersion(ctx context.Context, arg GetRuntimeIm
 		&i.ImageUrl,
 		&i.Version,
 		&i.Status,
-		&i.Prepulled,
-		&i.PrepullStatus,
-		&i.PrepullDetail,
-		&i.PrepulledAt,
 		&i.GenesisBaked,
-		&i.IsDefault,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getRuntimeImageByVersionForShare = `-- name: GetRuntimeImageByVersionForShare :one
-SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+SELECT id, runtime_id, image_url, version, status, genesis_baked, created_at
 FROM runtime_image
 WHERE runtime_id = $1 AND version = $2 AND status = 1
 FOR SHARE
@@ -800,19 +823,14 @@ func (q *Queries) GetRuntimeImageByVersionForShare(ctx context.Context, arg GetR
 		&i.ImageUrl,
 		&i.Version,
 		&i.Status,
-		&i.Prepulled,
-		&i.PrepullStatus,
-		&i.PrepullDetail,
-		&i.PrepulledAt,
 		&i.GenesisBaked,
-		&i.IsDefault,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getSandbox = `-- name: GetSandbox :one
-SELECT id, tenant_id, runtime_id, image_id, namespace, source_ref, owner_account_id, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
 FROM sandbox
 WHERE tenant_id = $1 AND id = $2
 `
@@ -832,13 +850,19 @@ func (q *Queries) GetSandbox(ctx context.Context, arg GetSandboxParams) (Sandbox
 		&i.ImageID,
 		&i.Namespace,
 		&i.SourceRef,
+		&i.ScopeRef,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.AccessProfile,
 		&i.OwnerAccountID,
+		&i.SharedAccountIds,
 		&i.Phase,
 		&i.Status,
 		&i.KeepAlive,
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
 		&i.SnapshotRef,
@@ -902,7 +926,7 @@ func (q *Queries) GetTenantQuotaForUpdate(ctx context.Context, tenantID int64) (
 }
 
 const getToolByCode = `-- name: GetToolByCode :one
-SELECT id, code, name, kind, eco_tags, resource_spec, status, created_at, updated_at
+SELECT id, code, name, category, kind, eco_tags, resource_spec, status, created_at, updated_at
 FROM tool
 WHERE code = $1
 `
@@ -914,6 +938,7 @@ func (q *Queries) GetToolByCode(ctx context.Context, code string) (Tool, error) 
 		&i.ID,
 		&i.Code,
 		&i.Name,
+		&i.Category,
 		&i.Kind,
 		&i.EcoTags,
 		&i.ResourceSpec,
@@ -924,47 +949,41 @@ func (q *Queries) GetToolByCode(ctx context.Context, code string) (Tool, error) 
 	return i, err
 }
 
-const invalidateRuntimeImagesPrepull = `-- name: InvalidateRuntimeImagesPrepull :exec
-UPDATE runtime_image
-SET prepulled = false,
-    prepull_status = 1,
-    prepull_detail = $2,
-    prepulled_at = NULL
-WHERE runtime_id = $1 AND status = 1
+const invalidateCompositionPrepullByRuntime = `-- name: InvalidateCompositionPrepullByRuntime :exec
+UPDATE sandbox_composition_prepull p
+SET status = 1, detail = $2, completed_at = NULL, updated_at = now()
+FROM runtime_image i
+WHERE p.runtime_image_id = i.id AND i.runtime_id = $1 AND p.status <> 1
 `
 
-type InvalidateRuntimeImagesPrepullParams struct {
-	RuntimeID     int64  `json:"runtime_id"`
-	PrepullDetail []byte `json:"prepull_detail"`
+type InvalidateCompositionPrepullByRuntimeParams struct {
+	RuntimeID int64  `json:"runtime_id"`
+	Detail    []byte `json:"detail"`
 }
 
-// 运行时工作负载闭包变化后统一撤销旧证明,重新预拉取成功前不得创建新沙箱。
-func (q *Queries) InvalidateRuntimeImagesPrepull(ctx context.Context, arg InvalidateRuntimeImagesPrepullParams) error {
-	_, err := q.db.Exec(ctx, invalidateRuntimeImagesPrepull, arg.RuntimeID, arg.PrepullDetail)
+func (q *Queries) InvalidateCompositionPrepullByRuntime(ctx context.Context, arg InvalidateCompositionPrepullByRuntimeParams) error {
+	_, err := q.db.Exec(ctx, invalidateCompositionPrepullByRuntime, arg.RuntimeID, arg.Detail)
 	return err
 }
 
 const listCatalogRuntimes = `-- name: ListCatalogRuntimes :many
-SELECT r.code AS runtime_code, r.name AS runtime_name, r.eco,
-       i.version AS image_version,
-       i.is_default AS image_is_default
+SELECT r.code AS runtime_code, r.name AS runtime_name, r.eco, r.adapter_spec,
+       i.version AS image_version
 FROM runtime r
 JOIN runtime_image i
   ON i.runtime_id = r.id
  AND i.status = 1
- AND i.prepulled = true
- AND i.prepull_status = 2
  AND i.genesis_baked = true
 WHERE r.status = 1 AND r.selftest_status = 2
-ORDER BY r.code, i.is_default DESC, i.version DESC
+ORDER BY r.code, i.version DESC
 `
 
 type ListCatalogRuntimesRow struct {
-	RuntimeCode    string `json:"runtime_code"`
-	RuntimeName    string `json:"runtime_name"`
-	Eco            string `json:"eco"`
-	ImageVersion   string `json:"image_version"`
-	ImageIsDefault bool   `json:"image_is_default"`
+	RuntimeCode  string `json:"runtime_code"`
+	RuntimeName  string `json:"runtime_name"`
+	Eco          string `json:"eco"`
+	AdapterSpec  []byte `json:"adapter_spec"`
+	ImageVersion string `json:"image_version"`
 }
 
 // 编排目录只取真正可调度的运行时与镜像版本,不把未完成自检或最新闭包预拉取的项暴露给教师。
@@ -983,8 +1002,8 @@ func (q *Queries) ListCatalogRuntimes(ctx context.Context) ([]ListCatalogRuntime
 			&i.RuntimeCode,
 			&i.RuntimeName,
 			&i.Eco,
+			&i.AdapterSpec,
 			&i.ImageVersion,
-			&i.ImageIsDefault,
 		); err != nil {
 			return nil, err
 		}
@@ -997,13 +1016,14 @@ func (q *Queries) ListCatalogRuntimes(ctx context.Context) ([]ListCatalogRuntime
 }
 
 const listCatalogTools = `-- name: ListCatalogTools :many
-SELECT code, name, kind, eco_tags, resource_spec
+SELECT category, code, name, kind, eco_tags, resource_spec
 FROM tool
 WHERE status = 1
-ORDER BY code
+ORDER BY category, code
 `
 
 type ListCatalogToolsRow struct {
+	Category     string `json:"category"`
 	Code         string `json:"code"`
 	Name         string `json:"name"`
 	Kind         int16  `json:"kind"`
@@ -1011,7 +1031,7 @@ type ListCatalogToolsRow struct {
 	ResourceSpec []byte `json:"resource_spec"`
 }
 
-// eco_tags 只在服务端计算各运行时兼容工具编码,不会直接下发给编排端。
+// eco_tags 只在服务端计算各运行时兼容组件,不会直接下发给编排端。
 func (q *Queries) ListCatalogTools(ctx context.Context) ([]ListCatalogToolsRow, error) {
 	rows, err := q.db.Query(ctx, listCatalogTools)
 	if err != nil {
@@ -1022,6 +1042,7 @@ func (q *Queries) ListCatalogTools(ctx context.Context) ([]ListCatalogToolsRow, 
 	for rows.Next() {
 		var i ListCatalogToolsRow
 		if err := rows.Scan(
+			&i.Category,
 			&i.Code,
 			&i.Name,
 			&i.Kind,
@@ -1039,7 +1060,7 @@ func (q *Queries) ListCatalogTools(ctx context.Context) ([]ListCatalogToolsRow, 
 }
 
 const listRecycleCandidates = `-- name: ListRecycleCandidates :many
-SELECT s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.owner_account_id, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+SELECT s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
 FROM sandbox s
 JOIN tenant_quota tq ON tq.tenant_id = s.tenant_id
 WHERE s.status IN (4, 6)
@@ -1073,13 +1094,19 @@ func (q *Queries) ListRecycleCandidates(ctx context.Context, arg ListRecycleCand
 			&i.ImageID,
 			&i.Namespace,
 			&i.SourceRef,
+			&i.ScopeRef,
+			&i.CompositionDigest,
+			&i.CompositionSnapshot,
+			&i.AccessProfile,
 			&i.OwnerAccountID,
+			&i.SharedAccountIds,
 			&i.Phase,
 			&i.Status,
 			&i.KeepAlive,
 			&i.SnapshotEnabled,
 			&i.CodeStorageKey,
 			&i.CodeHash,
+			&i.WorkspaceRevision,
 			&i.InitCodeRef,
 			&i.InitScriptRef,
 			&i.SnapshotRef,
@@ -1103,7 +1130,7 @@ func (q *Queries) ListRecycleCandidates(ctx context.Context, arg ListRecycleCand
 }
 
 const listRuntimeImages = `-- name: ListRuntimeImages :many
-SELECT id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+SELECT id, runtime_id, image_url, version, status, genesis_baked, created_at
 FROM runtime_image
 WHERE runtime_id = $1
 ORDER BY created_at DESC, id DESC
@@ -1124,12 +1151,7 @@ func (q *Queries) ListRuntimeImages(ctx context.Context, runtimeID int64) ([]Run
 			&i.ImageUrl,
 			&i.Version,
 			&i.Status,
-			&i.Prepulled,
-			&i.PrepullStatus,
-			&i.PrepullDetail,
-			&i.PrepulledAt,
 			&i.GenesisBaked,
-			&i.IsDefault,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -1238,8 +1260,71 @@ func (q *Queries) ListSandboxTools(ctx context.Context, arg ListSandboxToolsPara
 	return items, nil
 }
 
+const listSandboxesByScopeRef = `-- name: ListSandboxesByScopeRef :many
+SELECT id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+FROM sandbox
+WHERE tenant_id = $1 AND scope_ref = $2 AND status <> 5
+ORDER BY created_at DESC, id DESC
+`
+
+type ListSandboxesByScopeRefParams struct {
+	TenantID int64  `json:"tenant_id"`
+	ScopeRef string `json:"scope_ref"`
+}
+
+func (q *Queries) ListSandboxesByScopeRef(ctx context.Context, arg ListSandboxesByScopeRefParams) ([]Sandbox, error) {
+	rows, err := q.db.Query(ctx, listSandboxesByScopeRef, arg.TenantID, arg.ScopeRef)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Sandbox{}
+	for rows.Next() {
+		var i Sandbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.RuntimeID,
+			&i.ImageID,
+			&i.Namespace,
+			&i.SourceRef,
+			&i.ScopeRef,
+			&i.CompositionDigest,
+			&i.CompositionSnapshot,
+			&i.AccessProfile,
+			&i.OwnerAccountID,
+			&i.SharedAccountIds,
+			&i.Phase,
+			&i.Status,
+			&i.KeepAlive,
+			&i.SnapshotEnabled,
+			&i.CodeStorageKey,
+			&i.CodeHash,
+			&i.WorkspaceRevision,
+			&i.InitCodeRef,
+			&i.InitScriptRef,
+			&i.SnapshotRef,
+			&i.SnapshotDomains,
+			&i.SnapshotCreatedAt,
+			&i.SnapshotExpireAt,
+			&i.KeepAliveUntil,
+			&i.LastActiveAt,
+			&i.ExpireAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSandboxesBySourceRef = `-- name: ListSandboxesBySourceRef :many
-SELECT id, tenant_id, runtime_id, image_id, namespace, source_ref, owner_account_id, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
 FROM sandbox
 WHERE tenant_id = $1 AND source_ref = $2 AND status <> 5
 ORDER BY created_at DESC, id DESC
@@ -1266,13 +1351,19 @@ func (q *Queries) ListSandboxesBySourceRef(ctx context.Context, arg ListSandboxe
 			&i.ImageID,
 			&i.Namespace,
 			&i.SourceRef,
+			&i.ScopeRef,
+			&i.CompositionDigest,
+			&i.CompositionSnapshot,
+			&i.AccessProfile,
 			&i.OwnerAccountID,
+			&i.SharedAccountIds,
 			&i.Phase,
 			&i.Status,
 			&i.KeepAlive,
 			&i.SnapshotEnabled,
 			&i.CodeStorageKey,
 			&i.CodeHash,
+			&i.WorkspaceRevision,
 			&i.InitCodeRef,
 			&i.InitScriptRef,
 			&i.SnapshotRef,
@@ -1296,7 +1387,7 @@ func (q *Queries) ListSandboxesBySourceRef(ctx context.Context, arg ListSandboxe
 }
 
 const listSnapshotCleanupCandidates = `-- name: ListSnapshotCleanupCandidates :many
-SELECT id, tenant_id, runtime_id, image_id, namespace, source_ref, owner_account_id, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
 FROM sandbox
 WHERE status = 5 AND snapshot_expire_at IS NOT NULL AND snapshot_expire_at <= now()
 ORDER BY snapshot_expire_at ASC, id ASC
@@ -1319,13 +1410,19 @@ func (q *Queries) ListSnapshotCleanupCandidates(ctx context.Context, limit int32
 			&i.ImageID,
 			&i.Namespace,
 			&i.SourceRef,
+			&i.ScopeRef,
+			&i.CompositionDigest,
+			&i.CompositionSnapshot,
+			&i.AccessProfile,
 			&i.OwnerAccountID,
+			&i.SharedAccountIds,
 			&i.Phase,
 			&i.Status,
 			&i.KeepAlive,
 			&i.SnapshotEnabled,
 			&i.CodeStorageKey,
 			&i.CodeHash,
+			&i.WorkspaceRevision,
 			&i.InitCodeRef,
 			&i.InitScriptRef,
 			&i.SnapshotRef,
@@ -1349,7 +1446,7 @@ func (q *Queries) ListSnapshotCleanupCandidates(ctx context.Context, limit int32
 }
 
 const listTools = `-- name: ListTools :many
-SELECT id, code, name, kind, eco_tags, resource_spec, status, created_at, updated_at
+SELECT id, code, name, category, kind, eco_tags, resource_spec, status, created_at, updated_at
 FROM tool
 ORDER BY created_at DESC, id DESC
 `
@@ -1367,6 +1464,7 @@ func (q *Queries) ListTools(ctx context.Context) ([]Tool, error) {
 			&i.ID,
 			&i.Code,
 			&i.Name,
+			&i.Category,
 			&i.Kind,
 			&i.EcoTags,
 			&i.ResourceSpec,
@@ -1384,6 +1482,16 @@ func (q *Queries) ListTools(ctx context.Context) ([]Tool, error) {
 	return items, nil
 }
 
+const lockSandboxChain = `-- name: LockSandboxChain :exec
+SELECT pg_advisory_xact_lock($1::bigint)
+`
+
+// 沙箱 ID 是全局雪花 ID;事务级 advisory lock 贯穿真实链能力调用,跨副本串行化 deploy/tx/reset。
+func (q *Queries) LockSandboxChain(ctx context.Context, dollar_1 int64) error {
+	_, err := q.db.Exec(ctx, lockSandboxChain, dollar_1)
+	return err
+}
+
 const markIdleSandboxes = `-- name: MarkIdleSandboxes :many
 UPDATE sandbox s
 SET status = 8, updated_at = now()
@@ -1392,7 +1500,7 @@ WHERE tq.tenant_id = s.tenant_id
   AND s.status = 2
   AND s.keep_alive = false
   AND s.last_active_at <= now() - make_interval(mins => tq.idle_timeout_min)
-RETURNING s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.owner_account_id, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+RETURNING s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
 `
 
 func (q *Queries) MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error) {
@@ -1411,13 +1519,19 @@ func (q *Queries) MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error) {
 			&i.ImageID,
 			&i.Namespace,
 			&i.SourceRef,
+			&i.ScopeRef,
+			&i.CompositionDigest,
+			&i.CompositionSnapshot,
+			&i.AccessProfile,
 			&i.OwnerAccountID,
+			&i.SharedAccountIds,
 			&i.Phase,
 			&i.Status,
 			&i.KeepAlive,
 			&i.SnapshotEnabled,
 			&i.CodeStorageKey,
 			&i.CodeHash,
+			&i.WorkspaceRevision,
 			&i.InitCodeRef,
 			&i.InitScriptRef,
 			&i.SnapshotRef,
@@ -1440,22 +1554,6 @@ func (q *Queries) MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error) {
 	return items, nil
 }
 
-const markOtherRuntimeImagesNotDefault = `-- name: MarkOtherRuntimeImagesNotDefault :exec
-UPDATE runtime_image
-SET is_default = false
-WHERE runtime_id = $1 AND id <> $2
-`
-
-type MarkOtherRuntimeImagesNotDefaultParams struct {
-	RuntimeID int64 `json:"runtime_id"`
-	ID        int64 `json:"id"`
-}
-
-func (q *Queries) MarkOtherRuntimeImagesNotDefault(ctx context.Context, arg MarkOtherRuntimeImagesNotDefaultParams) error {
-	_, err := q.db.Exec(ctx, markOtherRuntimeImagesNotDefault, arg.RuntimeID, arg.ID)
-	return err
-}
-
 const markSandboxActive = `-- name: MarkSandboxActive :one
 UPDATE sandbox
 SET last_active_at = now(),
@@ -1463,7 +1561,7 @@ SET last_active_at = now(),
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
   AND status IN (2, 7, 8)
-RETURNING id, tenant_id, runtime_id, image_id, namespace, source_ref, owner_account_id, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+RETURNING id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
 `
 
 type MarkSandboxActiveParams struct {
@@ -1481,13 +1579,19 @@ func (q *Queries) MarkSandboxActive(ctx context.Context, arg MarkSandboxActivePa
 		&i.ImageID,
 		&i.Namespace,
 		&i.SourceRef,
+		&i.ScopeRef,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.AccessProfile,
 		&i.OwnerAccountID,
+		&i.SharedAccountIds,
 		&i.Phase,
 		&i.Status,
 		&i.KeepAlive,
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
 		&i.SnapshotRef,
@@ -1507,7 +1611,7 @@ const markSandboxRecycleOutboxFailed = `-- name: MarkSandboxRecycleOutboxFailed 
 UPDATE sandbox_recycle_outbox
 SET status = 4, last_error = $1, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $2 AND id = $3 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkSandboxRecycleOutboxFailedParams struct {
@@ -1530,6 +1634,7 @@ func (q *Queries) MarkSandboxRecycleOutboxFailed(ctx context.Context, arg MarkSa
 		&i.TenantID,
 		&i.SandboxID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.OwnerAccountID,
 		&i.Reason,
 		&i.TraceID,
@@ -1549,7 +1654,7 @@ const markSandboxRecycleOutboxPublished = `-- name: MarkSandboxRecycleOutboxPubl
 UPDATE sandbox_recycle_outbox
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, sandbox_id, source_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, sandbox_id, source_ref, scope_ref, owner_account_id, reason, trace_id, recycled_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkSandboxRecycleOutboxPublishedParams struct {
@@ -1566,6 +1671,7 @@ func (q *Queries) MarkSandboxRecycleOutboxPublished(ctx context.Context, arg Mar
 		&i.TenantID,
 		&i.SandboxID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.OwnerAccountID,
 		&i.Reason,
 		&i.TraceID,
@@ -1581,35 +1687,53 @@ func (q *Queries) MarkSandboxRecycleOutboxPublished(ctx context.Context, arg Mar
 	return i, err
 }
 
-const startRuntimeImagePrepull = `-- name: StartRuntimeImagePrepull :one
-UPDATE runtime_image
-SET prepulled = false, prepull_status = 4, prepull_detail = $3, prepulled_at = NULL
-WHERE id = $1 AND runtime_id = $2 AND status = 1
-RETURNING id, runtime_id, image_url, version, status, prepulled, prepull_status, prepull_detail, prepulled_at, genesis_baked, is_default, created_at
+const startCompositionPrepull = `-- name: StartCompositionPrepull :one
+INSERT INTO sandbox_composition_prepull (
+    id, runtime_image_id, composition_digest, status, attempt_id, daemonset_name, image_closure,
+    desired_nodes, ready_nodes, detail, started_at, completed_at, created_at, updated_at
+)
+VALUES ($1, $2, $3, 4, $4, '', $5, 0, 0, $6, now(), NULL, now(), now())
+ON CONFLICT (runtime_image_id, composition_digest) DO UPDATE
+SET status = 4, attempt_id = EXCLUDED.attempt_id, daemonset_name = '', image_closure = EXCLUDED.image_closure,
+    desired_nodes = 0, ready_nodes = 0, detail = EXCLUDED.detail, started_at = now(), completed_at = NULL, updated_at = now()
+RETURNING id, runtime_image_id, composition_digest, status, attempt_id, daemonset_name, image_closure,
+          desired_nodes, ready_nodes, detail, started_at, completed_at, created_at, updated_at
 `
 
-type StartRuntimeImagePrepullParams struct {
-	ID            int64  `json:"id"`
-	RuntimeID     int64  `json:"runtime_id"`
-	PrepullDetail []byte `json:"prepull_detail"`
+type StartCompositionPrepullParams struct {
+	ID                int64  `json:"id"`
+	RuntimeImageID    int64  `json:"runtime_image_id"`
+	CompositionDigest string `json:"composition_digest"`
+	AttemptID         string `json:"attempt_id"`
+	ImageClosure      []byte `json:"image_closure"`
+	Detail            []byte `json:"detail"`
 }
 
-func (q *Queries) StartRuntimeImagePrepull(ctx context.Context, arg StartRuntimeImagePrepullParams) (RuntimeImage, error) {
-	row := q.db.QueryRow(ctx, startRuntimeImagePrepull, arg.ID, arg.RuntimeID, arg.PrepullDetail)
-	var i RuntimeImage
+func (q *Queries) StartCompositionPrepull(ctx context.Context, arg StartCompositionPrepullParams) (SandboxCompositionPrepull, error) {
+	row := q.db.QueryRow(ctx, startCompositionPrepull,
+		arg.ID,
+		arg.RuntimeImageID,
+		arg.CompositionDigest,
+		arg.AttemptID,
+		arg.ImageClosure,
+		arg.Detail,
+	)
+	var i SandboxCompositionPrepull
 	err := row.Scan(
 		&i.ID,
-		&i.RuntimeID,
-		&i.ImageUrl,
-		&i.Version,
+		&i.RuntimeImageID,
+		&i.CompositionDigest,
 		&i.Status,
-		&i.Prepulled,
-		&i.PrepullStatus,
-		&i.PrepullDetail,
-		&i.PrepulledAt,
-		&i.GenesisBaked,
-		&i.IsDefault,
+		&i.AttemptID,
+		&i.DaemonsetName,
+		&i.ImageClosure,
+		&i.DesiredNodes,
+		&i.ReadyNodes,
+		&i.Detail,
+		&i.StartedAt,
+		&i.CompletedAt,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1691,11 +1815,66 @@ func (q *Queries) StatsByTenant(ctx context.Context, tenantID int64) (StatsByTen
 	return i, err
 }
 
+const updateSandboxAuthorizedAccounts = `-- name: UpdateSandboxAuthorizedAccounts :one
+WITH updated AS (
+    UPDATE sandbox SET shared_account_ids = $3, updated_at = now()
+    WHERE sandbox.tenant_id = $1 AND sandbox.id = $2 RETURNING sandbox.id
+)
+SELECT s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+FROM sandbox s JOIN updated u ON u.id = s.id
+`
+
+type UpdateSandboxAuthorizedAccountsParams struct {
+	TenantID         int64   `json:"tenant_id"`
+	ID               int64   `json:"id"`
+	SharedAccountIds []int64 `json:"shared_account_ids"`
+}
+
+func (q *Queries) UpdateSandboxAuthorizedAccounts(ctx context.Context, arg UpdateSandboxAuthorizedAccountsParams) (Sandbox, error) {
+	row := q.db.QueryRow(ctx, updateSandboxAuthorizedAccounts, arg.TenantID, arg.ID, arg.SharedAccountIds)
+	var i Sandbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.RuntimeID,
+		&i.ImageID,
+		&i.Namespace,
+		&i.SourceRef,
+		&i.ScopeRef,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.AccessProfile,
+		&i.OwnerAccountID,
+		&i.SharedAccountIds,
+		&i.Phase,
+		&i.Status,
+		&i.KeepAlive,
+		&i.SnapshotEnabled,
+		&i.CodeStorageKey,
+		&i.CodeHash,
+		&i.WorkspaceRevision,
+		&i.InitCodeRef,
+		&i.InitScriptRef,
+		&i.SnapshotRef,
+		&i.SnapshotDomains,
+		&i.SnapshotCreatedAt,
+		&i.SnapshotExpireAt,
+		&i.KeepAliveUntil,
+		&i.LastActiveAt,
+		&i.ExpireAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateSandboxCode = `-- name: UpdateSandboxCode :one
-UPDATE sandbox
-SET code_storage_key = $3, code_hash = $4, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, runtime_id, image_id, namespace, source_ref, owner_account_id, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+WITH updated AS (
+    UPDATE sandbox SET code_storage_key = $3, code_hash = $4, updated_at = now()
+    WHERE sandbox.tenant_id = $1 AND sandbox.id = $2 RETURNING sandbox.id
+)
+SELECT s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+FROM sandbox s JOIN updated u ON u.id = s.id
 `
 
 type UpdateSandboxCodeParams struct {
@@ -1720,13 +1899,19 @@ func (q *Queries) UpdateSandboxCode(ctx context.Context, arg UpdateSandboxCodePa
 		&i.ImageID,
 		&i.Namespace,
 		&i.SourceRef,
+		&i.ScopeRef,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.AccessProfile,
 		&i.OwnerAccountID,
+		&i.SharedAccountIds,
 		&i.Phase,
 		&i.Status,
 		&i.KeepAlive,
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
 		&i.SnapshotRef,
@@ -1746,7 +1931,7 @@ const updateSandboxPhaseStatus = `-- name: UpdateSandboxPhaseStatus :one
 UPDATE sandbox
 SET phase = $3, status = $4, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, runtime_id, image_id, namespace, source_ref, owner_account_id, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+RETURNING id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
 `
 
 type UpdateSandboxPhaseStatusParams struct {
@@ -1771,13 +1956,19 @@ func (q *Queries) UpdateSandboxPhaseStatus(ctx context.Context, arg UpdateSandbo
 		&i.ImageID,
 		&i.Namespace,
 		&i.SourceRef,
+		&i.ScopeRef,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.AccessProfile,
 		&i.OwnerAccountID,
+		&i.SharedAccountIds,
 		&i.Phase,
 		&i.Status,
 		&i.KeepAlive,
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
 		&i.SnapshotRef,
@@ -1794,10 +1985,12 @@ func (q *Queries) UpdateSandboxPhaseStatus(ctx context.Context, arg UpdateSandbo
 }
 
 const updateSandboxSnapshot = `-- name: UpdateSandboxSnapshot :one
-UPDATE sandbox
-SET snapshot_ref = $3, snapshot_domains = $4, snapshot_created_at = $5, snapshot_expire_at = $6, updated_at = now()
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, runtime_id, image_id, namespace, source_ref, owner_account_id, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+WITH updated AS (
+    UPDATE sandbox SET snapshot_ref = $3, snapshot_domains = $4, snapshot_created_at = $5, snapshot_expire_at = $6, updated_at = now()
+    WHERE sandbox.tenant_id = $1 AND sandbox.id = $2 RETURNING sandbox.id
+)
+SELECT s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+FROM sandbox s JOIN updated u ON u.id = s.id
 `
 
 type UpdateSandboxSnapshotParams struct {
@@ -1826,13 +2019,19 @@ func (q *Queries) UpdateSandboxSnapshot(ctx context.Context, arg UpdateSandboxSn
 		&i.ImageID,
 		&i.Namespace,
 		&i.SourceRef,
+		&i.ScopeRef,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.AccessProfile,
 		&i.OwnerAccountID,
+		&i.SharedAccountIds,
 		&i.Phase,
 		&i.Status,
 		&i.KeepAlive,
 		&i.SnapshotEnabled,
 		&i.CodeStorageKey,
 		&i.CodeHash,
+		&i.WorkspaceRevision,
 		&i.InitCodeRef,
 		&i.InitScriptRef,
 		&i.SnapshotRef,
@@ -1881,6 +2080,34 @@ func (q *Queries) UpdateSandboxToolStatus(ctx context.Context, arg UpdateSandbox
 		&i.Status,
 	)
 	return i, err
+}
+
+const upsertPublishedCompositionSnapshot = `-- name: UpsertPublishedCompositionSnapshot :exec
+INSERT INTO sandbox_composition (composition_digest, runtime_id, runtime_image_id, snapshot, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, 1, now(), now())
+ON CONFLICT (composition_digest) DO UPDATE
+SET runtime_id = EXCLUDED.runtime_id,
+    runtime_image_id = EXCLUDED.runtime_image_id,
+    snapshot = EXCLUDED.snapshot,
+    status = 1,
+    updated_at = now()
+`
+
+type UpsertPublishedCompositionSnapshotParams struct {
+	CompositionDigest string `json:"composition_digest"`
+	RuntimeID         int64  `json:"runtime_id"`
+	RuntimeImageID    int64  `json:"runtime_image_id"`
+	Snapshot          []byte `json:"snapshot"`
+}
+
+func (q *Queries) UpsertPublishedCompositionSnapshot(ctx context.Context, arg UpsertPublishedCompositionSnapshotParams) error {
+	_, err := q.db.Exec(ctx, upsertPublishedCompositionSnapshot,
+		arg.CompositionDigest,
+		arg.RuntimeID,
+		arg.RuntimeImageID,
+		arg.Snapshot,
+	)
+	return err
 }
 
 const upsertRuntime = `-- name: UpsertRuntime :one
@@ -2000,8 +2227,8 @@ func (q *Queries) UpsertTenantQuota(ctx context.Context, arg UpsertTenantQuotaPa
 }
 
 const upsertTool = `-- name: UpsertTool :one
-INSERT INTO tool (id, code, name, kind, eco_tags, resource_spec, status, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())
+INSERT INTO tool (id, code, name, category, kind, eco_tags, resource_spec, status, created_at, updated_at)
+VALUES ($1, $2, $3, 'tool', $4, $5, $6, $7, now(), now())
 ON CONFLICT (code) DO UPDATE
 SET name = EXCLUDED.name,
     kind = EXCLUDED.kind,
@@ -2009,7 +2236,7 @@ SET name = EXCLUDED.name,
     resource_spec = EXCLUDED.resource_spec,
     status = EXCLUDED.status,
     updated_at = now()
-RETURNING id, code, name, kind, eco_tags, resource_spec, status, created_at, updated_at
+RETURNING id, code, name, category, kind, eco_tags, resource_spec, status, created_at, updated_at
 `
 
 type UpsertToolParams struct {
@@ -2037,6 +2264,7 @@ func (q *Queries) UpsertTool(ctx context.Context, arg UpsertToolParams) (Tool, e
 		&i.ID,
 		&i.Code,
 		&i.Name,
+		&i.Category,
 		&i.Kind,
 		&i.EcoTags,
 		&i.ResourceSpec,

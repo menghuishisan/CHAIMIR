@@ -3,6 +3,10 @@ package contest
 
 import (
 	"bytes"
+	"reflect"
+	"strings"
+
+	"chaimir/internal/contracts"
 	"time"
 
 	"chaimir/internal/modules/contest/internal/sqlcgen"
@@ -11,6 +15,7 @@ import (
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // contestFromRow 转换竞赛定义行。
@@ -32,7 +37,21 @@ func problemFromRow(row sqlcgen.ContestProblem) (ContestProblem, error) {
 	if err != nil {
 		return ContestProblem{}, err
 	}
-	return ContestProblem{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ItemCode: row.ItemCode, ItemVersion: row.ItemVersion, Score: row.Score, DynamicScore: dynamic, BattleConfig: battleConfig, BattleRule: pgtypex.Int2Value(row.BattleRule), Seq: row.Seq}, nil
+	snapshot, err := decodeOptionalJSON[contracts.SandboxCompositionSnapshot](row.CompositionSnapshot, apperr.ErrContestProblemInvalid)
+	if err != nil {
+		return ContestProblem{}, err
+	}
+	digest := strings.TrimSpace(pgtypex.TextValue(row.CompositionDigest))
+	if (digest == "") != (snapshot == nil) {
+		return ContestProblem{}, apperr.ErrContestProblemInvalid
+	}
+	if snapshot != nil {
+		canonical, err := contracts.CanonicalSnapshotDigest(*snapshot)
+		if err != nil || canonical != digest {
+			return ContestProblem{}, apperr.ErrContestProblemInvalid
+		}
+	}
+	return ContestProblem{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ItemCode: row.ItemCode, ItemVersion: row.ItemVersion, Score: row.Score, DynamicScore: dynamic, BattleConfig: battleConfig, BattleRule: pgtypex.Int2Value(row.BattleRule), Seq: row.Seq, CompositionDigest: digest, CompositionSnapshot: snapshot}, nil
 }
 
 // decodeOptionalJSON 严格解析可空的固定 JSONB 结构。
@@ -63,13 +82,22 @@ func teamMemberFromRow(row sqlcgen.TeamMember) TeamMember {
 	return TeamMember{ID: row.ID, TenantID: row.TenantID, TeamID: row.TeamID, AccountID: row.AccountID, MemberTenantID: row.MemberTenantID, IsLeader: row.IsLeader, JoinedAt: timex.FromTimestamptz(row.JoinedAt)}
 }
 
+// contestAccessGrantFromRow 转换跨校竞赛授权行。
+func contestAccessGrantFromRow(row sqlcgen.ContestAccessGrant) (ContestAccessGrant, error) {
+	var capabilities []string
+	if err := jsonx.DecodeStrictKnownFields(row.Capabilities, &capabilities); err != nil {
+		return ContestAccessGrant{}, apperr.ErrContestTeamAccessDenied.WithCause(err)
+	}
+	return ContestAccessGrant{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, TeamID: row.TeamID, SandboxID: row.SandboxID, MemberTenantID: row.MemberTenantID, MemberAccountID: row.MemberAccountID, Capabilities: capabilities, SourceRef: row.SourceRef, GrantVersion: row.GrantVersion, Status: row.Status, ExpiresAt: timex.FromTimestamptz(row.ExpiresAt), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}, nil
+}
+
 // submissionFromRow 转换解题提交行。
 func submissionFromRow(row sqlcgen.SolveSubmission) (SolveSubmission, error) {
 	content, err := decodeMap(row.ContentRef, apperr.ErrContestSubmissionInvalid)
 	if err != nil {
 		return SolveSubmission{}, err
 	}
-	return SolveSubmission{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ProblemID: row.ProblemID, TeamID: row.TeamID, SubmitterID: row.SubmitterID, ContentRef: content, SourceRef: row.SourceRef, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, SandboxRef: pgtypex.TextValue(row.SandboxRef), SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
+	return SolveSubmission{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ProblemID: row.ProblemID, TeamID: row.TeamID, SubmitterTenantID: row.SubmitterTenantID, SubmitterID: row.SubmitterID, ContentRef: content, SourceRef: row.SourceRef, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, SandboxRef: pgtypex.TextValue(row.SandboxRef), SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
 }
 
 // battleEntryFromRow 转换参战物行。
@@ -79,22 +107,20 @@ func battleEntryFromRow(row sqlcgen.BattleEntry) BattleEntry {
 
 // battleMatchFromRow 转换对局行。
 func battleMatchFromRow(row sqlcgen.BattleMatch) (BattleMatch, error) {
-	delta, err := decodeBattleScoreDelta(row.ScoreDelta, apperr.ErrContestBattleMatchFailed)
+	return battleMatchFromFields(row.ID, row.TenantID, row.ContestID, row.ProblemID, row.EntryAID, row.EntryBID, row.SourceRef, row.ScopeRef, row.SandboxRef, row.JudgeTaskRef, row.ReplayRef, row.Result, row.ScoreDelta, row.Status, row.MatchedAt, row.FinishedAt, row.LeaseUntil, row.LeaseToken, row.AttemptCount)
+}
+
+func battleMatchFromFields(id, tenantID, contestID, problemID, entryAID, entryBID int64, sourceRef, scopeRef string, sandboxRef, judgeTaskRef, replayRef pgtype.Text, result pgtype.Int2, scoreDelta []byte, status int16, matchedAt, finishedAt, leaseUntil pgtype.Timestamptz, leaseToken string, attemptCount int32) (BattleMatch, error) {
+	delta, err := decodeBattleScoreDelta(scoreDelta, apperr.ErrContestBattleMatchFailed)
 	if err != nil {
 		return BattleMatch{}, err
 	}
-	return BattleMatch{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ProblemID: row.ProblemID, EntryAID: row.EntryAID, EntryBID: row.EntryBID, SourceRef: row.SourceRef, SandboxRef: pgtypex.TextValue(row.SandboxRef), JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Result: pgtypex.Int2Value(row.Result), ScoreDelta: delta, ReplayRef: pgtypex.TextValue(row.ReplayRef), Status: row.Status, MatchedAt: timex.FromTimestamptz(row.MatchedAt), FinishedAt: timex.FromTimestamptz(row.FinishedAt), LeaseToken: row.LeaseToken, LeaseUntil: timex.FromTimestamptz(row.LeaseUntil), AttemptCount: row.AttemptCount}, nil
+	return BattleMatch{ID: id, TenantID: tenantID, ContestID: contestID, ProblemID: problemID, EntryAID: entryAID, EntryBID: entryBID, SourceRef: sourceRef, ScopeRef: scopeRef, SandboxRef: pgtypex.TextValue(sandboxRef), JudgeTaskRef: pgtypex.TextValue(judgeTaskRef), Result: pgtypex.Int2Value(result), ScoreDelta: delta, ReplayRef: pgtypex.TextValue(replayRef), Status: status, MatchedAt: timex.FromTimestamptz(matchedAt), FinishedAt: timex.FromTimestamptz(finishedAt), LeaseToken: leaseToken, LeaseUntil: timex.FromTimestamptz(leaseUntil), AttemptCount: attemptCount}, nil
 }
 
 // battleMatchFromReplayRow 转换回放时间窗行,与普通对局转换共享同一 JSONB 校验。
 func battleMatchFromReplayRow(row sqlcgen.ListBattleReplayMatchesForTeamRow) (BattleMatch, error) {
-	return battleMatchFromRow(sqlcgen.BattleMatch{
-		ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ProblemID: row.ProblemID,
-		EntryAID: row.EntryAID, EntryBID: row.EntryBID, SourceRef: row.SourceRef,
-		SandboxRef: row.SandboxRef, JudgeTaskRef: row.JudgeTaskRef, Result: row.Result,
-		ScoreDelta: row.ScoreDelta, ReplayRef: row.ReplayRef, Status: row.Status,
-		MatchedAt: row.MatchedAt, FinishedAt: row.FinishedAt,
-	})
+	return battleMatchFromFields(row.ID, row.TenantID, row.ContestID, row.ProblemID, row.EntryAID, row.EntryBID, row.SourceRef, row.ScopeRef, row.SandboxRef, row.JudgeTaskRef, row.ReplayRef, row.Result, row.ScoreDelta, row.Status, row.MatchedAt, row.FinishedAt, pgtype.Timestamptz{}, "", 0)
 }
 
 // ladderFromRow 转换排行榜行。
@@ -239,16 +265,83 @@ func vulnSourceFromRow(row sqlcgen.VulnSource) (VulnSource, error) {
 }
 
 // vulnProblemFromRow 转换漏洞题草稿行。
-func vulnProblemFromRow(row sqlcgen.VulnProblem) (VulnProblem, error) {
-	body, err := decodeMap(row.DraftBody, apperr.ErrContestVulnProblemInvalid)
+func vulnProblemFromRow(row any) (VulnProblem, error) {
+	v := reflect.ValueOf(row)
+	field := func(name string) reflect.Value {
+		if v.Kind() == reflect.Pointer {
+			v = v.Elem()
+		}
+		return v.FieldByName(name)
+	}
+	bytesField := func(name string) []byte {
+		f := field(name)
+		if f.IsValid() && f.CanInterface() {
+			if b, ok := f.Interface().([]byte); ok {
+				return b
+			}
+		}
+		return nil
+	}
+	textField := func(name string) string {
+		f := field(name)
+		if f.IsValid() && f.CanInterface() {
+			if t, ok := f.Interface().(pgtype.Text); ok {
+				return pgtypex.TextValue(t)
+			}
+		}
+		return ""
+	}
+	int16Field := func(name string) int16 {
+		f := field(name)
+		if f.IsValid() && f.Kind() == reflect.Int16 {
+			return int16(f.Int())
+		}
+		return 0
+	}
+	int64Field := func(name string) int64 {
+		f := field(name)
+		if f.IsValid() && f.CanInterface() {
+			if t, ok := f.Interface().(pgtype.Int8); ok {
+				return pgtypex.Int8Value(t)
+			}
+		}
+		if f.IsValid() && (f.Kind() == reflect.Int64 || f.Kind() == reflect.Int || f.Kind() == reflect.Int32) {
+			return f.Int()
+		}
+		return 0
+	}
+	timeField := func(name string) time.Time {
+		f := field(name)
+		if f.IsValid() && f.CanInterface() {
+			if t, ok := f.Interface().(pgtype.Timestamptz); ok {
+				return timex.FromTimestamptz(t)
+			}
+		}
+		return time.Time{}
+	}
+	body, err := decodeMap(bytesField("DraftBody"), apperr.ErrContestVulnProblemInvalid)
 	if err != nil {
 		return VulnProblem{}, err
 	}
-	detail, err := decodeMap(row.PrevalidateDetail, apperr.ErrContestVulnProblemInvalid)
+	detail, err := decodeMap(bytesField("PrevalidateDetail"), apperr.ErrContestVulnProblemInvalid)
 	if err != nil {
 		return VulnProblem{}, err
 	}
-	return VulnProblem{ID: row.ID, TenantID: row.TenantID, SourceID: pgtypex.Int8Value(row.SourceID), ExternalRef: pgtypex.TextValue(row.ExternalRef), Title: row.Title, Level: row.Level, RuntimeMode: row.RuntimeMode, DraftBody: body, PrevalidateStatus: row.PrevalidateStatus, PrevalidateDetail: detail, ContentItemCode: pgtypex.TextValue(row.ContentItemCode), ContentItemVersion: pgtypex.TextValue(row.ContentItemVersion), Status: row.Status, CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)}, nil
+	snapshot, err := decodeOptionalJSON[contracts.SandboxCompositionSnapshot](bytesField("CompositionSnapshot"), apperr.ErrContestVulnProblemInvalid)
+	if err != nil {
+		return VulnProblem{}, err
+	}
+	digest := strings.TrimSpace(textField("CompositionDigest"))
+	if (digest == "") != (snapshot == nil) {
+		return VulnProblem{}, apperr.ErrContestVulnProblemInvalid
+	}
+	if snapshot != nil {
+		canonical, err := contracts.CanonicalSnapshotDigest(*snapshot)
+		if err != nil || canonical != digest {
+			return VulnProblem{}, apperr.ErrContestVulnProblemInvalid
+		}
+	}
+	return VulnProblem{ID: int64Field("ID"), TenantID: int64Field("TenantID"), SourceID: int64Field("SourceID"), ExternalRef: textField("ExternalRef"), Title: field("Title").String(), Level: int16Field("Level"), RuntimeMode: int16Field("RuntimeMode"), DraftBody: body, PrevalidateStatus: int16Field("PrevalidateStatus"), PrevalidateDetail: detail, CompositionDigest: digest, CompositionSnapshot: snapshot, InitCodeRef: textField("InitCodeRef"), InitScriptRef: textField("InitScriptRef"), ContentItemCode: textField("ContentItemCode"), ContentItemVersion: textField("ContentItemVersion"), Status: int16Field("Status"), CreatedAt: timeField("CreatedAt"), UpdatedAt: timeField("UpdatedAt")}, nil
 }
 
 // recordFromRow 转换个人竞赛记录行。

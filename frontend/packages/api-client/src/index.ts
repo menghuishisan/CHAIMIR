@@ -72,7 +72,7 @@ export function createApi(config: ApiConfig): ChaimirApi {
     sandbox: new SandboxApi(client, identity),
     judge: new JudgeApi(client),
     experiment: new ExperimentApi(client),
-    contest: new ContestApi(client),
+    contest: new ContestApi(client, identity),
     admin: new AdminApi(client),
     notify: new NotifyApi(client),
     grade: new GradeApi(client),

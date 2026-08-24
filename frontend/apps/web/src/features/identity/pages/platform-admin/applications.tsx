@@ -8,20 +8,20 @@
 
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { CircleCheck, CircleX, Inbox, Search } from 'lucide-react'
+import { Inbox, Search } from 'lucide-react'
 import { ApplicationStatus, type TenantApplication } from '@chaimir/api-client'
 import {
   Breadcrumb,
   Button,
   Callout,
+  DataPanel,
   FilterBar,
   FilterField,
   Input,
+  MetricStrip,
   PageHeader,
   PageScaffold,
-  PageSection,
   SegmentedControl,
-  Stat,
   StatusIndicator,
   Table,
   type TableColumn,
@@ -148,30 +148,35 @@ export default function PlatformApplicationsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '租户' }, { label: '入驻申请' }]} />}
+        kicker={<Breadcrumb items={[{ label: '租户' }]} />}
         title="入驻申请"
         description="学校提交的开通申请。审核通过会创建学校并开通首个管理员账号,请先核对联系人身份。"
         icon={Inbox}
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat
-            label="待审核"
-            value={stats.pending}
-            icon={Inbox}
-            hint={stats.pending > 0 ? '需要你处理' : '暂时没有积压'}
-          />
-          <Stat label="已开通" value={stats.approved} icon={CircleCheck} hint="不受下方筛选影响" />
-          <Stat label="已驳回" value={stats.rejected} icon={CircleX} />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是申请记录 */}
+      <MetricStrip
+        label="申请积压摘要"
+        className="mb-5"
+        items={[
+          {
+            label: '待审核',
+            value: stats.pending,
+            hint: stats.pending > 0 ? '需要你处理' : '暂时没有积压',
+          },
+          { label: '已开通', value: stats.approved, hint: '不受下方筛选影响' },
+          { label: '已驳回', value: stats.rejected, hint: '学校可重新提交' },
+        ]}
+      />
 
-      <PageSection
-        title="申请记录"
-        description="审核在详情页完成,那里能看到完整联系方式。"
-      >
-        <div className="flex flex-col gap-4">
+      <Callout tone="info" className="mb-4">
+        申请里的联系方式由学校自行填写,开通前请通过其他渠道核实身份 —— 通过后会立刻创建可登录的管理员账号。
+      </Callout>
+
+      {/* 筛选井与数据表同处一块抬起片(§6.5.2) */}
+      <DataPanel
+        label="申请记录"
+        filter={
           <FilterBar label="申请记录筛选">
             <FilterField label="审核状态" group>
               <SegmentedControl
@@ -192,6 +197,8 @@ export default function PlatformApplicationsPage() {
               />
             </FilterField>
           </FilterBar>
+        }
+      >
           <ResourceState
             resource={applications}
             emptyIcon={Inbox}
@@ -199,23 +206,30 @@ export default function PlatformApplicationsPage() {
             emptyDescription={
               statusFilter ? '换个状态看看。' : '学校在公共入驻页提交申请后会出现在这里。'
             }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {() => (
               <Table
                 columns={columns}
                 data={visible}
                 rowKey={(item) => item.application_id}
+                elevated={false}
                 empty={<span className="text-sm text-ink-sub">没有匹配的申请,换个关键词看看。</span>}
+                // <md 换行卡(§6.4.1 规则 3):校名一行、联系人与提交时间一行
+                mobileCard={(item) => ({
+                  title: item.school_name,
+                  meta: `${item.contact_name} · ${formatDateTime(item.submitted_at)}`,
+                  badge: (
+                    <StatusIndicator
+                      tone={applicationStatusTone(item.status)}
+                      label={applicationStatusLabel(item.status)}
+                    />
+                  ),
+                })}
               />
             )}
           </ResourceState>
-
-          <Callout tone="info">
-            申请里的联系方式由学校自行填写,开通前请通过其他渠道核实身份 —— 通过后会立刻创建可登录的管理员账号。
-          </Callout>
-        </div>
-      </PageSection>
+      </DataPanel>
     </PageScaffold>
   )
 }

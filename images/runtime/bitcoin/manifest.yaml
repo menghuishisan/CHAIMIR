@@ -1,4 +1,4 @@
-# 本文件声明 runtime/bitcoin 镜像的职责、端口、安全、资源和供应链约束。
+﻿# 本文件声明 runtime/bitcoin 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: runtime
 name: bitcoin
@@ -19,18 +19,39 @@ source:
   type: thin-wrapper
 upstream:
   image: ruimarinho/bitcoin-core:24-alpine
+  version: 24-alpine
   digest: sha256:258f763357e610f7d87c4898211878fc78d2452edcd5897f65843cbcd2940d5f
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
-  - chain-runtime
-  - bitcoin-regtest
-  - utxo-dev
+  provides:
+    - chain-runtime
+    - bitcoin-regtest
+    - utxo-dev
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 runtime:
   eco: bitcoin
   adapter_level: 2
-  default_tool_codes:
-    - code-server
+  native:
+    helper: /usr/local/bin/chaimir-bitcoin-adapter
+    profile: bitcoin-regtest
+    exec_target: sandbox/runtime
+    reset_strategy: recreate_runtime
+    actions:
+      deploy: [/usr/local/bin/chaimir-bitcoin-adapter, deploy]
+      tx: [/usr/local/bin/chaimir-bitcoin-adapter, tx]
+      query: [/usr/local/bin/chaimir-bitcoin-adapter, query]
+env_keys:
+  config:
+    - CHAIMIR_BITCOIN_DATA_DIR
+    - CHAIMIR_BITCOIN_WALLET
+    - CHAIMIR_BITCOIN_FALLBACK_FEE
+    - CHAIMIR_RUNTIME_RPC_PORT
 ports:
   - name: rpc
     container_port: 18443
@@ -82,9 +103,14 @@ selftest:
       command:
         - bitcoind
         - --version
+capability_selftest:
+  deploy_payload:
+    data: chaimir-bitcoin-capability-selftest
+  tx_payload:
+    amount: "0.01000000"
+  query_target: chain
 supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

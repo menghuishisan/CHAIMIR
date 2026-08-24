@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS experiment_instance (
     owner_account_id BIGINT NOT NULL,
     group_id BIGINT,
     source_ref VARCHAR(128) NOT NULL,
+    scope_ref VARCHAR(128) NOT NULL,
     sandbox_refs JSONB NOT NULL DEFAULT '[]'::jsonb,
     sim_session_refs JSONB NOT NULL DEFAULT '[]'::jsonb,
     status SMALLINT NOT NULL CHECK (status IN (1, 2, 3, 4, 5, 6, 7)),
@@ -60,6 +61,7 @@ CREATE TABLE IF NOT EXISTS experiment_instance (
     last_active_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, source_ref),
+    UNIQUE (tenant_id, scope_ref),
     FOREIGN KEY (tenant_id, experiment_id) REFERENCES experiment(tenant_id, id),
     FOREIGN KEY (tenant_id, owner_account_id) REFERENCES account(tenant_id, id),
     FOREIGN KEY (tenant_id, group_id) REFERENCES experiment_group(tenant_id, id)

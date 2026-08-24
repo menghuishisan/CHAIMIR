@@ -13,7 +13,6 @@ import { useCallback, useMemo, useState } from 'react'
 import {
   Archive,
   Building2,
-  GraduationCap,
   MoveUp,
   Network,
   Pencil,
@@ -48,12 +47,12 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
+  MetricStrip,
   PageHeader,
   PageScaffold,
   PageSection,
   SegmentedControl,
   Select,
-  Stat,
   toast,
   type TableColumn,
 } from '@chaimir/ui'
@@ -149,7 +148,7 @@ export default function SchoolAdminOrganizationPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '用户与组织' }, { label: '组织架构' }]} />}
+        kicker={<Breadcrumb items={[{ label: '用户与组织' }]} />}
         title="组织架构"
         description="维护院系、专业与班级。账号开通时按这里的结构选择归属,所以建议先建好组织。"
         icon={Network}
@@ -165,19 +164,25 @@ export default function SchoolAdminOrganizationPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="院系" value={stats.departments} icon={Building2} />
-          <Stat label="专业" value={stats.majors} icon={GraduationCap} />
-          <Stat label="班级" value={stats.classes} icon={Users} />
-          <Stat
-            label="在读班级"
-            value={stats.active}
-            icon={Users}
-            hint={`已归档 ${stats.classes - stats.active} 个`}
-          />
-        </div>
-      </PageSection>
+      {/*
+        归族:资源列表族(§6.5.3 第 ①)。四项由一次取齐的全量列表算出,
+        三个组织接口都不分页,故客户端聚合就是全量口径(§6.5.4)。指标降为内联摘要:
+        这一页的主体是院系专业卡与班级明细表,不是四个数字。
+      */}
+      <MetricStrip
+        label="组织规模摘要"
+        className="mb-5"
+        items={[
+          { label: '院系', value: stats.departments, hint: '已建立的院系' },
+          { label: '专业', value: stats.majors, hint: '各院系下设专业' },
+          { label: '班级', value: stats.classes, hint: '含已归档' },
+          {
+            label: '在读班级',
+            value: stats.active,
+            hint: `已归档 ${stats.classes - stats.active} 个`,
+          },
+        ]}
+      />
 
       <ResourceState
         resource={view}

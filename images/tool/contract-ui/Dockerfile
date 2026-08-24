@@ -6,7 +6,7 @@ LABEL org.opencontainers.image.description="Chaimir contract interaction panel i
 
 RUN apk add --no-cache python-3.13=3.13.14-r3 py3.13-pip=26.1.2-r1 \
     && python3.13 -m venv /opt/contract-ui \
-    && /opt/contract-ui/bin/pip install --no-cache-dir "setuptools>=78.1.1" "msgpack>=1.2.1" "eth-abi==5.2.0" "eth-utils==5.3.1" "eth-hash[pycryptodome]==0.8.0" \
+    && /opt/contract-ui/bin/pip install --no-cache-dir "setuptools==80.9.0" "eth-abi==5.2.0" "eth-utils==5.3.1" "eth-hash[pycryptodome]==0.8.0" \
     && addgroup -g 1000 chaimir \
     && adduser -D -u 1000 -G chaimir -h /app -s /sbin/nologin chaimir
 

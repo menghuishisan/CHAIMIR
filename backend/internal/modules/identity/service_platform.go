@@ -178,6 +178,29 @@ func (s *Service) ListApplicationsByPlatform(ctx context.Context, status int16) 
 	return out, nil
 }
 
+// GetApplicationByPlatform 读取平台管理员可见的单个入驻申请,不返回任何凭据字段。
+func (s *Service) GetApplicationByPlatform(ctx context.Context, appID int64) (TenantApplication, error) {
+	if err := s.ensurePlatformLayerEnabled(); err != nil {
+		return TenantApplication{}, err
+	}
+	id, ok := tenant.FromContext(ctx)
+	if !ok || !id.IsPlatform {
+		return TenantApplication{}, apperr.ErrForbidden
+	}
+	if appID <= 0 {
+		return TenantApplication{}, apperr.ErrIdentityApplicationInvalid
+	}
+	var out TenantApplication
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		out, err = tx.GetTenantApplication(ctx, appID)
+		return err
+	}); err != nil {
+		return TenantApplication{}, apperr.ErrIdentityApplicationInvalid.WithCause(err)
+	}
+	return out, nil
+}
+
 // ListTenantsByPlatform 分页读取平台租户列表,用于 SaaS 平台学校管理页。
 // status 传 0、keyword 传空串表示该维度不过滤;过滤与计数都在服务端完成,
 // 前端不得再对当前页做二次筛选(否则分页与总数会自相矛盾)。

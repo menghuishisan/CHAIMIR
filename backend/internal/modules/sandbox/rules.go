@@ -26,13 +26,32 @@ var (
 
 // validateCreateRequest 校验内部创建沙箱请求的租户、来源和资源开关。
 func validateCreateRequest(req CreateSandboxInputModel) error {
-	if req.TenantID <= 0 || strings.TrimSpace(req.RuntimeCode) == "" || strings.TrimSpace(req.SourceRef) == "" {
+	if req.TenantID <= 0 || strings.TrimSpace(req.CompositionSnapshot.Digest) == "" ||
+		req.CompositionSnapshot.Runtime.RuntimeID <= 0 || req.CompositionSnapshot.Runtime.ImageID <= 0 ||
+		strings.TrimSpace(req.CompositionSnapshot.Spec.PrimaryRuntime.Code) == "" ||
+		strings.TrimSpace(req.SourceRef) == "" || strings.TrimSpace(req.ScopeRef) == "" {
 		return apperr.ErrSandboxCreateRequestInvalid
+	}
+	if req.CompositionSnapshot.Spec.PrimaryRuntime.Code != req.CompositionSnapshot.Runtime.Code ||
+		req.CompositionSnapshot.Spec.PrimaryRuntime.ImageVersion != req.CompositionSnapshot.Runtime.ImageVersion {
+		return apperr.ErrSandboxCreateRequestInvalid
+	}
+	for _, component := range req.CompositionSnapshot.Components {
+		if component.ComponentID <= 0 || strings.TrimSpace(component.Code) == "" ||
+			(component.Category != "infra" && component.Category != "tool") || len(component.ResourceSpec) == 0 {
+			return apperr.ErrSandboxCreateRequestInvalid
+		}
 	}
 	if req.OwnerAccountID <= 0 {
 		return apperr.ErrSandboxOwnerInvalid
 	}
+	if _, err := normalizeSandboxSharedAccountIDs(req.OwnerAccountID, req.AuthorizedAccountIDs); err != nil {
+		return err
+	}
 	if !validSourceRef(req.SourceRef) {
+		return apperr.ErrSandboxCreateRequestInvalid
+	}
+	if !auth.ValidScopeRef(req.ScopeRef) {
 		return apperr.ErrSandboxCreateRequestInvalid
 	}
 	if req.KeepAliveMinutes < 0 || req.SnapshotRetentionMinutes < 0 {
@@ -45,6 +64,42 @@ func validateCreateRequest(req CreateSandboxInputModel) error {
 		return apperr.ErrSandboxCreateRequestInvalid
 	}
 	return nil
+}
+
+// normalizeSandboxSharedAccountIDs 生成创建事务要写入的唯一非 owner 共享账号集合。
+func normalizeSandboxSharedAccountIDs(ownerAccountID int64, authorizedAccountIDs []int64) ([]int64, error) {
+	if ownerAccountID <= 0 {
+		return nil, apperr.ErrSandboxOwnerInvalid
+	}
+	seen := map[int64]struct{}{ownerAccountID: {}}
+	out := make([]int64, 0, len(authorizedAccountIDs))
+	for _, accountID := range authorizedAccountIDs {
+		if accountID <= 0 {
+			return nil, apperr.ErrSandboxOwnerInvalid
+		}
+		if _, exists := seen[accountID]; exists {
+			continue
+		}
+		seen[accountID] = struct{}{}
+		out = append(out, accountID)
+	}
+	return out, nil
+}
+
+// sandboxAccountAuthorized 判断账号是否为沙箱 owner 或创建时明确记录的共享成员。
+func sandboxAccountAuthorized(sb Sandbox, accountID int64) bool {
+	if accountID <= 0 {
+		return false
+	}
+	if sb.OwnerAccountID == accountID {
+		return true
+	}
+	for _, sharedAccountID := range sb.SharedAccountIDs {
+		if sharedAccountID == accountID {
+			return true
+		}
+	}
+	return false
 }
 
 // validSourceRef 复用平台服务鉴权的来源标识规则,避免 HTTP 与 contract 调用出现两套口径。
@@ -66,6 +121,15 @@ func validateRuntimeRequest(req RuntimeRequest, cfg config.SandboxConfig) (Adapt
 	var spec AdapterSpec
 	if err := jsonx.DecodeStrictKnownFields(req.AdapterSpec, &spec); err != nil {
 		return AdapterSpec{}, apperr.ErrSandboxAdapterSpecInvalid.WithCause(err)
+	}
+	if strings.TrimSpace(spec.DisabledReason) != "" {
+		if spec.WorkspaceDir != "" || len(spec.VolumeDomains) > 0 || spec.RuntimeContainer.Name != "" ||
+			len(spec.InfraSidecars) > 0 || len(spec.Pods) > 0 || len(spec.Services) > 0 || len(spec.Routes) > 0 ||
+			len(spec.NetworkRules) > 0 || len(spec.InitAssets) > 0 ||
+			len(spec.WorkspaceOps.ReadFile) > 0 || len(spec.CapabilityCommands.Deploy.Command) > 0 {
+			return AdapterSpec{}, apperr.ErrSandboxRuntimeCreateInvalid
+		}
+		return spec, nil
 	}
 	if err := normalizeAndValidateAdapterSpec(&spec, cfg); err != nil {
 		return AdapterSpec{}, err
@@ -143,7 +207,19 @@ func validateToolResourceSpecShape(spec *ToolResourceSpec, kind int16) error {
 	if spec == nil {
 		return apperr.ErrSandboxToolCreateInvalid
 	}
+	if strings.TrimSpace(spec.DisabledReason) != "" {
+		if len(spec.Components) > 0 || len(spec.Services) > 0 || len(spec.Routes) > 0 ||
+			len(spec.NetworkRules) > 0 || commandPolicyConfigured(spec.CommandPolicy) ||
+			strings.TrimSpace(spec.BuiltinEndpoint) != "" || len(spec.PrepullCommand) > 0 {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		return nil
+	}
 	switch kind {
+	case SandboxToolKindInfra:
+		if commandPolicyConfigured(spec.CommandPolicy) || len(spec.Components) == 0 || len(spec.Routes) > 0 || strings.TrimSpace(spec.BuiltinEndpoint) != "" {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
 	case SandboxToolKindWebEmbed:
 		if commandPolicyConfigured(spec.CommandPolicy) || len(spec.Components) == 0 || len(spec.Services) == 0 || len(spec.Routes) == 0 {
 			return apperr.ErrSandboxToolCreateInvalid
@@ -172,11 +248,17 @@ func validateToolResourceSpecShape(spec *ToolResourceSpec, kind int16) error {
 	if err := validateToolNetworkRules(spec); err != nil {
 		return err
 	}
+	if err := validateRequiredBindings(spec.RequiredBindings); err != nil {
+		return err
+	}
 	if err := validatePrepullCommand(spec.PrepullCommand); err != nil {
 		return err
 	}
 	for i := range spec.Components {
 		component := &spec.Components[i]
+		if err := validateComponentMountDomains(*component); err != nil {
+			return err
+		}
 		// DaemonSet 由运行时唯一保持容器维持 Ready,工具镜像只作为 initContainer 拉取并自检。
 		if component.PrepullHold {
 			return apperr.ErrSandboxToolCreateInvalid
@@ -188,6 +270,22 @@ func validateToolResourceSpecShape(spec *ToolResourceSpec, kind int16) error {
 		if len(command) == 0 || validatePrepullCommand(command) != nil {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
+	}
+	return nil
+}
+
+// validateRequiredBindings 校验工具声明的运行时连接环境变量唯一且符合环境变量命名规则。
+func validateRequiredBindings(bindings []string) error {
+	seen := map[string]struct{}{}
+	for _, raw := range bindings {
+		name := strings.TrimSpace(raw)
+		if !envNamePattern.MatchString(name) {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		if _, exists := seen[name]; exists {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		seen[name] = struct{}{}
 	}
 	return nil
 }
@@ -453,7 +551,7 @@ func sandboxDeclaredResourceUsage(adapter AdapterSpec, tools []Tool, privateSide
 		}
 	}
 	for _, tool := range tools {
-		if tool.Kind != SandboxToolKindWebEmbed && tool.Kind != SandboxToolKindCommand {
+		if tool.Category != "infra" && tool.Kind != SandboxToolKindWebEmbed && tool.Kind != SandboxToolKindCommand {
 			continue
 		}
 		usage.PodCount += int64(len(tool.ResourceSpec.Components))
@@ -586,7 +684,7 @@ func validateWorkspacePath(relativePath string) (string, error) {
 
 // validateWorkspaceListPath 校验目录列表路径,允许空路径明确表示工作区根目录。
 func validateWorkspaceListPath(relativePath string) (string, error) {
-	if strings.TrimSpace(relativePath) == "" {
+	if strings.TrimSpace(relativePath) == "" || strings.TrimSpace(relativePath) == "." {
 		return ".", nil
 	}
 	return validateWorkspacePath(relativePath)
@@ -603,13 +701,13 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 	if err := validateWorkspaceOps(spec.WorkspaceOps); err != nil {
 		return err
 	}
+	if err := validatePrivateArchiveOps(spec.PrivateArchiveOps); err != nil {
+		return err
+	}
 	if err := validateCapabilityCommands(spec, cfg); err != nil {
 		return err
 	}
 	if err := validateRuntimeContainerSpec(&spec.RuntimeContainer, cfg, true); err != nil {
-		return err
-	}
-	if err := validatePrivateArchiveExecutionTarget(spec); err != nil {
 		return err
 	}
 	ports := map[string]struct{}{}
@@ -645,6 +743,9 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 	if err := validatePodTopology(spec); err != nil {
 		return err
 	}
+	if err := validateAdapterExecTargets(spec); err != nil {
+		return err
+	}
 	if err := validateNetworkRules(spec); err != nil {
 		return err
 	}
@@ -671,7 +772,13 @@ func validateRuntimeContainerSpec(spec *workload.ComponentSpec, cfg config.Sandb
 	if !mountNamePattern.MatchString(spec.Name) || (requirePort && len(spec.Ports) == 0) {
 		return apperr.ErrSandboxContainerSpecInvalid
 	}
+	if err := validateComponentMountDomains(*spec); err != nil {
+		return err
+	}
 	if err := validateLiteralEnv(spec.Env); err != nil {
+		return err
+	}
+	if err := validateContainerIdentity(spec); err != nil {
 		return err
 	}
 	if err := validateResourceSpec(spec.Resources); err != nil {
@@ -691,6 +798,17 @@ func validateRuntimeContainerSpec(spec *workload.ComponentSpec, cfg config.Sandb
 		}
 	}
 	if len(spec.Command) > 0 && !workload.ValidNonShellCommand(spec.Command) {
+		return apperr.ErrSandboxContainerSpecInvalid
+	}
+	return nil
+}
+
+// validateContainerIdentity 只允许平台规定的非 root 工作负载身份,并禁止容器自行取得更高权限。
+func validateContainerIdentity(spec *workload.ComponentSpec) error {
+	if spec.RunAsUser == nil && spec.RunAsGroup == nil {
+		return nil
+	}
+	if spec.RunAsUser == nil || spec.RunAsGroup == nil || (*spec.RunAsUser != 1000 && *spec.RunAsUser != 1001) || *spec.RunAsGroup != *spec.RunAsUser {
 		return apperr.ErrSandboxContainerSpecInvalid
 	}
 	return nil
@@ -792,7 +910,9 @@ func podContainerIsReferenceOnly(spec workload.ComponentSpec) bool {
 		spec.ReadOnlyRootFilesystem == nil &&
 		len(spec.Labels) == 0 &&
 		spec.MountWorkspace == nil &&
-		len(spec.EphemeralMounts) == 0
+		len(spec.MountDomains) == 0 &&
+		len(spec.EphemeralMounts) == 0 &&
+		spec.RunAsUser == nil && spec.RunAsGroup == nil
 }
 
 // validateNetworkRules 校验同沙箱 Pod 互通必须显式引用已声明的目标端口。
@@ -951,12 +1071,9 @@ func podTopologyForAdapter(spec AdapterSpec) []workload.PodSpec {
 	return []workload.PodSpec{{Name: "sandbox", Containers: containers}}
 }
 
-// validatePrivateArchiveExecutionTarget 保证隐藏判题域只会进入非学生入口的执行容器。
-func validatePrivateArchiveExecutionTarget(spec *AdapterSpec) error {
-	if !hasVolumeDomain(*spec, VolumeDomainJudgePrivate) {
-		return nil
-	}
-	if studentAccessibleContainer(spec.RuntimeContainer) {
+// validatePrivateArchiveOps 保证隐藏判题归档只会进入声明了私有卷且禁止学生进入的容器。
+func validatePrivateArchiveOps(ops PrivateArchiveOps) error {
+	if !explicitExecTarget(ops.ExecTarget) || !workload.ValidNonShellCommand(ops.UnpackTar) {
 		return apperr.ErrSandboxPrivateDomainInvalid
 	}
 	return nil
@@ -1118,6 +1235,9 @@ func digestFromImageURL(imageURL string) string {
 
 // validateWorkspaceOps 校验运行时声明了文件、归档、脚本、自检和终端所需的受控命令。
 func validateWorkspaceOps(ops WorkspaceOps) error {
+	if !explicitExecTarget(ops.ExecTarget) {
+		return apperr.ErrSandboxWorkspaceOpsInvalid
+	}
 	helperCommands := [][]string{
 		ops.ReadFile,
 		ops.WriteFile,
@@ -1147,9 +1267,11 @@ func validateCapabilityCommands(spec *AdapterSpec, cfg config.SandboxConfig) err
 		&spec.CapabilityCommands.Deploy,
 		&spec.CapabilityCommands.Tx,
 		&spec.CapabilityCommands.Query,
-		&spec.CapabilityCommands.Reset,
 	}
 	for _, command := range commands {
+		if !explicitExecTarget(command.ExecTarget) {
+			return apperr.ErrSandboxCapabilityCommandInvalid
+		}
 		if !workload.ValidNonShellCommand(command.Command) {
 			return apperr.ErrSandboxCapabilityCommandInvalid
 		}
@@ -1164,7 +1286,71 @@ func validateCapabilityCommands(spec *AdapterSpec, cfg config.SandboxConfig) err
 			command.TimeoutSeconds = defaultTimeout
 		}
 	}
+	strategy := strings.TrimSpace(spec.CapabilityCommands.ResetStrategy)
+	if strategy == "recreate_runtime" {
+		if len(spec.CapabilityCommands.Reset.Command) > 0 {
+			return apperr.ErrSandboxCapabilityCommandInvalid
+		}
+		return nil
+	}
+	if strategy != "" {
+		return apperr.ErrSandboxCapabilityCommandInvalid
+	}
+	reset := &spec.CapabilityCommands.Reset
+	if !explicitExecTarget(reset.ExecTarget) || !workload.ValidNonShellCommand(reset.Command) {
+		return apperr.ErrSandboxCapabilityCommandInvalid
+	}
+	if reset.TimeoutSeconds < 0 {
+		return apperr.ErrSandboxCapabilityCommandInvalid
+	}
+	if reset.TimeoutSeconds == 0 {
+		defaultTimeout, ok := intx.Int32(cfg.ChainRPCTimeoutSeconds)
+		if !ok || defaultTimeout <= 0 {
+			return apperr.ErrSandboxCapabilityCommandInvalid
+		}
+		reset.TimeoutSeconds = defaultTimeout
+	}
 	return nil
+}
+
+// validateAdapterExecTargets 校验受控命令只进入已声明且权限匹配的容器。
+func validateAdapterExecTargets(spec *AdapterSpec) error {
+	containers := map[string]workload.ComponentSpec{}
+	for _, pod := range podTopologyForAdapter(*spec) {
+		for _, container := range pod.Containers {
+			containers[pod.Name+"/"+container.Name] = container
+		}
+	}
+	workspaceContainer, ok := containers[strings.TrimSpace(spec.WorkspaceOps.ExecTarget)]
+	if !ok || !studentAccessibleContainer(workspaceContainer) || !shouldMountWorkspace(workspaceContainer) {
+		return apperr.ErrSandboxWorkspaceOpsInvalid
+	}
+	commands := []CapabilityCommandSpec{
+		spec.CapabilityCommands.Deploy,
+		spec.CapabilityCommands.Tx,
+		spec.CapabilityCommands.Query,
+		spec.CapabilityCommands.Reset,
+	}
+	for _, command := range commands {
+		if len(command.Command) == 0 {
+			continue
+		}
+		container, exists := containers[strings.TrimSpace(command.ExecTarget)]
+		if !exists || studentAccessibleContainer(container) {
+			return apperr.ErrSandboxCapabilityCommandInvalid
+		}
+	}
+	privateContainer, exists := containers[strings.TrimSpace(spec.PrivateArchiveOps.ExecTarget)]
+	if !exists || studentAccessibleContainer(privateContainer) {
+		return apperr.ErrSandboxPrivateDomainInvalid
+	}
+	return nil
+}
+
+// explicitExecTarget 要求内部受控命令明确使用 pod/container,禁止依赖隐式单 Pod 回退。
+func explicitExecTarget(target string) bool {
+	target = strings.TrimSpace(target)
+	return strings.Count(target, "/") == 1 && safeExecTarget(target)
 }
 
 // hasCapabilityCommands 判断运行时是否声明完整 L2 能力命令集合。
@@ -1172,7 +1358,7 @@ func hasCapabilityCommands(commands CapabilityCommandSet) bool {
 	return len(commands.Deploy.Command) > 0 &&
 		len(commands.Tx.Command) > 0 &&
 		len(commands.Query.Command) > 0 &&
-		len(commands.Reset.Command) > 0
+		(strings.TrimSpace(commands.ResetStrategy) == "recreate_runtime" || len(commands.Reset.Command) > 0)
 }
 
 // validateContainerSpec 校验单个容器声明不会绕过安全上下文或硬编码无效探针。
@@ -1180,6 +1366,9 @@ func validateContainerSpec(spec *workload.ComponentSpec, cfg config.SandboxConfi
 	spec.Name = strings.TrimSpace(spec.Name)
 	if !mountNamePattern.MatchString(spec.Name) || len(spec.Ports) == 0 {
 		return apperr.ErrSandboxContainerSpecInvalid
+	}
+	if err := validateComponentMountDomains(*spec); err != nil {
+		return err
 	}
 	if err := validateLiteralEnv(spec.Env); err != nil {
 		return err
@@ -1329,6 +1518,22 @@ func validateToolEphemeralMounts(mounts []workload.EphemeralMountSpec) error {
 		}
 		seen[name] = struct{}{}
 		paths = append(paths, mountPath)
+	}
+	return nil
+}
+
+// validateComponentMountDomains 校验组件只能显式引用安全域,且不允许工具绕过学生与判题隔离。
+func validateComponentMountDomains(spec workload.ComponentSpec) error {
+	seen := map[string]struct{}{}
+	for _, raw := range spec.MountDomains {
+		domain := strings.TrimSpace(raw)
+		if !mountNamePattern.MatchString(domain) || domain == VolumeDomainWorkspace || domain == VolumeDomainJudgePrivate {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		if _, exists := seen[domain]; exists {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		seen[domain] = struct{}{}
 	}
 	return nil
 }

@@ -43,13 +43,22 @@ type Querier interface {
 	ExhaustUnstartedBattleMatches(ctx context.Context, arg ExhaustUnstartedBattleMatchesParams) ([]BattleMatch, error)
 	FailBattleMatchByJudgeTask(ctx context.Context, arg FailBattleMatchByJudgeTaskParams) (BattleMatch, error)
 	FailBattleMatchStart(ctx context.Context, arg FailBattleMatchStartParams) (BattleMatch, error)
-	FinalizeVulnProblem(ctx context.Context, arg FinalizeVulnProblemParams) (VulnProblem, error)
+	FinalizeVulnProblem(ctx context.Context, arg FinalizeVulnProblemParams) (FinalizeVulnProblemRow, error)
+	FindBattleMatchTenant(ctx context.Context, id int64) (int64, error)
+	// M8 网关跨租户读取当前成员的唯一沙箱授权；只在受控特权事务中使用。
+	FindContestAccessGrantForSubject(ctx context.Context, arg FindContestAccessGrantForSubjectParams) (ContestAccessGrant, error)
+	// 学生入口允许跨校发现已发布竞赛,但只返回竞赛所属租户;后续读写仍必须进入该租户事务。
+	FindPublishedContestTenant(ctx context.Context, id int64) (int64, error)
+	FindSolveSubmissionTenant(ctx context.Context, id int64) (int64, error)
+	FindTeamTenant(ctx context.Context, id int64) (int64, error)
 	FinishBattleMatch(ctx context.Context, arg FinishBattleMatchParams) (BattleMatch, error)
 	GetBattleEntry(ctx context.Context, arg GetBattleEntryParams) (BattleEntry, error)
 	GetBattleMatch(ctx context.Context, arg GetBattleMatchParams) (BattleMatch, error)
 	GetBattleMatchByJudgeTask(ctx context.Context, arg GetBattleMatchByJudgeTaskParams) (BattleMatch, error)
 	GetBattleReplayCheckpointForTeam(ctx context.Context, arg GetBattleReplayCheckpointForTeamParams) (GetBattleReplayCheckpointForTeamRow, error)
 	GetContest(ctx context.Context, arg GetContestParams) (Contest, error)
+	GetContestAccessGrant(ctx context.Context, arg GetContestAccessGrantParams) (ContestAccessGrant, error)
+	GetContestAccessGrantForSubject(ctx context.Context, arg GetContestAccessGrantForSubjectParams) (ContestAccessGrant, error)
 	GetContestProblem(ctx context.Context, arg GetContestProblemParams) (ContestProblem, error)
 	GetLadderByTeam(ctx context.Context, arg GetLadderByTeamParams) (GetLadderByTeamRow, error)
 	GetLadderSnapshot(ctx context.Context, arg GetLadderSnapshotParams) (ContestLadderSnapshot, error)
@@ -58,7 +67,7 @@ type Querier interface {
 	GetTeam(ctx context.Context, arg GetTeamParams) (Team, error)
 	GetTeamByInviteCode(ctx context.Context, arg GetTeamByInviteCodeParams) (Team, error)
 	GetTeamForAccount(ctx context.Context, arg GetTeamForAccountParams) (Team, error)
-	GetVulnProblem(ctx context.Context, arg GetVulnProblemParams) (VulnProblem, error)
+	GetVulnProblem(ctx context.Context, arg GetVulnProblemParams) (GetVulnProblemRow, error)
 	GetVulnSource(ctx context.Context, arg GetVulnSourceParams) (VulnSource, error)
 	ListActiveBattleOpponents(ctx context.Context, arg ListActiveBattleOpponentsParams) ([]BattleEntry, error)
 	ListActiveBattleSourceRefsForArchive(ctx context.Context, arg ListActiveBattleSourceRefsForArchiveParams) ([]string, error)
@@ -69,6 +78,8 @@ type Querier interface {
 	// 回放专用时间窗只读取已完成对局,并由服务端携带本队视角和当时生效的参战物。
 	ListBattleReplayMatchesForTeam(ctx context.Context, arg ListBattleReplayMatchesForTeamParams) ([]ListBattleReplayMatchesForTeamRow, error)
 	ListCheatRecords(ctx context.Context, arg ListCheatRecordsParams) ([]CheatRecord, error)
+	ListContestAccessGrantsForContest(ctx context.Context, arg ListContestAccessGrantsForContestParams) ([]ContestAccessGrant, error)
+	ListContestAccessGrantsForSandbox(ctx context.Context, arg ListContestAccessGrantsForSandboxParams) ([]ContestAccessGrant, error)
 	ListContestProblems(ctx context.Context, arg ListContestProblemsParams) ([]ContestProblem, error)
 	ListContests(ctx context.Context, arg ListContestsParams) ([]Contest, error)
 	ListLadder(ctx context.Context, arg ListLadderParams) ([]ListLadderRow, error)
@@ -77,7 +88,7 @@ type Querier interface {
 	// status 传 0 回学生可发现的全部赛事(草稿态不可见);传具体状态时仍受可见区间约束。
 	ListStudentContests(ctx context.Context, arg ListStudentContestsParams) ([]Contest, error)
 	ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]TeamMember, error)
-	ListVulnProblems(ctx context.Context, arg ListVulnProblemsParams) ([]VulnProblem, error)
+	ListVulnProblems(ctx context.Context, arg ListVulnProblemsParams) ([]ListVulnProblemsRow, error)
 	ListVulnSources(ctx context.Context, tenantID pgtype.Int8) ([]VulnSource, error)
 	LockContestTeams(ctx context.Context, arg LockContestTeamsParams) error
 	LockTeam(ctx context.Context, arg LockTeamParams) (Team, error)
@@ -88,15 +99,17 @@ type Querier interface {
 	RefreshContestRanks(ctx context.Context, arg RefreshContestRanksParams) error
 	// 启动沙箱和提交判题期间仅由当前 token 续租,避免长时准备被其他 worker 重领。
 	RenewBattleMatchStartLease(ctx context.Context, arg RenewBattleMatchStartLeaseParams) (int64, error)
+	RevokeContestAccessGrantsForSandbox(ctx context.Context, arg RevokeContestAccessGrantsForSandboxParams) error
 	SetContestStatus(ctx context.Context, arg SetContestStatusParams) (Contest, error)
-	SetVulnProblemPrevalidate(ctx context.Context, arg SetVulnProblemPrevalidateParams) (VulnProblem, error)
+	SetVulnProblemPrevalidate(ctx context.Context, arg SetVulnProblemPrevalidateParams) (SetVulnProblemPrevalidateRow, error)
 	StartBattleMatch(ctx context.Context, arg StartBattleMatchParams) (BattleMatch, error)
 	SumTeamSolvedScore(ctx context.Context, arg SumTeamSolvedScoreParams) (SumTeamSolvedScoreRow, error)
 	UpdateContest(ctx context.Context, arg UpdateContestParams) (Contest, error)
 	UpdateSolveSubmissionResult(ctx context.Context, arg UpdateSolveSubmissionResultParams) (SolveSubmission, error)
+	UpsertContestAccessGrant(ctx context.Context, arg UpsertContestAccessGrantParams) (ContestAccessGrant, error)
 	UpsertContestProblem(ctx context.Context, arg UpsertContestProblemParams) (ContestProblem, error)
 	UpsertLadderSnapshot(ctx context.Context, arg UpsertLadderSnapshotParams) (ContestLadderSnapshot, error)
-	UpsertVulnProblem(ctx context.Context, arg UpsertVulnProblemParams) (VulnProblem, error)
+	UpsertVulnProblem(ctx context.Context, arg UpsertVulnProblemParams) (UpsertVulnProblemRow, error)
 	UpsertVulnSource(ctx context.Context, arg UpsertVulnSourceParams) (VulnSource, error)
 }
 

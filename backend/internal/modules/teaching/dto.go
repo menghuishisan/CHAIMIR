@@ -233,7 +233,7 @@ type SubmitAssignmentRequest struct {
 }
 
 type GradeSubmissionRequest struct {
-	Score   int32  `json:"score"`
+	Score   *int32 `json:"score"`
 	Comment string `json:"comment"`
 }
 

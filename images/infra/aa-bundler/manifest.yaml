@@ -1,4 +1,4 @@
-﻿# 本文件声明 infra/aa-bundler 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 infra/aa-bundler 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: infra
 name: aa-bundler
@@ -32,10 +32,25 @@ env_keys:
   secret: []
 data_driven: true
 capabilities:
-  - erc4337-bundler
+  provides:
+    - erc4337-bundler
+  requires:
+    - evm-json-rpc
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 infra:
   eco_tags:
     - evm
+  bindings:
+    - name: execution_chain
+      capability: evm-json-rpc
+      endpoint: rpc
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:NODE_HTTP
   roles:
     - account-abstraction
     - bundler
@@ -93,4 +108,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

@@ -338,6 +338,9 @@ func seed(ctx context.Context, cfg *config.Config) (resultErr error) {
 	if err := seedBuiltinSimPackages(ctx, database, ids); err != nil {
 		return err
 	}
+	if err := seedPlatformCatalog(ctx, database); err != nil {
+		return err
+	}
 	authManager := auth.NewManager(cfg.Auth)
 	smsSender, err := identity.NewSMSSender(cfg.SMS)
 	if err != nil {

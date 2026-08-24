@@ -25,16 +25,17 @@ import {
   Card,
   CardBody,
   CardHeader,
+  DataPanel,
   DescriptionList,
   Empty,
   FormField,
   Input,
+  ObjectIdentity,
   PageBody,
   PageHeader,
   PageScaffold,
   PageSection,
   Pagination,
-  Stat,
   StatusIndicator,
   Table,
   Tabs,
@@ -121,42 +122,49 @@ function ContestDetailContent({ contest, record, onRefresh }: ContestDetailConte
 
   return (
     <>
-      <PageHeader
-        kicker={
-          <Breadcrumb
-            items={[{ label: '竞赛参赛', href: '/student/contests' }, { label: contest.name }]}
-          />
-        }
-        title={contest.name}
-        description={`${contestModeLabel(contest.mode)} · ${teamModeLabel(contest.team_mode)}`}
-        icon={Swords}
-        actions={
-          <div className="flex items-center gap-2">
+      {/*
+        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的赛事名承担,
+        故页面头只出面包屑,末节到「竞赛参赛」为止(§6.5.0 通则 1)。
+      */}
+      <PageHeader kicker={<Breadcrumb items={[{ label: '竞赛参赛', href: '/student/contests' }]} />} />
+
+      {/*
+        对象身份区:赛事名 + 状态 + 关键属性横排。赛制、参赛形式与比赛时间是赛事属性,
+        横排在这里就够;报名与进入答题是右栏动作区的事,不塞进身份区 ——
+        报名要填队名或邀请码,那是一张表单而不是一个按钮。
+      */}
+      <ObjectIdentity
+        name={contest.name}
+        status={
+          <div className="flex flex-wrap items-center gap-2">
             {joined ? <Badge tone="jade">已报名</Badge> : null}
-            <StatusIndicator tone={contestStatusTone(contest.status)} label={contestStatusLabel(contest.status)} />
+            <StatusIndicator
+              tone={contestStatusTone(contest.status)}
+              label={contestStatusLabel(contest.status)}
+            />
           </div>
         }
+        subtitle={`${formatDateTime(contest.start_at)} — ${formatDateTime(contest.end_at)}`}
+        properties={[
+          { label: '赛制', value: contestModeLabel(contest.mode) },
+          { label: '参赛形式', value: teamModeLabel(contest.team_mode) },
+          { label: '我的得分', value: record ? formatScore(record.score) : '尚未计分' },
+          {
+            label: '我的名次',
+            value: record && record.rank > 0 ? `第 ${record.rank} 名` : '未上榜',
+          },
+          { label: '报名截止', value: formatDateTime(contest.signup_end) },
+        ]}
       />
 
-      {/* 指标带只放我的成绩;赛制、对抗形式与封榜时长是赛事静态属性,列在右侧「赛程」卡里 */}
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Stat
-            label="我的得分"
-            value={record ? formatScore(record.score) : '—'}
-            icon={Trophy}
-            hint={joined ? '以榜单实时结算为准' : '报名后开始计分'}
-          />
-          <Stat
-            label="我的名次"
-            value={record && record.rank > 0 ? record.rank : '—'}
-            icon={ListOrdered}
-            hint={isContestLeaderboardFrozen(contest.status) ? '封榜中,名次暂停更新' : undefined}
-          />
-        </div>
-      </PageSection>
+      {isContestLeaderboardFrozen(contest.status) ? (
+        <Callout tone="warning" className="mt-4">
+          当前处于封榜期,得分与名次暂停更新。封榜结束后一次性揭晓。
+        </Callout>
+      ) : null}
 
       <PageBody
+        className="mt-6"
         rail={
           <div className="flex flex-col gap-4">
             <ContestActionCard
@@ -458,16 +466,31 @@ function ContestProblems({ contestId, canAnswer }: ContestProblemsProps) {
   ]
 
   return (
+    // 列表型页内子视图走 DataPanel 片段(§6.5.5 B):赛题清单一次回齐,不分页也不筛选
     <PageSection title="赛题" description="进入答题后才能看到完整题面。">
-      <ResourceState
-        resource={problems}
-        emptyIcon={Swords}
-        emptyTitle="赛题尚未公布"
-        emptyDescription="开赛后赛题会显示在这里。"
-        skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-      >
-        {(list) => <Table columns={columns} data={list} rowKey={(item) => item.id} />}
-      </ResourceState>
+      <DataPanel label="赛题">
+        <ResourceState
+          resource={problems}
+          emptyIcon={Swords}
+          emptyTitle="赛题尚未公布"
+          emptyDescription="开赛后赛题会显示在这里。"
+          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+        >
+          {(list) => (
+            <Table
+              columns={columns}
+              data={list}
+              rowKey={(item) => item.id}
+              elevated={false}
+              // <md 换行卡(§6.4.1 规则 3):题号与分值一行、题型一行
+              mobileCard={(item) => ({
+                title: `第 ${item.seq} 题`,
+                meta: `${item.score} 分`,
+              })}
+            />
+          )}
+        </ResourceState>
+      </DataPanel>
     </PageSection>
   )
 }
@@ -515,37 +538,48 @@ function ContestLadder({ contestId, frozen }: ContestLadderProps) {
   ]
 
   return (
-    <PageSection title="天梯榜" description={`共 ${ladder.total} 支队伍上榜`}>
+    // 同一父页下的子视图必须同构(§6.5.5 B):与赛题一样走 DataPanel 片段
+    <PageSection title="天梯榜" description="按得分与通过时间排名,封榜期暂停更新。">
       <div className="flex flex-col gap-4">
         {frozen ? (
           <Callout tone="warning" title="封榜中">
             比赛进入封榜期,榜单暂停更新,当前名次不代表最终结果。
           </Callout>
         ) : null}
-        <ResourceState
-          resource={ladder}
-          emptyIcon={ListOrdered}
-          emptyTitle="榜单还是空的"
-          emptyDescription="有队伍通过赛题后榜单就会出现。"
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+        <DataPanel
+          label="天梯榜"
+          footer={
+            <Pagination
+              page={ladder.page}
+              pageSize={ladder.pageSize}
+              total={ladder.total}
+              onPageChange={ladder.setPage}
+            />
+          }
         >
-          {(page) => (
-            <>
+          <ResourceState
+            resource={ladder}
+            emptyIcon={ListOrdered}
+            emptyTitle="榜单还是空的"
+            emptyDescription="有队伍通过赛题后榜单就会出现。"
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+          >
+            {(page) => (
               <Table
                 columns={columns}
                 data={page.list}
                 rowKey={(item) => item.team_id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):名次一行、得分与通过题数一行
+                mobileCard={(item) => ({
+                  title: `第 ${item.rank} 名`,
+                  meta: `得分 ${formatScore(item.score)} · 通过 ${item.solved_count} 题`,
+                })}
                 empty={<Empty icon={ListOrdered} title="榜单还是空的" />}
               />
-              <Pagination
-                page={ladder.page}
-                pageSize={ladder.pageSize}
-                total={ladder.total}
-                onPageChange={ladder.setPage}
-              />
-            </>
-          )}
-        </ResourceState>
+            )}
+          </ResourceState>
+        </DataPanel>
       </div>
     </PageSection>
   )

@@ -195,12 +195,17 @@ func (s *Service) QueryAuditLogs(ctx context.Context, query contracts.AuditQuery
 	query.Page, query.Size = pagex.Int32(page, size)
 	var rows []AuditLogRow
 	var total int64
+	var facetRows []AuditFacetRow
 	read := func(ctx context.Context, tx TxStore) error {
 		list, n, err := tx.QueryAuditLogs(ctx, AuditQueryInput{TenantID: auditTenantFilter(query), ActorID: query.ActorID, Action: query.Action, TargetType: query.TargetType, From: query.From, To: query.To, Page: query.Page, Size: query.Size})
 		if err != nil {
 			return err
 		}
 		rows, total = list, n
+		facetRows, err = tx.QueryAuditActionFacets(ctx, AuditQueryInput{TenantID: auditTenantFilter(query), ActorID: query.ActorID, Action: query.Action, TargetType: query.TargetType, From: query.From, To: query.To})
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 	var err error
@@ -216,7 +221,11 @@ func (s *Service) QueryAuditLogs(ctx context.Context, query contracts.AuditQuery
 	for _, row := range rows {
 		out = append(out, contracts.AuditLogEntry{ID: row.ID, TenantID: row.TenantID, ActorID: row.ActorID, ActorRole: row.ActorRole, Action: row.Action, TargetType: row.TargetType, TargetID: row.TargetID, Detail: row.Detail, IP: row.IP, TraceID: row.TraceID, CreatedAt: row.CreatedAt})
 	}
-	return contracts.AuditQueryResult{List: out, Total: total, Page: query.Page, Size: query.Size}, nil
+	facets := map[string]map[string]int64{"action": {}}
+	for _, row := range facetRows {
+		facets["action"][row.Action] = row.Count
+	}
+	return contracts.AuditQueryResult{List: out, Total: total, Page: query.Page, Size: query.Size, Facets: facets}, nil
 }
 
 // ensureAccountVisibleInContext 用调用方上下文收敛账号摘要读取范围,避免跨租户 ID 枚举。

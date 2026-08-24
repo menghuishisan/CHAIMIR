@@ -26,6 +26,7 @@ import {
   CardBody,
   CardHeader,
   Checkbox,
+  DataPanel,
   Empty,
   FormField,
   PageSection,
@@ -305,16 +306,41 @@ export function TranscriptBatchSection() {
           </CardBody>
         </Card>
 
+        {/*
+          列表型页内子视图走 DataPanel 片段(§6.5.5 B):批量结果是一次性产出,
+          既不筛选也不分页,故只用片本身 —— 不为了凑齐槽位补一个只有一页的分页控件。
+        */}
         {generated && generated.length > 0 ? (
-          <Card>
-            <CardHeader
-              title="本次生成结果"
-              description="逐份下载。下载链接是一次性的,重新点击会重新签发。"
+          <DataPanel label="本次生成结果">
+            <div className="border-b border-line px-4 py-3">
+              <h3 className="text-sm font-semibold text-ink">本次生成结果</h3>
+              <p className="mt-0.5 text-xs text-ink-sub">
+                共 {generated.length} 份,逐份下载。下载链接是一次性的,重新点击会重新签发。
+              </p>
+            </div>
+            <Table
+              columns={columns}
+              data={generated}
+              rowKey={(item) => item.id}
+              elevated={false}
+              // <md 换行卡(§6.4.1 规则 3):学生名一行、范围与时间一行,下载按钮在右
+              mobileCard={(item) => ({
+                title: studentNameById.get(item.student_id)?.name ?? '该学生',
+                meta: `${transcriptScopeLabel(item.scope)} · ${formatDateTime(item.generated_at)}`,
+                action: (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    leftIcon={Download}
+                    loading={downloadingId === item.id}
+                    onClick={() => void download(item)}
+                  >
+                    下载
+                  </Button>
+                ),
+              })}
             />
-            <CardBody>
-              <Table columns={columns} data={generated} rowKey={(item) => item.id} />
-            </CardBody>
-          </Card>
+          </DataPanel>
         ) : null}
       </div>
     </PageSection>

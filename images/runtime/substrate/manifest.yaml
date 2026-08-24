@@ -1,4 +1,4 @@
-# 本文件声明 runtime/substrate 镜像的职责、端口、安全、资源和供应链约束。
+﻿# 本文件声明 runtime/substrate 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: runtime
 name: substrate
@@ -19,18 +19,27 @@ source:
   type: thin-wrapper
 upstream:
   image: parity/polkadot:stable2603-3
+  version: stable2603-3
   digest: sha256:0bbcce4a417ad8c2c88af08b96bd27113f1fd33427ae4d02b6c64b8c126f1997
   reuse_policy: thin-wrapper
 data_driven: true
+env_keys:
+  config:
+    - CHAIMIR_RUNTIME_RPC_PORT
+  secret: []
 capabilities:
-  - chain-runtime
-  - substrate-dev-chain
-  - polkadot-sdk-dev
+  provides:
+    - chain-runtime
+    - substrate-dev-chain
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 runtime:
   eco: substrate
-  adapter_level: 2
-  default_tool_codes:
-    - code-server
+  adapter_level: 1
 ports:
   - name: rpc
     container_port: 9944
@@ -87,4 +96,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

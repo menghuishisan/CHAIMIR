@@ -16,6 +16,7 @@ import (
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/ws"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
 
@@ -38,6 +39,7 @@ type ContestModuleDeps struct {
 	Fingerprint   contracts.FingerprintService
 	Audit         audit.Writer
 	EventBus      eventbus.Bus
+	WSHub         *ws.Hub
 	Auth          *auth.Manager
 	Roles         contracts.IdentityService
 }
@@ -80,6 +82,7 @@ func RegisterContestModule(ctx context.Context, deps ContestModuleDeps) (*contes
 		ReplayStore:   deps.Storage,
 		ReplayBucket:  deps.Storage.BucketReport(),
 		Bus:           deps.EventBus,
+		WSHub:         deps.WSHub,
 		Cipher:        cipher,
 	})
 	if err != nil {

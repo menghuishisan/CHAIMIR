@@ -4,6 +4,7 @@ package judge
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -39,7 +40,7 @@ type TxStore interface {
 	GetJudgeTaskBySourceRef(ctx context.Context, tenantID int64, sourceRef, problemRef string) (JudgeTask, error)
 	GetJudgeTaskInfo(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error)
 	ListJudgeTasksBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]JudgeTask, error)
-	ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, tenantID, submitterID int64, problemRef string, windowSeconds int32) ([]JudgeTask, error)
+	ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, tenantID, submitterTenantID, submitterID int64, problemRef string, windowSeconds int32) ([]JudgeTask, error)
 	ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, state string, limit, offset int32) ([]JudgeTaskInfo, int64, error)
 	CancelQueuedJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error)
 	ResetJudgeTaskForRejudge(ctx context.Context, tenantID, taskID int64, snapshot JudgeInputSnapshot) (JudgeTask, error)
@@ -197,23 +198,24 @@ func (s *txStore) CreateJudgeTask(ctx context.Context, task JudgeTask) (JudgeTas
 		return JudgeTask{}, err
 	}
 	row, err := s.q.CreateJudgeTask(ctx, sqlcgen.CreateJudgeTaskParams{
-		ID:               task.ID,
-		TenantID:         task.TenantID,
-		JudgerID:         task.JudgerID,
-		SourceRef:        task.SourceRef,
-		SourceOwnerID:    task.SourceOwnerID,
-		SourceCourseID:   task.SourceCourseID,
-		SourceScope:      task.SourceScope,
-		SubmitterID:      task.SubmitterID,
-		ProblemRef:       task.ProblemRef,
-		CodeStorageKey:   task.CodeStorageKey,
-		CodeHash:         task.CodeHash,
-		InputSnapshot:    raw,
-		SandboxMode:      task.SandboxMode,
-		TargetSandboxRef: pgtypex.Text(task.TargetSandboxRef),
-		Priority:         task.Priority,
-		Status:           task.Status,
-		MaxRetries:       task.MaxRetries,
+		ID:                task.ID,
+		TenantID:          task.TenantID,
+		JudgerID:          task.JudgerID,
+		SourceRef:         task.SourceRef,
+		SourceOwnerID:     task.SourceOwnerID,
+		SourceCourseID:    task.SourceCourseID,
+		SourceScope:       task.SourceScope,
+		SubmitterID:       task.SubmitterID,
+		SubmitterTenantID: task.SubmitterTenantID,
+		ProblemRef:        task.ProblemRef,
+		CodeStorageKey:    task.CodeStorageKey,
+		CodeHash:          task.CodeHash,
+		InputSnapshot:     raw,
+		SandboxMode:       task.SandboxMode,
+		TargetSandboxRef:  pgtypex.Text(task.TargetSandboxRef),
+		Priority:          task.Priority,
+		Status:            task.Status,
+		MaxRetries:        task.MaxRetries,
 	})
 	if err != nil {
 		return JudgeTask{}, err
@@ -227,7 +229,7 @@ func (s *txStore) GetJudgeTask(ctx context.Context, tenantID, taskID int64) (Jud
 	if err != nil {
 		return JudgeTask{}, err
 	}
-	return taskFromRow(row)
+	return taskFromDatabaseRow(row)
 }
 
 // GetJudgeTaskBySourceRef 按来源和题目读取已存在任务,允许实验实例下多个检查点各自幂等。
@@ -236,7 +238,7 @@ func (s *txStore) GetJudgeTaskBySourceRef(ctx context.Context, tenantID int64, s
 	if err != nil {
 		return JudgeTask{}, err
 	}
-	return taskFromRow(row)
+	return taskFromDatabaseRow(row)
 }
 
 // GetJudgeTaskInfo 查询任务及其结果。
@@ -258,8 +260,8 @@ func (s *txStore) ListJudgeTasksBySourceRef(ctx context.Context, tenantID int64,
 }
 
 // ListRecentJudgeTasksBySubmitterProblem 查询同账号同题限频窗口内的提交任务。
-func (s *txStore) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, tenantID, submitterID int64, problemRef string, windowSeconds int32) ([]JudgeTask, error) {
-	rows, err := s.q.ListRecentJudgeTasksBySubmitterProblem(ctx, sqlcgen.ListRecentJudgeTasksBySubmitterProblemParams{TenantID: tenantID, SubmitterID: submitterID, ProblemRef: problemRef, Column4: windowSeconds})
+func (s *txStore) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, tenantID, submitterTenantID, submitterID int64, problemRef string, windowSeconds int32) ([]JudgeTask, error) {
+	rows, err := s.q.ListRecentJudgeTasksBySubmitterProblem(ctx, sqlcgen.ListRecentJudgeTasksBySubmitterProblemParams{TenantID: tenantID, SubmitterTenantID: submitterTenantID, SubmitterID: submitterID, ProblemRef: problemRef, Column5: windowSeconds})
 	if err != nil {
 		return nil, err
 	}
@@ -288,7 +290,7 @@ func (s *txStore) CancelQueuedJudgeTask(ctx context.Context, tenantID, taskID in
 	if err != nil {
 		return JudgeTask{}, err
 	}
-	return taskFromRow(row)
+	return taskFromDatabaseRow(row)
 }
 
 // ResetJudgeTaskForRejudge 重置任务进入重判队列。
@@ -301,7 +303,7 @@ func (s *txStore) ResetJudgeTaskForRejudge(ctx context.Context, tenantID, taskID
 	if err != nil {
 		return JudgeTask{}, err
 	}
-	return taskFromRow(row)
+	return taskFromDatabaseRow(row)
 }
 
 // DequeueJudgeTasks 跨租户领取队列任务。
@@ -339,7 +341,7 @@ func (s *txStore) CompleteJudgeTask(ctx context.Context, tenantID, taskID int64,
 	if err != nil {
 		return JudgeTask{}, err
 	}
-	return taskFromRow(row)
+	return taskFromDatabaseRow(row)
 }
 
 // RetryJudgeTask 标记任务重试入队。
@@ -348,7 +350,7 @@ func (s *txStore) RetryJudgeTask(ctx context.Context, tenantID, taskID int64, re
 	if err != nil {
 		return JudgeTask{}, err
 	}
-	return taskFromRow(row)
+	return taskFromDatabaseRow(row)
 }
 
 // FailJudgeTask 标记任务失败终态。
@@ -357,7 +359,7 @@ func (s *txStore) FailJudgeTask(ctx context.Context, tenantID, taskID int64, rea
 	if err != nil {
 		return JudgeTask{}, err
 	}
-	return taskFromRow(row)
+	return taskFromDatabaseRow(row)
 }
 
 // CompleteManualJudgeTask 由人工评分路径在无 worker 租约时完成任务。
@@ -366,7 +368,7 @@ func (s *txStore) CompleteManualJudgeTask(ctx context.Context, tenantID, taskID 
 	if err != nil {
 		return JudgeTask{}, err
 	}
-	return taskFromRow(row)
+	return taskFromDatabaseRow(row)
 }
 
 // UpsertJudgeResult 保存判题结果。
@@ -470,11 +472,11 @@ func (s *txStore) CreateFingerprint(ctx context.Context, fp SubmissionFingerprin
 	if err != nil {
 		return SubmissionFingerprint{}, err
 	}
-	row, err := s.q.CreateSubmissionFingerprint(ctx, sqlcgen.CreateSubmissionFingerprintParams{ID: fp.ID, TenantID: fp.TenantID, SourceRef: fp.SourceRef, ProblemRef: fp.ProblemRef, SubmitterID: fp.SubmitterID, CodeHash: fp.CodeHash, SimVector: raw})
+	row, err := s.q.CreateSubmissionFingerprint(ctx, sqlcgen.CreateSubmissionFingerprintParams{ID: fp.ID, TenantID: fp.TenantID, SourceRef: fp.SourceRef, ProblemRef: fp.ProblemRef, SubmitterID: fp.SubmitterID, SubmitterTenantID: fp.SubmitterTenantID, CodeHash: fp.CodeHash, SimVector: raw})
 	if err != nil {
 		return SubmissionFingerprint{}, err
 	}
-	return fingerprintFromRow(row)
+	return fingerprintFromDatabaseRow(row)
 }
 
 // FindExactFingerprints 查询完全相同提交。
@@ -496,10 +498,14 @@ func (s *txStore) ListFingerprintsForProblem(ctx context.Context, tenantID int64
 }
 
 // tasksFromRows 批量转换任务行。
-func tasksFromRows(rows []sqlcgen.JudgeTask) ([]JudgeTask, error) {
-	out := make([]JudgeTask, 0, len(rows))
-	for _, row := range rows {
-		item, err := taskFromRow(row)
+func tasksFromRows(rows any) ([]JudgeTask, error) {
+	v := reflect.ValueOf(rows)
+	if v.Kind() != reflect.Slice {
+		return nil, fmt.Errorf("judge task rows must be slice, got %s", v.Kind())
+	}
+	out := make([]JudgeTask, 0, v.Len())
+	for i := 0; i < v.Len(); i++ {
+		item, err := taskFromDatabaseRow(v.Index(i).Interface())
 		if err != nil {
 			return nil, err
 		}
@@ -509,10 +515,14 @@ func tasksFromRows(rows []sqlcgen.JudgeTask) ([]JudgeTask, error) {
 }
 
 // fingerprintsFromRows 批量转换指纹行。
-func fingerprintsFromRows(rows []sqlcgen.SubmissionFingerprint) ([]SubmissionFingerprint, error) {
-	out := make([]SubmissionFingerprint, 0, len(rows))
-	for _, row := range rows {
-		item, err := fingerprintFromRow(row)
+func fingerprintsFromRows(rows any) ([]SubmissionFingerprint, error) {
+	v := reflect.ValueOf(rows)
+	if v.Kind() != reflect.Slice {
+		return nil, fmt.Errorf("submission fingerprint rows must be slice, got %s", v.Kind())
+	}
+	out := make([]SubmissionFingerprint, 0, v.Len())
+	for i := 0; i < v.Len(); i++ {
+		item, err := fingerprintFromDatabaseRow(v.Index(i).Interface())
 		if err != nil {
 			return nil, err
 		}

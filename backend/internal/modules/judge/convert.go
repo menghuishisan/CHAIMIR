@@ -13,33 +13,39 @@ import (
 // contractSubmitFromDTO 把内部 HTTP 请求转换为跨模块判题契约,来源标识只取服务签名上下文。
 func contractSubmitFromDTO(tenantID int64, sourceRef string, req SubmitTaskRequest) contracts.JudgeSubmitRequest {
 	return contracts.JudgeSubmitRequest{
-		TenantID:         tenantID,
-		JudgerCode:       req.JudgerCode,
-		ItemCode:         req.ItemCode,
-		ItemVersion:      req.ItemVersion,
-		CodeStorageKey:   req.CodeStorageKey,
-		CodeHash:         req.CodeHash,
-		SubmitterID:      req.SubmitterID.Int64(),
-		SourceRef:        sourceRef,
-		SourceOwnerID:    req.SourceOwnerID.Int64(),
-		SourceCourseID:   req.SourceCourseID.Int64(),
-		SourceScope:      req.SourceScope,
-		ExtraInput:       req.ExtraInput,
-		SandboxMode:      req.SandboxMode,
-		TargetSandboxRef: req.TargetSandboxRef,
-		Priority:         req.Priority,
+		TenantID:          tenantID,
+		SubmitterTenantID: tenantID,
+		JudgerCode:        req.JudgerCode,
+		ItemCode:          req.ItemCode,
+		ItemVersion:       req.ItemVersion,
+		CodeStorageKey:    req.CodeStorageKey,
+		CodeHash:          req.CodeHash,
+		SubmitterID:       req.SubmitterID.Int64(),
+		SourceRef:         sourceRef,
+		SourceOwnerID:     req.SourceOwnerID.Int64(),
+		SourceCourseID:    req.SourceCourseID.Int64(),
+		SourceScope:       req.SourceScope,
+		ExtraInput:        req.ExtraInput,
+		SandboxMode:       req.SandboxMode,
+		TargetSandboxRef:  req.TargetSandboxRef,
+		Priority:          req.Priority,
 	}
 }
 
 // contractTaskInfoFromModel 把 M3 任务摘要转换为跨模块返回契约。
 func contractTaskInfoFromModel(info JudgeTaskInfo) contracts.JudgeTaskInfo {
+	submitterTenantID := info.Task.SubmitterTenantID
+	if submitterTenantID <= 0 {
+		submitterTenantID = info.Task.TenantID
+	}
 	return contracts.JudgeTaskInfo{
-		TaskID:      info.Task.ID,
-		TenantID:    info.Task.TenantID,
-		SourceRef:   info.Task.SourceRef,
-		SubmitterID: info.Task.SubmitterID,
-		Status:      contractStatus(info.Task.Status),
-		Result:      contractResult(info.Task, info.Result),
+		TaskID:            info.Task.ID,
+		TenantID:          info.Task.TenantID,
+		SourceRef:         info.Task.SourceRef,
+		SubmitterID:       info.Task.SubmitterID,
+		SubmitterTenantID: submitterTenantID,
+		Status:            contractStatus(info.Task.Status),
+		Result:            contractResult(info.Task, info.Result),
 	}
 }
 
@@ -86,13 +92,18 @@ func contractResult(task JudgeTask, result *JudgeResult) contracts.JudgeTaskResu
 
 // judgeTaskDTOFromModel 转换任务及其最新结果为公开 HTTP DTO。
 func judgeTaskDTOFromModel(info JudgeTaskInfo) JudgeTaskDTO {
+	submitterTenantID := info.Task.SubmitterTenantID
+	if submitterTenantID <= 0 {
+		submitterTenantID = info.Task.TenantID
+	}
 	out := JudgeTaskDTO{
-		TaskID:      ids.ID(info.Task.ID),
-		TenantID:    ids.ID(info.Task.TenantID),
-		SourceRef:   info.Task.SourceRef,
-		SubmitterID: ids.ID(info.Task.SubmitterID),
-		Status:      statusText(info.Task.Status),
-		Existing:    info.Existing,
+		TaskID:            ids.ID(info.Task.ID),
+		TenantID:          ids.ID(info.Task.TenantID),
+		SourceRef:         info.Task.SourceRef,
+		SubmitterID:       ids.ID(info.Task.SubmitterID),
+		SubmitterTenantID: ids.ID(submitterTenantID),
+		Status:            statusText(info.Task.Status),
+		Existing:          info.Existing,
 	}
 	if info.Result != nil {
 		details := make([]JudgeResultDetailDTO, 0, len(info.Result.Details))

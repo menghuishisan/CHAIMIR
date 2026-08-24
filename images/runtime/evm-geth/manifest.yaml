@@ -1,4 +1,4 @@
-# 本文件声明 runtime/evm-geth 镜像的职责、端口、安全、资源和供应链约束。
+﻿# 本文件声明 runtime/evm-geth 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: runtime
 name: evm-geth
@@ -20,20 +20,41 @@ source:
 upstream:
   source_repository: https://github.com/ethereum/go-ethereum
   version: v1.17.4
+  source_sha256: 80b4dee3b89ea40bedc808132befd605208089fdb8fde7981fc3c530596d3a9e
   builder_arg: GO_BUILDER_IMAGE
   runtime: alpine:3.23
+  runtime_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: source-build
 data_driven: true
+env_keys:
+  config:
+    - CHAIMIR_EVM_RPC_URL
+    - CHAIMIR_RUNTIME_RPC_PORT
+    - CHAIMIR_CHAIN_STATE_DIR
+  secret: []
 capabilities:
-  - chain-runtime
-  - evm-json-rpc
-  - geth-private-chain
+  provides:
+    - chain-runtime
+    - evm-json-rpc
+    - geth-private-chain
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 runtime:
   eco: evm
   adapter_level: 2
-  default_tool_codes:
-    - code-server
-    - blockscout
+  native:
+    helper: /usr/local/bin/chaimir-geth-adapter
+    profile: evm-json-rpc
+    exec_target: sandbox/runtime
+    reset_strategy: recreate_runtime
+    actions:
+      deploy: [/usr/local/bin/chaimir-geth-adapter, deploy]
+      tx: [/usr/local/bin/chaimir-geth-adapter, tx]
+      query: [/usr/local/bin/chaimir-geth-adapter, query]
 ports:
   - name: rpc
     container_port: 8545
@@ -89,10 +110,12 @@ selftest:
       command:
         - geth
         - version
+capability_selftest:
+  deploy_payload:
+    bytecode: "0x6005600c60003960056000f3600060005500"
+  query_target: chainId
 supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-
-

@@ -87,6 +87,47 @@ func (q *Queries) CountUnreadNotifications(ctx context.Context, receiverID int64
 	return count, err
 }
 
+const countVisibleAnnouncementsByScope = `-- name: CountVisibleAnnouncementsByScope :many
+SELECT a.scope, COUNT(*)::bigint AS count
+FROM system_announcement a
+WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
+  AND (a.expire_at IS NULL OR a.expire_at > now())
+  AND (a.scope <> 3 OR a.target_roles && $2::smallint[] OR a.publisher_id = $3)
+GROUP BY a.scope
+ORDER BY a.scope
+`
+
+type CountVisibleAnnouncementsByScopeParams struct {
+	TenantID    pgtype.Int8 `json:"tenant_id"`
+	RoleNumbers []int16     `json:"role_numbers"`
+	AccountID   int64       `json:"account_id"`
+}
+
+type CountVisibleAnnouncementsByScopeRow struct {
+	Scope int16 `json:"scope"`
+	Count int64 `json:"count"`
+}
+
+func (q *Queries) CountVisibleAnnouncementsByScope(ctx context.Context, arg CountVisibleAnnouncementsByScopeParams) ([]CountVisibleAnnouncementsByScopeRow, error) {
+	rows, err := q.db.Query(ctx, countVisibleAnnouncementsByScope, arg.TenantID, arg.RoleNumbers, arg.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountVisibleAnnouncementsByScopeRow{}
+	for rows.Next() {
+		var i CountVisibleAnnouncementsByScopeRow
+		if err := rows.Scan(&i.Scope, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createAnnouncement = `-- name: CreateAnnouncement :one
 INSERT INTO system_announcement (id, tenant_id, title, content, scope, target_roles, publisher_id, published_at, expire_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, now(), $8)

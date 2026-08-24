@@ -21,6 +21,7 @@ RUN apt-get -o Acquire::Retries=3 update \
     && chown -R 1000:1000 /judge
 
 COPY --from=fabric-tools /usr/local/bin/peer /usr/local/bin/peer
+COPY --from=fabric-tools /usr/local/bin/orderer /usr/local/bin/orderer
 COPY --from=fabric-tools /usr/local/bin/configtxgen /usr/local/bin/configtxgen
 COPY --from=fabric-tools /usr/local/bin/configtxlator /usr/local/bin/configtxlator
 COPY --from=fabric-tools /usr/local/bin/cryptogen /usr/local/bin/cryptogen
@@ -32,7 +33,7 @@ COPY --from=fabric-tools /etc/hyperledger/fabric/configtx.yaml /etc/hyperledger/
 COPY --from=fabric-tools /etc/hyperledger/fabric/orderer.yaml /etc/hyperledger/fabric/orderer.yaml
 COPY run_fabric_tests.sh /usr/local/bin/run-fabric-tests
 COPY --from=judge-base /usr/local/bin/normalize-result /usr/local/bin/normalize-result
-RUN chmod 0755 /usr/local/bin/peer /usr/local/bin/configtxgen /usr/local/bin/configtxlator /usr/local/bin/cryptogen /usr/local/bin/discover /usr/local/bin/ledgerutil /usr/local/bin/osnadmin /usr/local/bin/run-fabric-tests /usr/local/bin/normalize-result
+RUN chmod 0755 /usr/local/bin/peer /usr/local/bin/orderer /usr/local/bin/configtxgen /usr/local/bin/configtxlator /usr/local/bin/cryptogen /usr/local/bin/discover /usr/local/bin/ledgerutil /usr/local/bin/osnadmin /usr/local/bin/run-fabric-tests /usr/local/bin/normalize-result
 
 ENV FABRIC_CFG_PATH=/etc/hyperledger/fabric
 USER 1000:1000

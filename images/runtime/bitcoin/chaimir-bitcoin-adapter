@@ -1,0 +1,121 @@
+#!/usr/bin/env sh
+# runtime/bitcoin 的原生 UTXO 能力插件,只通过 Bitcoin Core RPC 完成真实状态动作。
+set -eu
+
+action="${1:-}"
+data_dir="${CHAIMIR_BITCOIN_DATA_DIR:-/runtime-state/bitcoin}"
+rpc_port="${CHAIMIR_RUNTIME_RPC_PORT:-18443}"
+wallet="${CHAIMIR_BITCOIN_WALLET:-chaimir}"
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit "${2:-1}"
+}
+
+cli() {
+  bitcoin-cli -regtest -datadir="$data_dir" -rpcport="$rpc_port" "$@"
+}
+
+wallet_cli() {
+  cli -rpcwallet="$wallet" "$@"
+}
+
+ensure_wallet() {
+  local wallets
+  wallets="$(cli listwallets 2>/dev/null || true)"
+  if jq -e --arg wallet "$wallet" 'index($wallet) != null' >/dev/null 2>&1 <<EOF
+$wallets
+EOF
+  then
+    return
+  fi
+  if ! cli loadwallet "$wallet" >/dev/null 2>&1; then
+    cli createwallet "$wallet" false false "" false true true >/dev/null || fail "无法创建 Bitcoin regtest 钱包" 70
+  fi
+}
+
+mine_confirmations() {
+  local blocks="$1" address
+  address="$(wallet_cli getnewaddress "" legacy)" || fail "无法生成 Bitcoin 挖矿地址" 70
+  cli generatetoaddress "$blocks" "$address" >/dev/null || fail "Bitcoin regtest 挖矿失败" 70
+}
+
+ensure_funds() {
+  local balance
+  balance="$(wallet_cli getbalance 2>/dev/null || printf '0')"
+  if [ "$(printf '%s\n' "$balance" | awk '{print ($1 + 0 <= 0) ? "zero" : "nonzero"}')" = "zero" ]; then
+    # regtest coinbase 需要 100 个成熟区块后才能作为交易输入。
+    mine_confirmations 101
+  fi
+}
+
+encode_payload() {
+  local data="$1" hex
+  case "$data" in
+    0x*)
+      hex="${data#0x}"
+      printf '%s' "$hex" | grep -Eq '^[0-9a-fA-F]*$' || fail "十六进制发布数据格式不正确" 22
+      ;;
+    *)
+      hex="$(printf '%s' "$data" | od -An -tx1 | tr -d ' \n')"
+      ;;
+  esac
+  [ $(( ${#hex} % 2 )) -eq 0 ] || fail "发布数据编码失败" 22
+  [ ${#hex} -le 160 ] || fail "OP_RETURN 数据不能超过 80 字节" 22
+  printf '%s' "$hex"
+}
+
+send_raw_and_confirm() {
+  local raw="$1" funded signed txid
+  funded="$(wallet_cli fundrawtransaction "$raw" | jq -r '.hex // empty')"
+  [ -n "$funded" ] || fail "无法为 Bitcoin 交易补充输入" 70
+  signed="$(wallet_cli signrawtransactionwithwallet "$funded" | jq -r '.hex // empty')"
+  [ -n "$signed" ] || fail "无法签名 Bitcoin 交易" 70
+  txid="$(cli sendrawtransaction "$signed")" || fail "无法广播 Bitcoin 交易" 70
+  mine_confirmations 1
+  printf '%s' "$txid"
+}
+
+ensure_wallet
+ensure_funds
+case "$action" in
+  deploy)
+    payload="$(cat)"; [ -n "$payload" ] || payload='{}'
+    data="$(printf '%s' "$payload" | jq -r '.data // empty')"
+    [ -n "$data" ] || fail "deploy payload requires data" 22
+    hex="$(encode_payload "$data")"
+    outputs="$(jq -cn --arg data "$hex" '{data:$data}')"
+    raw="$(wallet_cli createrawtransaction '[]' "$outputs")" || fail "无法创建 OP_RETURN 交易" 70
+    txid="$(send_raw_and_confirm "$raw")"
+    jq -cn --arg txid "$txid" --arg data "$hex" '{txid:$txid,op_return_hex:$data,confirmed:true}'
+    ;;
+  tx)
+    payload="$(cat)"; [ -n "$payload" ] || payload='{}'
+    to="$(printf '%s' "$payload" | jq -r '.to // empty')"
+    [ -n "$to" ] || to="$(wallet_cli getnewaddress "" legacy)"
+    amount="$(printf '%s' "$payload" | jq -r '.amount // empty')"
+    [ -n "$amount" ] || fail "tx payload requires amount" 22
+    printf '%s' "$amount" | grep -Eq '^[0-9]+(\.[0-9]{1,8})?$' || fail "Bitcoin amount 格式不正确" 22
+    txid="$(wallet_cli sendtoaddress "$to" "$amount")" || fail "无法发送 Bitcoin regtest 交易" 70
+    mine_confirmations 1
+    jq -cn --arg txid "$txid" --arg to "$to" --arg amount "$amount" '{txid:$txid,to:$to,amount:$amount,confirmed:true}'
+    ;;
+  query)
+    payload="$(cat)"; [ -n "$payload" ] || payload='{}'
+    target="$(printf '%s' "$payload" | jq -r '.target // empty')"
+    [ -n "$target" ] || fail "query target is required" 22
+    case "$target" in
+      chain)
+        cli getblockchaininfo | jq '{chain,blocks,best_block_hash:.bestblockhash}'
+        ;;
+      balance)
+        wallet_cli getbalances | jq '{mine:.mine}'
+        ;;
+      tx:*)
+        cli getrawtransaction "${target#tx:}" true
+        ;;
+      *) fail "unsupported query target" 22 ;;
+    esac
+    ;;
+  *) fail "unknown chain action" 64 ;;
+esac

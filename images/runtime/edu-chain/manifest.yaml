@@ -25,18 +25,33 @@ env_keys:
     - CHAIMIR_EDU_CHAIN_PORT
     - CHAIMIR_EDU_CHAIN_ID
     - CHAIMIR_MAX_BODY_BYTES
+    - CHAIMIR_CHAIN_RPC_URL
   secret: []
 data_driven: true
 capabilities:
-  - chain-runtime
-  - teaching-consensus
-  - protocol-visualization
-  - static-runtime
+  provides:
+    - chain-runtime
+    - teaching-consensus
+    - protocol-visualization
+    - static-runtime
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 runtime:
   eco: edu
   adapter_level: 2
-  default_tool_codes:
-    - code-server
+  native:
+    helper: /usr/local/bin/chaimir-edu-chain
+    profile: edu-chain-http
+    exec_target: sandbox/runtime
+    reset_strategy: recreate_runtime
+    actions:
+      deploy: [/usr/local/bin/chaimir-edu-chain, -adapter, deploy]
+      tx: [/usr/local/bin/chaimir-edu-chain, -adapter, tx]
+      query: [/usr/local/bin/chaimir-edu-chain, -adapter, query]
 ports:
   - name: http
     container_port: 8080
@@ -78,9 +93,12 @@ selftest:
       command:
         - /usr/local/bin/chaimir-edu-chain
         - -selftest
+capability_selftest:
+  deploy_payload:
+    data: chaimir-capability-selftest
+  query_target: chain
 supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

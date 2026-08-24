@@ -157,13 +157,14 @@ func (s *Service) IssueLessonMaterialAccess(ctx context.Context, lessonID int64)
 		mode = storage.DownloadModeStream
 	}
 	token, grant, err := s.files.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
-		TenantID:     id.TenantID,
-		AccountID:    id.AccountID,
-		ObjectRef:    objectRef,
-		Module:       teachingModuleName,
-		ResourceType: lessonMaterialResourceType,
-		ResourceID:   ids.Format(lessonID),
-		Mode:         mode,
+		TenantID:         id.TenantID,
+		ResourceTenantID: id.TenantID,
+		AccountID:        id.AccountID,
+		ObjectRef:        objectRef,
+		Module:           teachingModuleName,
+		ResourceType:     lessonMaterialResourceType,
+		ResourceID:       ids.Format(lessonID),
+		Mode:             mode,
 	})
 	if err != nil {
 		return LessonMaterialAccessDTO{}, apperr.ErrTeachingLessonInvalid.WithCause(err)

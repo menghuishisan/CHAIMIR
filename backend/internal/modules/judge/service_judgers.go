@@ -63,7 +63,7 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
 		}
-		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Target: parsedAssertion.Target})
+		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), Target: parsedAssertion.Target})
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 		}
@@ -95,19 +95,19 @@ func (s *Service) runChainStep(ctx context.Context, task JudgeTask, sandboxID in
 	payload := sanitizeReplayMap(jsonx.ObjectFromAny(step["payload"]))
 	switch op {
 	case "deploy":
-		output, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Payload: jsonx.ObjectFromAny(step["payload"])})
+		output, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), Payload: jsonx.ObjectFromAny(step["payload"])})
 		if err != nil {
 			return nil, err
 		}
 		return &contracts.JudgeReplayAction{Op: op, Payload: payload, Output: sanitizeReplayMap(output)}, nil
 	case "tx":
-		output, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Payload: jsonx.ObjectFromAny(step["payload"])})
+		output, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), Payload: jsonx.ObjectFromAny(step["payload"])})
 		if err != nil {
 			return nil, err
 		}
 		return &contracts.JudgeReplayAction{Op: op, Payload: payload, Output: sanitizeReplayMap(output)}, nil
 	case "reset":
-		if err := s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef}); err != nil {
+		if err := s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task)}); err != nil {
 			return nil, err
 		}
 		return &contracts.JudgeReplayAction{Op: op}, nil
@@ -127,7 +127,7 @@ func (s *Service) judgeFlag(ctx context.Context, task JudgeTask, sandboxID int64
 	}
 	submittedHash := strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.ExtraInput["submitted_flag_hash"]))
 	if target := strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.Expectation["flag_chain_target"])); target != "" {
-		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: task.SourceRef, Target: target})
+		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), Target: target})
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 		}

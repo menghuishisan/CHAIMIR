@@ -121,7 +121,18 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
             <Callout tone="warning">
               激活码等同于首次登录凭据,请通过本人可信的渠道转交,不要在群聊里公开。
             </Callout>
-            <Table columns={codeColumns} data={activationCodes} rowKey={(item) => item.account_id} />
+            <Table
+              columns={codeColumns}
+              data={activationCodes}
+              rowKey={(item) => item.account_id}
+              elevated={false}
+              // <md 换行卡(§6.4.1 规则 3):姓名一行、学工号一行,激活码等宽显示在右
+              mobileCard={(item) => ({
+                title: item.name,
+                meta: <span className="font-mono">{item.no}</span>,
+                badge: <span className="font-mono text-sm text-ink">{item.activation_code}</span>,
+              })}
+            />
           </ModalBody>
           <ModalFooter>
             <Button variant="primary" onClick={() => onCommitted()}>

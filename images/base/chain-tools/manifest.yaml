@@ -14,17 +14,19 @@ labels:
   chaimir.io/sensitivity: build-base
   chaimir.io/scope: build
   chaimir.io/source: build-base
-description: 链工具公共基座镜像。
+description: 仅用于构建运行时 JSON helper 和平台网络诊断的公共基座镜像,不提供沙箱工作区或学生入口。
 source:
   type: build-base
 upstream:
   image: alpine:3.23
+  version: "3.23"
   digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: thin-wrapper
 data_driven: false
 capabilities:
   - toolchain-base
   - blockchain-cli-tooling
+  - runtime-json-helper-build
 ports: []
 local_dev:
   host_mappings: []
@@ -55,10 +57,9 @@ selftest:
       command:
         - bash
         - -lc
-        - "curl --version >/dev/null && jq --version >/dev/null"
+        - "curl --version >/dev/null && jq --version >/dev/null && /usr/local/bin/chaimir-chain --version"
 supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

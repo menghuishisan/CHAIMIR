@@ -1,4 +1,4 @@
-﻿# 本文件声明 infra/paymaster 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 infra/paymaster 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: infra
 name: paymaster
@@ -19,6 +19,7 @@ source:
   type: platform-built
 upstream:
   image: node:24-alpine3.23
+  version: 24-alpine3.23
   digest: sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
   reuse_policy: runtime-base
 env_keys:
@@ -40,10 +41,31 @@ secrets_required:
     runtime_value: secret-or-kms
 data_driven: true
 capabilities:
-  - erc4337-paymaster
+  provides:
+    - erc4337-paymaster
+  requires:
+    - evm-json-rpc
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      entrypoint_address:
+        type: string
+        x-chaimir-env: infra/CHAIMIR_ENTRYPOINT_ADDRESS
+  student_access: private
 infra:
   eco_tags:
     - evm
+  bindings:
+    - name: execution_chain
+      capability: evm-json-rpc
+      endpoint: rpc
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:CHAIMIR_EVM_RPC_URL
   roles:
     - account-abstraction
     - gas-sponsor

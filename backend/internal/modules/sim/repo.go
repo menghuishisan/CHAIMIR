@@ -38,6 +38,7 @@ type TxStore interface {
 	GetPackageByCodeVersion(ctx context.Context, code, version string) (Package, error)
 	GetPackageByID(ctx context.Context, id int64) (Package, error)
 	ListPackages(ctx context.Context, status int16, category, keyword string, authorID int64, limit, offset int32) ([]Package, int64, error)
+	CountPackagesByCategory(ctx context.Context, status int16, category, keyword string, authorID int64) (map[string]int64, error)
 	ListPackageVersions(ctx context.Context, code string) ([]Package, error)
 	CreatePackage(ctx context.Context, pkg Package) (Package, error)
 	UpsertBuiltinPackage(ctx context.Context, pkg Package) (Package, error)
@@ -58,7 +59,8 @@ type TxStore interface {
 	GetSessionWithPackage(ctx context.Context, tenantID, sessionID int64) (SessionWithPackage, error)
 	CountActiveIsolatedSessions(ctx context.Context, tenantID int64) (int64, error)
 	UpdateSessionStatus(ctx context.Context, tenantID, sessionID int64, status int16) (Session, error)
-	ArchiveSessionsBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]Session, error)
+	UpdateSessionAuthorizedAccounts(ctx context.Context, tenantID, sessionID int64, sourceRef string, accountIDs []int64) (Session, error)
+	ArchiveSessionsByScopeRef(ctx context.Context, tenantID int64, scopeRef, sourceRef string) ([]Session, error)
 	GetLastAction(ctx context.Context, tenantID, sessionID int64) (Action, error)
 	GetActionBySeq(ctx context.Context, tenantID, sessionID int64, seq int32) (Action, error)
 	CreateAction(ctx context.Context, action Action) (Action, error)
@@ -142,6 +144,19 @@ func (s *txStore) ListPackages(ctx context.Context, status int16, category, keyw
 	}
 	items, err := packagesFromRows(rows)
 	return items, total, err
+}
+
+// CountPackagesByCategory 按当前列表边界统计仿真包分类。
+func (s *txStore) CountPackagesByCategory(ctx context.Context, status int16, category, keyword string, authorID int64) (map[string]int64, error) {
+	rows, err := s.q.CountSimPackagesByCategory(ctx, sqlcgen.CountSimPackagesByCategoryParams{Column1: status, Column2: category, Column3: keyword, Column4: authorID})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		out[row.Category] = row.Count
+	}
+	return out, nil
 }
 
 // ListPackageVersions 查询同 code 下所有版本。
@@ -372,7 +387,7 @@ func (s *txStore) CreateSession(ctx context.Context, session Session) (Session, 
 	if err != nil {
 		return Session{}, err
 	}
-	row, err := s.q.CreateSimSession(ctx, sqlcgen.CreateSimSessionParams{ID: session.ID, TenantID: session.TenantID, PackageID: session.PackageID, SourceRef: session.SourceRef, OwnerAccountID: session.OwnerAccountID, Seed: session.Seed, InitParams: raw, Compute: session.Compute, Status: session.Status})
+	row, err := s.q.CreateSimSession(ctx, sqlcgen.CreateSimSessionParams{ID: session.ID, TenantID: session.TenantID, PackageID: session.PackageID, SourceRef: session.SourceRef, ScopeRef: session.ScopeRef, OwnerAccountID: session.OwnerAccountID, SharedAccountIds: session.SharedAccountIDs, Seed: session.Seed, InitParams: raw, Compute: session.Compute, Status: session.Status})
 	if err != nil {
 		return Session{}, err
 	}
@@ -411,9 +426,18 @@ func (s *txStore) UpdateSessionStatus(ctx context.Context, tenantID, sessionID i
 	return sessionFromRow(row)
 }
 
-// ArchiveSessionsBySourceRef 按来源归档会话。
-func (s *txStore) ArchiveSessionsBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]Session, error) {
-	rows, err := s.q.ArchiveSimSessionsBySourceRef(ctx, sqlcgen.ArchiveSimSessionsBySourceRefParams{TenantID: tenantID, SourceRef: sourceRef})
+// UpdateSessionAuthorizedAccounts 替换仿真会话共享账号,同时再次校验稳定来源归属。
+func (s *txStore) UpdateSessionAuthorizedAccounts(ctx context.Context, tenantID, sessionID int64, sourceRef string, accountIDs []int64) (Session, error) {
+	row, err := s.q.UpdateSimSessionAuthorizedAccounts(ctx, sqlcgen.UpdateSimSessionAuthorizedAccountsParams{TenantID: tenantID, ID: sessionID, SharedAccountIds: accountIDs, SourceRef: sourceRef})
+	if err != nil {
+		return Session{}, err
+	}
+	return sessionFromRow(row)
+}
+
+// ArchiveSessionsByScopeRef 按生命周期作用域归档会话,同时校验稳定来源归属。
+func (s *txStore) ArchiveSessionsByScopeRef(ctx context.Context, tenantID int64, scopeRef, sourceRef string) ([]Session, error) {
+	rows, err := s.q.ArchiveSimSessionsByScopeRef(ctx, sqlcgen.ArchiveSimSessionsByScopeRefParams{TenantID: tenantID, ScopeRef: scopeRef, SourceRef: sourceRef})
 	if err != nil {
 		return nil, err
 	}

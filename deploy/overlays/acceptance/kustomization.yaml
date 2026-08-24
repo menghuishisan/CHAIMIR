@@ -6,104 +6,27 @@ kind: Kustomization
 
 resources:
   - ../../base
+  - ../../config/external-secret
+  - ../../config/external-secret-middleware
+  - ../../config/kubernetes-secret-store
 
 # 验收所需中间件单实例随集群拉起;SaaS/staging 使用外接托管服务。
 components:
   - ../../components/middleware
 
-# 验收密钥从 deploy/config/secret.env(被 .gitignore 忽略)生成。
-# make dev-up 只校验 config/secret.env 已存在,不会自动生成或覆盖密钥。
-# 生成两份(命名空间隔离):chaimir-system 给应用,chaimir-data 给中间件。同源文件,单一来源。
-secretGenerator:
-  - name: chaimir-secret
-    namespace: chaimir-system
-    envs:
-      - ../../config/secret.env
-  - name: chaimir-data-secret
-    namespace: chaimir-data
-    envs:
-      - ../../config/secret.env
-  - name: postgres-tls
-    namespace: chaimir-data
-    type: kubernetes.io/tls
-    files:
-      - tls.crt=../../config/chaimir-tls/postgres.crt
-      - tls.key=../../config/chaimir-tls/postgres.key
-    options:
-      disableNameSuffixHash: true
-
-# 验收镜像必须使用 Harbor digest,不保留旧 chaimir/*:dev 兼容路径。
-images:
-  - name: chaimir/backend
-    newName: registry.chaimir.io/service/backend
-    digest: sha256:b115d9a05980e656f92f208c149a914e0db4f7e15c67431e520209749ab14bfb
-  - name: chaimir/frontend
-    newName: registry.chaimir.io/service/frontend
-    digest: sha256:3fb22d178f8a7f88f73bd11315e7b6166954683997f5bf04d464d3bf614bf363
-  - name: chaimir/migrate
-    newName: registry.chaimir.io/service/migrate
-    digest: sha256:a052e8c487e0fbc596ccc9b31ab2022b62d5de9cdee95632ba786650c1422065
-  - name: chaimir/cron
-    newName: registry.chaimir.io/service/cron
-    digest: sha256:af96add2d212c284be956c7365d3c697de6fbcd680764a82bb150f8bb0f435e4
-  - name: chaimir/middleware/clamav
-    newName: registry.chaimir.io/middleware/clamav
-    digest: sha256:5eeae8652cff5a00d4321628345bd53bb0488f285e7f038a49cdc4042a3f1445
-  - name: chaimir/middleware/minio
-    newName: registry.chaimir.io/middleware/minio
-    digest: sha256:6bb4539a21e09550a3b2bad4fe4ecca07a655200ff5bbf700158316f094d48c0
-  - name: chaimir/middleware/nats
-    newName: registry.chaimir.io/middleware/nats
-    digest: sha256:c8a1fe28c2b1d1e69189471582973d5b13b79835bcd1ac717f760610f981935b
-  - name: chaimir/middleware/postgres
-    newName: registry.chaimir.io/middleware/postgres
-    digest: sha256:344e6a15f1d778db725d5c6bbbb3ce384872222c1bfe13d003476582b9625da7
-  - name: chaimir/middleware/redis
-    newName: registry.chaimir.io/middleware/redis
-    digest: sha256:55a24360a131488be0c49a877af45d63d4cdd7919cb972765e59e9390324a7e1
+# 验收密钥由统一 ExternalSecret 组件从受控密钥提供方同步,本 overlay 不读取密钥文件。
 
 # 完整验收形态:SaaS 多租户 + 平台层开启。
 configMapGenerator:
-  - name: chaimir-frontend-runtime-config
-    namespace: chaimir-system
-    behavior: replace
-    files:
-      - runtime-config.js=frontend-runtime-config.js
   - name: chaimir-config
     namespace: chaimir-system
     behavior: merge
     literals:
       # test 仅开启验收 seed 与受控短信夹具;集群及应用安全配置仍执行生产基线。
       - APP_ENV=test
-      - DEPLOY_MODE=saas
-      - PLATFORM_LAYER_ENABLED=true
-      - LOG_LEVEL=info
-      - PG_SSLMODE=require
       - SMS_HTTP_ENDPOINT=http://sms-gateway.chaimir-system.svc.cluster.local:18080/sms
       - SMS_HTTP_ENDPOINT_SCOPE=cluster
       - SMS_HTTP_CLUSTER_CIDRS=10.96.0.0/12
       - SMS_TEMPLATE_LOGIN=acceptance-login
       - SMS_TEMPLATE_RESET=acceptance-reset
       - SMS_TEMPLATE_CHANGE_PHONE=acceptance-change-phone
-
-patches:
-  - target:
-      kind: Ingress
-      name: chaimir
-    patch: |-
-      - op: replace
-        path: /spec/rules/0/host
-        value: www.chaimir.io
-      - op: replace
-        path: /spec/tls/0/hosts/0
-        value: www.chaimir.io
-  - target:
-      kind: Ingress
-      name: chaimir-public-deny
-    patch: |-
-      - op: replace
-        path: /spec/rules/0/host
-        value: www.chaimir.io
-      - op: replace
-        path: /spec/tls/0/hosts/0
-        value: www.chaimir.io

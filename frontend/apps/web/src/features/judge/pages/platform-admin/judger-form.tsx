@@ -1,28 +1,32 @@
 // 判题器配置表单(判题器页内)。
 //
-// 后端 parseJudgerResourceSpec 按类型分别要求不同字段:
-//   测试用例 / 静态扫描:必须有链环境三件套 + 执行命令 + 执行目标 + 至少一个执行容器;
-//   链上断言:必须有链环境三件套(命令由断言执行器内置);
-//   flag 比对 / 仿真检查点:不强制链环境,勾了「需要链环境」才要;
-//   人工评分:不能带执行命令(它根本不执行)。
-// 故本表单按类型只渲染该类型真正用到的字段,并按同一口径先在前端校验。
+// 后端把判题器拆成三部分:声明式判题环境组合、受控执行策略、自检样例。
+//   - 组合(composition):主运行时 + 镜像版本 + 组件,访问边界固定为判题私有环境;
+//     服务端编译后冻结成快照,前端只提交声明,不提交也不回填镜像地址、digest 与工作负载。
+//   - 执行策略(resource_spec):初始链状态、判题命令、执行目标、超时与重试。
+//   - 自检样例:随判题器镜像由平台目录同步提供,表单不改动。
 //
-// 链环境编码、镜像版本与工具编码都从已登记的资源里选,不让人手打 ——
-// 打错的结果是判题任务在运行期才失败,那时学生已经交了作业。
+// 需要私有执行容器的类型(测试用例 / 静态扫描)其容器声明来自判题器镜像 manifest,
+// 由平台目录同步写入 —— 表单不提供镜像地址与启动命令的编辑入口
+// (docs/对齐-后端待补齐清单-2026-08-23.md §7.5 / §8.3)。
+//
+// 已冻结的组合快照只作为事实展示,不回填成编辑输入:修改时要重新声明一遍判题环境。
 
 import { useCallback, useId, useMemo, useState } from 'react'
 import {
   JudgerStatus,
   JudgerType,
+  SANDBOX_ACCESS_PROFILE,
   type Judger,
+  type JudgerExecutionSpec,
   type JudgerRequest,
-  type JudgerResourceSpec,
 } from '@chaimir/api-client'
 import {
   Badge,
   Button,
   Callout,
   Checkbox,
+  DescriptionList,
   FormField,
   Input,
   Modal,
@@ -34,11 +38,15 @@ import {
   ModalTitle,
   SegmentedControl,
   Select,
-  Textarea,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { useAsyncResource } from '../../../../hooks'
+import { CompositionDeclarationFields } from '../../../sandbox/components/CompositionDeclarationFields'
+import {
+  compositionDeclarationError,
+  compositionSpecFromDeclaration,
+  emptyCompositionDeclaration,
+} from '../../../sandbox/composition'
 import { judgerStatusLabel, judgerTypeLabel } from '../../../../utils/labels/judge'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { JUDGER_STATUSES, JUDGER_TYPES } from '../../options'
@@ -49,25 +57,15 @@ const CODE_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/
 /** 执行目标规则:pod/container 两段,各自都是受控编码(后端 safeExecTarget)。 */
 const EXEC_TARGET_PATTERN = /^[a-z][a-z0-9-]*[a-z0-9]\/[a-z][a-z0-9-]*[a-z0-9]$/
 
-/** 必须绑定链环境的类型:后端对这三类强制要求链环境三件套。 */
+/** 必须绑定判题环境的类型:后端对这三类强制要求 judge-private 组合。 */
 const RUNTIME_BOUND_TYPES: readonly JudgerType[] = [
   JudgerType.TESTCASE,
   JudgerType.ONCHAIN_ASSERT,
   JudgerType.STATIC_SCAN,
 ]
 
-/** 必须给出执行入口的类型:命令、执行目标与执行容器三者都不能缺。 */
+/** 必须给出执行入口的类型:命令、执行目标与私有执行容器三者都不能缺。 */
 const COMMAND_BOUND_TYPES: readonly JudgerType[] = [JudgerType.TESTCASE, JudgerType.STATIC_SCAN]
-
-/** 执行容器清单骨架:判题在这些容器里跑,跑完即销毁。 */
-const SIDECAR_TEMPLATE = `[
-  {
-    "name": "runner",
-    "image_url": "",
-    "command": ["sleep", "infinity"],
-    "mount_workspace": true
-  }
-]`
 
 export interface JudgerFormModalProps {
   /** 传入即为修改模式;缺省为新增。修改时编码不可变 */
@@ -92,21 +90,15 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
   const [defaultTimeout, setDefaultTimeout] = useState(String(judger?.default_timeout_sec ?? 120))
   const [status, setStatus] = useState(String(judger?.status ?? JudgerStatus.AVAILABLE))
 
-  const [runtimeCode, setRuntimeCode] = useState(spec?.runtime_code ?? '')
-  const [imageVersion, setImageVersion] = useState(spec?.runtime_image_version ?? '')
+  // 判题环境每次都要重新声明:已冻结快照是服务端事实,不作为输入回填(§8.3)
+  const [declaration, setDeclaration] = useState(emptyCompositionDeclaration)
   const [genesisRef, setGenesisRef] = useState(spec?.genesis_ref ?? '')
-  const [toolCodes, setToolCodes] = useState<string[]>(spec?.tool_codes ?? [])
   const [initScriptRef, setInitScriptRef] = useState(spec?.init_script_ref ?? '')
   const [command, setCommand] = useState((spec?.command ?? []).join(' '))
   const [execTarget, setExecTarget] = useState(spec?.exec_target ?? '')
   const [suiteArchiveName, setSuiteArchiveName] = useState(spec?.suite_archive_name ?? '')
   const [timeoutSec, setTimeoutSec] = useState(String(spec?.timeout_sec ?? 0))
   const [maxRetries, setMaxRetries] = useState(String(spec?.max_retries ?? 0))
-  const [sidecarText, setSidecarText] = useState(() =>
-    spec?.execution_sidecars && spec.execution_sidecars.length > 0
-      ? JSON.stringify(spec.execution_sidecars, null, 2)
-      : SIDECAR_TEMPLATE,
-  )
 
   const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
@@ -117,23 +109,9 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
   const needsCommand = COMMAND_BOUND_TYPES.includes(typeValue)
   const isManual = typeValue === JudgerType.MANUAL
 
-  // 链环境与工具从已登记资源里选:选项来自平台自己的登记表,避免手打编码
-  const runtimes = useAsyncResource(() => api.sandbox.listRuntimes(), [], () => false)
-  const tools = useAsyncResource(() => api.sandbox.listTools(), [], () => false)
-
-  const selectedRuntime = useMemo(
-    () => (runtimes.data ?? []).find((item) => item.code === runtimeCode),
-    [runtimeCode, runtimes.data],
-  )
-
-  const images = useAsyncResource(
-    () =>
-      selectedRuntime
-        ? api.sandbox.listRuntimeImages(selectedRuntime.id)
-        : Promise.resolve([]),
-    [selectedRuntime?.id],
-    () => false,
-  )
+  // 私有执行容器由判题器镜像 manifest 提供,表单只带回不编辑
+  const sidecars = useMemo(() => spec?.execution_sidecars ?? [], [spec?.execution_sidecars])
+  const snapshot = spec?.composition_snapshot
 
   const commandList = useMemo(
     () =>
@@ -144,9 +122,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
     [command],
   )
 
-  const sidecarsParsed = useMemo(() => parseSidecars(sidecarText), [sidecarText])
-
-  /** validate 按类型逐项校验,口径与后端 parseJudgerResourceSpec 一致。 */
+  /** validate 按类型逐项校验,口径与后端 parseJudgerExecutionSpec 一致。 */
   const validate = useCallback((): boolean => {
     const timeoutValue = Number(timeoutSec)
     const retriesValue = Number(maxRetries)
@@ -166,8 +142,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
         !Number.isInteger(timeoutValue) || timeoutValue < 0 ? '覆盖超时要是 0 或更大的整数秒' : null,
       maxRetries:
         !Number.isInteger(retriesValue) || retriesValue < 0 ? '重试次数要是 0 或更大的整数' : null,
-      runtimeCode: null,
-      imageVersion: null,
+      composition: null,
       genesisRef: null,
       command: null,
       execTarget: null,
@@ -175,8 +150,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
     }
 
     if (needsRuntime) {
-      next.runtimeCode = runtimeCode.trim() === '' ? '请选择判题时使用的链环境' : null
-      next.imageVersion = imageVersion.trim() === '' ? '请选择链环境的镜像版本' : null
+      next.composition = compositionDeclarationError(declaration) ?? null
       next.genesisRef = genesisRef.trim() === '' ? '请填写初始链状态名称' : null
     }
 
@@ -184,8 +158,11 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
       next.command = commandList.length === 0 ? '请填写判题要执行的命令' : null
       next.execTarget = EXEC_TARGET_PATTERN.test(execTarget.trim())
         ? null
-        : '执行目标写成「组/名称」两段,例如 runner/runner'
-      next.sidecars = sidecarsParsed.error ?? null
+        : '执行目标写成「组/名称」两段,例如 sandbox/testcase-evm'
+      next.sidecars =
+        sidecars.length === 0
+          ? '这类判题器需要判题器镜像提供私有执行容器。请先在平台镜像目录同步该判题器镜像,再回来配置。'
+          : null
     }
 
     if (isManual && commandList.length > 0) {
@@ -197,35 +174,30 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
   }, [
     code,
     commandList,
+    declaration,
     defaultTimeout,
     execTarget,
     executorRef,
     genesisRef,
-    imageVersion,
     isManual,
     maxRetries,
     name,
     needsCommand,
     needsRuntime,
-    runtimeCode,
-    sidecarsParsed.error,
+    sidecars.length,
     timeoutSec,
   ])
 
-  /** buildResourceSpec 只带该类型真正用到的字段,空值一律不写进声明。 */
-  const buildResourceSpec = useCallback((): JudgerResourceSpec => {
-    const out: JudgerResourceSpec = {}
-    if (needsRuntime) {
-      out.runtime_code = runtimeCode.trim()
-      out.runtime_image_version = imageVersion.trim()
-      out.genesis_ref = genesisRef.trim()
-    }
-    if (toolCodes.length > 0) out.tool_codes = toolCodes
+  /** buildExecutionSpec 只带该类型真正用到的执行策略字段,空值一律不写进声明。 */
+  const buildExecutionSpec = useCallback((): JudgerExecutionSpec => {
+    const out: JudgerExecutionSpec = {}
+    if (needsRuntime) out.genesis_ref = genesisRef.trim()
     if (initScriptRef.trim() !== '') out.init_script_ref = initScriptRef.trim()
     if (needsCommand) {
       out.command = commandList
       out.exec_target = execTarget.trim()
-      out.execution_sidecars = sidecarsParsed.sidecars
+      // 私有执行容器原样带回:镜像地址与安全上下文由平台镜像目录提供,表单不改写
+      out.execution_sidecars = sidecars
     }
     if (suiteArchiveName.trim() !== '') out.suite_archive_name = suiteArchiveName.trim()
     if (Number(timeoutSec) > 0) out.timeout_sec = Number(timeoutSec)
@@ -237,17 +209,14 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
     commandList,
     execTarget,
     genesisRef,
-    imageVersion,
     initScriptRef,
     maxRetries,
     needsCommand,
     needsRuntime,
-    runtimeCode,
-    sidecarsParsed.sidecars,
+    sidecars,
     spec?.selftest,
     suiteArchiveName,
     timeoutSec,
-    toolCodes,
   ])
 
   const submit = useCallback(
@@ -267,7 +236,15 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
           executor_ref: executorRef.trim(),
           runtime_required: needsRuntime,
           default_timeout_sec: Number(defaultTimeout),
-          resource_spec: buildResourceSpec(),
+          // 不需要沙箱的判题方式提交空组合:后端要求这几项一律留空
+          composition: needsRuntime
+            ? compositionSpecFromDeclaration({
+                id: `judge:${code.trim()}`,
+                declaration,
+                accessProfile: SANDBOX_ACCESS_PROFILE.JUDGE_PRIVATE,
+              })
+            : emptyComposition(),
+          resource_spec: buildExecutionSpec(),
           status: Number(status) as JudgerStatus,
         }
         if (editing) await api.judge.updateJudger(judger.id, payload)
@@ -281,8 +258,9 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
       }
     },
     [
-      buildResourceSpec,
+      buildExecutionSpec,
       code,
+      declaration,
       defaultTimeout,
       editing,
       executorRef,
@@ -428,7 +406,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
 
             {RUNTIME_BOUND_TYPES.includes(typeValue) ? (
               <Callout tone="info">
-                这种判题方式必须在链环境里跑,下面的链环境三项是必填的。
+                这种判题方式必须在判题私有环境里跑,下面的判题环境是必填的。
               </Callout>
             ) : (
               <Checkbox
@@ -441,61 +419,23 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
             {needsRuntime ? (
               <div className="flex flex-col gap-4 well p-4">
                 <div>
-                  <p className="text-base text-ink">链环境</p>
+                  <p className="text-base text-ink">判题环境</p>
                   <p className="text-sm text-ink-sub">
-                    判题时会按这个运行时与镜像版本起一个一次性沙箱,判完即销毁。
+                    判题时会按这份声明起一个学生不可见的一次性沙箱,判完即销毁。
+                    {editing ? '修改配置要重新声明一遍 —— 已冻结的执行事实不作为输入回填。' : ''}
                   </p>
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <FormField
-                    label="运行时"
-                    htmlFor={`${fieldId}-runtime`}
-                    required
-                    error={errors.runtimeCode}
-                    helper="只列已登记的链运行时"
-                  >
-                    <Select
-                      id={`${fieldId}-runtime`}
-                      options={(runtimes.data ?? []).map((item) => ({
-                        value: item.code,
-                        label: `${item.name} · ${item.code}`,
-                      }))}
-                      value={runtimeCode}
-                      placeholder={(runtimes.data ?? []).length > 0 ? '选择运行时' : '还没有登记运行时'}
-                      disabled={(runtimes.data ?? []).length === 0}
-                      onValueChange={(value) => {
-                        setRuntimeCode(value)
-                        setImageVersion('')
-                      }}
-                    />
-                  </FormField>
-                  <FormField
-                    label="镜像版本"
-                    htmlFor={`${fieldId}-image`}
-                    required
-                    error={errors.imageVersion}
-                    helper={selectedRuntime ? '只列这个运行时下的版本' : '先选运行时'}
-                  >
-                    <Select
-                      id={`${fieldId}-image`}
-                      options={(images.data ?? []).map((item) => ({
-                        value: item.version,
-                        label: item.is_default ? `${item.version}(默认)` : item.version,
-                      }))}
-                      value={imageVersion}
-                      placeholder={
-                        !selectedRuntime
-                          ? '先选运行时'
-                          : (images.data ?? []).length > 0
-                            ? '选择版本'
-                            : '这个运行时还没有镜像版本'
-                      }
-                      disabled={!selectedRuntime || (images.data ?? []).length === 0}
-                      onValueChange={setImageVersion}
-                    />
-                  </FormField>
-                </div>
+                {errors.composition ? (
+                  <Callout tone="danger">{errors.composition}</Callout>
+                ) : null}
+
+                <CompositionDeclarationFields
+                  idPrefix={`${fieldId}-composition`}
+                  value={declaration}
+                  onChange={setDeclaration}
+                  toolsHelper="判题执行时需要用到的工具,不需要就都不选"
+                />
 
                 <FormField
                   label="初始链状态名称"
@@ -516,40 +456,30 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
               </div>
             ) : null}
 
-            <FormField
-              label="需要的工具"
-              helper="判题环境里要用到的工具,只列已登记的。不需要就都不选"
-            >
-              <div className="flex flex-col gap-2">
-                {(tools.data ?? []).length === 0 ? (
-                  <span className="text-sm text-ink-sub">还没有登记工具。</span>
-                ) : (
-                  (tools.data ?? []).map((tool) => (
-                    <Checkbox
-                      key={tool.id}
-                      checked={toolCodes.includes(tool.code)}
-                      label={`${tool.name} · ${tool.code}`}
-                      onCheckedChange={(checked) =>
-                        setToolCodes((current) =>
-                          checked === true
-                            ? [...current, tool.code]
-                            : current.filter((item) => item !== tool.code),
-                        )
-                      }
-                    />
-                  ))
-                )}
-              </div>
-            </FormField>
-
-            {toolCodes.length > 0 ? (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-sm text-ink-sub">已选工具:</span>
-                {toolCodes.map((item) => (
-                  <Badge key={item} tone="jade">
-                    {item}
-                  </Badge>
-                ))}
+            {snapshot ? (
+              <div className="flex flex-col gap-2 well p-4">
+                <div>
+                  <p className="text-base text-ink">当前已冻结的判题环境(只读)</p>
+                  <p className="text-sm text-ink-sub">
+                    这是服务端编译后冻结的事实,判题任务实际使用它。它不会回填成上面的编辑项。
+                  </p>
+                </div>
+                <DescriptionList
+                  dense
+                  columns={2}
+                  items={[
+                    { term: '运行时', description: snapshot.runtime.code, mono: true },
+                    { term: '镜像版本', description: snapshot.runtime.image_version, mono: true },
+                    {
+                      term: '组件数',
+                      description: `${snapshot.components?.length ?? 0} 个`,
+                    },
+                    {
+                      term: '锁定镜像数',
+                      description: `${snapshot.image_closure.length} 个`,
+                    },
+                  ]}
+                />
               </div>
             ) : null}
 
@@ -558,9 +488,11 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                 <div>
                   <p className="text-base text-ink">执行入口</p>
                   <p className="text-sm text-ink-sub">
-                    判题在这些容器里执行指定命令。命令按空格拆成参数,不经过 shell。
+                    判题在判题器镜像提供的私有容器里执行指定命令。命令按空格拆成参数,不经过 shell。
                   </p>
                 </div>
+
+                {errors.sidecars ? <Callout tone="warning">{errors.sidecars}</Callout> : null}
 
                 <FormField
                   label="执行命令"
@@ -573,7 +505,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                     id={`${fieldId}-command`}
                     className="font-mono text-sm"
                     value={command}
-                    placeholder="forge test --json"
+                    placeholder="run-evm-tests"
                     invalid={Boolean(errors.command)}
                     onChange={(event) => setCommand(event.target.value)}
                   />
@@ -585,13 +517,13 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                     htmlFor={`${fieldId}-exec-target`}
                     required
                     error={errors.execTarget}
-                    helper="写成「组/名称」两段,指向下面声明的执行环境"
+                    helper="写成「组/名称」两段,指向判题器镜像声明的私有容器"
                   >
                     <Input
                       id={`${fieldId}-exec-target`}
                       className="font-mono text-sm"
                       value={execTarget}
-                      placeholder="runner/runner"
+                      placeholder="sandbox/testcase-evm"
                       invalid={Boolean(errors.execTarget)}
                       onChange={(event) => setExecTarget(event.target.value)}
                     />
@@ -611,23 +543,20 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   </FormField>
                 </div>
 
-                <FormField
-                  label="执行环境配置"
-                  htmlFor={`${fieldId}-sidecars`}
-                  required
-                  error={errors.sidecars}
-                  helper="评分任务在这些环境中执行,完成后自动清理。至少配置一个"
-                >
-                  <Textarea
-                    id={`${fieldId}-sidecars`}
-                    className="font-mono text-sm"
-                    value={sidecarText}
-                    rows={12}
-                    spellCheck={false}
-                    invalid={Boolean(errors.sidecars)}
-                    onChange={(event) => setSidecarText(event.target.value)}
-                  />
-                </FormField>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-sm text-ink-sub">私有执行容器:</span>
+                  {sidecars.length === 0 ? (
+                    <span className="text-sm text-ink-sub">
+                      还没有。它由判题器镜像随平台镜像目录同步提供,不在这里编辑。
+                    </span>
+                  ) : (
+                    sidecars.map((item, index) => (
+                      <Badge key={index} tone="neutral">
+                        {sidecarName(item) || `容器 ${index + 1}`}
+                      </Badge>
+                    ))
+                  )}
+                </div>
               </div>
             ) : null}
 
@@ -666,39 +595,18 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
   )
 }
 
-/** ParsedSidecars 是执行容器清单的解析结果。 */
-interface ParsedSidecars {
-  sidecars: Record<string, unknown>[]
-  error?: string
+/** emptyComposition 给出「不需要沙箱」时必须提交的空组合:后端要求这三项一律留空。 */
+function emptyComposition(): JudgerRequest['composition'] {
+  return {
+    id: '',
+    primary_runtime: { runtime_code: '', image_version: '' },
+    access_profile: SANDBOX_ACCESS_PROFILE.JUDGE_PRIVATE,
+  }
 }
 
-/**
- * parseSidecars 解析执行容器清单。
- * 后端要求至少一个容器;容器内部字段(镜像签名、资源限制)由后端最终判定,
- * 这里只挡住能在本地确定的错误。
- */
-function parseSidecars(text: string): ParsedSidecars {
-  const trimmed = text.trim()
-  if (trimmed === '') return { sidecars: [], error: '请填写执行环境配置。' }
-
-  let raw: unknown
-  try {
-    raw = JSON.parse(trimmed)
-  } catch {
-    return { sidecars: [], error: '内容不是合法的声明格式,检查是否漏了逗号或引号。' }
-  }
-  if (!Array.isArray(raw)) return { sidecars: [], error: '执行环境配置格式不正确,请按示例填写多个条目。' }
-  if (raw.length === 0) return { sidecars: [], error: '至少要声明一个执行环境。' }
-  for (const item of raw) {
-    const record = typeof item === 'object' && item !== null ? (item as Record<string, unknown>) : undefined
-    if (!record || typeof record.name !== 'string' || record.name.trim() === '') {
-      return { sidecars: [], error: '每个执行环境都要有名称(name)。' }
-    }
-  }
-  return {
-    sidecars: raw.filter(
-      (item): item is Record<string, unknown> =>
-        typeof item === 'object' && item !== null && !Array.isArray(item),
-    ) as Record<string, unknown>[],
-  }
+/** sidecarName 读出私有执行容器的名称,用于只读展示。 */
+function sidecarName(item: unknown): string {
+  if (typeof item !== 'object' || item === null) return ''
+  const name = (item as Record<string, unknown>).name
+  return typeof name === 'string' ? name : ''
 }

@@ -12,7 +12,7 @@
 //   实例本身才是权威,推送只是「该刷新了」的信号,不用推送内容改本地状态。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import {
   FlaskConical,
   FileUp,
@@ -185,6 +185,7 @@ function ExperimentWorkbench({
   onExit,
   onReload,
 }: ExperimentWorkbenchProps) {
+  const navigate = useNavigate()
   const [codeRef, setCodeRef] = useState<WorkspaceCodeRef>()
   const [activeSandboxId, setActiveSandboxId] = useState<string>()
   const [reportOpen, setReportOpen] = useState(false)
@@ -216,6 +217,20 @@ function ExperimentWorkbench({
   const currentSandbox = useMemo(
     () => sandboxes.find((item) => item.sandbox_id === activeSandboxId) ?? sandboxes[0],
     [activeSandboxId, sandboxes]
+  )
+
+  /** openSimulation 打开实例已经授权的仿真会话,退出后回到当前实验实例。 */
+  const openSimulation = useCallback(
+    (sim: SimSessionRef) => {
+      const query = new URLSearchParams({
+        version: sim.version,
+        session: sim.session_id,
+        return_experiment: experiment.id,
+        return_instance: instance.instance_id,
+      })
+      navigate(`/student/simulations/${encodeURIComponent(sim.package_code)}/workspace?${query.toString()}`)
+    },
+    [experiment.id, instance.instance_id, navigate],
   )
 
   // 进度订阅:topic 由实例给出,连的是 M10 统一业务 WS;推送只当刷新信号
@@ -300,10 +315,11 @@ function ExperimentWorkbench({
   )
 
   const paused = instance.status === ExperimentInstanceStatus.PAUSED
+  const released = instance.status === ExperimentInstanceStatus.RELEASED
+  const resumable = paused || released
   const finished =
     instance.status === ExperimentInstanceStatus.FINISHED ||
-    instance.status === ExperimentInstanceStatus.RECYCLED ||
-    instance.status === ExperimentInstanceStatus.RELEASED
+    instance.status === ExperimentInstanceStatus.RECYCLED
 
   const mintedCount = results.filter((result) => result.passed).length
 
@@ -363,11 +379,14 @@ function ExperimentWorkbench({
             sims={sims}
             currentSandboxId={currentSandbox?.sandbox_id}
             onPickSandbox={setActiveSandboxId}
+            onOpenSimulation={openSimulation}
           />
         }
         leftLabel="实验说明"
         stage={
-          currentSandbox ? (
+          released ? (
+            <ReleasedEnvironmentStage />
+          ) : currentSandbox ? (
             <SandboxIdeWorkspace
               key={currentSandbox.sandbox_id}
               sandboxId={currentSandbox.sandbox_id}
@@ -414,7 +433,7 @@ function ExperimentWorkbench({
               <Button variant="on-dark" size="sm" leftIcon={RefreshCw} onClick={onReload}>
                 刷新状态
               </Button>
-              {paused ? (
+              {resumable ? (
                 <Button
                   variant="on-dark"
                   size="sm"
@@ -422,7 +441,7 @@ function ExperimentWorkbench({
                   loading={busy}
                   onClick={() => void control('resume')}
                 >
-                  恢复实验
+                  {released ? '重建实验环境' : '恢复实验'}
                 </Button>
               ) : (
                 <Button
@@ -463,6 +482,7 @@ interface ExperimentBriefProps {
   sims: SimSessionRef[]
   currentSandboxId?: string
   onPickSandbox: (sandboxId: string) => void
+  onOpenSimulation: (sim: SimSessionRef) => void
 }
 
 /**
@@ -476,6 +496,7 @@ function ExperimentBrief({
   sims,
   currentSandboxId,
   onPickSandbox,
+  onOpenSimulation,
 }: ExperimentBriefProps) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
@@ -531,14 +552,17 @@ function ExperimentBrief({
           <h3 className="text-xs font-medium text-on-dark-sub">仿真场景</h3>
           <ul className="flex flex-col gap-1">
             {sims.map((sim) => (
-              <li
-                key={sim.session_id}
-                className="rounded-md border border-dark-line bg-dark-surface px-2 py-1.5"
-              >
-                <p className="truncate text-sm text-on-dark">{sim.component_id}</p>
-                <p className="truncate font-mono text-xs text-on-dark-sub">
-                  {sim.package_code} · {sim.version}
-                </p>
+              <li key={sim.session_id}>
+                <button
+                  type="button"
+                  onClick={() => onOpenSimulation(sim)}
+                  className="hit-target flex w-full flex-col rounded-md border border-dark-line bg-dark-surface px-2 py-1.5 text-left hover:bg-dark-elevated focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
+                >
+                  <span className="truncate text-sm text-on-dark">{sim.component_id}</span>
+                  <span className="truncate font-mono text-xs text-on-dark-sub">
+                    {sim.package_code} · {sim.version}
+                  </span>
+                </button>
               </li>
             ))}
           </ul>
@@ -563,6 +587,20 @@ function NoEnvironmentStage({ sims }: { sims: SimSessionRef[] }) {
         {sims.length > 0
           ? '本阶段用仿真场景推演。去仿真实验室打开对应场景,推演完回到右栏判分。'
           : '本阶段不需要动手写代码,按右栏的检查点判分推进即可。'}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * ReleasedEnvironmentStage 说明计算资源已按生命周期释放,代码和实验进度仍可恢复。
+ */
+function ReleasedEnvironmentStage() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+      <p className="text-base text-on-dark">实验环境已释放</p>
+      <p className="max-w-md text-sm text-on-dark-sub">
+        已保存的代码、检查点和报告不会丢失。点击下方“重建实验环境”后可以继续实验。
       </p>
     </div>
   )

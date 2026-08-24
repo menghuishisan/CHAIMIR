@@ -302,18 +302,18 @@ func (s *txStore) CreateTeachingGradeEventOutbox(ctx context.Context, id, tenant
 	if err != nil {
 		return TeachingGradeEventOutbox{}, err
 	}
-	return teachingGradeEventOutboxFromFields(row.ID, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil), nil
+	return teachingGradeEventOutboxFromFields(row.ID, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.NextAttemptAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil), nil
 }
 
 // ClaimPendingTeachingGradeEventOutbox 跨租户领取待发布或失败待重试的成绩事件。
-func (s *txStore) ClaimPendingTeachingGradeEventOutbox(ctx context.Context, limit, maxAttempts int32, staleBefore time.Time, leaseToken string, leaseUntil time.Time) ([]TeachingGradeEventOutbox, error) {
-	rows, err := s.q.ClaimPendingTeachingGradeEventOutbox(ctx, sqlcgen.ClaimPendingTeachingGradeEventOutboxParams{LeaseToken: leaseToken, LeaseUntil: timex.RequiredTimestamptz(leaseUntil), StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit, MaxAttempts: maxAttempts})
+func (s *txStore) ClaimPendingTeachingGradeEventOutbox(ctx context.Context, limit int32, staleBefore time.Time, leaseToken string, leaseUntil time.Time) ([]TeachingGradeEventOutbox, error) {
+	rows, err := s.q.ClaimPendingTeachingGradeEventOutbox(ctx, sqlcgen.ClaimPendingTeachingGradeEventOutboxParams{LeaseToken: leaseToken, LeaseUntil: timex.RequiredTimestamptz(leaseUntil), StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]TeachingGradeEventOutbox, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, teachingGradeEventOutboxFromFields(row.ID, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil))
+		out = append(out, teachingGradeEventOutboxFromFields(row.ID, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.NextAttemptAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil))
 	}
 	return out, nil
 }
@@ -324,7 +324,7 @@ func (s *txStore) MarkTeachingGradeEventOutboxPublished(ctx context.Context, ten
 	if err != nil {
 		return TeachingGradeEventOutbox{}, err
 	}
-	return teachingGradeEventOutboxFromFields(row.ID, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil), nil
+	return teachingGradeEventOutboxFromFields(row.ID, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.NextAttemptAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil), nil
 }
 
 // MarkTeachingGradeEventOutboxFailed 标记成绩事件发布失败并保留脱敏原因。
@@ -333,7 +333,7 @@ func (s *txStore) MarkTeachingGradeEventOutboxFailed(ctx context.Context, tenant
 	if err != nil {
 		return TeachingGradeEventOutbox{}, err
 	}
-	return teachingGradeEventOutboxFromFields(row.ID, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil), nil
+	return teachingGradeEventOutboxFromFields(row.ID, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.NextAttemptAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil), nil
 }
 
 // Stats 查询教学统计摘要。

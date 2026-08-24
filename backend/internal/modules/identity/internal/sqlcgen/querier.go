@@ -80,6 +80,7 @@ type Querier interface {
 	PlatformStats(ctx context.Context) (PlatformStatsRow, error)
 	PromoteClassStudentProfiles(ctx context.Context, arg PromoteClassStudentProfilesParams) error
 	PromoteClasses(ctx context.Context, arg PromoteClassesParams) (int64, error)
+	QueryAuditActionFacets(ctx context.Context, arg QueryAuditActionFacetsParams) ([]QueryAuditActionFacetsRow, error)
 	QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) ([]QueryAuditLogsRow, error)
 	RecordPasswordFailure(ctx context.Context, arg RecordPasswordFailureParams) (Account, error)
 	RejectTenantApplication(ctx context.Context, arg RejectTenantApplicationParams) (TenantApplication, error)

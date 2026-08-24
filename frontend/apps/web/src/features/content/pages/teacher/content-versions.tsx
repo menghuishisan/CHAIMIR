@@ -127,9 +127,30 @@ export function ContentVersionsModal({ item, onClose, onChanged }: ContentVersio
               emptyIcon={History}
               emptyTitle="暂无版本记录"
               emptyDescription="这道题目只有当前版本。"
-              skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+              skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
             >
-              {(list) => <Table columns={columns} data={list} rowKey={(version) => version.id} />}
+              {(list) => (
+                <Table
+                  columns={columns}
+                  data={list}
+                  rowKey={(version) => version.id}
+                  elevated={false}
+                  // <md 换行卡(§6.4.1 规则 3):版本号一行、可见范围与被引用次数一行,状态在右
+                  mobileCard={(version) => ({
+                    title:
+                      version.version === item.version
+                        ? `${version.version}(当前查看)`
+                        : version.version,
+                    meta: `${contentVisibilityLabel(version.visibility)} · ${contentAuthorTypeLabel(version.author_type)} · 被引用 ${version.usage_count} 次 · ${formatShortDateTime(version.updated_at)}`,
+                    badge: (
+                      <StatusIndicator
+                        tone={contentStatusTone(version.status)}
+                        label={contentStatusLabel(version.status)}
+                      />
+                    ),
+                  })}
+                />
+              )}
             </ResourceState>
           ) : null}
 

@@ -6,16 +6,16 @@
 //
 // 最近一次成功备份的时间是最该盯的数字,故单独放在指标带首位。
 
-import { CircleCheck, CircleX, Database, Save } from 'lucide-react'
+import { Save } from 'lucide-react'
 import { BackupStatus, type BackupRecord } from '@chaimir/api-client'
 import {
   Breadcrumb,
   Callout,
+  DataPanel,
+  MetricStrip,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
-  Stat,
   StatusIndicator,
   Table,
   type TableColumn,
@@ -104,62 +104,82 @@ export default function PlatformBackupsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }, { label: '备份记录' }]} />}
+        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="备份记录"
         description="备份由运维侧的定时任务执行,这里核对结果。连续失败要尽快查原因。"
         icon={Save}
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat
-            label="最近一次成功"
-            value={latest ? formatDateTime(latest.started_at) : '暂无成功记录'}
-            icon={CircleCheck}
-            hint={latest ? formatFileSize(latest.size_bytes) : '备份成功后显示时间与大小'}
-          />
-          <Stat label="已成功" value={succeededCount ?? '—'} icon={CircleCheck} />
-          <Stat
-            label="已失败"
-            value={failedCount ?? '—'}
-            icon={CircleX}
-            hint={failedCount === 0 ? '暂无失败' : '需要查原因'}
-          />
-          <Stat label="进行中" value={runningCount ?? '—'} icon={Database} />
-        </div>
-      </PageSection>
+      {/*
+        归族:资源列表族(§6.5.3 第 ①)。备份记录是「在一批同类记录里核对」,
+        故指标退为一行内联摘要,不占 Stat 大卡 —— 那是看板族才保留的形态。
+        四项都取服务端全量口径(§6.5.4),不用当前页切片统计。
+      */}
+      <MetricStrip
+        label="备份结果摘要"
+        className="mb-5"
+        items={[
+          {
+            label: '最近一次成功',
+            value: latest ? formatDateTime(latest.started_at) : '暂无',
+            hint: latest ? formatFileSize(latest.size_bytes) : '备份成功后显示时间与大小',
+          },
+          { label: '已成功', value: succeededCount ?? '—', hint: '不受下方翻页影响' },
+          {
+            label: '已失败',
+            value: failedCount ?? '—',
+            hint: failedCount === 0 ? '暂无失败' : '需要查原因',
+          },
+          { label: '进行中', value: runningCount ?? '—', hint: '正在执行的备份' },
+        ]}
+      />
 
-      <PageSection
-        title="执行记录"
-        description={`共 ${backups.total} 条,按开始时间从新到旧排列。`}
+      {/* 数据表与分页同处一块抬起片(§6.5.2)。本页没有筛选项:后端列表只按状态过滤,
+          而四种状态的条数已在上方摘要里给出,再排一条筛选井只是把同一件事说第二遍。 */}
+      <DataPanel
+        label="执行记录"
+        footer={
+          <Pagination
+            page={backups.page}
+            pageSize={backups.pageSize}
+            total={backups.total}
+            onPageChange={backups.setPage}
+          />
+        }
       >
-        <div className="flex flex-col gap-4">
-          <ResourceState
-            resource={backups}
-            emptyIcon={Save}
-            emptyTitle="还没有备份记录"
-            emptyDescription="备份任务执行后会在这里留下记录。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-          >
-            {(page) => (
-              <>
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={backups.page}
-                  pageSize={backups.pageSize}
-                  total={backups.total}
-                  onPageChange={backups.setPage}
-                />
-              </>
-            )}
-          </ResourceState>
+        <ResourceState
+          resource={backups}
+          emptyIcon={Save}
+          emptyTitle="还没有备份记录"
+          emptyDescription="备份任务执行后会在这里留下记录。"
+          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+        >
+          {(page) => (
+            <Table
+              columns={columns}
+              data={page.list}
+              rowKey={(item) => item.id}
+              elevated={false}
+              // <md 换行卡(§6.4.1 规则 3):开始时间一行、类型与大小耗时一行,结果在右
+              mobileCard={(item) => ({
+                title: formatDateTime(item.started_at),
+                meta: `${backupTypeLabel(item.type)} · ${formatFileSize(item.size_bytes)} · ${durationText(item)}`,
+                badge: (
+                  <StatusIndicator
+                    tone={backupStatusTone(item.status)}
+                    label={backupStatusLabel(item.status)}
+                  />
+                ),
+              })}
+            />
+          )}
+        </ResourceState>
+      </DataPanel>
 
-          <Callout tone="info">
-            备份不能从界面触发:执行要在集群侧带着数据库凭据进行,这条链路不对浏览器开放。
-            需要临时备份请联系运维。
-          </Callout>
-        </div>
-      </PageSection>
+      <Callout tone="info" className="mt-4">
+        备份不能从界面触发:执行要在集群侧带着数据库凭据进行,这条链路不对浏览器开放。
+        需要临时备份请联系运维。
+      </Callout>
     </PageScaffold>
   )
 }

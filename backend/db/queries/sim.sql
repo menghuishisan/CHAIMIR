@@ -29,6 +29,16 @@ WHERE ($1::smallint = 0 OR status = $1)
   AND ($3::text = '' OR code ILIKE '%' || $3 || '%' OR name ILIKE '%' || $3 || '%')
   AND ($4::bigint = 0 OR (author_type = 2 AND author_id = $4));
 
+-- name: CountSimPackagesByCategory :many
+SELECT category, COUNT(DISTINCT code)::bigint AS count
+FROM sim_package
+WHERE ($1::smallint = 0 OR status = $1)
+  AND ($2::text = '' OR category = $2)
+  AND ($3::text = '' OR code ILIKE '%' || $3 || '%' OR name ILIKE '%' || $3 || '%')
+  AND ($4::bigint = 0 OR (author_type = 2 AND author_id = $4))
+GROUP BY category
+ORDER BY category;
+
 -- name: ListSimPackageVersions :many
 SELECT id, code, version, name, category, compute, scale_limit, bundle_key, bundle_hash, entry,
        backend_adapter, backend_config, interaction_schema, code_trace, author_type, author_id, status, created_at, updated_at
@@ -206,17 +216,17 @@ WHERE id = $1 AND result = 1
 RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at;
 
 -- name: CreateSimSession :one
-INSERT INTO sim_session (id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
-RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at;
+INSERT INTO sim_session (id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
+RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at;
 
 -- name: GetSimSession :one
-SELECT id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at
+SELECT id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at
 FROM sim_session
 WHERE tenant_id = $1 AND id = $2;
 
 -- name: GetSimSessionWithPackage :one
-SELECT s.id, s.tenant_id, s.package_id, s.source_ref, s.owner_account_id, s.seed, s.init_params, s.compute, s.status, s.created_at, s.updated_at,
+SELECT s.id, s.tenant_id, s.package_id, s.source_ref, s.scope_ref, s.owner_account_id, s.shared_account_ids, s.seed, s.init_params, s.compute, s.status, s.created_at, s.updated_at,
        p.code, p.version, p.name, p.category, p.scale_limit, p.bundle_key, p.bundle_hash, p.entry, p.backend_adapter, p.backend_config,
        p.interaction_schema, p.status AS package_status
 FROM sim_session s
@@ -237,13 +247,19 @@ SET status = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
   AND status IN (1, 2, 3, 4)
   AND $3 IN (2, 3, 4, 5, 6)
-RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at;
+RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at;
 
--- name: ArchiveSimSessionsBySourceRef :many
+-- name: UpdateSimSessionAuthorizedAccounts :one
+UPDATE sim_session
+SET shared_account_ids = $3, updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND source_ref = $4
+RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at;
+
+-- name: ArchiveSimSessionsByScopeRef :many
 UPDATE sim_session
 SET status = 5, updated_at = now()
-WHERE tenant_id = $1 AND source_ref = $2 AND status IN (1, 2, 3, 4)
-RETURNING id, tenant_id, package_id, source_ref, owner_account_id, seed, init_params, compute, status, created_at, updated_at;
+WHERE tenant_id = $1 AND scope_ref = $2 AND source_ref = $3 AND status IN (1, 2, 3, 4)
+RETURNING id, tenant_id, package_id, source_ref, scope_ref, owner_account_id, shared_account_ids, seed, init_params, compute, status, created_at, updated_at;
 
 -- name: GetLastSimAction :one
 SELECT id, tenant_id, session_id, seq, at_tick, event_type, payload, created_at

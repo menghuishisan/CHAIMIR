@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# 本文件提供沙箱学生工作区的目录、文件、归档、脚本和终端入口。
+set -euo pipefail
+
+# fail 输出用户不可见的稳定错误标识,具体上下文由调用侧结构化记录。
+fail() {
+  printf '%s\n' "$1" >&2
+  exit 1
+}
+
+# workspace_root 校验工作区根目录存在并返回规范化路径。
+workspace_root() {
+  local root="$1"
+  [[ -d "$root" ]] || fail "workspace_not_found"
+  realpath "$root"
+}
+
+# workspace_path 把相对路径约束在工作区根目录内,禁止目录穿越。
+workspace_path() {
+  local root="$1"
+  local input="${2:-.}"
+  local resolved
+  if [[ "$input" == /* ]]; then
+    resolved="$(realpath -m "$input")"
+  else
+    resolved="$(realpath -m "$root/$input")"
+  fi
+  case "$resolved" in
+    "$root"|"$root"/*) printf '%s\n' "$resolved" ;;
+    *) fail "workspace_path_outside_root" ;;
+  esac
+}
+
+# read_file 输出工作区内文件内容。
+read_file() {
+  local root path
+  root="$(workspace_root "$1")"
+  path="$(workspace_path "$root" "$2")"
+  [[ -f "$path" ]] || fail "workspace_file_not_found"
+  cat -- "$path"
+}
+
+# write_file 从标准输入原子写入工作区文件。
+write_file() {
+  local root path parent temporary
+  root="$(workspace_root "$1")"
+  path="$(workspace_path "$root" "$2")"
+  parent="$(dirname "$path")"
+  mkdir -p -- "$parent"
+  temporary="$(mktemp "$parent/.chaimir-write.XXXXXX")"
+  trap 'rm -f -- "$temporary"' EXIT
+  cat >"$temporary"
+  mv -f -- "$temporary" "$path"
+  trap - EXIT
+}
+
+# relative_path 返回目标相对工作区根目录的规范路径。
+relative_path() {
+  local root="$1"
+  local path="$2"
+  if [[ "$path" == "$root" ]]; then
+    printf '.\n'
+    return
+  fi
+  printf '%s\n' "${path#"$root"/}"
+}
+
+# list_files 按稳定顺序输出后端文件接口约定的 JSON 目录条目。
+list_files() {
+  local root path
+  root="$(workspace_root "$1")"
+  path="$(workspace_path "$root" "${2:-.}")"
+  [[ -d "$path" ]] || fail "workspace_directory_not_found"
+  local first=true item name relative size is_dir
+  printf '['
+  while IFS= read -r -d '' item; do
+    name="$(basename "$item")"
+    relative="$(relative_path "$root" "$item")"
+    if [[ -d "$item" ]]; then
+      size=0
+      is_dir=true
+    else
+      size="$(stat -c '%s' "$item")"
+      is_dir=false
+    fi
+    if [[ "$first" == false ]]; then
+      printf ','
+    fi
+    first=false
+    jq -cn --arg name "$name" --arg relative_path "$relative" --argjson is_dir "$is_dir" --argjson size "$size" \
+      '{name:$name,relative_path:$relative_path,is_dir:$is_dir,size:$size}'
+  done < <(find "$path" -mindepth 1 -maxdepth 1 -print0 | LC_ALL=C sort -z)
+  printf ']'
+}
+
+# pack_tar 把工作区内指定路径归档到标准输出。
+pack_tar() {
+  local root path relative
+  root="$(workspace_root "$1")"
+  path="$(workspace_path "$root" "${2:-.}")"
+  [[ -e "$path" ]] || fail "workspace_path_not_found"
+  relative="${path#"$root"/}"
+  if [[ "$path" == "$root" ]]; then
+    tar -C "$root" --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf - .
+    return
+  fi
+  tar -C "$root" --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf - -- "$relative"
+}
+
+# unpack_tar 从标准输入解包到工作区指定目录,并拒绝绝对路径和上级目录条目。
+unpack_tar() {
+  local root destination archive
+  root="$(workspace_root "$1")"
+  destination="$(workspace_path "$root" "${2:-.}")"
+  mkdir -p -- "$destination"
+  archive="$(mktemp /tmp/chaimir-unpack.XXXXXX.tar)"
+  trap 'rm -f -- "$archive"' EXIT
+  cat >"$archive"
+  if tar -tf "$archive" | awk 'BEGIN { bad=0 } /(^|\/)\.\.($|\/)|^\// { bad=1 } END { exit bad ? 0 : 1 }'; then
+    fail "workspace_archive_invalid_path"
+  fi
+  tar -C "$destination" --no-same-owner --no-same-permissions -xf "$archive"
+}
+
+# run_script 在工作区内执行指定脚本,工作目录也必须位于同一工作区。
+run_script() {
+  local root workdir script
+  root="$(workspace_root "$1")"
+  workdir="$(workspace_path "$root" "${2:-.}")"
+  script="$(workspace_path "$root" "$3")"
+  [[ -d "$workdir" ]] || fail "workspace_workdir_not_found"
+  [[ -f "$script" ]] || fail "workspace_script_not_found"
+  cd "$workdir"
+  exec bash "$script"
+}
+
+# terminal 在工作区根目录启动受控交互 shell。
+terminal() {
+  local root
+  root="$(workspace_root "$1")"
+  cd "$root"
+  exec bash --noprofile --norc
+}
+
+# selftest 验证目录、写入、读取、列举、归档和越界拒绝能力。
+selftest() {
+  local root archive
+  root="$(mktemp -d /tmp/chaimir-workspace.XXXXXX)"
+  archive="$(mktemp /tmp/chaimir-workspace.XXXXXX.tar)"
+  trap 'rm -rf -- "$root" "$archive"' EXIT
+  printf 'ok\n' | write_file "$root" "src/main.txt"
+  [[ "$(read_file "$root" "src/main.txt")" == "ok" ]] || fail "workspace_selftest_read_failed"
+  [[ "$(list_files "$root" "src" | jq -r '.[0].name')" == "main.txt" ]] || fail "workspace_selftest_list_failed"
+  pack_tar "$root" "src" >"$archive"
+  rm -rf -- "$root/src"
+  unpack_tar "$root" "." <"$archive"
+  [[ "$(read_file "$root" "src/main.txt")" == "ok" ]] || fail "workspace_selftest_unpack_failed"
+  if workspace_path "$root" "../outside" >/dev/null 2>&1; then
+    fail "workspace_selftest_traversal_failed"
+  fi
+  printf 'workspace_selftest_ok\n'
+}
+
+# main 只接受平台声明的固定动作,不解释任意子命令。
+main() {
+  local action="${1:-}"
+  case "$action" in
+    read) [[ $# -eq 3 ]] || fail "workspace_invalid_arguments"; read_file "$2" "$3" ;;
+    write) [[ $# -eq 3 ]] || fail "workspace_invalid_arguments"; write_file "$2" "$3" ;;
+    list) [[ $# -ge 2 && $# -le 3 ]] || fail "workspace_invalid_arguments"; list_files "$2" "${3:-.}" ;;
+    pack) [[ $# -ge 2 && $# -le 3 ]] || fail "workspace_invalid_arguments"; pack_tar "$2" "${3:-.}" ;;
+    unpack) [[ $# -ge 2 && $# -le 3 ]] || fail "workspace_invalid_arguments"; unpack_tar "$2" "${3:-.}" ;;
+    run) [[ $# -eq 4 ]] || fail "workspace_invalid_arguments"; run_script "$2" "$3" "$4" ;;
+    terminal) [[ $# -eq 2 ]] || fail "workspace_invalid_arguments"; terminal "$2" ;;
+    selftest) [[ $# -eq 1 ]] || fail "workspace_invalid_arguments"; selftest ;;
+    *) fail "workspace_unknown_action" ;;
+  esac
+}
+
+main "$@"

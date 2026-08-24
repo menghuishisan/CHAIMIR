@@ -1,7 +1,11 @@
 // contest model 文件定义 M8 领域模型和内部快照。
 package contest
 
-import "time"
+import (
+	"time"
+
+	"chaimir/internal/contracts"
+)
 
 // Contest 是竞赛定义领域模型。
 type Contest struct {
@@ -25,16 +29,18 @@ type Contest struct {
 
 // ContestProblem 是竞赛内题目引用和赛内配置。
 type ContestProblem struct {
-	ID           int64
-	TenantID     int64
-	ContestID    int64
-	ItemCode     string
-	ItemVersion  string
-	Score        int32
-	DynamicScore *DynamicScoreConfig
-	BattleConfig *BattleRuntimeConfig
-	BattleRule   int16
-	Seq          int32
+	ID                  int64
+	TenantID            int64
+	ContestID           int64
+	ItemCode            string
+	ItemVersion         string
+	Score               int32
+	DynamicScore        *DynamicScoreConfig
+	BattleConfig        *BattleRuntimeConfig
+	BattleRule          int16
+	Seq                 int32
+	CompositionDigest   string
+	CompositionSnapshot *contracts.SandboxCompositionSnapshot
 }
 
 // Team 是参赛队伍,个人赛也以单人队建模。
@@ -60,6 +66,29 @@ type TeamMember struct {
 	JoinedAt       time.Time
 }
 
+// ContestAccessGrant 是 M8 为跨校竞赛队员签发的沙箱范围授权。
+type ContestAccessGrant struct {
+	ID              int64
+	TenantID        int64
+	ContestID       int64
+	TeamID          int64
+	SandboxID       int64
+	MemberTenantID  int64
+	MemberAccountID int64
+	Capabilities    []string
+	SourceRef       string
+	GrantVersion    int64
+	Status          int16
+	ExpiresAt       time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+const (
+	contestAccessGrantActive  int16 = 1
+	contestAccessGrantRevoked int16 = 2
+)
+
 // SolveSubmission 是一次解题赛提交。
 type SolveSubmission struct {
 	ID           int64
@@ -67,6 +96,7 @@ type SolveSubmission struct {
 	ContestID    int64
 	ProblemID    int64
 	TeamID       int64
+	SubmitterTenantID int64
 	SubmitterID  int64
 	ContentRef   map[string]any
 	SourceRef    string
@@ -101,6 +131,7 @@ type BattleMatch struct {
 	EntryAID     int64
 	EntryBID     int64
 	SourceRef    string
+	ScopeRef     string
 	SandboxRef   string
 	JudgeTaskRef string
 	Result       int16
@@ -199,21 +230,25 @@ type VulnSource struct {
 
 // VulnProblem 是漏洞题转化草稿和预验证记录。
 type VulnProblem struct {
-	ID                 int64
-	TenantID           int64
-	SourceID           int64
-	ExternalRef        string
-	Title              string
-	Level              int16
-	RuntimeMode        int16
-	DraftBody          map[string]any
-	PrevalidateStatus  int16
-	PrevalidateDetail  map[string]any
-	ContentItemCode    string
-	ContentItemVersion string
-	Status             int16
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	ID                  int64
+	TenantID            int64
+	SourceID            int64
+	ExternalRef         string
+	Title               string
+	Level               int16
+	RuntimeMode         int16
+	DraftBody           map[string]any
+	PrevalidateStatus   int16
+	PrevalidateDetail   map[string]any
+	CompositionDigest   string
+	CompositionSnapshot *contracts.SandboxCompositionSnapshot
+	InitCodeRef         string
+	InitScriptRef       string
+	ContentItemCode     string
+	ContentItemVersion  string
+	Status              int16
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // ContestStatsSnapshot 是 M8 输出给聚合层的统计投影。

@@ -11,26 +11,31 @@ import (
 )
 
 // ListPapers 查询试卷分页。
-func (s *Service) ListPapers(ctx context.Context, page, size int) ([]PaperDTO, int64, int, int, error) {
+func (s *Service) ListPapers(ctx context.Context, page, size int) ([]PaperDTO, int64, int, int, map[string]map[string]int64, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, 0, 0, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
 	var papers []Paper
 	var total int64
+	var byMode map[string]int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		papers, total, err = tx.ListPapers(ctx, id.TenantID, page, size)
+		if err != nil {
+			return err
+		}
+		byMode, err = tx.CountPapersByGenMode(ctx, id.TenantID)
 		return err
 	}); err != nil {
-		return nil, 0, 0, 0, mapPaperError(err)
+		return nil, 0, 0, 0, nil, mapPaperError(err)
 	}
 	out := make([]PaperDTO, 0, len(papers))
 	for _, paper := range papers {
 		out = append(out, paperDTO(paper))
 	}
-	return out, total, page, size, nil
+	return out, total, page, size, map[string]map[string]int64{"gen_mode": byMode}, nil
 }
 
 // CreatePaper 创建手动或随机试卷。

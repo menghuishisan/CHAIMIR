@@ -19,6 +19,7 @@ source:
   type: platform-built
 upstream:
   image: hyperledger/fabric-tools:2.5.16
+  version: 2.5.16
   digest: sha256:760022c3eed97e83dd7a2e1a04b68d04ece3675988063e9dbdc7b0b993a8d95a
   rebuild_image: base/fabric-tools
   runtime_image: ubuntu:22.04
@@ -26,10 +27,26 @@ upstream:
   reuse_policy: self-developed-judger
 data_driven: true
 capabilities:
-  - judger
-  - fabric-chaincode-testcase-runner
+  provides:
+    - judger
+    - fabric-chaincode-testcase-runner
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 judger:
   type: testcase
+  runtime_code: fabric
+  genesis_ref: genesis/fabric/platform-selftest.json
+  command:
+    - run-fabric-tests
+  exec_target: sandbox/testcase-fabric
+  env:
+    - name: CHAIMIR_TEST_SCRIPT
+      value: /judge-private/tests/run.sh
+  suite_archive_name: platform-selftest.tar
   modes:
     - fabric-chaincode
   output_contract:

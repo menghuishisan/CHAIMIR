@@ -74,6 +74,39 @@ func (q *Queries) CountPapers(ctx context.Context, tenantID int64) (int64, error
 	return column_1, err
 }
 
+const countPapersByGenMode = `-- name: CountPapersByGenMode :many
+SELECT gen_mode, COUNT(*)::bigint AS count
+FROM paper
+WHERE tenant_id = $1 AND deleted_at IS NULL
+GROUP BY gen_mode
+ORDER BY gen_mode
+`
+
+type CountPapersByGenModeRow struct {
+	GenMode int16 `json:"gen_mode"`
+	Count   int64 `json:"count"`
+}
+
+func (q *Queries) CountPapersByGenMode(ctx context.Context, tenantID int64) ([]CountPapersByGenModeRow, error) {
+	rows, err := q.db.Query(ctx, countPapersByGenMode, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountPapersByGenModeRow{}
+	for rows.Next() {
+		var i CountPapersByGenModeRow
+		if err := rows.Scan(&i.GenMode, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createContentBody = `-- name: CreateContentBody :one
 INSERT INTO content_body (item_id, tenant_id, body, sensitive_fields, created_at, updated_at)
 VALUES ($1, $2, $3, $4, now(), now())

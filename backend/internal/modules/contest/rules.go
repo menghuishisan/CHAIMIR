@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
 )
@@ -98,23 +100,12 @@ func validateBattleConfig(cfg *BattleRuntimeConfig) (*BattleRuntimeConfig, error
 		return nil, apperr.ErrContestProblemInvalid
 	}
 	normalized := BattleRuntimeConfig{
-		RuntimeCode:         strings.TrimSpace(cfg.RuntimeCode),
-		RuntimeImageVersion: strings.TrimSpace(cfg.RuntimeImageVersion),
+		ExecutionProfile: strings.TrimSpace(cfg.ExecutionProfile),
+		EntryRoles:       append([]int16(nil), cfg.EntryRoles...),
+		ReplayProfile:    cfg.ReplayProfile,
 	}
-	if normalized.RuntimeCode == "" || normalized.RuntimeImageVersion == "" {
+	if err := normalized.Validate(); err != nil {
 		return nil, apperr.ErrContestProblemInvalid
-	}
-	seen := make(map[string]struct{}, len(cfg.ToolCodes))
-	for _, raw := range cfg.ToolCodes {
-		toolCode := strings.TrimSpace(raw)
-		if toolCode == "" {
-			return nil, apperr.ErrContestProblemInvalid
-		}
-		if _, exists := seen[toolCode]; exists {
-			continue
-		}
-		seen[toolCode] = struct{}{}
-		normalized.ToolCodes = append(normalized.ToolCodes, toolCode)
 	}
 	return &normalized, nil
 }
@@ -284,26 +275,29 @@ func validateVulnProblemInput(req ImportVulnProblemRequest) (ImportVulnProblemRe
 	if len(req.DraftBody) == 0 {
 		return ImportVulnProblemRequest{}, apperr.ErrContestVulnProblemInvalid
 	}
+	if !validateVulnDraftBody(req.DraftBody) {
+		return ImportVulnProblemRequest{}, apperr.ErrContestVulnProblemInvalid
+	}
 	return req, nil
+}
+
+// validateVulnDraftBody 确保漏洞草稿固化时具备完整判题配置,不允许导入后才发现无法判题。
+func validateVulnDraftBody(body map[string]any) bool {
+	judgeConfig, ok := body["judge_config"].(map[string]any)
+	return ok && strings.TrimSpace(jsonx.StringFromAny(judgeConfig["judger_code"])) != "" && jsonx.Int32FromAny(judgeConfig["max_score"], 0) > 0
 }
 
 // validatePrevalidateRequest 校验漏洞预验证运行时参数。
 func validatePrevalidateRequest(req PrevalidateRequest) (PrevalidateRequest, error) {
-	req.RuntimeCode = strings.TrimSpace(req.RuntimeCode)
-	req.RuntimeImageVersion = strings.TrimSpace(req.RuntimeImageVersion)
 	req.InitCodeRef = strings.TrimSpace(req.InitCodeRef)
 	req.InitScriptRef = strings.TrimSpace(req.InitScriptRef)
-	if req.RuntimeCode == "" || req.RuntimeImageVersion == "" {
+	req.Composition.ID = strings.TrimSpace(req.Composition.ID)
+	req.Composition.PrimaryRuntime.Code = strings.TrimSpace(req.Composition.PrimaryRuntime.Code)
+	req.Composition.PrimaryRuntime.ImageVersion = strings.TrimSpace(req.Composition.PrimaryRuntime.ImageVersion)
+	if req.Composition.ID == "" || req.Composition.PrimaryRuntime.Code == "" || req.Composition.PrimaryRuntime.ImageVersion == "" {
 		return PrevalidateRequest{}, apperr.ErrContestVulnProblemInvalid
 	}
-	outTools := make([]string, 0, len(req.ToolCodes))
-	for _, code := range req.ToolCodes {
-		code = strings.TrimSpace(code)
-		if code != "" {
-			outTools = append(outTools, code)
-		}
-	}
-	req.ToolCodes = outTools
+	req.Composition.AccessProfile = contracts.SandboxAccessVulnerabilityPrevalidate
 	return req, nil
 }
 

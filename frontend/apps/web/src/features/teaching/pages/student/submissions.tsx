@@ -18,13 +18,13 @@ import {
   Card,
   CardBody,
   CardHeader,
+  DataPanel,
   DescriptionList,
+  MetricStrip,
   PageBody,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
-  Stat,
   StatusIndicator,
   Table,
   type TableColumn,
@@ -110,7 +110,6 @@ export default function StudentSubmissionsPage() {
             items={[
               { label: '我的课程', href: '/student/courses' },
               { label: '课程详情', href: `/student/courses/${courseId}` },
-              { label: '作业结果' },
             ]}
           />
         }
@@ -128,25 +127,40 @@ export default function StudentSubmissionsPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="提交次数" value={submissions.total} icon={ClipboardCheck} />
-          <Stat
-            label="最新得分"
-            value={latest ? formatScore(latest.final_score) : '—'}
-            icon={ClipboardCheck}
-            hint={latest ? submissionStatusLabel(latest.status) : '尚未提交'}
-          />
-          <Stat
-            label="最近提交"
-            value={latest ? formatDateTime(latest.submitted_at) : '—'}
-            icon={ClipboardCheck}
-          />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):主体是提交记录与右侧反馈,不是三个数字。
+          「最新得分/最近提交」取后端排序后的首条(submitted_at DESC),不是页面切片统计 */}
+      <MetricStrip
+        label="提交摘要"
+        className="mb-5"
+        items={[
+          { label: '提交次数', value: submissions.total, hint: '含尚未批改的提交' },
+          {
+            label: '最新得分',
+            value: latest ? formatScore(latest.final_score) : '—',
+            hint: latest ? submissionStatusLabel(latest.status) : '尚未提交',
+          },
+          {
+            label: '最近提交',
+            value: latest ? formatDateTime(latest.submitted_at) : '—',
+            hint: latest?.is_late ? '这次是迟交' : '按时提交',
+          },
+        ]}
+      />
 
       <PageBody rail={latest ? <FeedbackCard submission={latest} /> : undefined}>
-        <PageSection title="提交记录" description={`共 ${submissions.total} 次提交`}>
+        {/* 数据表与分页同处一块抬起片(§6.5.2)。本页不排筛选井:同一份作业的提交按次数排,
+            条数少且顺序固定,没有可筛的维度(接口也只接分页参数) */}
+        <DataPanel
+          label="提交记录"
+          footer={
+            <Pagination
+              page={submissions.page}
+              pageSize={submissions.pageSize}
+              total={submissions.total}
+              onPageChange={submissions.setPage}
+            />
+          }
+        >
           <ResourceState
             resource={submissions}
             emptyIcon={ClipboardCheck}
@@ -160,21 +174,30 @@ export default function StudentSubmissionsPage() {
                 去作答
               </Button>
             }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (
-              <div className="flex flex-col gap-4">
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={submissions.page}
-                  pageSize={submissions.pageSize}
-                  total={submissions.total}
-                  onPageChange={submissions.setPage}
-                />
-              </div>
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):第几次一行、时间与最终得分一行,批改状态在右
+                mobileCard={(item) => ({
+                  title: `第 ${item.attempt_no} 次提交`,
+                  meta: `${formatDateTime(item.submitted_at)} · 最终得分 ${formatScore(item.final_score)}`,
+                  badge: (
+                    <StatusIndicator
+                      tone={submissionStatusTone(item.status)}
+                      label={submissionStatusLabel(item.status)}
+                      loading={item.status === SubmissionStatus.PENDING}
+                    />
+                  ),
+                })}
+              />
             )}
           </ResourceState>
-        </PageSection>
+        </DataPanel>
       </PageBody>
     </PageScaffold>
   )

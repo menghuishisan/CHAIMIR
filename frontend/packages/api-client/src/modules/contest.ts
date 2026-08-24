@@ -1,7 +1,9 @@
 // Contest API：对齐后端 M8 竞赛模块唯一 HTTP 契约。
 
 import { ApiClient, encodePathSegment } from '../client'
-import type { ContestStatus, VulnProblemStatus } from '../constants/contest'
+import { API_BASE_PATH } from '../constants'
+import type { IdentityApi } from './identity'
+import type { ContestStatus, VulnPrevalidateStatus, VulnProblemStatus } from '../constants/contest'
 import type { PaginatedResponse, SnowflakeID } from '../types/common'
 import type {
   BattleEntryRequest,
@@ -20,6 +22,16 @@ import type {
   ContestRequest,
   ContestSubmission,
   ContestSubmitRequest,
+  ContestSandboxResponse,
+  ContestSandboxFileReadResponse,
+  ContestSandboxFileListResponse,
+  ContestSandboxFileWriteRequest,
+  ContestSandboxFileWriteResponse,
+  ContestSandboxFileSaveResponse,
+  ContestSandboxCommandToolRunRequest,
+  ContestSandboxCommandToolRunResponse,
+  ContestSandboxChainRequest,
+  ContestSandboxChainResponse,
   EnvRequest,
   EnvSummary,
   JoinTeamRequest,
@@ -41,7 +53,10 @@ export class ContestApi {
   /**
    * constructor 注入统一 ApiClient,确保竞赛接口共用鉴权、trace_id 和错误处理。
    */
-  constructor(private client: ApiClient) {}
+  constructor(
+    private client: ApiClient,
+    private identity: IdentityApi
+  ) {}
 
   /**
    * 获取竞赛列表。
@@ -52,6 +67,16 @@ export class ContestApi {
     size?: number
   }): Promise<PaginatedResponse<Contest>> {
     return this.client.get('/contest/contests', params)
+  }
+
+  /**
+   * getContest 读取单场赛事的教师视图。
+   * 与学生单读的区别是**没有非草稿门槛** —— 草稿态赛事正是教师要编排的那些,
+   * 所以教师侧必须走这条,不能借学生接口(它会把草稿判成不存在)。
+   * 详情、发布与运营动作都以这条返回的对象为当前版本。
+   */
+  async getContest(contestId: string): Promise<Contest> {
+    return this.client.get(`/contest/contests/${encodePathSegment(contestId)}`)
   }
 
   /**
@@ -181,6 +206,102 @@ export class ContestApi {
       `/contest/contests/${encodePathSegment(contestId)}/problems/${encodePathSegment(problemId)}/env`,
       data
     )
+  }
+
+  /** 读取竞赛授权网关中的沙箱摘要。跨校竞赛工作区只允许走 M8 网关。 */
+  async getSandboxInstance(sandboxId: string): Promise<ContestSandboxResponse> {
+    return this.client.get(`/contest/sandboxes/${encodePathSegment(sandboxId)}`)
+  }
+
+  /** 获取竞赛授权沙箱终端 WebSocket 地址。 */
+  getSandboxTerminalWsUrl(sandboxId: string, container?: string): string {
+    return this.client.wsURL(
+      `/contest/sandboxes/${encodePathSegment(sandboxId)}/terminal`,
+      container ? { container } : undefined
+    )
+  }
+
+  /** 获取竞赛授权沙箱准备进度 WebSocket 地址。 */
+  getSandboxProgressWsUrl(sandboxId: string): string {
+    return this.client.wsURL(`/contest/sandboxes/${encodePathSegment(sandboxId)}/progress`)
+  }
+
+  /** 读取竞赛授权沙箱工作区文件。 */
+  async readSandboxFile(sandboxId: string, path: string): Promise<ContestSandboxFileReadResponse> {
+    return this.client.get(`/contest/sandboxes/${encodePathSegment(sandboxId)}/files`, { path })
+  }
+
+  /** 列出竞赛授权沙箱工作区目录。 */
+  async listSandboxFiles(sandboxId: string, path = '.'): Promise<ContestSandboxFileListResponse> {
+    return this.client.get(`/contest/sandboxes/${encodePathSegment(sandboxId)}/files`, {
+      mode: 'list',
+      path,
+    })
+  }
+
+  /** 写入竞赛授权沙箱工作区文件。 */
+  async writeSandboxFile(
+    sandboxId: string,
+    data: ContestSandboxFileWriteRequest
+  ): Promise<ContestSandboxFileWriteResponse> {
+    return this.client.put(`/contest/sandboxes/${encodePathSegment(sandboxId)}/files`, data)
+  }
+
+  /** 持久化竞赛授权沙箱工作区。 */
+  async saveSandboxFiles(sandboxId: string): Promise<ContestSandboxFileSaveResponse> {
+    return this.client.post(`/contest/sandboxes/${encodePathSegment(sandboxId)}/files/save`)
+  }
+
+  /** 执行竞赛授权沙箱命令工具。 */
+  async runSandboxCommandTool(
+    sandboxId: string,
+    toolCode: string,
+    data: ContestSandboxCommandToolRunRequest
+  ): Promise<ContestSandboxCommandToolRunResponse> {
+    return this.client.post(
+      `/contest/sandboxes/${encodePathSegment(sandboxId)}/command-tools/${encodePathSegment(toolCode)}/run`,
+      data
+    )
+  }
+
+  /** 执行竞赛授权沙箱链部署。 */
+  async sandboxChainDeploy(
+    sandboxId: string,
+    data: ContestSandboxChainRequest
+  ): Promise<ContestSandboxChainResponse> {
+    return this.client.post(`/contest/sandboxes/${encodePathSegment(sandboxId)}/chain/deploy`, data)
+  }
+
+  /** 执行竞赛授权沙箱链交易。 */
+  async sandboxChainSendTx(
+    sandboxId: string,
+    data: ContestSandboxChainRequest
+  ): Promise<ContestSandboxChainResponse> {
+    return this.client.post(`/contest/sandboxes/${encodePathSegment(sandboxId)}/chain/tx`, data)
+  }
+
+  /** 查询竞赛授权沙箱链状态。 */
+  async sandboxChainQuery(
+    sandboxId: string,
+    target: string
+  ): Promise<ContestSandboxChainResponse> {
+    return this.client.get(`/contest/sandboxes/${encodePathSegment(sandboxId)}/chain/query`, { target })
+  }
+
+  /** 获取竞赛授权沙箱网页工具代理地址。 */
+  async getSandboxToolProxyUrl(
+    sandboxId: string,
+    toolCode: string,
+    proxyPath = '',
+    toolOrigin: string
+  ): Promise<string> {
+    const normalizedPath = normalizeProxyPath(proxyPath)
+    const encodedSandbox = encodePathSegment(sandboxId)
+    const encodedTool = encodePathSegment(toolCode)
+    const pathPrefix = `${API_BASE_PATH}/contest/sandboxes/${encodedSandbox}/tools/${encodedTool}`
+    const path = `${pathPrefix}/${normalizedPath}`
+    const { ticket } = await this.identity.issueBrowserAccessTicket(pathPrefix)
+    return this.client.browserURLAtOrigin(toolOrigin, path, { ticket })
   }
 
   /**
@@ -355,10 +476,14 @@ export class ContestApi {
 
   /**
    * 查询漏洞题草稿。
+   * `status` 过滤的是草稿/固化状态,`prevalidate_status` 过滤的是预验证结果 ——
+   * 两者是不同的列,出题人最常用的分堆是后者(验过 / 没验过)。
+   * 两个参数都是 `0=不限`,由服务端过滤,`total` 与筛选同口径。
    */
   async listVulnProblems(params?: {
     source_id?: SnowflakeID
     status?: VulnProblemStatus
+    prevalidate_status?: VulnPrevalidateStatus
     page?: number
     size?: number
   }): Promise<PaginatedResponse<VulnProblem>> {
@@ -393,4 +518,37 @@ export class ContestApi {
   async finalizeVulnProblem(problemId: string): Promise<VulnProblem> {
     return this.client.post(`/contest/vuln-problems/${encodePathSegment(problemId)}/finalize`)
   }
+}
+
+/** 将浏览器代理路径约束为不含查询、片段或路径逃逸的编码路径。 */
+function normalizeProxyPath(proxyPath: string): string {
+  const normalized = proxyPath.trim().replace(/^\/+/, '')
+  if (/[?#\\]/.test(normalized) || hasControlCharacter(normalized)) {
+    throw new Error('工具代理路径包含不允许的字符')
+  }
+  const segments = normalized
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => {
+      let decoded: string
+      try {
+        decoded = decodeURIComponent(segment)
+      } catch {
+        throw new Error('工具代理路径包含无效编码')
+      }
+      if (
+        decoded === '.' ||
+        decoded === '..' ||
+        /[\\/?#]/.test(decoded) ||
+        hasControlCharacter(decoded)
+      ) {
+        throw new Error('工具代理路径包含不允许的路径段')
+      }
+      return encodeURIComponent(decoded)
+    })
+  return segments.join('/')
+}
+
+function hasControlCharacter(value: string): boolean {
+  return [...value].some((char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f)
 }

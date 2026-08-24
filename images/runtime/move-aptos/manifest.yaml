@@ -1,4 +1,4 @@
-# 本文件声明 runtime/move-aptos 镜像的职责、端口、安全、资源和供应链约束。
+﻿# 本文件声明 runtime/move-aptos 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: runtime
 name: move-aptos
@@ -19,6 +19,7 @@ source:
   type: thin-wrapper
 upstream:
   image: aptoslabs/tools:aptos-node-v1.46.2
+  version: aptos-node-v1.46.2
   digest: sha256:af715f809bd12769ba53750f81a1eb8384b312babd472ef6216001652600a326
   runtime_libs_image: debian:13.5-slim
   runtime_libs_digest: sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2
@@ -27,14 +28,19 @@ upstream:
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
-  - chain-runtime
-  - aptos-localnet
-  - move-dev
+  provides:
+    - chain-runtime
+    - aptos-localnet
+    - move-dev
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 runtime:
   eco: aptos
-  adapter_level: 2
-  default_tool_codes:
-    - code-server
+  adapter_level: 1
 ports:
   - name: rest
     container_port: 8080
@@ -81,4 +87,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

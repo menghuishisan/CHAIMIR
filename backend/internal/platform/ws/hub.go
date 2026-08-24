@@ -38,10 +38,11 @@ type Conn struct {
 	session SessionKey
 }
 
-// SessionKey 标识一条需要单端互斥的连接主体。
+// SessionKey 标识一条需要单端互斥的连接主体；Scope 允许同一账号在不同受控资源上独立连接和精确撤销。
 type SessionKey struct {
 	TenantID  int64
 	AccountID int64
+	Scope     string
 }
 
 // HubOptions 描述 WebSocket 连接的统一生命周期边界。
@@ -366,6 +367,34 @@ func (h *Hub) CloseSession(session SessionKey) error {
 		return nil
 	}
 	return conn.closeWithControl(websocket.ClosePolicyViolation, "session_replaced")
+}
+
+// CloseAll 在服务进入 draining 状态时关闭全部 WebSocket 连接,让客户端重新连接到仍然就绪的副本。
+func (h *Hub) CloseAll(reason string) error {
+	if h == nil {
+		return nil
+	}
+	h.mu.RLock()
+	connections := make(map[*Conn]struct{})
+	for _, conn := range h.sessions {
+		if conn != nil {
+			connections[conn] = struct{}{}
+		}
+	}
+	for _, topicConnections := range h.topics {
+		for conn := range topicConnections {
+			if conn != nil {
+				connections[conn] = struct{}{}
+			}
+		}
+	}
+	h.mu.RUnlock()
+	for conn := range connections {
+		if err := conn.closeWithControl(websocket.CloseGoingAway, reason); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // writeLoop 把服务端广播顺序写入客户端连接。

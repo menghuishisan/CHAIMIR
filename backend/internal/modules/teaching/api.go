@@ -130,7 +130,11 @@ func (a teachingAPI) listCourses(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListCourses(c.Request.Context(), CourseListFilter{Role: c.Query("role"), Status: status, Page: page, Size: size})
+	isShared, ok := httpx.QueryInt16(c, "is_shared", httpx.QueryIntRule{Default: 0, Min: 0, Max: 2, HasMax: true})
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListCourses(c.Request.Context(), CourseListFilter{Role: c.Query("role"), Status: status, IsShared: isShared, Page: page, Size: size})
 	httpx.WritePage(c, out, total, p, s, err)
 }
 
@@ -583,7 +587,11 @@ func (a teachingAPI) listSubmissions(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListSubmissions(c.Request.Context(), id, status, page, size)
+	isLate, ok := httpx.QueryInt16(c, "is_late", httpx.QueryIntRule{Default: 0, Min: 0, Max: 2, HasMax: true})
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListSubmissions(c.Request.Context(), id, status, isLate, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
 }
 

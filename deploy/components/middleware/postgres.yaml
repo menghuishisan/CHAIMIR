@@ -64,7 +64,7 @@ spec:
           env:
             # 引用 chaimir-data 命名空间内的配置/密钥(ConfigMap/Secret 命名空间隔离,
             # 不能跨命名空间引用 chaimir-system 的 chaimir-config/chaimir-secret)。
-            # chaimir-data-config / chaimir-data-secret 由 overlay 从同源文件生成,保证单一来源。
+            # chaimir-data-config 由统一 config component 生成,密钥由 ExternalSecret 同步。
             - name: POSTGRES_DB
               valueFrom:
                 configMapKeyRef:

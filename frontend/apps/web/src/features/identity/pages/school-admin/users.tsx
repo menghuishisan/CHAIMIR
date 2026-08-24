@@ -33,6 +33,7 @@ import {
   Button,
   Callout,
   Checkbox,
+  DataPanel,
   FilterBar,
   FilterField,
   IconButton,
@@ -42,6 +43,7 @@ import {
   MenuItem,
   MenuSeparator,
   MenuTrigger,
+  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -55,7 +57,6 @@ import {
   Pagination,
   SegmentedControl,
   Select,
-  Stat,
   StatusIndicator,
   Table,
   toast,
@@ -347,7 +348,7 @@ export default function SchoolAdminUsersPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '用户与组织' }, { label: '账号管理' }]} />}
+        kicker={<Breadcrumb items={[{ label: '用户与组织' }]} />}
         title="账号管理"
         description="开通教师与学生账号、维护状态、授予管理员权限。批量开通请用导入。"
         icon={Users}
@@ -363,18 +364,28 @@ export default function SchoolAdminUsersPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="账号总数" value={totalCount ?? '—'} icon={Users} hint="不受下方筛选影响" />
-          <Stat label="待激活" value={pendingCount ?? '—'} icon={UserPlus} hint="尚未设置密码" />
-          <Stat label="正常" value={activeCount ?? '—'} icon={UserCheck} />
-          <Stat label="已停用" value={disabledCount ?? '—'} icon={CircleSlash} />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是账号列表,大卡会把表格推到折叠线以下 */}
+      <MetricStrip
+        label="账号总量摘要"
+        className="mb-5"
+        items={[
+          { label: '账号总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
+          { label: '待激活', value: pendingCount ?? '—', hint: '尚未设置密码' },
+          { label: '正常', value: activeCount ?? '—', hint: '可正常登录' },
+          { label: '已停用', value: disabledCount ?? '—', hint: '不能登录,数据保留' },
+        ]}
+      />
 
-      <PageSection title="账号列表" description={`共 ${accounts.total} 个账号`}>
-        <div className="flex flex-col gap-4">
-          <FilterBar
+      {/* 动作失败就近内联(§6.7 C),排在数据区之前 */}
+      {actionError ? (
+        <Callout tone="danger" className="mb-4">
+          {actionError}
+        </Callout>
+      ) : null}
+
+      <DataPanel
+        label="账号列表"
+        filter={          <FilterBar
             label="账号筛选"
             onSubmit={() => setSearchTerm(keyword.trim())}
             submitLabel="搜索"
@@ -421,29 +432,38 @@ export default function SchoolAdminUsersPage() {
               />
             </FilterField>
           </FilterBar>
-          {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
-          {selected.size > 0 ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 well p-3">
-              <span className="text-sm text-ink">已选择 {selected.size} 个账号</span>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => setBatchAction('disable')}>
-                  批量停用
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => setBatchAction('restore')}>
-                  批量恢复
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
-                  取消选择
-                </Button>
-              </div>
+        }
+        footer={
+          <Pagination
+            page={accounts.page}
+            pageSize={accounts.pageSize}
+            total={accounts.total}
+            onPageChange={accounts.setPage}
+          />
+        }
+      >
+        {/* 批量动作条:选中后出现在数据区顶部,紧贴它所操作的那批行 */}
+        {selected.size > 0 ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-surface-sunken px-4 py-2.5">
+            <span className="text-sm text-ink">已选择 {selected.size} 个账号</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => setBatchAction('disable')}>
+                批量停用
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setBatchAction('restore')}>
+                批量恢复
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+                取消选择
+              </Button>
             </div>
-          ) : null}
+          </div>
+        ) : null}
 
-          <ResourceState
-            resource={accounts}
-            emptyIcon={Users}
-            emptyTitle={
+        <ResourceState
+          resource={accounts}
+          emptyIcon={Users}
+          emptyTitle={
               statusFilter || roleFilter || classFilter || searchTerm ? '没有匹配的账号' : '还没有账号'
             }
             emptyDescription={
@@ -463,22 +483,29 @@ export default function SchoolAdminUsersPage() {
                 </div>
               )
             }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-          >
-            {(page) => (
-              <>
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={accounts.page}
-                  pageSize={accounts.pageSize}
-                  total={accounts.total}
-                  onPageChange={accounts.setPage}
-                />
-              </>
-            )}
-          </ResourceState>
-        </div>
-      </PageSection>
+          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+        >
+          {(page) => (
+            <Table
+              columns={columns}
+              data={page.list}
+              rowKey={(item) => item.id}
+              elevated={false}
+              // <md 换行卡(§6.4.1 规则 3):姓名一行、学工号与身份一行、状态在右
+              mobileCard={(item) => ({
+                title: item.name,
+                meta: `${item.no ?? '—'} · ${baseIdentityLabel(item.base_identity)}`,
+                badge: (
+                  <StatusIndicator
+                    tone={accountStatusTone(item.status)}
+                    label={accountStatusLabel(item.status)}
+                  />
+                ),
+              })}
+            />
+          )}
+        </ResourceState>
+      </DataPanel>
 
       <PageSection
         title="导入模板"

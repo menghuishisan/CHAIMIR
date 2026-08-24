@@ -4,7 +4,7 @@
 
 import { Users } from 'lucide-react'
 import type { ExperimentGroup } from '@chaimir/api-client'
-import { Badge, Card, CardBody, CardHeader, Skeleton } from '@chaimir/ui'
+import { Badge, Card, CardBody, CardHeader, DescriptionList, Skeleton } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
@@ -40,19 +40,19 @@ export function ExperimentGroupCard({ groupId }: ExperimentGroupCardProps) {
 /**
  * GroupMembers 列出小组名称与成员分工。
  * 成员用学号无法从本接口取得(只回 student_id),故按分工呈现 —— 内部编号不进界面。
+ * 只读属性型页内子视图用 DescriptionList(§6.5.5 B),不自己拼一套键值排布。
  */
 function GroupMembers({ group }: { group: ExperimentGroup }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="text-base font-medium text-ink">{group.name}</div>
-      <div className="flex flex-col gap-2">
-        {group.members.map((member, index) => (
-          <div key={member.id} className="flex items-center justify-between gap-2">
-            <span className="text-sm text-ink-sub">成员 {index + 1}</span>
-            <Badge tone="neutral">{member.role || '未分工'}</Badge>
-          </div>
-        ))}
-      </div>
+      <DescriptionList
+        dense
+        items={group.members.map((member, index) => ({
+          term: `成员 ${index + 1}`,
+          description: <Badge tone="neutral">{member.role || '未分工'}</Badge>,
+        }))}
+      />
       <p className="text-xs text-ink-faint">共 {group.members.length} 名成员</p>
     </div>
   )

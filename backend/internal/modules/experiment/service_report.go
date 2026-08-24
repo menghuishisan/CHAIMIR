@@ -276,13 +276,14 @@ func (s *Service) IssueReportAccess(ctx context.Context, reportID int64) (Report
 		return ReportAccessDTO{}, err
 	}
 	token, grant, err := s.files.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
-		TenantID:     id.TenantID,
-		AccountID:    id.AccountID,
-		ObjectRef:    report.ContentRef,
-		Module:       experimentModuleName,
-		ResourceType: experimentReportResource,
-		ResourceID:   ids.Format(report.InstanceID),
-		Mode:         storage.DownloadModeDownload,
+		TenantID:         id.TenantID,
+		ResourceTenantID: id.TenantID,
+		AccountID:        id.AccountID,
+		ObjectRef:        report.ContentRef,
+		Module:           experimentModuleName,
+		ResourceType:     experimentReportResource,
+		ResourceID:       ids.Format(report.InstanceID),
+		Mode:             storage.DownloadModeDownload,
 	})
 	if err != nil {
 		return ReportAccessDTO{}, apperr.ErrExperimentReportInvalid.WithCause(err)
@@ -300,7 +301,11 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 		return ReportDTO{}, err
 	}
 	req.Comment = strings.TrimSpace(req.Comment)
-	if err := validateManualScore(req.ManualScore); err != nil {
+	if req.ManualScore == nil {
+		return ReportDTO{}, apperr.ErrExperimentScoreInvalid
+	}
+	manualScore := *req.ManualScore
+	if err := validateManualScore(manualScore); err != nil {
 		return ReportDTO{}, err
 	}
 	var report ExperimentReport
@@ -322,7 +327,7 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 		if err := s.ensureTeacherCanManage(ctx, id.AccountID, exp); err != nil {
 			return err
 		}
-		report, err = tx.GradeReport(ctx, id.TenantID, reportID, req.ManualScore, req.Comment)
+		report, err = tx.GradeReport(ctx, id.TenantID, reportID, manualScore, req.Comment)
 		if err != nil {
 			return err
 		}
@@ -353,5 +358,5 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 	if err != nil {
 		return ReportDTO{}, err
 	}
-	return reportDTOFromModel(report, profiles), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.report.grade", auditTargetReport, report.ID, map[string]any{"manual_score": req.ManualScore})
+	return reportDTOFromModel(report, profiles), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "experiment.report.grade", auditTargetReport, report.ID, map[string]any{"manual_score": manualScore})
 }

@@ -31,15 +31,18 @@ type JudgeSubmitRequest struct {
 	ItemCode    string `json:"item_code"`
 	ItemVersion string `json:"item_version"`
 	// CodeStorageKey/CodeHash 仅代码类判题器必填;Flag、仿真检查点、人工评分和 reuse 链上断言必须留空。
-	CodeStorageKey   string         `json:"code_storage_key"`
-	CodeHash         string         `json:"code_hash"`
-	SubmitterID      int64          `json:"submitter_id"`
-	SourceRef        string         `json:"source_ref"`
-	SourceOwnerID    int64          `json:"source_owner_id"`
-	SourceCourseID   int64          `json:"source_course_id"`
-	SourceScope      string         `json:"source_scope"`
-	SandboxMode      string         `json:"sandbox_mode"`
-	TargetSandboxRef string         `json:"target_sandbox_ref"`
+	CodeStorageKey    string `json:"code_storage_key"`
+	CodeHash          string `json:"code_hash"`
+	SubmitterTenantID int64  `json:"submitter_tenant_id"`
+	SubmitterID       int64  `json:"submitter_id"`
+	SourceRef         string `json:"source_ref"`
+	SourceOwnerID     int64  `json:"source_owner_id"`
+	SourceCourseID    int64  `json:"source_course_id"`
+	SourceScope       string `json:"source_scope"`
+	SandboxMode       string `json:"sandbox_mode"`
+	TargetSandboxRef  string `json:"target_sandbox_ref"`
+	// SandboxSourceRef 是 reuse 模式目标沙箱真实来源;任务 SourceRef 仍保持本次判题事件唯一。
+	SandboxSourceRef string         `json:"sandbox_source_ref"`
 	ExtraInput       map[string]any `json:"extra_input"`
 	Priority         int16          `json:"priority"`
 }
@@ -78,12 +81,13 @@ type JudgeTaskResult struct {
 
 // JudgeTaskInfo 是评测引擎向调用方暴露的任务摘要。
 type JudgeTaskInfo struct {
-	TaskID      int64           `json:"task_id"`
-	TenantID    int64           `json:"tenant_id"`
-	SourceRef   string          `json:"source_ref"`
-	SubmitterID int64           `json:"submitter_id"`
-	Status      int16           `json:"status"`
-	Result      JudgeTaskResult `json:"result"`
+	TaskID            int64           `json:"task_id"`
+	TenantID          int64           `json:"tenant_id"`
+	SubmitterTenantID int64           `json:"submitter_tenant_id"`
+	SourceRef         string          `json:"source_ref"`
+	SubmitterID       int64           `json:"submitter_id"`
+	Status            int16           `json:"status"`
+	Result            JudgeTaskResult `json:"result"`
 }
 
 // FingerprintSimilarityRequest 是查重服务的相似度比对请求。

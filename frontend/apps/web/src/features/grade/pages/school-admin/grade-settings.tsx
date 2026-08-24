@@ -26,6 +26,7 @@ import {
   CardBody,
   CardHeader,
   Checkbox,
+  DataPanel,
   Empty,
   FormField,
   IconButton,
@@ -41,6 +42,7 @@ import {
   PageScaffold,
   PageSection,
   Skeleton,
+  StickySaveBar,
   Table,
   Tabs,
   TabsContent,
@@ -62,12 +64,17 @@ export default function SchoolAdminGradeSettingsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '教务与成绩' }, { label: '成绩配置' }]} />}
+        kicker={<Breadcrumb items={[{ label: '教务与成绩' }]} />}
         title="成绩配置"
         description="等级换算、学期区间与学业预警阈值。这些配置影响全校成绩的计算与预警。"
         icon={Settings2}
       />
 
+      {/*
+        归族:配置表单族(§6.5.3 第 ③)。三项配置各有自己的提交动作与服务端接口,
+        故用 Tabs 承担该族的「分组」而不是左侧锚点 —— 锚点是「同一份表单里的几段」,
+        这里是三份互不相干的配置,一次只该出现一份,底部保存条也只服务当前那一份。
+      */}
       <Tabs defaultValue="levels">
         <TabsList>
           <TabsTrigger value="levels" icon={GraduationCap}>
@@ -195,7 +202,12 @@ function LevelConfigCard({ config, onEdit }: LevelConfigCardProps) {
         }
       />
       <CardBody className="flex flex-col gap-3">
-        <Table columns={columns} data={sorted} rowKey={(rule) => rule.grade} />
+        {/*
+          elevated={false}:卡本身就是抬起片,表格再画一层就成了片里套片(§6.5.1 不出现第三级)。
+          不给 mobileCard:这是 3 列短值对照表(不低于 / 等级 / 绩点),375 下不溢出,
+          而它的意义正在于逐行横向对照 —— 摊成卡片会把对照关系拆散(§6.4.1 规则 3 的例外)。
+        */}
+        <Table columns={columns} data={sorted} rowKey={(rule) => rule.grade} elevated={false} />
         <div className="flex flex-wrap gap-1.5">
           <Badge tone="neutral">不及格上限 {config.warning_rules.fail_count} 门</Badge>
           <Badge tone="neutral">绩点下限 {formatGpa(config.warning_rules.min_gpa)}</Badge>
@@ -491,20 +503,36 @@ function SemestersSection() {
       }
     >
       <div className="flex flex-col gap-4">
-        <ResourceState
-          resource={semesters}
-          emptyIcon={CalendarDays}
-          emptyTitle="还没有学期"
-          emptyDescription="建立学期后教师报送的成绩才能归档到对应学期。"
-          emptyAction={
-            <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
-              新建学期
-            </Button>
-          }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-        >
-          {(list) => <Table columns={columns} data={list} rowKey={(item) => item.id} />}
-        </ResourceState>
+        {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):学期清单一次回齐,不分页也不筛选 */}
+        <DataPanel label="学期">
+          <ResourceState
+            resource={semesters}
+            emptyIcon={CalendarDays}
+            emptyTitle="还没有学期"
+            emptyDescription="建立学期后教师报送的成绩才能归档到对应学期。"
+            emptyAction={
+              <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
+                新建学期
+              </Button>
+            }
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+          >
+            {(list) => (
+              <Table
+                columns={columns}
+                data={list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):学期名一行、起止区间一行
+                mobileCard={(item) => ({
+                  title: item.name,
+                  meta: `${formatDate(item.start_date)} — ${formatDate(item.end_date)}`,
+                  badge: item.is_current ? <Badge tone="jade">当前学期</Badge> : undefined,
+                })}
+              />
+            )}
+          </ResourceState>
+        </DataPanel>
 
         <Callout tone="info">
           只有一个学期能是「当前学期」。新建时勾选当前学期会把原来的取消。
@@ -738,14 +766,22 @@ function WarningRulesForm({ rules, onSaved }: WarningRulesFormProps) {
 
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
-          <div className="flex items-center gap-2">
-            <Button type="submit" variant="primary" leftIcon={CircleCheck} loading={working}>
-              保存规则
-            </Button>
-            <span className="text-sm text-ink-sub">
-              保存后到学业预警页执行扫描,规则才会应用到学生。
-            </span>
-          </div>
+          {/* 保存态常显(§6.5.3 第 ③ 族):两项阈值改了几处、存没存,在任何滚动位置都看得见 */}
+          <StickySaveBar
+            dirtyCount={
+              [
+                failCount.trim() !== String(rules.fail_count),
+                minGpa.trim() !== String(rules.min_gpa),
+              ].filter(Boolean).length
+            }
+            saving={working}
+            hint="保存后到学业预警页执行扫描,规则才会应用到学生。"
+            saveAction={
+              <Button type="submit" variant="primary" leftIcon={CircleCheck} loading={working}>
+                保存规则
+              </Button>
+            }
+          />
         </form>
       </CardBody>
     </Card>

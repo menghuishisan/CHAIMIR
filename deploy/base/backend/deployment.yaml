@@ -1,7 +1,7 @@
 # 后端单体 Deployment + Service。
 # 依据 docs/总-部署架构设计.md §三:无状态多副本(会话在 Redis、JWT 无状态),
 # 经 client-go 创建/销毁动态沙箱 Pod;docs/总-工程目录设计:单控制面二进制 cmd/server。
-# 镜像名为逻辑占位 chaimir/backend,由各 overlay 的 images: 覆盖 registry+tag。
+# 镜像名为逻辑占位 chaimir/backend,由 base 的 images 变换锁定不可变 digest。
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -14,6 +14,11 @@ metadata:
     app.kubernetes.io/part-of: chaimir
 spec:
   replicas: 1  # overlay 覆盖:prod-saas 多副本 + HPA。
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       app.kubernetes.io/name: chaimir-backend
@@ -24,6 +29,7 @@ spec:
         app.kubernetes.io/component: control-plane
         app.kubernetes.io/part-of: chaimir
     spec:
+      terminationGracePeriodSeconds: 60
       serviceAccountName: chaimir-backend  # 最小 RBAC,管理动态运行命名空间。
       securityContext:
         runAsNonRoot: true
@@ -33,7 +39,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: server
-          image: chaimir/backend:placeholder  # overlay images: 覆盖。
+          image: chaimir/backend:placeholder  # 由 base 的 images 变换锁定 digest。
           args: ["serve"]  # 控制面 HTTP/WS 主进程,后台任务由 server 内统一 background runner 承载。
           ports:
             - name: http
@@ -64,7 +70,9 @@ spec:
               path: /-/readyz
               port: http
             initialDelaySeconds: 5
-            periodSeconds: 10
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 1
           livenessProbe:
             httpGet:
               path: /-/healthz

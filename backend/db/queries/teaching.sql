@@ -21,28 +21,44 @@ WHERE invite_code = $1 AND deleted_at IS NULL;
 -- name: ListTeacherCourses :many
 SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
-WHERE tenant_id = $1 AND teacher_id = $2 AND deleted_at IS NULL AND ($3::smallint = 0 OR status = $3)
+WHERE tenant_id = sqlc.arg(tenant_id)::bigint AND teacher_id = sqlc.arg(teacher_id)::bigint AND deleted_at IS NULL
+  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(is_shared)::smallint = 0
+    OR (sqlc.arg(is_shared)::smallint = 1 AND visibility = 2)
+    OR (sqlc.arg(is_shared)::smallint = 2 AND visibility = 1))
 ORDER BY updated_at DESC, id DESC
-LIMIT $4 OFFSET $5;
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountTeacherCourses :one
 SELECT COUNT(*)::bigint
 FROM course
-WHERE tenant_id = $1 AND teacher_id = $2 AND deleted_at IS NULL AND ($3::smallint = 0 OR status = $3);
+WHERE tenant_id = sqlc.arg(tenant_id)::bigint AND teacher_id = sqlc.arg(teacher_id)::bigint AND deleted_at IS NULL
+  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(is_shared)::smallint = 0
+    OR (sqlc.arg(is_shared)::smallint = 1 AND visibility = 2)
+    OR (sqlc.arg(is_shared)::smallint = 2 AND visibility = 1));
 
 -- name: ListStudentCourses :many
 SELECT c.id, c.tenant_id, c.teacher_id, c.name, c.description, c.type, c.difficulty, c.cover_ref, c.semester, c.credits::float8 AS credits, c.schedule, c.start_at, c.end_at, c.invite_code, c.status, c.visibility, c.created_at, c.updated_at, c.deleted_at
 FROM course c
 JOIN course_member m ON m.tenant_id = c.tenant_id AND m.course_id = c.id
-WHERE c.tenant_id = $1 AND m.student_id = $2 AND c.deleted_at IS NULL AND ($3::smallint = 0 OR c.status = $3)
+WHERE c.tenant_id = sqlc.arg(tenant_id)::bigint AND m.student_id = sqlc.arg(student_id)::bigint AND c.deleted_at IS NULL
+  AND (sqlc.arg(status)::smallint = 0 OR c.status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(is_shared)::smallint = 0
+    OR (sqlc.arg(is_shared)::smallint = 1 AND c.visibility = 2)
+    OR (sqlc.arg(is_shared)::smallint = 2 AND c.visibility = 1))
 ORDER BY c.updated_at DESC, c.id DESC
-LIMIT $4 OFFSET $5;
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountStudentCourses :one
 SELECT COUNT(*)::bigint
 FROM course c
 JOIN course_member m ON m.tenant_id = c.tenant_id AND m.course_id = c.id
-WHERE c.tenant_id = $1 AND m.student_id = $2 AND c.deleted_at IS NULL AND ($3::smallint = 0 OR c.status = $3);
+WHERE c.tenant_id = sqlc.arg(tenant_id)::bigint AND m.student_id = sqlc.arg(student_id)::bigint AND c.deleted_at IS NULL
+  AND (sqlc.arg(status)::smallint = 0 OR c.status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(is_shared)::smallint = 0
+    OR (sqlc.arg(is_shared)::smallint = 1 AND c.visibility = 2)
+    OR (sqlc.arg(is_shared)::smallint = 2 AND c.visibility = 1));
 
 -- name: UpdateCourse :one
 UPDATE course
@@ -289,6 +305,7 @@ WHERE tenant_id = $1
   AND assignment_id = $2
   AND (sqlc.arg(student_id)::bigint = 0 OR submission.student_id = sqlc.arg(student_id)::bigint)
   AND (sqlc.arg(status)::smallint = 0 OR submission.status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(is_late)::smallint = 0 OR submission.is_late = (sqlc.arg(is_late)::smallint = 1))
 ORDER BY submitted_at DESC, id DESC
 LIMIT $3 OFFSET $4;
 
@@ -298,7 +315,8 @@ FROM submission
 WHERE tenant_id = $1
   AND assignment_id = $2
   AND (sqlc.arg(student_id)::bigint = 0 OR submission.student_id = sqlc.arg(student_id)::bigint)
-  AND (sqlc.arg(status)::smallint = 0 OR submission.status = sqlc.arg(status)::smallint);
+  AND (sqlc.arg(status)::smallint = 0 OR submission.status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(is_late)::smallint = 0 OR submission.is_late = (sqlc.arg(is_late)::smallint = 1));
 
 -- name: UpdateSubmissionManualGrade :one
 UPDATE submission
@@ -584,21 +602,21 @@ SET is_locked = $3, updated_at = now()
 WHERE tenant_id = $1 AND course_id = $2;
 
 -- name: CreateTeachingGradeEventOutbox :one
-INSERT INTO teaching_grade_event_outbox (id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
-VALUES ($1, $2, $3, $4, $5, $6, 1, 0, NULL, now(), now(), '', NULL)
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
+INSERT INTO teaching_grade_event_outbox (id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, $6, 1, 0, now(), NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: ClaimPendingTeachingGradeEventOutbox :many
-WITH exhausted AS (
-    UPDATE teaching_grade_event_outbox AS expired
-    SET status = 4, last_error = 'grade event lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
-    WHERE expired.status = 2 AND expired.lease_until <= @stale_before::timestamptz AND expired.retry_count >= @max_attempts
-    RETURNING expired.id
+WITH expired AS (
+    UPDATE teaching_grade_event_outbox AS item
+    SET status = 4, updated_at = now(), lease_token = '', lease_until = NULL, next_attempt_at = now()
+    WHERE item.status = 2 AND item.lease_until <= @stale_before::timestamptz
+    RETURNING item.id
 ), candidates AS (
     SELECT o.id
     FROM teaching_grade_event_outbox o
-    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= @stale_before::timestamptz))
-      AND o.retry_count < @max_attempts
+    WHERE ((o.status IN (1, 4) AND o.next_attempt_at <= now())
+       OR (o.status = 2 AND o.lease_until <= @stale_before::timestamptz))
     ORDER BY o.created_at ASC, o.id ASC
     LIMIT @page_limit
     FOR UPDATE SKIP LOCKED
@@ -607,19 +625,20 @@ UPDATE teaching_grade_event_outbox AS outbox
 SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = @lease_token, lease_until = @lease_until::timestamptz
 FROM candidates
 WHERE outbox.id = candidates.id
-RETURNING outbox.id, outbox.tenant_id, outbox.course_id, outbox.student_id, outbox.trace_id, outbox.event_updated_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
+RETURNING outbox.id, outbox.tenant_id, outbox.course_id, outbox.student_id, outbox.trace_id, outbox.event_updated_at, outbox.status, outbox.retry_count, outbox.next_attempt_at, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
 
 -- name: MarkTeachingGradeEventOutboxPublished :one
 UPDATE teaching_grade_event_outbox
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: MarkTeachingGradeEventOutboxFailed :one
 UPDATE teaching_grade_event_outbox
-SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL,
+    next_attempt_at = now() + LEAST(interval '1 hour', power(2::numeric, LEAST(retry_count, 10)) * interval '1 second')
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: TeachingStats :one
 SELECT

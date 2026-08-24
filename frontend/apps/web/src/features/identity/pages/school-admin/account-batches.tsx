@@ -8,6 +8,7 @@ import { FileClock } from 'lucide-react'
 import { ImportBatchStatus, ImportTarget, type ImportBatch } from '@chaimir/api-client'
 import {
   Badge,
+  DataPanel,
   PageSection,
   StatusIndicator,
   Table,
@@ -97,16 +98,39 @@ export function AccountImportBatches() {
   )
 
   return (
+    // 列表型页内子视图(§6.5.5 B):不自带页面头,数据区收进一块抬起片。
+    // 三态由本子视图自己给 —— 批次是它独立拉的资源,不来自父页的账号列表。
     <PageSection title="导入记录" description="按导入时间从新到旧排列。">
-      <ResourceState
-        resource={batches}
-        emptyIcon={FileClock}
-        emptyTitle="还没有导入记录"
-        emptyDescription="用批量导入开通账号后,每次导入的结果会记录在这里。"
-        skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-      >
-        {(list) => <Table columns={columns} data={list} rowKey={(item) => item.id} />}
-      </ResourceState>
+      <DataPanel label="导入记录">
+        <ResourceState
+          resource={batches}
+          emptyIcon={FileClock}
+          emptyTitle="还没有导入记录"
+          emptyDescription="用批量导入开通账号后,每次导入的结果会记录在这里。"
+          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+        >
+          {(list) => (
+            <Table
+              columns={columns}
+              data={list}
+              rowKey={(item) => item.id}
+              elevated={false}
+              // <md 换行卡(§6.4.1 规则 3):文件名一行、时间与行数一行,状态在右
+              mobileCard={(item) => ({
+                title: item.file_name,
+                meta: `${TARGET_LABELS[item.target_type]} · ${formatDateTime(item.created_at)} · 成功 ${item.success}/${item.total}`,
+                badge: (
+                  <StatusIndicator
+                    tone={BATCH_STATUS_TONES[item.status]}
+                    label={BATCH_STATUS_LABELS[item.status]}
+                    loading={item.status === ImportBatchStatus.PROCESSING}
+                  />
+                ),
+              })}
+            />
+          )}
+        </ResourceState>
+      </DataPanel>
     </PageSection>
   )
 }

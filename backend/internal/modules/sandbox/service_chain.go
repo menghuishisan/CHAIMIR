@@ -14,18 +14,22 @@ func (s *Service) chainDeployContract(ctx context.Context, req contracts.Sandbox
 	if req.TenantID <= 0 || req.SandboxID <= 0 || len(req.Payload) == 0 || !validSourceRef(req.SourceRef) {
 		return nil, apperr.ErrSandboxDeployRequestInvalid
 	}
-	sb, runtime, cap, err := s.chainCapability(ctx, req.TenantID, req.SandboxID, req.SourceRef)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-		return nil, err
-	}
-	out, err := cap.Deploy(ctx, sb, runtime, req.Payload)
-	if err != nil {
-		return nil, apperr.ErrSandboxChainFailed.WithCause(err)
-	}
-	return out, nil
+	var out map[string]any
+	err := s.withSandboxChainLock(ctx, req.TenantID, req.SandboxID, func() error {
+		sb, runtime, cap, err := s.chainCapability(ctx, req.TenantID, req.SandboxID, req.SourceRef)
+		if err != nil {
+			return err
+		}
+		if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+			return err
+		}
+		out, err = cap.Deploy(ctx, sb, runtime, req.Payload)
+		if err != nil {
+			return apperr.ErrSandboxChainFailed.WithCause(err)
+		}
+		return nil
+	})
+	return out, err
 }
 
 // ChainSendTx 调用统一链交易能力。
@@ -33,18 +37,22 @@ func (s *Service) chainSendTxContract(ctx context.Context, req contracts.Sandbox
 	if req.TenantID <= 0 || req.SandboxID <= 0 || len(req.Payload) == 0 || !validSourceRef(req.SourceRef) {
 		return nil, apperr.ErrSandboxTxRequestInvalid
 	}
-	sb, runtime, cap, err := s.chainCapability(ctx, req.TenantID, req.SandboxID, req.SourceRef)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-		return nil, err
-	}
-	out, err := cap.SendTx(ctx, sb, runtime, req.Payload)
-	if err != nil {
-		return nil, apperr.ErrSandboxChainFailed.WithCause(err)
-	}
-	return out, nil
+	var out map[string]any
+	err := s.withSandboxChainLock(ctx, req.TenantID, req.SandboxID, func() error {
+		sb, runtime, cap, err := s.chainCapability(ctx, req.TenantID, req.SandboxID, req.SourceRef)
+		if err != nil {
+			return err
+		}
+		if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+			return err
+		}
+		out, err = cap.SendTx(ctx, sb, runtime, req.Payload)
+		if err != nil {
+			return apperr.ErrSandboxChainFailed.WithCause(err)
+		}
+		return nil
+	})
+	return out, err
 }
 
 // ChainQuery 调用统一链查询能力。
@@ -71,17 +79,39 @@ func (s *Service) chainResetContract(ctx context.Context, req contracts.SandboxC
 	if req.TenantID <= 0 || req.SandboxID <= 0 || !validSourceRef(req.SourceRef) {
 		return apperr.ErrSandboxContractRequestInvalid
 	}
-	sb, runtime, cap, err := s.chainCapability(ctx, req.TenantID, req.SandboxID, req.SourceRef)
-	if err != nil {
-		return err
-	}
-	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-		return err
-	}
-	if err := cap.Reset(ctx, sb, runtime); err != nil {
-		return apperr.ErrSandboxChainFailed.WithCause(err)
-	}
-	return nil
+	return s.withSandboxChainLock(ctx, req.TenantID, req.SandboxID, func() error {
+		sb, runtime, cap, err := s.chainCapability(ctx, req.TenantID, req.SandboxID, req.SourceRef)
+		if err != nil {
+			return err
+		}
+		if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+			return err
+		}
+		if strings.TrimSpace(runtime.AdapterSpec.CapabilityCommands.ResetStrategy) == "recreate_runtime" {
+			plan, planErr := s.planForExistingSandbox(ctx, sb)
+			if planErr != nil {
+				return planErr
+			}
+			if err := s.orchestrator.ResetSandboxRuntime(ctx, plan); err != nil {
+				return apperr.ErrSandboxChainFailed.WithCause(err)
+			}
+			return nil
+		}
+		if err := cap.Reset(ctx, sb, runtime); err != nil {
+			return apperr.ErrSandboxChainFailed.WithCause(err)
+		}
+		return nil
+	})
+}
+
+// withSandboxChainLock 持有数据库事务级 advisory lock,覆盖真实插件调用的整个生命周期。
+func (s *Service) withSandboxChainLock(ctx context.Context, tenantID, sandboxID int64, fn func() error) error {
+	return s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		if err := tx.LockSandboxChain(ctx, tenantID, sandboxID); err != nil {
+			return apperr.ErrSandboxChainFailed.WithCause(err)
+		}
+		return fn()
+	})
 }
 
 // ChainDeployForOwner 校验用户归属后调用统一链部署能力,供用户工作台使用。
@@ -89,18 +119,22 @@ func (s *Service) ChainDeployForOwner(ctx context.Context, tenantID, accountID, 
 	if tenantID <= 0 || accountID <= 0 || sandboxID <= 0 || len(payload) == 0 {
 		return nil, apperr.ErrSandboxDeployRequestInvalid
 	}
-	sb, runtime, cap, err := s.chainCapabilityForOwner(ctx, tenantID, accountID, sandboxID)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-		return nil, err
-	}
-	out, err := cap.Deploy(ctx, sb, runtime, payload)
-	if err != nil {
-		return nil, apperr.ErrSandboxChainFailed.WithCause(err)
-	}
-	return out, nil
+	var out map[string]any
+	err := s.withSandboxChainLock(ctx, tenantID, sandboxID, func() error {
+		sb, runtime, cap, err := s.chainCapabilityForOwner(ctx, tenantID, accountID, sandboxID)
+		if err != nil {
+			return err
+		}
+		if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+			return err
+		}
+		out, err = cap.Deploy(ctx, sb, runtime, payload)
+		if err != nil {
+			return apperr.ErrSandboxChainFailed.WithCause(err)
+		}
+		return nil
+	})
+	return out, err
 }
 
 // ChainSendTxForOwner 校验用户归属后调用统一链交易能力,避免工具容器直连链节点。
@@ -108,18 +142,22 @@ func (s *Service) ChainSendTxForOwner(ctx context.Context, tenantID, accountID, 
 	if tenantID <= 0 || accountID <= 0 || sandboxID <= 0 || len(payload) == 0 {
 		return nil, apperr.ErrSandboxTxRequestInvalid
 	}
-	sb, runtime, cap, err := s.chainCapabilityForOwner(ctx, tenantID, accountID, sandboxID)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-		return nil, err
-	}
-	out, err := cap.SendTx(ctx, sb, runtime, payload)
-	if err != nil {
-		return nil, apperr.ErrSandboxChainFailed.WithCause(err)
-	}
-	return out, nil
+	var out map[string]any
+	err := s.withSandboxChainLock(ctx, tenantID, sandboxID, func() error {
+		sb, runtime, cap, err := s.chainCapabilityForOwner(ctx, tenantID, accountID, sandboxID)
+		if err != nil {
+			return err
+		}
+		if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+			return err
+		}
+		out, err = cap.SendTx(ctx, sb, runtime, payload)
+		if err != nil {
+			return apperr.ErrSandboxChainFailed.WithCause(err)
+		}
+		return nil
+	})
+	return out, err
 }
 
 // ChainQueryForOwner 校验用户归属后调用统一链查询能力,返回前由能力实现负责结果脱敏。

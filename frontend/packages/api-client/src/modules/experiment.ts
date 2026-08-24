@@ -2,7 +2,11 @@
 // 对应后端 M7 模块
 
 import { ApiClient, encodePathSegment } from '../client'
-import type { ExperimentReportStatus, ExperimentStatus } from '../constants/experiment'
+import type {
+  ExperimentInstanceStatus,
+  ExperimentReportStatus,
+  ExperimentStatus,
+} from '../constants/experiment'
 import type { PaginatedResponse } from '../types/common'
 import type {
   Experiment,
@@ -41,6 +45,27 @@ export class ExperimentApi {
     size?: number
   }): Promise<PaginatedResponse<Experiment>> {
     return this.client.get('/experiment/experiments', params)
+  }
+
+  /**
+   * getExperiment 读取单个实验的教师视图(完整定义,含环境与判题配置)。
+   * 只有作者与本校管理员可读,边界在服务端 GetExperimentForTeacher 判定。
+   * 详情页与编排向导用它做深链首屏读取 —— 不再拉全量列表在浏览器里筛单条。
+   */
+  async getExperiment(experimentId: string): Promise<Experiment> {
+    return this.client.get(`/experiment/experiments/${encodePathSegment(experimentId)}`)
+  }
+
+  /**
+   * listInstances 列出教师可见的实验环境实例(教师按实验作者过滤、校管按租户)。
+   * 实时监控页据此看真实的活跃环境,不再按实验清单反推。
+   */
+  async listInstances(params?: {
+    status?: ExperimentInstanceStatus
+    page?: number
+    size?: number
+  }): Promise<PaginatedResponse<ExperimentInstance>> {
+    return this.client.get('/experiment/instances', params)
   }
 
   /** getPublishedExperiments 查询学生可进入的已发布实验。 */
@@ -136,6 +161,13 @@ export class ExperimentApi {
    */
   async upsertGroupMember(groupId: string, data: ExperimentGroupMemberRequest): Promise<ExperimentGroup> {
     return this.client.post(`/experiment/groups/${encodePathSegment(groupId)}/members`, data)
+  }
+
+  /**
+   * 移除协作小组成员,由服务端先收回活跃资源权限再提交成员删除。
+   */
+  async removeGroupMember(groupId: string, studentId: string): Promise<ExperimentGroup> {
+    return this.client.delete(`/experiment/groups/${encodePathSegment(groupId)}/members/${encodePathSegment(studentId)}`)
   }
 
   /**

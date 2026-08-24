@@ -13,10 +13,12 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
+	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/timex"
@@ -50,14 +52,22 @@ type Orchestrator interface {
 	Exec(ctx context.Context, namespace, container string, command []string, stdin []byte, tty bool) ([]byte, []byte, error)
 	// ExecStream 在沙箱容器中执行交互式命令并透传流。
 	ExecStream(ctx context.Context, namespace, container string, command []string, stdin io.Reader, stdout io.Writer, stderr io.Writer, tty bool) error
+	// ResetSandboxRuntime 只重建运行时计算 Pod,保留工作区卷和沙箱命名空间。
+	ResetSandboxRuntime(ctx context.Context, plan CreateSandboxPlan) error
 	// PrepullImage 创建或更新预拉取 DaemonSet 并等待工作负载镜像集合在真实节点 Ready。
-	PrepullImage(ctx context.Context, image RuntimeImage, specs []PrepullImageSpec) (PrepullResult, error)
+	PrepullImage(ctx context.Context, image RuntimeImage, compositionDigest string, specs []PrepullImageSpec) (PrepullResult, error)
 	// DeletePrepullDaemonSet 删除镜像预拉取 DaemonSet,用于镜像停用或删除闭环。
 	DeletePrepullDaemonSet(ctx context.Context, image RuntimeImage) error
 	// ToolReady 校验 Web 工具容器已达到可代理状态。
 	ToolReady(ctx context.Context, sb Sandbox, tool Tool) error
 	// SnapshotSupported 返回当前集群是否安装并启用 CSI 快照能力。
 	SnapshotSupported(ctx context.Context) (bool, error)
+}
+
+// sandboxResourceReadiness 是编排器可选的只读就绪探针,用于服务重启后恢复已存在的资源。
+// 旧的编排器实现没有该探针时仍走完整的幂等创建流程。
+type sandboxResourceReadiness interface {
+	SandboxResourcesReady(context.Context, CreateSandboxPlan) (bool, error)
 }
 
 // sandboxExecFailure 保留统一的输出超限错误,其余底层执行失败映射到调用场景已有错误码。
@@ -106,6 +116,8 @@ type Service struct {
 	capabilities map[string]ChainCapability
 	saveMu       sync.Mutex
 	saveTimers   map[int64]*time.Timer
+	startupMu    sync.Mutex
+	startup      map[int64]struct{}
 }
 
 // resolvedSandboxCreateDependencies 是创建或发布前校验沙箱模板时解析出的 M2 能力快照。
@@ -170,6 +182,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		wsHub:        deps.WSHub,
 		capabilities: capabilities,
 		saveTimers:   map[int64]*time.Timer{},
+		startup:      map[int64]struct{}{},
 	}, nil
 }
 
@@ -179,6 +192,10 @@ func (s *Service) validateSandboxTemplateContract(ctx context.Context, req contr
 	if err := validateCreateRequest(input); err != nil {
 		return err
 	}
+	digest, err := contracts.CanonicalSnapshotDigest(req.CompositionSnapshot)
+	if err != nil || digest != req.CompositionSnapshot.Digest {
+		return apperr.ErrSandboxCreateRequestInvalid
+	}
 	return s.store.TenantTx(ctx, input.TenantID, func(ctx context.Context, tx TxStore) error {
 		_, err := s.resolveSandboxCreateDependencies(ctx, tx, input, false)
 		return err
@@ -187,15 +204,26 @@ func (s *Service) validateSandboxTemplateContract(ctx context.Context, req contr
 
 // CreateSandbox 创建沙箱控制面记录并异步推进 K8s 启动。
 func (s *Service) createSandboxContract(ctx context.Context, req contracts.SandboxCreateRequest) (contracts.SandboxInfo, error) {
+	digest, err := contracts.CanonicalSnapshotDigest(req.CompositionSnapshot)
+	if err != nil || strings.TrimSpace(req.CompositionSnapshot.Digest) == "" || req.CompositionSnapshot.Digest != digest {
+		return contracts.SandboxInfo{}, apperr.ErrSandboxCreateRequestInvalid
+	}
 	input := createInputFromContract(req)
 	if err := validateCreateRequest(input); err != nil {
+		return contracts.SandboxInfo{}, err
+	}
+	sharedAccountIDs, err := normalizeSandboxSharedAccountIDs(input.OwnerAccountID, input.AuthorizedAccountIDs)
+	if err != nil {
+		return contracts.SandboxInfo{}, err
+	}
+	if err := s.validateSandboxSharedAccounts(ctx, input.TenantID, sharedAccountIDs); err != nil {
 		return contracts.SandboxInfo{}, err
 	}
 	var plan CreateSandboxPlan
 	var existingID int64
 	if err := s.store.TenantTx(ctx, input.TenantID, func(ctx context.Context, tx TxStore) error {
-		if isBattleMatchSourceRef(input.SourceRef) {
-			items, err := tx.ListSandboxesBySourceRef(ctx, input.TenantID, input.SourceRef)
+		if isBattleMatchSourceRef(input.SourceRef) || input.SourceRef == input.ScopeRef {
+			items, err := tx.ListSandboxesByScopeRef(ctx, input.TenantID, input.ScopeRef)
 			if err != nil {
 				return apperr.ErrSandboxCreateFailed.WithCause(err)
 			}
@@ -208,7 +236,7 @@ func (s *Service) createSandboxContract(ctx context.Context, req contracts.Sandb
 		if err != nil {
 			return err
 		}
-		sb, err := s.createSandboxRecord(ctx, tx, input, resolved.Runtime, resolved.Image, resolved.Quota)
+		sb, err := s.createSandboxRecord(ctx, tx, input, sharedAccountIDs, resolved.Runtime, resolved.Image, resolved.Quota)
 		if err != nil {
 			return err
 		}
@@ -230,8 +258,8 @@ func (s *Service) createSandboxContract(ctx context.Context, req contracts.Sandb
 		plan.Sandbox.Status = SandboxStatusCreating
 		return nil
 	}); err != nil {
-		if isBattleMatchSourceRef(input.SourceRef) && db.IsUniqueViolation(err) {
-			return s.infoByBattleSourceRef(ctx, input.TenantID, input.SourceRef)
+		if (isBattleMatchSourceRef(input.SourceRef) || input.SourceRef == input.ScopeRef) && db.IsUniqueViolation(err) {
+			return s.infoBySourceRef(ctx, input.TenantID, input.SourceRef)
 		}
 		return contracts.SandboxInfo{}, err
 	}
@@ -245,6 +273,31 @@ func (s *Service) createSandboxContract(ctx context.Context, req contracts.Sandb
 	s.startAsync(ctx, plan)
 	s.broadcastProgress(ctx, input.TenantID, plan.Sandbox.ID, SandboxPhaseAllocating, SandboxStatusCreating, response.TraceFromContext(ctx))
 	return s.info(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID)
+}
+
+// validateSandboxSharedAccounts 确认共享账号真实存在且全部属于目标租户,弥补数组字段无法声明逐元素外键的限制。
+func (s *Service) validateSandboxSharedAccounts(ctx context.Context, tenantID int64, accountIDs []int64) error {
+	if len(accountIDs) == 0 {
+		return nil
+	}
+	accounts, err := s.identity.BatchGetAccounts(ctx, accountIDs)
+	if err != nil {
+		return apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
+	}
+	want := make(map[int64]struct{}, len(accountIDs))
+	for _, accountID := range accountIDs {
+		want[accountID] = struct{}{}
+	}
+	for _, account := range accounts {
+		if account.TenantID != tenantID {
+			return apperr.ErrSandboxCreateRequestInvalid
+		}
+		delete(want, account.AccountID)
+	}
+	if len(want) != 0 {
+		return apperr.ErrSandboxCreateRequestInvalid
+	}
+	return nil
 }
 
 // isBattleMatchSourceRef 识别 M8 单场对局的稳定来源键,其余来源不施加单例限制。
@@ -262,8 +315,8 @@ func isBattleMatchSourceRef(sourceRef string) bool {
 	return ok
 }
 
-// infoByBattleSourceRef 处理并发创建的唯一索引竞争,返回同一场对局已经创建的沙箱。
-func (s *Service) infoByBattleSourceRef(ctx context.Context, tenantID int64, sourceRef string) (contracts.SandboxInfo, error) {
+// infoBySourceRef 处理稳定来源键的并发创建竞争,返回已经创建的沙箱。
+func (s *Service) infoBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (contracts.SandboxInfo, error) {
 	var items []Sandbox
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
@@ -280,18 +333,28 @@ func (s *Service) infoByBattleSourceRef(ctx context.Context, tenantID int64, sou
 
 // resolveSandboxCreateDependencies 用同一套规则服务发布前校验和真实创建,避免 M7 与 M2 对运行时/工具可用性判断分叉。
 func (s *Service) resolveSandboxCreateDependencies(ctx context.Context, tx TxStore, input CreateSandboxInputModel, enforceLiveCapacity bool) (resolvedSandboxCreateDependencies, error) {
-	runtime, err := tx.GetRuntimeByCode(ctx, input.RuntimeCode)
+	runtime, err := tx.GetRuntimeByID(ctx, input.CompositionSnapshot.Runtime.RuntimeID)
 	if err != nil {
 		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxRuntimeNotFound.WithCause(err)
 	}
-	if runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
+	if runtime.Code != input.CompositionSnapshot.Runtime.Code || runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
 		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxRuntimeUnavailable
 	}
-	image, err := selectRuntimeImage(ctx, tx, runtime.ID, input.RuntimeImageVersion)
-	if err != nil {
-		return resolvedSandboxCreateDependencies{}, err
+	var frozenAdapter AdapterSpec
+	if err := jsonx.DecodeStrictKnownFields(input.CompositionSnapshot.Runtime.AdapterSpec, &frozenAdapter); err != nil {
+		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
 	}
-	if !image.Prepulled || image.PrepullStatus != ImagePrepullSucceeded || !image.GenesisBaked {
+	runtime.AdapterSpec = frozenAdapter
+	runtime.CapabilityImpl = input.CompositionSnapshot.Runtime.CapabilityImpl
+	image, err := tx.GetRuntimeImageByID(ctx, input.CompositionSnapshot.Runtime.RuntimeID, input.CompositionSnapshot.Runtime.ImageID)
+	if err != nil {
+		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
+	}
+	if image.Version != input.CompositionSnapshot.Runtime.ImageVersion || image.ImageURL != input.CompositionSnapshot.Runtime.ImageURL || image.RuntimeID != input.CompositionSnapshot.Runtime.RuntimeID {
+		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxRuntimeImageNotFound
+	}
+	prepull, err := tx.GetCompositionPrepullForUpdate(ctx, image.ID, input.CompositionSnapshot.Digest)
+	if err != nil || prepull.Status != ImagePrepullSucceeded || !image.GenesisBaked {
 		return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxRuntimeUnavailable
 	}
 	if _, err := tx.EnsureTenantQuota(ctx, s.defaultTenantQuota(input.TenantID)); err != nil {
@@ -308,9 +371,22 @@ func (s *Service) resolveSandboxCreateDependencies(ctx context.Context, tx TxSto
 			return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxCreateFailed.WithCause(err)
 		}
 	}
-	tools, err := s.resolveTools(ctx, tx, runtime, input.ToolCodes)
-	if err != nil {
-		return resolvedSandboxCreateDependencies{}, err
+	tools := make([]Tool, 0, len(input.CompositionSnapshot.Components))
+	for _, component := range input.CompositionSnapshot.Components {
+		catalog, err := tx.GetToolByCode(ctx, component.Code)
+		if err != nil || catalog.ID != component.ComponentID || catalog.Status != ToolStatusAvailable {
+			return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxToolIncompatible
+		}
+		var resourceSpec ToolResourceSpec
+		if err := jsonx.DecodeStrictKnownFields(component.ResourceSpec, &resourceSpec); err != nil {
+			return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxToolIncompatible.WithCause(err)
+		}
+		catalog.Category = component.Category
+		catalog.ResourceSpec = resourceSpec
+		if err := validateToolForRuntime(catalog, runtime); err != nil {
+			return resolvedSandboxCreateDependencies{}, err
+		}
+		tools = append(tools, catalog)
 	}
 	if err := validatePrivateSidecars(input.PrivateSidecars, s.cfg, runtime.AdapterSpec); err != nil {
 		return resolvedSandboxCreateDependencies{}, err
@@ -365,12 +441,12 @@ func (s *Service) getSandboxContract(ctx context.Context, tenantID, sandboxID in
 
 // GetSandboxForOwner 查询用户自己的沙箱,防止同租户内横向访问。
 func (s *Service) GetSandboxForOwner(ctx context.Context, tenantID, accountID, sandboxID int64) (contracts.SandboxInfo, error) {
+	if _, err := s.sandboxForOwner(ctx, tenantID, accountID, sandboxID); err != nil {
+		return contracts.SandboxInfo{}, err
+	}
 	info, err := s.info(ctx, tenantID, sandboxID)
 	if err != nil {
 		return contracts.SandboxInfo{}, err
-	}
-	if info.OwnerAccountID != accountID {
-		return contracts.SandboxInfo{}, apperr.ErrSandboxOwnershipInvalid
 	}
 	return info, nil
 }
@@ -526,15 +602,15 @@ func validateSandboxControlRequest(req contracts.SandboxControlRequest) error {
 	return nil
 }
 
-// RecycleBySourceRef 按来源标识级联回收沙箱。
-func (s *Service) recycleBySourceRefContract(ctx context.Context, req contracts.SandboxRecycleRequest) error {
-	if req.TenantID <= 0 || !validSourceRef(req.SourceRef) {
+// recycleByScopeRefContract 按生命周期作用域级联回收沙箱。
+func (s *Service) recycleByScopeRefContract(ctx context.Context, req contracts.SandboxRecycleRequest) error {
+	if req.TenantID <= 0 || !validSourceRef(req.SourceRef) || !auth.ValidScopeRef(req.ScopeRef) {
 		return apperr.ErrSandboxRecycleRequestInvalid
 	}
 	var items []Sandbox
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, err = tx.ListSandboxesBySourceRef(ctx, req.TenantID, req.SourceRef)
+		items, err = tx.ListSandboxesByScopeRef(ctx, req.TenantID, req.ScopeRef)
 		if err != nil {
 			return apperr.ErrSandboxRecycleScanFailed.WithCause(err)
 		}
@@ -605,17 +681,36 @@ func (s *Service) restoreSnapshotSandbox(ctx context.Context, sb Sandbox) error 
 
 // planForExistingSandbox 重新加载沙箱恢复或暂停恢复所需的运行时、镜像和工具定义。
 func (s *Service) planForExistingSandbox(ctx context.Context, sb Sandbox) (CreateSandboxPlan, error) {
+	var snapshot contracts.SandboxCompositionSnapshot
+	if err := jsonx.DecodeStrictKnownFields(sb.CompositionSnapshot, &snapshot); err != nil {
+		return CreateSandboxPlan{}, apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
+	}
+	digest, err := contracts.CanonicalSnapshotDigest(snapshot)
+	if err != nil || digest != sb.CompositionDigest || snapshot.Digest != sb.CompositionDigest {
+		return CreateSandboxPlan{}, apperr.ErrSandboxCreateRequestInvalid
+	}
 	var runtime Runtime
 	var image RuntimeImage
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		runtime, err = tx.GetRuntimeByID(ctx, sb.RuntimeID)
+		runtime, err = tx.GetRuntimeByID(ctx, snapshot.Runtime.RuntimeID)
 		if err != nil {
 			return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
 		}
-		image, err = tx.GetRuntimeImageByID(ctx, sb.RuntimeID, sb.ImageID)
+		if runtime.Code != snapshot.Runtime.Code || runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
+			return apperr.ErrSandboxRuntimeUnavailable
+		}
+		if err := jsonx.DecodeStrictKnownFields(snapshot.Runtime.AdapterSpec, &runtime.AdapterSpec); err != nil {
+			return apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
+		}
+		runtime.CapabilityImpl = snapshot.Runtime.CapabilityImpl
+		image, err = tx.GetRuntimeImageByID(ctx, snapshot.Runtime.RuntimeID, snapshot.Runtime.ImageID)
 		if err != nil {
 			return apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
+		}
+		prepull, prepullErr := tx.GetCompositionPrepullForUpdate(ctx, image.ID, snapshot.Digest)
+		if image.ImageURL != snapshot.Runtime.ImageURL || image.Version != snapshot.Runtime.ImageVersion || prepullErr != nil || prepull.Status != ImagePrepullSucceeded || !image.GenesisBaked {
+			return apperr.ErrSandboxRuntimeUnavailable
 		}
 		return nil
 	}); err != nil {
@@ -631,25 +726,26 @@ func (s *Service) planForExistingSandbox(ctx context.Context, sb Sandbox) (Creat
 	return CreateSandboxPlan{Sandbox: sb, Runtime: runtime, Image: image, Tools: tools}, nil
 }
 
-// toolsForSandbox 重新加载沙箱已挂载工具的完整定义,用于快照恢复后重建工具 Service。
+// toolsForSandbox 从不可变快照重建沙箱组件,当前目录只负责撤销门禁,不覆盖已发布执行规格。
 func (s *Service) toolsForSandbox(ctx context.Context, tenantID, sandboxID int64) ([]Tool, error) {
-	var mounts []SandboxTool
+	var sb Sandbox
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		mounts, err = tx.ListSandboxTools(ctx, tenantID, sandboxID)
-		if err != nil {
-			return apperr.ErrSandboxToolNotFound.WithCause(err)
-		}
-		return nil
+		sb, err = tx.GetSandbox(ctx, tenantID, sandboxID)
+		return err
 	}); err != nil {
-		return nil, err
+		return nil, apperr.ErrSandboxNotFound.WithCause(err)
 	}
-	tools := make([]Tool, 0, len(mounts))
-	for _, mount := range mounts {
+	var snapshot contracts.SandboxCompositionSnapshot
+	if err := jsonx.DecodeStrictKnownFields(sb.CompositionSnapshot, &snapshot); err != nil {
+		return nil, apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
+	}
+	tools := make([]Tool, 0, len(snapshot.Components))
+	for _, component := range snapshot.Components {
 		var tool Tool
 		if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 			var err error
-			tool, err = tx.GetToolByCode(ctx, mount.ToolCode)
+			tool, err = tx.GetToolByCode(ctx, component.Code)
 			if err != nil {
 				return apperr.ErrSandboxToolNotFound.WithCause(err)
 			}
@@ -657,9 +753,14 @@ func (s *Service) toolsForSandbox(ctx context.Context, tenantID, sandboxID int64
 		}); err != nil {
 			return nil, err
 		}
-		if tool.Status == ToolStatusAvailable {
-			tools = append(tools, tool)
+		if tool.ID != component.ComponentID || tool.Status != ToolStatusAvailable {
+			return nil, apperr.ErrSandboxToolIncompatible
 		}
+		if err := jsonx.DecodeStrictKnownFields(component.ResourceSpec, &tool.ResourceSpec); err != nil {
+			return nil, apperr.ErrSandboxToolIncompatible.WithCause(err)
+		}
+		tool.Category = component.Category
+		tools = append(tools, tool)
 	}
 	return tools, nil
 }
@@ -726,10 +827,10 @@ func (s *Service) defaultTenantQuota(tenantID int64) TenantQuota {
 	}
 }
 
-// resolveTools 按显式工具或运行时默认工具解析工具定义并校验运行时适配性。
+// resolveTools 只解析调用方明确提交的工具并校验运行时适配性。
 func (s *Service) resolveTools(ctx context.Context, tx TxStore, runtime Runtime, codes []string) ([]Tool, error) {
 	if len(codes) == 0 {
-		codes = runtime.AdapterSpec.DefaultToolCodes
+		return nil, apperr.ErrSandboxToolNotFound
 	}
 	tools := make([]Tool, 0, len(codes))
 	for _, code := range codes {
@@ -747,14 +848,14 @@ func (s *Service) resolveTools(ctx context.Context, tx TxStore, runtime Runtime,
 
 // validateToolForRuntime 统一工具目录、发布校验和真实创建使用的运行时兼容规则。
 func validateToolForRuntime(tool Tool, runtime Runtime) error {
-	if tool.Status != ToolStatusAvailable || !toolCompatible(runtime.Eco, tool.EcoTags) {
+	if tool.Status != ToolStatusAvailable {
 		return apperr.ErrSandboxToolIncompatible
 	}
 	return validateToolNetworkRulesForRuntime(tool, runtime.AdapterSpec)
 }
 
 // createSandboxRecord 计算过期时间和对象存储 key 后创建沙箱主记录。
-func (s *Service) createSandboxRecord(ctx context.Context, tx TxStore, req CreateSandboxInputModel, runtime Runtime, image RuntimeImage, quota TenantQuota) (Sandbox, error) {
+func (s *Service) createSandboxRecord(ctx context.Context, tx TxStore, req CreateSandboxInputModel, sharedAccountIDs []int64, runtime Runtime, image RuntimeImage, quota TenantQuota) (Sandbox, error) {
 	now := timex.Now()
 	id := s.ids.Generate()
 	keepAliveUntil := time.Time{}
@@ -769,24 +870,33 @@ func (s *Service) createSandboxRecord(ctx context.Context, tx TxStore, req Creat
 	if err != nil {
 		return Sandbox{}, apperr.ErrSandboxCreateFailed.WithCause(err)
 	}
+	snapshot, err := jsonx.AnyBytes(req.CompositionSnapshot, apperr.ErrSandboxCreateFailed)
+	if err != nil {
+		return Sandbox{}, err
+	}
 	return tx.CreateSandbox(ctx, CreateSandboxInput{
-		ID:               id,
-		TenantID:         req.TenantID,
-		RuntimeID:        runtime.ID,
-		ImageID:          image.ID,
-		Namespace:        namespaceFor(s.cfg.NSPrefixStudent, id),
-		SourceRef:        req.SourceRef,
-		OwnerAccountID:   req.OwnerAccountID,
-		Phase:            SandboxPhaseAllocating,
-		Status:           SandboxStatusCreating,
-		KeepAlive:        req.KeepAlive,
-		SnapshotEnabled:  req.SnapshotEnabled,
-		CodeStorageKey:   codeKey,
-		InitCodeRef:      req.InitCodeRef,
-		InitScriptRef:    req.InitScriptRef,
-		KeepAliveUntil:   keepAliveUntil,
-		SnapshotExpireAt: snapshotExpireAt,
-		ExpireAt:         now.Add(time.Duration(quota.MaxLifetimeMin) * time.Minute),
+		ID:                  id,
+		TenantID:            req.TenantID,
+		RuntimeID:           runtime.ID,
+		ImageID:             image.ID,
+		Namespace:           namespaceFor(s.cfg.NSPrefixStudent, id),
+		SourceRef:           req.SourceRef,
+		ScopeRef:            req.ScopeRef,
+		CompositionDigest:   req.CompositionSnapshot.Digest,
+		CompositionSnapshot: snapshot,
+		AccessProfile:       string(req.CompositionSnapshot.Spec.AccessProfile),
+		OwnerAccountID:      req.OwnerAccountID,
+		SharedAccountIDs:    sharedAccountIDs,
+		Phase:               SandboxPhaseAllocating,
+		Status:              SandboxStatusCreating,
+		KeepAlive:           req.KeepAlive,
+		SnapshotEnabled:     req.SnapshotEnabled,
+		CodeStorageKey:      codeKey,
+		InitCodeRef:         req.InitCodeRef,
+		InitScriptRef:       req.InitScriptRef,
+		KeepAliveUntil:      keepAliveUntil,
+		SnapshotExpireAt:    snapshotExpireAt,
+		ExpireAt:            now.Add(time.Duration(quota.MaxLifetimeMin) * time.Minute),
 	})
 }
 
@@ -794,6 +904,9 @@ func (s *Service) createSandboxRecord(ctx context.Context, tx TxStore, req Creat
 func (s *Service) createToolRecords(ctx context.Context, tx TxStore, sb Sandbox, tools []Tool) ([]SandboxTool, error) {
 	out := make([]SandboxTool, 0, len(tools))
 	for _, tool := range tools {
+		if tool.Category == "infra" {
+			continue
+		}
 		endpoint := toolEndpoint(sb.ID, tool)
 		status := SandboxToolStatusReady
 		if tool.Kind == SandboxToolKindWebEmbed || tool.Kind == SandboxToolKindCommand {
@@ -861,6 +974,14 @@ func (s *Service) info(ctx context.Context, tenantID, sandboxID int64) (contract
 	}
 	out := sandboxInfoFromModel(sb, runtime, image, tools)
 	out.Capabilities = sandboxCapabilitiesFromModel(runtime, tools, s.capabilities)
+	if sb.Status == SandboxStatusCreating {
+		// 重启恢复必须从发布时保存的完整组合快照重建计划，不能从租户挂载表反推基础设施。
+		plan, err := s.planForExistingSandbox(ctx, sb)
+		if err != nil {
+			return contracts.SandboxInfo{}, err
+		}
+		s.scheduleSandboxStart(ctx, plan)
+	}
 	if s.orchestrator != nil && shouldLoadLiveResourceUsage(sb) {
 		usage, err := s.orchestrator.ResourceUsage(ctx, sb)
 		if err != nil {
@@ -906,18 +1027,64 @@ func (s *Service) transition(ctx context.Context, tenantID, sandboxID int64, pha
 
 // startAsync 提交异步启动任务,请求返回后继续推进 K8s 创建和阶段变化。
 func (s *Service) startAsync(ctx context.Context, plan CreateSandboxPlan) {
+	s.scheduleSandboxStart(ctx, plan)
+}
+
+// scheduleSandboxStart 保证每个沙箱只有一个启动任务,并允许服务重启后从持久化状态恢复未完成启动。
+func (s *Service) scheduleSandboxStart(ctx context.Context, plan CreateSandboxPlan) {
+	s.startupMu.Lock()
+	if s.startup == nil {
+		s.startup = map[int64]struct{}{}
+	}
+	if _, exists := s.startup[plan.Sandbox.ID]; exists {
+		s.startupMu.Unlock()
+		return
+	}
+	s.startup[plan.Sandbox.ID] = struct{}{}
+	s.startupMu.Unlock()
 	traceCtx := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
-	go s.startSandbox(traceCtx, plan)
+	go func() {
+		defer func() {
+			s.startupMu.Lock()
+			delete(s.startup, plan.Sandbox.ID)
+			s.startupMu.Unlock()
+		}()
+		s.startSandbox(traceCtx, plan)
+	}()
 }
 
 // startSandbox 推进 K8s 编排,阶段失败时写 error 并保留可排查事件。
 func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 	ctx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 	defer cancel()
-	if err := s.orchestrator.CreateSandboxResources(ctx, plan); err != nil {
-		s.cleanupAfterStartFailure(ctx, plan.Sandbox)
-		s.markStartFailed(ctx, plan.Sandbox, err)
-		return
+	resourcesReady := false
+	if checker, ok := s.orchestrator.(sandboxResourceReadiness); ok {
+		ready, err := checker.SandboxResourcesReady(ctx, plan)
+		if err != nil {
+			slog.WarnContext(ctx, "sandbox resource readiness probe failed; falling back to idempotent create", slog.String("error", logging.SanitizeError(err.Error())), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
+		} else {
+			resourcesReady = ready
+		}
+	}
+	if !resourcesReady {
+		if err := s.orchestrator.CreateSandboxResources(ctx, plan); err != nil {
+			// 服务重启可能留下已经就绪的 K8s 资源,但原进程内协程已经消失;
+			// 标记沙箱失败前必须再次探测资源状态。
+			if checker, ok := s.orchestrator.(sandboxResourceReadiness); ok {
+				ready, readinessErr := checker.SandboxResourcesReady(ctx, plan)
+				if readinessErr == nil && ready {
+					resourcesReady = true
+				} else {
+					s.cleanupAfterStartFailure(ctx, plan.Sandbox)
+					s.markStartFailed(ctx, plan.Sandbox, err)
+					return
+				}
+			} else {
+				s.cleanupAfterStartFailure(ctx, plan.Sandbox)
+				s.markStartFailed(ctx, plan.Sandbox, err)
+				return
+			}
+		}
 	}
 	advanced, err := s.advanceStartupState(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseReady, SandboxStatusReady, map[string]any{"phase": SandboxPhaseReady, "status": SandboxStatusReady}, SandboxStatusCreating)
 	if err != nil {
@@ -1245,30 +1412,16 @@ func asyncPersistenceContext(ctx context.Context, timeout time.Duration) (contex
 	return context.WithTimeout(base, timeout)
 }
 
-// selectRuntimeImage 按请求固定版本或默认版本选择已登记镜像。
+// selectRuntimeImage 按组合声明固定的镜像版本选择已登记镜像。
 func selectRuntimeImage(ctx context.Context, tx TxStore, runtimeID int64, version string) (RuntimeImage, error) {
-	if strings.TrimSpace(version) != "" {
-		image, err := tx.GetRuntimeImageByVersionForShare(ctx, runtimeID, strings.TrimSpace(version))
-		if err != nil {
-			return RuntimeImage{}, apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
-		}
-		return image, nil
+	if strings.TrimSpace(version) == "" {
+		return RuntimeImage{}, apperr.ErrSandboxRuntimeImageNotFound
 	}
-	image, err := tx.GetDefaultRuntimeImageForShare(ctx, runtimeID)
+	image, err := tx.GetRuntimeImageByVersionForShare(ctx, runtimeID, strings.TrimSpace(version))
 	if err != nil {
 		return RuntimeImage{}, apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
 	}
 	return image, nil
-}
-
-// toolCompatible 判断工具生态标签是否包含运行时生态。
-func toolCompatible(eco string, tags []string) bool {
-	for _, tag := range tags {
-		if tag == "*" || strings.EqualFold(tag, eco) {
-			return true
-		}
-	}
-	return false
 }
 
 // namespaceFor 根据配置前缀和沙箱 ID 生成动态命名空间。

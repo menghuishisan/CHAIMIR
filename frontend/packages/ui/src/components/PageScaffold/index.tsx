@@ -1,7 +1,7 @@
 /**
- * PageScaffold:日常页(光面语境)结构原语组合(规范 §6.5 资源页统一渲染范式)。
+ * PageScaffold:日常页(光面语境)结构原语组合(规范 §6.5 页面族谱)。
  * 提供 PageScaffold(容器)/ PageHeader(页面头)/ PageBody(主区 + 右侧动作区)/
- * PageSection(分组区)四个原语,四端资源页统一用它们组装,避免退化为裸堆叠。
+ * PageSection(分组区)四个原语,各族骨架用它们组装(§6.5.3)。
  */
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
@@ -16,18 +16,13 @@ export interface PageScaffoldProps {
 }
 
 /**
- * PageScaffold:页面内容容器 —— 居中、限宽、统一内边距。
- * 最大宽度引用布局令牌 --content-max(布局尺寸属内联 style 例外,SVG/类名无法表达该变量约束)。
+ * PageScaffold:页面内容容器 —— 按纸宽铺满 + 分档内距。
+ * 不做全局 max-width 居中(§2.4 `--content-max` 已废止):限宽会在宽屏把内容缩成居中一根柱子,
+ * 两侧空白复现外壳刚去掉的隔离感。唯一需要限宽的正文在「学习阅读族」自己的骨架里写。
+ * 内距分档(§6.4.1 规则 1):<md 用 16,≥md 用 32×24 —— 375 宽用桌面内距等于把 64px 交给空白。
  */
 export function PageScaffold({ children, className }: PageScaffoldProps) {
-  return (
-    <div
-      className={cn("mx-auto w-full px-8 py-7", className)}
-      style={{ maxWidth: "var(--content-max)" }}
-    >
-      {children}
-    </div>
-  );
+  return <div className={cn("w-full p-4 md:px-8 md:py-6", className)}>{children}</div>;
 }
 
 /* ---------------------------------------------------------------- 页面头 */
@@ -35,8 +30,15 @@ export function PageScaffold({ children, className }: PageScaffoldProps) {
 export interface PageHeaderProps {
   /** 面包屑插槽(kicker),渲染在标题上方 */
   kicker?: ReactNode;
-  /** 页面主标题(h1,Display 字体) */
-  title: string;
+  /**
+   * 页面主标题(h1,Display 字体)。
+   *
+   * **详情族(§6.5.3 第 ④)不传它**:那一族的 `h1` 由 `ObjectIdentity` 的对象名承担,
+   * 页面头只出面包屑 —— 一页只该有一个 h1,标题也不该说两遍(§6.5.0 通则 1)。
+   * 此时页面头退化为一条面包屑:不画底线、不占页头的行高,
+   * 因为紧接着的对象身份片自己就是一块抬起片,再来一条分隔线是重复的分层信号。
+   */
+  title?: string;
   /** 用户向描述文案 */
   description?: string;
   /** 页面图标(Lucide),渲染在标题左侧玉浅底容器内 */
@@ -48,8 +50,14 @@ export interface PageHeaderProps {
 
 /**
  * PageHeader:页面头 —— kicker + 图标 + h1 + 描述 + 右侧操作,底部细线收束。
+ * 只给 kicker(详情族用法)时只渲染面包屑,不画底线。
  */
 export function PageHeader({ kicker, title, description, icon, actions, className }: PageHeaderProps) {
+  // 只有面包屑:详情族的页面头(§6.5.3 第 ④)。底线交给紧随其后的对象身份片,这里不画
+  if (!title && !description && !icon && !actions) {
+    return <header className={cn("mb-4", className)}>{kicker}</header>;
+  }
+
   return (
     <header className={cn("mb-6 border-b border-line pb-5", className)}>
       {kicker && <div className="mb-3">{kicker}</div>}
@@ -61,7 +69,7 @@ export function PageHeader({ kicker, title, description, icon, actions, classNam
             </span>
           )}
           <div className="min-w-0">
-            <h1 className="font-display text-3xl text-ink">{title}</h1>
+            {title && <h1 className="font-display text-3xl text-ink">{title}</h1>}
             {description && <p className="mt-1 text-sm text-ink-sub">{description}</p>}
           </div>
         </div>

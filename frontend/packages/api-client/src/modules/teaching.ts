@@ -2,6 +2,7 @@
 // 对应后端 M6 模块
 
 import { ApiClient, encodePathSegment } from '../client'
+import type { BoolFilter } from '../constants/filters'
 import type { CourseStatus, SubmissionStatus } from '../constants/teaching'
 import type { PaginatedResponse } from '../types/common'
 import type {
@@ -58,6 +59,8 @@ export class TeachingApi {
   async getCourses(params?: {
     role?: 'teacher' | 'student'
     status?: CourseStatus
+    /** 共享状态:BOOL_FILTER.ANY 不限、YES 已共享、NO 私有;由服务端过滤,total 与筛选同口径 */
+    is_shared?: BoolFilter
     page?: number
     size?: number
   }): Promise<PaginatedResponse<Course>> {
@@ -320,6 +323,8 @@ export class TeachingApi {
    */
   async getSubmissions(assignmentId: string, params?: {
     status?: SubmissionStatus
+    /** 迟交状态:BOOL_FILTER.ANY 不限、YES 迟交、NO 按时;由服务端过滤,total 与筛选同口径 */
+    is_late?: BoolFilter
     page?: number
     size?: number
   }): Promise<PaginatedResponse<Submission>> {

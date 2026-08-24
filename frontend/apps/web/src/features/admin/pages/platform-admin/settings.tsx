@@ -1,28 +1,28 @@
 // 系统配置页(平台侧栏,/platform-admin/settings)。
 //
-// 平台级配置的查看、修改、历史与回滚。三件事要一起说清:
+// 平台级配置的查看与修改。两件事要一起说清:
 //   1. 修改用乐观锁:提交时带上读到的版本号,别人在这期间改过就会冲突并要求重新读取 ——
 //      两个管理员同时改同一项时不会有人的改动被静默吞掉。
 //   2. 凭据类字段(含 password / secret / token / key 等词的键)后端一律脱敏返回「已配置」。
 //      保存时整个配置值会被替换,所以把「已配置」原样提交会把真实密钥覆盖成这四个字。
 //      故本页在编辑时把凭据字段从文档里摘出来,单独要求重新填写,绝不让掩码值进入提交体。
-//   3. 回滚是把某次变更的「改动前值」写回去,同样要带当前版本号。
+//
+// 变更历史与回滚在深页 /platform-admin/settings/:configKey/history:
+// 历史是分页数据,而浮层里不出现分页(规范 §6.5.5 A)。
 //
 // 配置值是开放 JSONB(每个配置项的键由使用方定义,不可枚举),故非凭据部分用文档编辑器
 // 并在本地做合法性校验;凭据部分是可枚举的键,做成显式密码输入。
+// 值的读取、脱敏与比较口径收敛在 ../../configValue,与变更历史页共用一套判定。
 
 import { useCallback, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router'
 import {
   History,
-  KeyRound,
-  RotateCcw,
   Save,
   Settings,
-  TriangleAlert,
 } from 'lucide-react'
 import {
   AdminScope,
-  type ConfigChangeLog,
   type SystemConfig,
 } from '@chaimir/api-client'
 import {
@@ -36,6 +36,7 @@ import {
   DescriptionList,
   FormField,
   Input,
+  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -46,54 +47,30 @@ import {
   PageHeader,
   PageScaffold,
   PageSection,
-  Pagination,
   Skeleton,
-  Stat,
-  Table,
   Textarea,
   toast,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useAsyncResource } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import { configKeyDescription, configKeyLabel } from '../../../../utils/labels/admin'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-
-/** 后端脱敏后填回的占位文案(secretmap.MaskedValue),识别它是为了绝不把它提交回去。 */
-const MASKED_VALUE = '已配置'
-
-/**
- * 凭据类字段的词根,与后端 privacy.credentialKeyMarkers 一致。
- * 键名里包含任一词根即被后端加密保存并脱敏返回,故前端按同一口径识别 ——
- * 判据不一致会导致某个字段的掩码值被当成普通值提交,把真实密钥覆盖掉。
- */
-const CREDENTIAL_KEY_MARKERS = [
-  'password',
-  'passwd',
-  'private_key',
-  'privatekey',
-  'access_key',
-  'accesskey',
-  'signing_key',
-  'signingkey',
-  'session_secret',
-  'sessionsecret',
-  'secret',
-  'token',
-  'credential',
-  'authorization',
-  'api_key',
-  'apikey',
-] as const
+import {
+  credentialKeysOf,
+  MASKED_VALUE,
+  parseValue,
+  summarizeValue,
+  withoutKeys,
+} from '../../configValue'
 
 /**
  * PlatformSettingsPage 承载平台级系统配置的查看与维护。
  */
 export default function PlatformSettingsPage() {
+  const navigate = useNavigate()
   const [editTarget, setEditTarget] = useState<SystemConfig>()
-  const [historyTarget, setHistoryTarget] = useState<SystemConfig>()
 
   const configs = useAsyncResource(
     () => api.admin.listConfigs({ scope: AdminScope.GLOBAL }),
@@ -114,29 +91,34 @@ export default function PlatformSettingsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }, { label: '系统配置' }]} />}
+        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="系统配置"
         description="平台级运行参数。改动立即对全平台生效,每次改动都会留下可回滚的记录。"
         icon={Settings}
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="配置项" value={list.length} icon={Settings} />
-          <Stat
-            label="已登记说明"
-            value={stats.registered}
-            icon={Settings}
-            hint="其余是使用方自定义的键"
-          />
-          <Stat
-            label="含凭据字段"
-            value={stats.withCredentials}
-            icon={KeyRound}
-            hint="保存时需要重新填写"
-          />
-        </div>
-      </PageSection>
+      {/*
+        归族:资源列表族的卡片网格形态(§6.5.3 第 ① 族 + §6.5.2 第二条出路)。
+        指标降为内联摘要;三项由一次取齐的全量配置算出(接口不分页,故是全量口径,§6.5.4)。
+        变更历史是深页而不是弹窗:它是分页数据,而浮层里不出现分页(§6.5.5 A)。
+      */}
+      <MetricStrip
+        label="平台配置摘要"
+        className="mb-5"
+        items={[
+          { label: '配置项', value: list.length, hint: '平台级运行参数' },
+          {
+            label: '已登记说明',
+            value: stats.registered,
+            hint: '其余是使用方自定义的键',
+          },
+          {
+            label: '含凭据字段',
+            value: stats.withCredentials,
+            hint: '保存时需要重新填写',
+          },
+        ]}
+      />
 
       <PageSection
         title="配置项"
@@ -157,7 +139,7 @@ export default function PlatformSettingsPage() {
                     key={config.id}
                     config={config}
                     onEdit={() => setEditTarget(config)}
-                    onHistory={() => setHistoryTarget(config)}
+                    onHistory={() => navigate(`/platform-admin/settings/${encodeURIComponent(config.key)}/history`)}
                   />
                 ))}
               </div>
@@ -181,16 +163,6 @@ export default function PlatformSettingsPage() {
         />
       ) : null}
 
-      {historyTarget ? (
-        <ConfigHistoryModal
-          config={historyTarget}
-          onClose={() => setHistoryTarget(undefined)}
-          onRolledBack={() => {
-            setHistoryTarget(undefined)
-            configs.reload()
-          }}
-        />
-      ) : null}
     </PageScaffold>
   )
 }
@@ -402,230 +374,4 @@ function ConfigEditModal({ config, onClose, onSaved }: ConfigEditModalProps) {
       </ModalContent>
     </Modal>
   )
-}
-
-interface ConfigHistoryModalProps {
-  config: SystemConfig
-  onClose: () => void
-  onRolledBack: () => void
-}
-
-/**
- * ConfigHistoryModal 列出变更历史并承载回滚。
- * 回滚写回的是那条记录的「改动前值」,同样受乐观锁保护。
- */
-function ConfigHistoryModal({ config, onClose, onRolledBack }: ConfigHistoryModalProps) {
-  const [target, setTarget] = useState<ConfigChangeLog>()
-  const [working, setWorking] = useState(false)
-  const [actionError, setActionError] = useState<string>()
-
-  const history = usePagedResource<ConfigChangeLog>(
-    (params) => api.admin.listConfigHistory(config.key, { scope: AdminScope.GLOBAL, ...params }),
-    [config.key],
-  )
-
-  const rollback = useCallback(async () => {
-    if (!target) return
-    setWorking(true)
-    setActionError(undefined)
-    try {
-      await api.admin.rollbackConfig(config.key, {
-        scope: AdminScope.GLOBAL,
-        version: config.version,
-        change_log_id: target.id,
-      })
-      toast.success('已回滚到这次改动前的内容')
-      onRolledBack()
-    } catch (error) {
-      setActionError(
-        userFacingErrorMessage(
-          error,
-          '回滚没有成功。如果这一项刚被别人改过,请关闭后重新打开再试。',
-        ),
-      )
-    } finally {
-      setWorking(false)
-    }
-  }, [config.key, config.version, onRolledBack, target])
-
-  const columns: TableColumn<ConfigChangeLog>[] = [
-    {
-      key: 'created_at',
-      header: '改动时间',
-      render: (log) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDateTime(log.created_at)}
-        </span>
-      ),
-    },
-    {
-      key: 'changed_keys',
-      header: '改了哪些字段',
-      render: (log) => {
-        const keys = changedKeys(log.old_value, log.new_value)
-        return keys.length > 0 ? (
-          <span className="flex flex-wrap gap-1">
-            {keys.map((key) => (
-              <Badge key={key} tone="neutral">
-                {key}
-              </Badge>
-            ))}
-          </span>
-        ) : (
-          <span className="text-sm text-ink-sub">内容未变</span>
-        )
-      },
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (log) => (
-        <Button variant="ghost" size="sm" leftIcon={RotateCcw} onClick={() => setTarget(log)}>
-          回滚到改动前
-        </Button>
-      ),
-    },
-  ]
-
-  return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>{configKeyLabel(config.key)}的变更历史</ModalTitle>
-          <ModalDescription>
-            每次改动都会留一条记录。回滚会把内容写回到所选记录改动之前的样子。
-          </ModalDescription>
-        </ModalHeader>
-        <ModalBody className="flex flex-col gap-4">
-          {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
-          <ResourceState
-            resource={history}
-            emptyIcon={History}
-            emptyTitle="还没有变更记录"
-            emptyDescription="这一项自创建以来没有改动过。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-          >
-            {(page) => (
-              <>
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={history.page}
-                  pageSize={history.pageSize}
-                  total={history.total}
-                  onPageChange={history.setPage}
-                />
-              </>
-            )}
-          </ResourceState>
-
-          {target ? (
-            <div className="flex flex-col gap-3 well p-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <TriangleAlert aria-hidden="true" className="size-4 text-warning" />
-                <span className="text-base text-ink">
-                  确认回滚到 {formatDateTime(target.created_at)} 这次改动之前?
-                </span>
-              </div>
-              <p className="text-sm text-ink-sub">
-                回滚本身也会记一条新的变更记录,所以随时可以再回滚回来。凭据字段按当时的加密值写回。
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="danger" loading={working} onClick={() => void rollback()}>
-                  确认回滚
-                </Button>
-                <Button variant="ghost" onClick={() => setTarget(undefined)}>
-                  先不回滚
-                </Button>
-              </div>
-            </div>
-          ) : null}
-        </ModalBody>
-        <ModalFooter>
-          <Button variant="outline" onClick={onClose}>
-            关闭
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
-  )
-}
-
-/** credentialKeysOf 列出配置值顶层的凭据字段键。 */
-function credentialKeysOf(value: Record<string, unknown>): string[] {
-  return Object.keys(value).filter(isCredentialKey).sort()
-}
-
-/** isCredentialKey 判断键名是否带凭据语义,口径与后端一致。 */
-function isCredentialKey(key: string): boolean {
-  const normalized = key.trim().toLowerCase()
-  return CREDENTIAL_KEY_MARKERS.some((marker) => normalized.includes(marker))
-}
-
-/** withoutKeys 去掉指定键,得到可以安全放进编辑器的部分。 */
-function withoutKeys(
-  value: Record<string, unknown>,
-  keys: string[],
-): Record<string, unknown> {
-  const drop = new Set(keys)
-  return Object.fromEntries(Object.entries(value).filter(([key]) => !drop.has(key)))
-}
-
-/** summarizeValue 把配置值摊成可读条目;凭据字段只说「已配置」。 */
-function summarizeValue(value: Record<string, unknown>): Array<{
-  term: string
-  description: string
-  mono?: boolean
-}> {
-  return Object.entries(value).map(([key, raw]) => {
-    if (isCredentialKey(key)) return { term: key, description: '已配置(不显示)' }
-    return { term: key, description: describeValue(raw), mono: true }
-  })
-}
-
-/** describeValue 给任意配置值一个短的可读表达,不打印整段结构。 */
-function describeValue(raw: unknown): string {
-  if (typeof raw === 'string') return raw === '' ? '(空)' : raw
-  if (typeof raw === 'number' || typeof raw === 'boolean') return String(raw)
-  if (Array.isArray(raw)) return `${raw.length} 项`
-  if (raw === null || raw === undefined) return '未设置'
-  return `${Object.keys(raw as Record<string, unknown>).length} 个子项`
-}
-
-/** changedKeys 比较改动前后的键值,列出真正变化的键。 */
-function changedKeys(
-  oldValue: Record<string, unknown>,
-  newValue: Record<string, unknown>,
-): string[] {
-  const keys = new Set([...Object.keys(oldValue), ...Object.keys(newValue)])
-  return [...keys]
-    .filter((key) => JSON.stringify(oldValue[key]) !== JSON.stringify(newValue[key]))
-    .sort()
-}
-
-/** ParsedValue 是配置内容文本的解析结果。 */
-interface ParsedValue {
-  value?: Record<string, unknown>
-  error?: string
-}
-
-/**
- * parseValue 解析配置内容。
- * 后端要求 value 是一个对象且非空(nil 会被拒),故这两条在本地先判定。
- */
-function parseValue(text: string): ParsedValue {
-  const trimmed = text.trim()
-  if (trimmed === '') return { error: '配置内容不能为空。' }
-
-  let raw: unknown
-  try {
-    raw = JSON.parse(trimmed)
-  } catch {
-    return { error: '内容不是合法的配置格式,检查是否漏了逗号或引号。' }
-  }
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    return { error: '配置内容最外层要是一个对象。' }
-  }
-  return { value: raw as Record<string, unknown> }
 }

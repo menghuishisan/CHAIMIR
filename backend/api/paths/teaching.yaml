@@ -11,6 +11,7 @@
       - { $ref: "#/components/parameters/StatusQuery" }
       - { $ref: "#/components/parameters/PageQuery" }
       - { $ref: "#/components/parameters/SizeQuery" }
+      - { name: is_shared, in: query, schema: { type: integer, minimum: 0, maximum: 2 } }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [teaching]
@@ -317,6 +318,8 @@
       - { $ref: "#/components/parameters/IDPath" }
       - { $ref: "#/components/parameters/PageQuery" }
       - { $ref: "#/components/parameters/SizeQuery" }
+      - { $ref: "#/components/parameters/StatusQuery" }
+      - { name: is_late, in: query, schema: { type: integer, minimum: 0, maximum: 2 } }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/assignments/{id}/draft:
   get:

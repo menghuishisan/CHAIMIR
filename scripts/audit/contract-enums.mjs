@@ -827,6 +827,12 @@ const stringGroups = [
     "frontend/packages/api-client/src/constants/contest.ts",
     "CHAIN_ASSERT_OPERATION",
   ],
+  [
+    "backend/internal/contracts/engine_composition.go",
+    "SandboxAccess",
+    "frontend/packages/api-client/src/constants/composition.ts",
+    "SANDBOX_ACCESS_PROFILE",
+  ],
 ].map(([go, prefix, ts, constName, omit]) => ({
   go,
   prefix,
@@ -894,6 +900,19 @@ for (const fileName of readdirSync(
 const frontendOnlyStringConsts = new Set([
   "API_ERROR_CODES",
   "API_TRANSPORT_ERROR_MESSAGES",
+  // BOOL_FILTER 是查询串上的三态编码(0 不限 / 1 是 / 2 否),对应后端
+  // httpx.QueryInt16(Min:0, Max:2) 的取值域而不是某个 Go 常量组,故按前端边界登记。
+  "BOOL_FILTER",
+]);
+
+// 后端目前用裸字符串字面量表达、尚未命名成 Go 常量组的契约值:
+// 本脚本无法做逐项对照,故单独登记并在 docs/对齐-后端待补齐清单-2026-08-23.md 记为后端待办 ——
+// 后端把它们提成命名常量后,应移入 stringGroups 做真实对照,不留在这里。
+const pendingBackendNamedConsts = new Set([
+  // sandbox 组合编译器按 "tool" / "infra" 判定组件类别(composition.go expectedCategory)
+  "SANDBOX_COMPONENT_CATEGORY",
+  // 组合组件引用来源按 "explicit" / "auto" 判定(composition.go selection 校验)
+  "COMPOSITION_SELECTION",
 ]);
 const coveredStringConsts = new Set([
   ...stringGroups.map((group) => `${group.ts}:${group.constName}`),
@@ -909,7 +928,8 @@ for (const fileName of readdirSync(
   )) {
     if (
       !coveredStringConsts.has(`${path}:${match[1]}`) &&
-      !frontendOnlyStringConsts.has(match[1])
+      !frontendOnlyStringConsts.has(match[1]) &&
+      !pendingBackendNamedConsts.has(match[1])
     ) {
       problems.push(
         `${path}: 字符串常量 ${match[1]} 未登记后端来源或前端专属边界`,

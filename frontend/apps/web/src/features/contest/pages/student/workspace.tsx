@@ -33,11 +33,14 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { AppStatusScreen } from '../../../../components/AppStatusScreen'
-import { SandboxIdeWorkspace } from '../../../sandbox/components/SandboxIdeWorkspace'
+import {
+  SandboxIdeWorkspace,
+  type SandboxWorkspaceApi,
+} from '../../../sandbox/components/SandboxIdeWorkspace'
 import { useSession } from '../../../../components/RoleGuard'
 import { useAsyncResource, usePagedResource, useTicketedWebSocket } from '../../../../hooks'
 import { useImmersive } from '../../../../layouts/immersive/context'
-import { readString, readStringArray } from '../../jsonReaders'
+import { readString } from '../../jsonReaders'
 import { formatDateTime } from '../../../../utils/formatters'
 import { battleRoleLabel, contestStatusLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -49,13 +52,33 @@ const FACE_KEYS = {
   scenario: 'scenario',
   statement: 'statement',
   title: 'title',
+  /** 实操题的环境声明:题库按 M2 组合契约写入,竞赛按它起环境 */
+  composition: 'composition',
+  primaryRuntime: 'primary_runtime',
   runtimeCode: 'runtime_code',
-  tools: 'tools',
   submitKey: 'submit_key',
 } as const
 
 /** 参战角色:攻防题分攻守,博弈题只有策略方。 */
 const BATTLE_ROLES = [BattleRole.STRATEGY, BattleRole.ATTACK, BattleRole.DEFENSE] as const
+
+/** 竞赛工作区只通过 M8 授权网关访问沙箱,不复用 M2 租户内路径。 */
+const contestWorkspaceApi: SandboxWorkspaceApi = {
+  getInstance: (sandboxId) => api.contest.getSandboxInstance(sandboxId),
+  getTerminalWsUrl: (sandboxId, container) => api.contest.getSandboxTerminalWsUrl(sandboxId, container),
+  getProgressWsUrl: (sandboxId) => api.contest.getSandboxProgressWsUrl(sandboxId),
+  readFile: (sandboxId, path) => api.contest.readSandboxFile(sandboxId, path),
+  listFiles: (sandboxId, path) => api.contest.listSandboxFiles(sandboxId, path),
+  writeFile: (sandboxId, data) => api.contest.writeSandboxFile(sandboxId, data),
+  saveFiles: (sandboxId) => api.contest.saveSandboxFiles(sandboxId),
+  runCommandTool: (sandboxId, toolCode, data) =>
+    api.contest.runSandboxCommandTool(sandboxId, toolCode, data),
+  chainDeploy: (sandboxId, data) => api.contest.sandboxChainDeploy(sandboxId, data),
+  chainSendTx: (sandboxId, data) => api.contest.sandboxChainSendTx(sandboxId, data),
+  chainQuery: (sandboxId, target) => api.contest.sandboxChainQuery(sandboxId, target),
+  getToolProxyUrl: (sandboxId, toolCode, proxyPath, toolOrigin) =>
+    api.contest.getSandboxToolProxyUrl(sandboxId, toolCode, proxyPath, toolOrigin),
+}
 
 /**
  * StudentContestWorkspacePage 装配竞赛答题工作台。
@@ -191,16 +214,18 @@ function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
     setActionError(undefined)
   }, [problemId])
 
-  /** createEnv 起一个实操环境:运行时按题目声明,镜像版本留空即用该运行时的默认镜像。 */
+  /**
+   * createEnv 起一个实操环境。
+   * 环境内容取自赛题锁定版本已发布的组合快照,故请求只带一个幂等引用 ——
+   * 学生端不声明运行时或工具,也就无法绕过赛题冻结的执行内容(对齐清单 §6.3)。
+   */
   const createEnv = useCallback(async () => {
-    if (!spec.runtimeCode) return
+    if (!spec.hasEnvironment) return
     setBusy(true)
     setActionError(undefined)
     try {
       const env = await api.contest.createEnv(contest.id, problem.id, {
-        runtime_code: spec.runtimeCode,
-        runtime_image_version: spec.runtimeImageVersion,
-        tool_codes: spec.toolCodes,
+        request_ref: `contest-problem:${problem.id}`,
       })
       setSandboxId(env.sandbox_id)
       toast.success('实操环境已就绪')
@@ -209,7 +234,7 @@ function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
     } finally {
       setBusy(false)
     }
-  }, [contest.id, problem.id, spec])
+  }, [contest.id, problem.id, spec.hasEnvironment])
 
   /** submitSolve 提交解题赛答案:代码题带代码引用,答题类按声明的键带答案。 */
   const submitSolve = useCallback(async () => {
@@ -400,47 +425,48 @@ interface ProblemSpec {
   title: string
   scenario: string
   statement: string
-  runtimeCode?: string
-  runtimeImageVersion: string
-  toolCodes: string[]
+  /** hasEnvironment 表示题目锁定版本里声明了可启动的实操环境 */
+  hasEnvironment: boolean
+  /** runtimeName 只用于告诉学生这道题在什么链上做,不参与启动请求 */
+  runtimeName: string
   submitKey?: string
 }
 
 /**
- * problemSpec 从题面与对抗配置里读出这道题怎么答。
- * 对抗题优先:它的环境参数在对抗配置里(后端要求运行时与镜像版本必填),
- * 与解题赛不共用一条路径。
+ * problemSpec 从题面读出这道题怎么答。
+ * 环境由题目锁定版本的组合声明唯一提供 —— 学生端不拼装运行时与工具,
+ * 故这里只判断「有没有环境」并取出链名用于文案(对齐清单 §6.3)。
  */
 function problemSpec(problem: ContestProblem): ProblemSpec {
   const face = problem.face ?? {}
+  const runtimeName = readCompositionRuntime(face)
   const base = {
     title: readString(face, FACE_KEYS.title) || `第 ${problem.seq} 题`,
     scenario: readString(face, FACE_KEYS.scenario),
     statement: readString(face, FACE_KEYS.statement),
+    hasEnvironment: runtimeName !== '',
+    runtimeName,
   }
 
   if (problem.battle_rule !== undefined) {
-    const config = problem.battle_config
-    return {
-      ...base,
-      kind: 'battle',
-      runtimeCode: config?.runtime_code || undefined,
-      runtimeImageVersion: config?.runtime_image_version ?? '',
-      toolCodes: config?.tool_codes ?? [],
-    }
+    return { ...base, kind: 'battle' }
   }
 
-  const runtimeCode = readString(face, FACE_KEYS.runtimeCode)
   const submitKey = readString(face, FACE_KEYS.submitKey)
   return {
     ...base,
-    kind: runtimeCode !== '' ? 'code' : submitKey !== '' ? 'answer' : 'undeclared',
-    runtimeCode: runtimeCode || undefined,
-    // 题面不声明镜像版本:留空即用该运行时的默认镜像
-    runtimeImageVersion: '',
-    toolCodes: readStringArray(face, FACE_KEYS.tools),
+    kind: runtimeName !== '' ? 'code' : submitKey !== '' ? 'answer' : 'undeclared',
     submitKey: submitKey || undefined,
   }
+}
+
+/** readCompositionRuntime 从题面的组合声明里读出主运行时编码;没有声明即回空串。 */
+function readCompositionRuntime(face: Record<string, unknown>): string {
+  const composition = face[FACE_KEYS.composition]
+  if (typeof composition !== 'object' || composition === null) return ''
+  const primary = (composition as Record<string, unknown>)[FACE_KEYS.primaryRuntime]
+  if (typeof primary !== 'object' || primary === null) return ''
+  return readString(primary as Record<string, unknown>, FACE_KEYS.runtimeCode)
 }
 
 interface ProblemBriefProps {
@@ -561,21 +587,34 @@ function ProblemStage({
           {spec.kind === 'battle' ? '准备参战物需要一个实操环境' : '这道题要在实操环境里完成'}
         </p>
         <p className="max-w-md text-sm text-on-dark-sub">
-          环境按题目指定的链运行时准备,起好后可以写代码、开终端、做链上操作。
+          环境按题目锁定版本里的声明准备,起好后可以写代码、开终端、做链上操作。
+          {spec.runtimeName ? `这道题用的是 ${spec.runtimeName}。` : ''}
         </p>
-        <Button variant="primary" loading={busy} disabled={!answerable} onClick={onCreateEnv}>
+        <Button
+          variant="primary"
+          loading={busy}
+          disabled={!answerable || !spec.hasEnvironment}
+          onClick={onCreateEnv}
+        >
           准备实操环境
         </Button>
-        {!spec.runtimeCode ? (
+        {!spec.hasEnvironment ? (
           <p className="text-xs text-on-dark-danger">
-            这道题没有指定链运行时,暂时起不了环境。请把题号告诉老师。
+            这道题的题目版本里没有声明实操环境,暂时起不了。请把题号告诉老师。
           </p>
         ) : null}
       </div>
     )
   }
 
-  return <SandboxIdeWorkspace key={sandboxId} sandboxId={sandboxId} onSaved={onSaved} />
+  return (
+    <SandboxIdeWorkspace
+      key={sandboxId}
+      sandboxId={sandboxId}
+      workspaceApi={contestWorkspaceApi}
+      onSaved={onSaved}
+    />
+  )
 }
 
 /**

@@ -19,24 +19,35 @@ source:
   type: thin-wrapper
 upstream:
   image: envoyproxy/envoy:v1.32.3
+  version: v1.32.3
   digest: sha256:127e33c48c60be9a148cf9256d52e734ceda28aa344145023933116c7e524beb
   reuse_policy: thin-wrapper
+env_keys:
+  config:
+    - CHAIMIR_RPC_UPSTREAM_URL
+  secret: []
 data_driven: true
 capabilities:
-  - rpc-gateway
+  provides:
+    - rpc-gateway
+    - evm-json-rpc
+  requires:
+    - evm-json-rpc
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 infra:
   eco_tags:
     - evm
-    - fabric
-    - fisco
-    - solana
-    - aptos
-    - sui
-    - cosmos
-    - substrate
-    - near
-    - bitcoin
-    - edu
+  bindings:
+    - name: upstream
+      capability: evm-json-rpc
+      endpoint: rpc
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:CHAIMIR_RPC_UPSTREAM_URL
   roles:
     - rpc-proxy
     - load-balancer
@@ -79,6 +90,11 @@ selftest:
       command:
         - envoy
         - --version
+    - name: entrypoint-syntax
+      command:
+        - sh
+        - -n
+        - /usr/local/bin/chaimir-rpc-gateway-entrypoint
 supply_chain:
   sbom: true
   trivy_required: true

@@ -1,0 +1,75 @@
+# 本文件声明 tool/workspace 的学生工作区能力,不承担链运行时或判题能力。
+schema_version: 1
+category: tool
+name: workspace
+image: tool/workspace
+labels:
+  app.kubernetes.io/name: workspace
+  app.kubernetes.io/component: tool
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: tool
+  chaimir.io/image: tool/workspace
+  chaimir.io/data-driven: "false"
+  chaimir.io/student-access: "true"
+  chaimir.io/sensitivity: student-workspace
+  chaimir.io/scope: sandbox
+  chaimir.io/exposure: platform-private
+  chaimir.io/source: platform-built
+description: 学生工作区文件、归档和受控终端能力。
+source:
+  type: platform-built
+upstream:
+  image: alpine
+  version: 3.23
+  digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+data_driven: false
+capabilities:
+  provides:
+    - workspace-files
+    - workspace-terminal
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: public
+tool:
+  kind: terminal
+  eco_tags:
+    - "*"
+  mount_workspace: true
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+student_access:
+  enabled: true
+  shell: restricted
+  allowed_mounts:
+    - workspace
+resources:
+  cpu_request: 50m
+  cpu_limit: 250m
+  memory_request: 64Mi
+  memory_limit: 256Mi
+  ephemeral_storage_limit: 512Mi
+build:
+  context: ../../..
+  dockerfile: images/tool/workspace/Dockerfile
+selftest:
+  commands:
+    - name: workspace
+      command:
+        - /usr/local/bin/chaimir-workspace
+        - selftest
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true

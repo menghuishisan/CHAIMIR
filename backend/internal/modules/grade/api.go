@@ -135,7 +135,11 @@ func (a gradeAPI) listReviews(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out5, total, p, s, err := a.svc.ListReviews(c.Request.Context(), status, page, size)
+	isLocked, ok := httpx.QueryInt16(c, "is_locked", httpx.QueryIntRule{Default: 0, Min: 0, Max: 2, HasMax: true})
+	if !ok {
+		return
+	}
+	out5, total, p, s, err := a.svc.ListReviews(c.Request.Context(), status, isLocked, page, size)
 	httpx.WritePage(c, out5, total, p, s, err)
 }
 
@@ -255,7 +259,7 @@ func (a gradeAPI) getWarningRules(c *gin.Context) {
 
 // updateWarningRules 绑定学业预警规则更新请求。
 func (a gradeAPI) updateWarningRules(c *gin.Context) {
-	var req WarningRules
+	var req WarningRulesRequest
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrGradeConfigInvalid) {
 		return
 	}

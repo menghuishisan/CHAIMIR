@@ -12,6 +12,8 @@ RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 go mod download
 COPY --chown=1000:1000 backend/ ./
 COPY --chown=1000:1000 images/tool /src/acceptance-images/tool
 COPY --chown=1000:1000 images/infra /src/acceptance-images/infra
+COPY --chown=1000:1000 images/runtime /src/acceptance-images/runtime
+COPY --chown=1000:1000 images/judger /src/acceptance-images/judger
 
 # migrate 命令用于部署期 migration、授权和 seed 编排。
 RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 --mount=type=cache,target=/tmp/go-cache,uid=1000,gid=1000 \

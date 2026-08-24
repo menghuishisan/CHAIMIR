@@ -33,10 +33,11 @@ type Envelope struct {
 
 // Page 是分页接口统一返回结构。
 type Page struct {
-	List  any   `json:"list"`
-	Total int64 `json:"total"`
-	Page  int   `json:"page"`
-	Size  int   `json:"size"`
+	List   any                         `json:"list"`
+	Total  int64                       `json:"total"`
+	Page   int                         `json:"page"`
+	Size   int                         `json:"size"`
+	Facets map[string]map[string]int64 `json:"facets,omitempty"`
 }
 
 // WithTrace 把 trace_id 写入 context。
@@ -100,6 +101,11 @@ func OK(c *gin.Context, data any) {
 // OKPage 写出统一分页信封。
 func OKPage(c *gin.Context, list any, total int64, page, size int) {
 	OK(c, Page{List: list, Total: total, Page: page, Size: size})
+}
+
+// OKPageWithFacets 输出带全量分组计数的分页响应,列表与聚合使用同一权限口径。
+func OKPageWithFacets(c *gin.Context, list any, total int64, page, size int, facets map[string]map[string]int64) {
+	OK(c, Page{List: list, Total: total, Page: page, Size: size, Facets: facets})
 }
 
 // Fail 写出错误响应,并按错误分层规则记录内部原因。

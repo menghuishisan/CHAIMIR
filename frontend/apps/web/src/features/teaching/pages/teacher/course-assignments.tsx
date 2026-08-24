@@ -17,6 +17,7 @@ import {
 import {
   Button,
   Callout,
+  DataPanel,
   Empty,
   FormField,
   IconButton,
@@ -164,25 +165,51 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
       <div className="flex flex-col gap-4">
         {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
-        <ResourceState
-          resource={assignments}
-          emptyIcon={ClipboardList}
-          emptyTitle="还没有作业"
-          emptyDescription="从题库选题创建作业,发布后学生就能作答。"
-          emptyAction={
-            <Button variant="primary" leftIcon={Plus} onClick={() => setFormOpen({})}>
-              新建作业
-            </Button>
+        {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):数据表与分页同处一块抬起片 */}
+        <DataPanel
+          label="课程作业"
+          footer={
+            <Pagination
+              page={assignments.page}
+              pageSize={assignments.pageSize}
+              total={assignments.total}
+              onPageChange={assignments.setPage}
+            />
           }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
         >
-			{(page) => (
-				<div className="flex flex-col gap-4">
-					<Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-					<Pagination page={assignments.page} pageSize={assignments.pageSize} total={assignments.total} onPageChange={assignments.setPage} />
-				</div>
-			)}
-        </ResourceState>
+          <ResourceState
+            resource={assignments}
+            emptyIcon={ClipboardList}
+            emptyTitle="还没有作业"
+            emptyDescription="从题库选题创建作业,发布后学生就能作答。"
+            emptyAction={
+              <Button variant="primary" leftIcon={Plus} onClick={() => setFormOpen({})}>
+                新建作业
+              </Button>
+            }
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+          >
+            {(page) => (
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):作业名一行、截止时间与可提交次数一行,发布状态在右
+                mobileCard={(item) => ({
+                  title: item.title,
+                  meta: `${formatDateTime(item.due_at)} 截止 · 可交 ${item.max_attempts} 次 · ${latePolicyLabel(item.late_policy)}`,
+                  badge: (
+                    <StatusIndicator
+                      tone={item.status === AssignmentStatus.PUBLISHED ? 'success' : 'neutral'}
+                      label={assignmentStatusLabel(item.status)}
+                    />
+                  ),
+                })}
+              />
+            )}
+          </ResourceState>
+        </DataPanel>
       </div>
 
       {formOpen ? (

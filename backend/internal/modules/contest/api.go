@@ -3,13 +3,17 @@ package contest
 
 import (
 	"context"
+	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/httpx"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/response"
+	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 
 	"github.com/gin-gonic/gin"
@@ -26,7 +30,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	if authn == nil {
 		return apperr.ErrHTTPAuthMissing
 	}
-	api := contestAPI{svc: svc}
+	api := contestAPI{svc: svc, authn: authn}
 	g := r.Group("/api/v1/contest")
 	teacher := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
 	student := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent))
@@ -36,17 +40,24 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	api.registerTeacherRoutes(teacher)
 	api.registerStudentRoutes(student)
 	api.registerSharedRoutes(all)
+	api.registerContestSandboxRoutes(student)
+	api.registerContestSandboxInteractiveRoutes(g.Group("", authn.WebSocketMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent)))
+	api.registerContestSandboxToolProxyRoutes(g.Group("", authn.BrowserAccessMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent)))
 	api.registerPlatformRoutes(platform)
 	api.registerInternalRoutes(internal)
 	return nil
 }
 
-type contestAPI struct{ svc *Service }
+type contestAPI struct {
+	svc   *Service
+	authn *auth.Manager
+}
 
 // registerTeacherRoutes 注册教师/管理员竞赛管理接口。
 func (a contestAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.GET("/contests", a.listContests)
 	g.POST("/contests", a.createContest)
+	g.GET("/contests/:id", a.getContest)
 	g.PATCH("/contests/:id", a.updateContest)
 	g.POST("/contests/:id/problems", a.addProblem)
 	g.POST("/contests/:id/publish", a.publishContest)
@@ -68,6 +79,16 @@ func (a contestAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/vuln-problems/:id/finalize", a.finalizeVulnProblem)
 }
 
+// getContest 读取教师可管理的竞赛定义,草稿也可访问。
+func (a contestAPI) getContest(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetContestForTeacher(c.Request.Context(), id)
+	httpx.Write(c, out, err)
+}
+
 // registerStudentRoutes 注册学生参赛接口。
 func (a contestAPI) registerStudentRoutes(g gin.IRouter) {
 	g.GET("/student/contests", a.listStudentContests)
@@ -84,6 +105,29 @@ func (a contestAPI) registerStudentRoutes(g gin.IRouter) {
 	g.GET("/matches/:id/replay", a.getBattleReplay)
 	g.POST("/matches/:id/replay/download-grant", a.issueBattleReplayDownloadGrant)
 	g.GET("/my/contest-records", a.myRecords)
+}
+
+// registerContestSandboxRoutes 注册 M8 作为跨校授权网关的普通 HTTP 工作区和链操作入口。
+func (a contestAPI) registerContestSandboxRoutes(g gin.IRouter) {
+	g.GET("/sandboxes/:id", a.getContestSandbox)
+	g.GET("/sandboxes/:id/files", a.getContestSandboxFiles)
+	g.PUT("/sandboxes/:id/files", a.writeContestSandboxFile)
+	g.POST("/sandboxes/:id/files/save", a.saveContestSandboxFiles)
+	g.POST("/sandboxes/:id/command-tools/:tool_code/run", a.runContestSandboxCommandTool)
+	g.POST("/sandboxes/:id/chain/deploy", a.deployContestSandboxChain)
+	g.POST("/sandboxes/:id/chain/tx", a.sendContestSandboxChainTx)
+	g.GET("/sandboxes/:id/chain/query", a.queryContestSandboxChain)
+}
+
+// registerContestSandboxInteractiveRoutes 注册经短时票据保护的竞赛进度和终端 WebSocket。
+func (a contestAPI) registerContestSandboxInteractiveRoutes(g gin.IRouter) {
+	g.GET("/sandboxes/:id/progress", a.contestSandboxProgress)
+	g.GET("/sandboxes/:id/terminal", a.contestSandboxTerminal)
+}
+
+// registerContestSandboxToolProxyRoutes 注册受 M8 grant 校验保护的浏览器工具代理。
+func (a contestAPI) registerContestSandboxToolProxyRoutes(g gin.IRouter) {
+	g.Match([]string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodHead, http.MethodOptions}, "/sandboxes/:id/tools/:tool_code/*proxy_path", a.contestSandboxToolProxy)
 }
 
 // registerPlatformRoutes 注册平台级漏洞源治理接口，不暴露租户漏洞题写入能力。
@@ -526,7 +570,11 @@ func (a contestAPI) listVulnProblems(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListVulnProblems(c.Request.Context(), sourceID, status, page, size)
+	prevalidateStatus, ok := httpx.QueryInt16(c, "prevalidate_status", httpx.QueryIntRule{Default: 0, Min: 0, Max: 3, HasMax: true})
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListVulnProblems(c.Request.Context(), sourceID, status, prevalidateStatus, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
 }
 
@@ -586,6 +634,228 @@ func (a contestAPI) internalAchievements(c *gin.Context) {
 	}
 	out, err := a.svc.ListStudentAchievements(c.Request.Context(), tenantID, studentID)
 	httpx.Write(c, out, err)
+}
+
+// getContestSandbox 返回 M8 grant 校验后的竞赛沙箱摘要。
+func (a contestAPI) getContestSandbox(c *gin.Context) {
+	sandboxID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetContestSandbox(c.Request.Context(), sandboxID)
+	if err != nil {
+		httpx.Write(c, nil, err)
+		return
+	}
+	httpx.Write(c, contestSandboxResponseFromInfo(out), nil)
+}
+
+// getContestSandboxFiles 读取单个文件或列出目录，能力由 M8 grant 在每次请求时核验。
+func (a contestAPI) getContestSandboxFiles(c *gin.Context) {
+	sandboxID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	if strings.EqualFold(c.Query("mode"), "list") {
+		out, err := a.svc.ListContestSandboxFiles(c.Request.Context(), sandboxID, c.Query("path"))
+		httpx.Write(c, out, err)
+		return
+	}
+	out, err := a.svc.ReadContestSandboxFile(c.Request.Context(), sandboxID, c.Query("path"))
+	httpx.Write(c, out, err)
+}
+
+// writeContestSandboxFile 写入竞赛工作区公开文件。
+func (a contestAPI) writeContestSandboxFile(c *gin.Context) {
+	sandboxID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	var req ContestSandboxFileWriteRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxFileWriteRequestInvalid) {
+		return
+	}
+	if strings.TrimSpace(req.RelativePath) == "" {
+		req.RelativePath = c.Query("path")
+	}
+	revision, err := a.svc.WriteContestSandboxFile(c.Request.Context(), sandboxID, req.RelativePath, req.ContentBase64, req.ExpectedRevision)
+	httpx.Write(c, ContestSandboxFileWriteResponse{WorkspaceRevision: revision}, err)
+}
+
+// saveContestSandboxFiles 立即持久化竞赛工作区。
+func (a contestAPI) saveContestSandboxFiles(c *gin.Context) {
+	sandboxID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.SaveContestSandboxFiles(c.Request.Context(), sandboxID)
+	httpx.Write(c, out, err)
+}
+
+// runContestSandboxCommandTool 执行受 grant 和工具白名单双重约束的命令。
+func (a contestAPI) runContestSandboxCommandTool(c *gin.Context) {
+	sandboxID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	var req ContestSandboxToolRunRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxToolRunRequestInvalid) {
+		return
+	}
+	out, err := a.svc.RunContestSandboxCommandTool(c.Request.Context(), sandboxID, c.Param("tool_code"), req.Command, req.StdinBase64, req.TimeoutSec)
+	httpx.Write(c, out, err)
+}
+
+// deployContestSandboxChain 调用 grant 允许的统一链部署能力。
+func (a contestAPI) deployContestSandboxChain(c *gin.Context) {
+	sandboxID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	var req ContestSandboxChainRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxDeployRequestInvalid) {
+		return
+	}
+	out, err := a.svc.DeployContestSandboxChain(c.Request.Context(), sandboxID, req.Payload)
+	httpx.Write(c, out, err)
+}
+
+// sendContestSandboxChainTx 调用 grant 允许的统一链交易能力。
+func (a contestAPI) sendContestSandboxChainTx(c *gin.Context) {
+	sandboxID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	var req ContestSandboxChainRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxTxRequestInvalid) {
+		return
+	}
+	out, err := a.svc.SendContestSandboxChainTx(c.Request.Context(), sandboxID, req.Payload)
+	httpx.Write(c, out, err)
+}
+
+// queryContestSandboxChain 调用 grant 允许的统一链查询能力。
+func (a contestAPI) queryContestSandboxChain(c *gin.Context) {
+	sandboxID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.QueryContestSandboxChain(c.Request.Context(), sandboxID, c.Query("target"))
+	httpx.Write(c, out, err)
+}
+
+// contestSandboxProgress 建立已授权竞赛成员的沙箱进度订阅。
+func (a contestAPI) contestSandboxProgress(c *gin.Context) {
+	sandboxID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	id, err := currentIdentity(c.Request.Context())
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	if a.svc.wsHub == nil {
+		response.Fail(c, apperr.ErrSandboxToolProxyUnavailable)
+		return
+	}
+	if err := a.svc.wsHub.Serve(c.Writer, c.Request, func(conn *ws.Conn) error {
+		access, topic, initial, err := a.svc.ContestSandboxProgressSubscription(c.Request.Context(), sandboxID)
+		if err != nil {
+			return err
+		}
+		if err := conn.BindSession(ws.SessionKey{TenantID: id.TenantID, AccountID: id.AccountID, Scope: contestSandboxSessionScope(access.Principal.AuthorizationID, sandboxID) + ":progress"}); err != nil {
+			return apperr.ErrContestTeamAccessDenied.WithCause(err)
+		}
+		if err := a.svc.wsHub.Subscribe(conn, topic); err != nil {
+			return apperr.ErrSandboxToolProxyUnavailable.WithCause(err)
+		}
+		return conn.SendJSON(initial)
+	}); err != nil {
+		response.Fail(c, apperr.ErrSandboxToolProxyUnavailable.WithCause(err))
+	}
+}
+
+// contestSandboxTerminal 建立已授权竞赛成员的终端字节流连接。
+func (a contestAPI) contestSandboxTerminal(c *gin.Context) {
+	sandboxID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	id, err := currentIdentity(c.Request.Context())
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	if a.svc.wsHub == nil {
+		response.Fail(c, apperr.ErrSandboxToolProxyUnavailable)
+		return
+	}
+	access, target, err := a.svc.ContestSandboxTerminalTarget(c.Request.Context(), sandboxID, strings.TrimSpace(c.Query("container")))
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	if err := a.svc.wsHub.ServeInteractive(c.Writer, c.Request, func(conn *ws.Conn) error {
+		if err := conn.BindSession(ws.SessionKey{TenantID: id.TenantID, AccountID: id.AccountID, Scope: contestSandboxSessionScope(access.Principal.AuthorizationID, sandboxID)}); err != nil {
+			return apperr.ErrContestTeamAccessDenied.WithCause(err)
+		}
+		return a.svc.AttachContestSandboxTerminal(c.Request.Context(), access, target, conn.Reader(), conn.Writer())
+	}); err != nil {
+		response.Fail(c, apperr.ErrSandboxToolProxyUnavailable.WithCause(err))
+	}
+}
+
+// contestSandboxToolProxy 将已授权的浏览器工具请求代理到组织租户的集群内 Service。
+func (a contestAPI) contestSandboxToolProxy(c *gin.Context) {
+	sandboxID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	access, target, err := a.svc.ContestSandboxToolProxyTarget(c.Request.Context(), sandboxID, c.Param("tool_code"))
+	if err != nil {
+		response.Fail(c, err)
+		return
+	}
+	parsed, err := url.Parse(target.TargetURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		response.Fail(c, apperr.ErrSandboxToolProxyUnavailable)
+		return
+	}
+	externalPrefix := contestToolProxyExternalPrefix(sandboxID, c.Param("tool_code"))
+	if !a.prepareContestToolBrowserAccess(c, externalPrefix) {
+		return
+	}
+	proxy := httpx.NewPrefixReverseProxy(httpx.PrefixReverseProxyConfig{
+		Target: parsed, ProxyPath: c.Param("proxy_path"), ExternalPrefix: externalPrefix,
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
+			response.Fail(c, apperr.ErrSandboxToolProxyUnavailable.WithCause(err))
+		},
+	})
+	proxy.ServeHTTP(c.Writer, c.Request)
+	_ = a.svc.ObserveContestSandboxToolAccess(c.Request.Context(), access)
+}
+
+// prepareContestToolBrowserAccess 将浏览器入口票据收敛为路径受限 Cookie，避免令牌进入上游工具日志。
+func (a contestAPI) prepareContestToolBrowserAccess(c *gin.Context, externalPrefix string) bool {
+	token, ok := auth.VerifiedAccessToken(c)
+	if ok && a.authn != nil {
+		a.authn.SetBrowserAccessCookie(c, externalPrefix, token)
+	}
+	if !auth.BrowserAccessFromTicket(c) {
+		return true
+	}
+	u := *c.Request.URL
+	query := u.Query()
+	query.Del(auth.BrowserAccessTicketQuery)
+	u.RawQuery = query.Encode()
+	c.Redirect(http.StatusFound, u.RequestURI())
+	return false
+}
+
+// contestToolProxyExternalPrefix 返回 M8 网关对浏览器暴露的工具代理前缀。
+func contestToolProxyExternalPrefix(sandboxID int64, toolCode string) string {
+	return "/api/v1/contest/sandboxes/" + ids.Format(sandboxID) + "/tools/" + url.PathEscape(strings.TrimSpace(toolCode))
 }
 
 // contestProblemPath 统一解析竞赛和题目路径 ID。

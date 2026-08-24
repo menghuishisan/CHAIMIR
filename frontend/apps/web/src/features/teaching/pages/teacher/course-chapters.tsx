@@ -297,6 +297,30 @@ function ChapterCard({
           columns={columns}
           data={lessons}
           rowKey={(lesson) => lesson.id}
+          elevated={false}
+          // <md 换行卡(§6.4.1 规则 3):课时名一行、内容形态一行,增删改在右
+          mobileCard={(lesson) => ({
+            title: `${lesson.sort}. ${lesson.title}`,
+            meta: lessonContentTypeLabel(lesson.content_type),
+            action: (
+              <div className="flex gap-1">
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  icon={Pencil}
+                  aria-label={`编辑课时 ${lesson.title}`}
+                  onClick={() => onEditLesson(lesson)}
+                />
+                <IconButton
+                  variant="ghost"
+                  size="sm"
+                  icon={Trash2}
+                  aria-label={`删除课时 ${lesson.title}`}
+                  onClick={() => onDeleteLesson(lesson)}
+                />
+              </div>
+            ),
+          })}
           empty={
             <Empty
               icon={FilePlus2}

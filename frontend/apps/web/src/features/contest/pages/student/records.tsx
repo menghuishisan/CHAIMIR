@@ -5,15 +5,15 @@
 
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router'
-import { ListOrdered, Medal, Swords, Trophy } from 'lucide-react'
+import { Trophy } from 'lucide-react'
 import { ContestStatus, type ContestRecord } from '@chaimir/api-client'
 import {
   Breadcrumb,
   Button,
+  DataPanel,
+  MetricStrip,
   PageHeader,
   PageScaffold,
-  PageSection,
-  Stat,
   StatusIndicator,
   Table,
   type TableColumn,
@@ -97,26 +97,33 @@ export default function StudentRecordsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '学习区' }, { label: '竞赛战绩' }]} />}
+        kicker={<Breadcrumb items={[{ label: '学习区' }]} />}
         title="竞赛战绩"
         description="这里是你参加过的全部赛事、得分与名次。"
         icon={Trophy}
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="参赛场次" value={stats.count} icon={Swords} />
-          <Stat
-            label="最好名次"
-            value={stats.bestRank ? `第 ${stats.bestRank} 名` : '—'}
-            icon={Medal}
-            hint={`已完赛 ${stats.settledCount} 场`}
-          />
-          <Stat label="累计得分" value={formatScore(stats.totalScore)} icon={ListOrdered} />
-        </div>
-      </PageSection>
+      {/*
+        指标降为内联摘要(§6.5.3 第 ① 族)。这四项由本人全部战绩算出而不是页面切片:
+        GET /contest/my/contest-records 不分页、一次回齐,故客户端聚合就是全量口径(§6.5.4)。
+      */}
+      <MetricStrip
+        label="战绩摘要"
+        className="mb-5"
+        items={[
+          { label: '参赛场次', value: stats.count, hint: '含进行中的赛事' },
+          {
+            label: '最好名次',
+            value: stats.bestRank ? `第 ${stats.bestRank} 名` : '—',
+            hint: `已完赛 ${stats.settledCount} 场`,
+          },
+          { label: '累计得分', value: formatScore(stats.totalScore), hint: '全部赛事求和' },
+        ]}
+      />
 
-      <PageSection title="参赛记录" description="按赛事结束时间从新到旧排列。">
+      {/* 数据表独占一块抬起片(§6.5.2)。本页不分页:接口一次回齐全部战绩,
+          也没有筛选项 —— 场次数量本就不多,再排一条筛选井是多余的一层。 */}
+      <DataPanel label="参赛记录">
         <ResourceState
           resource={records}
           emptyIcon={Trophy}
@@ -127,13 +134,30 @@ export default function StudentRecordsPage() {
               去看看有哪些赛事
             </Button>
           }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
         >
           {(data) => (
-            <Table columns={columns} data={data} rowKey={(item) => `${item.contest_id}-${item.team_id}`} />
+            <Table
+              columns={columns}
+              data={data}
+              rowKey={(item) => `${item.contest_id}-${item.team_id}`}
+              elevated={false}
+              onRowClick={(item) => navigate(`/student/contests/${item.contest_id}`)}
+              // <md 换行卡(§6.4.1 规则 3):赛事名一行、得分与名次一行,赛事状态在右
+              mobileCard={(item) => ({
+                title: item.contest_name,
+                meta: `得分 ${formatScore(item.score)} · ${item.rank > 0 ? `第 ${item.rank} 名` : '未上榜'}`,
+                badge: (
+                  <StatusIndicator
+                    tone={contestStatusTone(item.contest_status)}
+                    label={contestStatusLabel(item.contest_status)}
+                  />
+                ),
+              })}
+            />
           )}
         </ResourceState>
-      </PageSection>
+      </DataPanel>
     </PageScaffold>
   )
 }

@@ -18,7 +18,6 @@ import {
 } from 'lucide-react'
 import {
   ContestStatus,
-  PAGINATION_MAX_SIZE,
   type Contest,
   type ResultSnapshot,
 } from '@chaimir/api-client'
@@ -27,8 +26,10 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  DataPanel,
   DescriptionList,
   Empty,
+  ObjectIdentity,
   PageHeader,
   PageScaffold,
   PageSection,
@@ -62,13 +63,11 @@ import { ContestCheat } from './contest-cheat'
 export default function TeacherContestDetailPage() {
   const { contestId = '' } = useParams<{ contestId: string }>()
 
+  // 单读走 teacher 组:它没有非草稿门槛,而草稿态赛事正是教师要编排的那些
   const contest = useAsyncResource(
-    () =>
-      api.contest
-        .getContests({ page: 1, size: PAGINATION_MAX_SIZE })
-        .then((page) => page.list.find((item) => item.id === contestId)),
+    () => api.contest.getContest(contestId),
     [contestId],
-    (value) => value === undefined,
+    () => false,
   )
 
   return (
@@ -79,7 +78,7 @@ export default function TeacherContestDetailPage() {
         emptyTitle="赛事不存在"
         emptyDescription="这场赛事可能已被删除,请回到赛事组织查看。"
       >
-        {(data) => (data ? <ContestDetailContent contest={data} onRefresh={contest.reload} /> : null)}
+        {(data) => <ContestDetailContent contest={data} onRefresh={contest.reload} />}
       </ResourceState>
     </PageScaffold>
   )
@@ -118,43 +117,70 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
 
   return (
     <>
+      {/*
+        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的赛事名承担,
+        故页面头只出面包屑,末节到「赛事组织」为止(§6.5.0 通则 1)。
+      */}
       <PageHeader
         kicker={
           <Breadcrumb
             items={[
               { label: '实践' },
               { label: '赛事组织', href: '/teacher/contests' },
-              { label: contest.name },
             ]}
           />
         }
-        title={contest.name}
-        description={`${contestModeLabel(contest.mode)} · ${teamModeLabel(contest.team_mode)}${
-          contest.match_mode ? ` · ${matchModeLabel(contest.match_mode)}` : ''
-        }`}
-        icon={Trophy}
-        actions={
-          <div className="flex items-center gap-2">
-            <StatusIndicator
-              tone={contestStatusTone(contest.status)}
-              label={contestStatusLabel(contest.status)}
-            />
-            <Button variant="outline" leftIcon={Pencil} onClick={() => setEditOpen(true)}>
-              编辑赛事
-            </Button>
-          </div>
-        }
       />
 
-      <PageSection title="赛事信息" description={isContestLeaderboardFrozen(contest.status) ? '当前处于封榜期,榜单暂停更新。' : undefined}>
-        <DescriptionList dense columns={2} items={scheduleItems} />
-      </PageSection>
+      {/*
+        对象身份区:赛事名 + 状态 + 关键属性横排 + 对象级动作。
+        赛制、参赛形式、封榜时长都是赛事静态属性,横排在这里;完整赛程留在下方属性表 ——
+        七个时间点摊进身份区会把「一眼看清这是什么赛事」变成读时刻表(§6.5.3 第 ④:超过 6 项应当下沉)。
+      */}
+      <ObjectIdentity
+        name={contest.name}
+        status={
+          <StatusIndicator
+            tone={contestStatusTone(contest.status)}
+            label={contestStatusLabel(contest.status)}
+          />
+        }
+        subtitle={`${formatDateTime(contest.start_at)} — ${formatDateTime(contest.end_at)}`}
+        actions={
+          <Button variant="outline" leftIcon={Pencil} onClick={() => setEditOpen(true)}>
+            编辑赛事
+          </Button>
+        }
+        properties={[
+          { label: '赛制', value: contestModeLabel(contest.mode) },
+          { label: '参赛形式', value: teamModeLabel(contest.team_mode) },
+          ...(contest.match_mode
+            ? [{ label: '对局方式', value: matchModeLabel(contest.match_mode) }]
+            : []),
+          {
+            label: '封榜时长',
+            value: contest.freeze_minutes > 0 ? `${contest.freeze_minutes} 分钟` : '不封榜',
+          },
+          { label: '报名截止', value: formatDateTime(contest.signup_end) },
+        ]}
+      />
 
       {isDraft ? (
-        <Callout tone="info" title="这场赛事还是草稿">
+        <Callout tone="info" title="这场赛事还是草稿" className="mt-4">
           编排好赛题后回到赛事组织发布,发布后学生才能看到并报名。
         </Callout>
       ) : null}
+      {isContestLeaderboardFrozen(contest.status) ? (
+        <Callout tone="warning" className="mt-4">
+          当前处于封榜期,榜单暂停更新。封榜结束后名次会一次性揭晓。
+        </Callout>
+      ) : null}
+
+      <PageSection title="完整赛程" description="报名与比赛的四个时间点,以及赛制细节。" className="mt-6">
+        <div className="rounded-lg bg-surface p-5 shadow-xs">
+          <DescriptionList dense columns={2} items={scheduleItems} />
+        </div>
+      </PageSection>
 
       <Tabs defaultValue="problems">
         <TabsList>
@@ -256,7 +282,7 @@ function ContestSnapshot({ contestId }: { contestId: string }) {
         emptyIcon={Archive}
         emptyTitle="快照里没有名次"
         emptyDescription="这场赛事归档时还没有队伍产生成绩。"
-        skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+        skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
       >
         {(data) => (
           <div className="flex flex-col gap-4">
@@ -264,7 +290,20 @@ function ContestSnapshot({ contestId }: { contestId: string }) {
               <Badge tone="neutral">生成于 {formatDateTime(data.generated_at)}</Badge>
               <Badge tone="jade">{data.final_ranking.length} 支队伍上榜</Badge>
             </div>
-            <Table columns={columns} data={snapshotRows(data)} rowKey={(row) => String(row.rank)} />
+            {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):快照不分页也不筛选,只用片本身 */}
+            <DataPanel label="最终名次">
+              <Table
+                columns={columns}
+                data={snapshotRows(data)}
+                rowKey={(row) => String(row.rank)}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):名次一行、得分与通过题数一行
+                mobileCard={(row) => ({
+                  title: `第 ${row.rank} 名`,
+                  meta: `得分 ${formatScore(row.score)} · 通过 ${row.solvedCount} 题`,
+                })}
+              />
+            </DataPanel>
           </div>
         )}
       </ResourceState>

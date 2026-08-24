@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import urllib.error
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
@@ -15,9 +13,7 @@ from eth_utils import to_checksum_address
 
 PORT = int(os.environ.get("CHAIMIR_IMAGE_PORT", "8080"))
 MAX_BODY_BYTES = int(os.environ.get("CHAIMIR_MAX_BODY_BYTES", "1048576"))
-RPC_URL = os.environ.get("CHAIMIR_EVM_RPC_URL", "").strip()
 ACCOUNT = Account.create(os.urandom(32))
-DEFAULT_CHAIN_ID = int(os.environ.get("CHAIMIR_EVM_CHAIN_ID", "31337"))
 
 INDEX_HTML = """<!doctype html>
 <html lang="zh-CN">
@@ -64,7 +60,7 @@ INDEX_HTML = """<!doctype html>
     </section>
   </div>
   <section>
-    <h2>签名并发送交易</h2>
+    <h2>签名交易</h2>
     <div class="grid">
       <label>接收地址<input id="to" placeholder="0x..."></label>
       <label>金额 Wei<input id="valueWei" value="0"></label>
@@ -75,9 +71,8 @@ INDEX_HTML = """<!doctype html>
     </div>
     <label for="data">Data</label>
     <input id="data" value="0x">
-    <button onclick="sendTx()">广播交易</button>
-    <button class="secondary" onclick="signTxOnly()">只签名</button>
-    <p class="muted">广播需要镜像运行时配置 CHAIMIR_EVM_RPC_URL。未配置时会明确返回失败原因。</p>
+    <button class="secondary" onclick="signTxOnly()">签名交易</button>
+    <p class="muted">交易签名结果由工作台提交到当前组合的链运行时,工具本身不直连节点。</p>
   </section>
   <section>
     <h2>结果</h2>
@@ -112,7 +107,7 @@ async function signMessage() {
     show('result', await requestJSON('/sign', { method: 'POST', body: JSON.stringify({ message }) }));
   } catch (e) { show('result', e); }
 }
-function txPayload(broadcast) {
+function txPayload() {
   return {
     to: document.getElementById('to').value,
     value_wei: document.getElementById('valueWei').value,
@@ -120,16 +115,11 @@ function txPayload(broadcast) {
     gas: document.getElementById('gas').value,
     gas_price_wei: document.getElementById('gasPrice').value,
     chain_id: document.getElementById('chainId').value,
-    data: document.getElementById('data').value,
-    broadcast
+    data: document.getElementById('data').value
   };
 }
-async function sendTx() {
-  try { show('result', await requestJSON('/tx', { method: 'POST', body: JSON.stringify(txPayload(true)) })); }
-  catch (e) { show('result', e); }
-}
 async function signTxOnly() {
-  try { show('result', await requestJSON('/tx', { method: 'POST', body: JSON.stringify(txPayload(false)) })); }
+  try { show('result', await requestJSON('/tx', { method: 'POST', body: JSON.stringify(txPayload()) })); }
   catch (e) { show('result', e); }
 }
 refreshAccount();
@@ -188,7 +178,7 @@ def parse_int_field(payload: dict[str, Any], name: str, default: int | None = No
 
 
 def sign_transaction(payload: dict[str, Any]) -> dict[str, str]:
-    """签名一笔 EVM 交易,广播由调用方显式决定。"""
+    """签名一笔 EVM 交易,广播由 M2 链能力负责。"""
     to_addr = str(payload.get("to", "")).strip()
     if not to_addr:
         raise ValueError("to is required")
@@ -198,7 +188,7 @@ def sign_transaction(payload: dict[str, Any]) -> dict[str, str]:
         "nonce": parse_int_field(payload, "nonce"),
         "gas": parse_int_field(payload, "gas", 21000),
         "gasPrice": parse_int_field(payload, "gas_price_wei", 1000000000),
-        "chainId": parse_int_field(payload, "chain_id", DEFAULT_CHAIN_ID),
+        "chainId": parse_int_field(payload, "chain_id"),
         "data": str(payload.get("data", "0x") or "0x"),
     }
     signed = Account.sign_transaction(tx, ACCOUNT.key)
@@ -208,24 +198,6 @@ def sign_transaction(payload: dict[str, Any]) -> dict[str, str]:
         "raw_transaction": "0x" + raw.hex(),
         "transaction_hash": "0x" + signed.hash.hex(),
     }
-
-
-def send_raw_transaction(raw_transaction: str) -> dict[str, str]:
-    """通过配置的 EVM RPC 广播交易,未配置时显式失败。"""
-    if not RPC_URL:
-        raise RuntimeError("CHAIMIR_EVM_RPC_URL is not configured")
-    body = json.dumps(
-        {"jsonrpc": "2.0", "id": 1, "method": "eth_sendRawTransaction", "params": [raw_transaction]}
-    ).encode("utf-8")
-    req = urllib.request.Request(RPC_URL, data=body, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"rpc request failed: {exc}") from exc
-    if "error" in payload:
-        raise RuntimeError(str(payload["error"]))
-    return {"tx_hash": str(payload.get("result", ""))}
 
 
 class WalletSimHandler(BaseHTTPRequestHandler):
@@ -276,10 +248,8 @@ class WalletSimHandler(BaseHTTPRequestHandler):
         if self.path == "/tx":
             try:
                 signed = sign_transaction(payload)
-                if bool(payload.get("broadcast", True)):
-                    signed.update(send_raw_transaction(signed["raw_transaction"]))
                 self.write_json(signed)
-            except (RuntimeError, ValueError) as exc:
+            except ValueError as exc:
                 self.write_json({"status": "failed", "reason": str(exc)}, status=422)
             return
         message = str(payload.get("message", ""))

@@ -43,15 +43,18 @@ CREATE TABLE IF NOT EXISTS contest_problem (
     battle_config JSONB CHECK (
         battle_config IS NULL OR (
             jsonb_typeof(battle_config) = 'object'
-            AND battle_config ?& ARRAY['runtime_code', 'runtime_image_version']
-            AND battle_config - ARRAY['runtime_code', 'runtime_image_version', 'tool_codes'] = '{}'::jsonb
-            AND jsonb_typeof(battle_config->'runtime_code') = 'string'
-            AND jsonb_typeof(battle_config->'runtime_image_version') = 'string'
-            AND (NOT (battle_config ? 'tool_codes') OR jsonb_typeof(battle_config->'tool_codes') = 'array')
+            AND battle_config ?& ARRAY['execution_profile', 'entry_roles', 'replay_profile']
+            AND battle_config - ARRAY['execution_profile', 'entry_roles', 'replay_profile'] = '{}'::jsonb
+            AND jsonb_typeof(battle_config->'execution_profile') = 'object'
+            AND jsonb_typeof(battle_config->'entry_roles') = 'array'
+            AND jsonb_typeof(battle_config->'replay_profile') = 'object'
         )
     ),
     battle_rule SMALLINT CHECK (battle_rule IS NULL OR battle_rule > 0),
     seq INT NOT NULL DEFAULT 0,
+    composition_digest VARCHAR(128),
+    composition_snapshot JSONB,
+    CHECK ((composition_digest IS NULL AND composition_snapshot IS NULL) OR (composition_digest IS NOT NULL AND composition_snapshot IS NOT NULL)),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, contest_id, item_code, item_version),
     FOREIGN KEY (tenant_id, contest_id) REFERENCES contest(tenant_id, id)
@@ -84,15 +87,39 @@ CREATE TABLE IF NOT EXISTS team_member (
     FOREIGN KEY (member_tenant_id, account_id) REFERENCES account(tenant_id, id)
 );
 
+CREATE TABLE IF NOT EXISTS contest_access_grant (
+    id BIGINT PRIMARY KEY,
+    tenant_id BIGINT NOT NULL REFERENCES tenant(id),
+    contest_id BIGINT NOT NULL,
+    team_id BIGINT NOT NULL,
+    sandbox_id BIGINT NOT NULL,
+    member_tenant_id BIGINT NOT NULL,
+    member_account_id BIGINT NOT NULL,
+    capabilities JSONB NOT NULL DEFAULT '[]'::jsonb,
+    source_ref VARCHAR(128) NOT NULL,
+    grant_version BIGINT NOT NULL DEFAULT 1 CHECK (grant_version > 0),
+    status SMALLINT NOT NULL CHECK (status IN (1, 2)),
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, sandbox_id, member_tenant_id, member_account_id),
+    FOREIGN KEY (tenant_id, contest_id) REFERENCES contest(tenant_id, id),
+    FOREIGN KEY (tenant_id, team_id) REFERENCES team(tenant_id, id),
+    FOREIGN KEY (tenant_id, team_id, member_tenant_id, member_account_id) REFERENCES team_member(tenant_id, team_id, member_tenant_id, account_id)
+);
+
 CREATE TABLE IF NOT EXISTS solve_submission (
     id BIGINT PRIMARY KEY,
     tenant_id BIGINT NOT NULL REFERENCES tenant(id),
     contest_id BIGINT NOT NULL,
     problem_id BIGINT NOT NULL,
     team_id BIGINT NOT NULL,
+    submitter_tenant_id BIGINT NOT NULL,
     submitter_id BIGINT NOT NULL,
     content_ref JSONB NOT NULL DEFAULT '{}'::jsonb,
     source_ref VARCHAR(128) NOT NULL,
+    scope_ref VARCHAR(128) NOT NULL,
     judge_task_ref VARCHAR(64),
     passed BOOLEAN NOT NULL DEFAULT false,
     score INT NOT NULL DEFAULT 0 CHECK (score >= 0),
@@ -100,10 +127,12 @@ CREATE TABLE IF NOT EXISTS solve_submission (
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, source_ref),
+    UNIQUE (tenant_id, scope_ref),
     FOREIGN KEY (tenant_id, contest_id) REFERENCES contest(tenant_id, id),
     FOREIGN KEY (tenant_id, problem_id) REFERENCES contest_problem(tenant_id, id),
     FOREIGN KEY (tenant_id, team_id) REFERENCES team(tenant_id, id),
-    FOREIGN KEY (tenant_id, submitter_id) REFERENCES account(tenant_id, id)
+    FOREIGN KEY (submitter_tenant_id, submitter_id) REFERENCES account(tenant_id, id),
+    FOREIGN KEY (tenant_id, team_id, submitter_tenant_id, submitter_id) REFERENCES team_member(tenant_id, team_id, member_tenant_id, account_id)
 );
 
 CREATE TABLE IF NOT EXISTS battle_entry (
@@ -133,6 +162,7 @@ CREATE TABLE IF NOT EXISTS battle_match (
     entry_a_id BIGINT NOT NULL,
     entry_b_id BIGINT NOT NULL,
     source_ref VARCHAR(128) NOT NULL,
+    scope_ref VARCHAR(128) NOT NULL,
     sandbox_ref VARCHAR(64),
     judge_task_ref VARCHAR(64),
     result SMALLINT CHECK (result IS NULL OR result IN (1, 2, 3)),
@@ -171,6 +201,7 @@ CREATE TABLE IF NOT EXISTS battle_match (
     attempt_count INT NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, source_ref),
+    UNIQUE (tenant_id, scope_ref),
     FOREIGN KEY (tenant_id, contest_id) REFERENCES contest(tenant_id, id),
     FOREIGN KEY (tenant_id, problem_id) REFERENCES contest_problem(tenant_id, id),
     FOREIGN KEY (tenant_id, entry_a_id) REFERENCES battle_entry(tenant_id, id),
@@ -248,6 +279,11 @@ CREATE TABLE IF NOT EXISTS vuln_problem (
     draft_body JSONB NOT NULL DEFAULT '{}'::jsonb,
     prevalidate_status SMALLINT NOT NULL CHECK (prevalidate_status IN (1, 2, 3)),
     prevalidate_detail JSONB NOT NULL DEFAULT '{}'::jsonb,
+    composition_digest VARCHAR(128),
+    composition_snapshot JSONB,
+    init_code_ref VARCHAR(255),
+    init_script_ref VARCHAR(255),
+    CHECK ((composition_digest IS NULL AND composition_snapshot IS NULL) OR (composition_digest IS NOT NULL AND composition_snapshot IS NOT NULL)),
     content_item_code VARCHAR(96),
     content_item_version VARCHAR(32),
     status SMALLINT NOT NULL CHECK (status IN (1, 2, 3)),
@@ -261,6 +297,8 @@ CREATE INDEX IF NOT EXISTS idx_contest_problem_contest ON contest_problem(tenant
 CREATE INDEX IF NOT EXISTS idx_team_contest ON team(tenant_id, contest_id);
 CREATE INDEX IF NOT EXISTS idx_team_invite ON team(tenant_id, invite_code);
 CREATE INDEX IF NOT EXISTS idx_team_member_account ON team_member(tenant_id, member_tenant_id, account_id);
+CREATE INDEX IF NOT EXISTS idx_contest_access_grant_subject ON contest_access_grant(tenant_id, member_tenant_id, member_account_id, status);
+CREATE INDEX IF NOT EXISTS idx_contest_access_grant_sandbox ON contest_access_grant(tenant_id, sandbox_id, status);
 CREATE INDEX IF NOT EXISTS idx_solve_submission_scope ON solve_submission(tenant_id, contest_id, team_id, problem_id);
 CREATE INDEX IF NOT EXISTS idx_battle_entry_active ON battle_entry(tenant_id, contest_id, problem_id, team_id, is_active);
 CREATE INDEX IF NOT EXISTS idx_battle_match_contest ON battle_match(tenant_id, contest_id, status);
@@ -274,6 +312,7 @@ ALTER TABLE contest ENABLE ROW LEVEL SECURITY;
 ALTER TABLE contest_problem ENABLE ROW LEVEL SECURITY;
 ALTER TABLE team ENABLE ROW LEVEL SECURITY;
 ALTER TABLE team_member ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contest_access_grant ENABLE ROW LEVEL SECURITY;
 ALTER TABLE solve_submission ENABLE ROW LEVEL SECURITY;
 ALTER TABLE battle_entry ENABLE ROW LEVEL SECURITY;
 ALTER TABLE battle_match ENABLE ROW LEVEL SECURITY;
@@ -287,6 +326,7 @@ CREATE POLICY contest_tenant_rls ON contest USING (tenant_id = current_setting('
 CREATE POLICY contest_problem_tenant_rls ON contest_problem USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY team_tenant_rls ON team USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY team_member_tenant_rls ON team_member USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY contest_access_grant_tenant_rls ON contest_access_grant USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY solve_submission_tenant_rls ON solve_submission USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY battle_entry_tenant_rls ON battle_entry USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY battle_match_tenant_rls ON battle_match USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);

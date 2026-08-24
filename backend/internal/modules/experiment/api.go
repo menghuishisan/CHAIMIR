@@ -48,7 +48,9 @@ type experimentAPI struct {
 // registerTeacherRoutes 注册教师实验配置、报告批改和分组管理接口。
 func (a experimentAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.GET("/experiments", a.listExperiments)
+	g.GET("/instances", a.listTeacherInstances)
 	g.POST("/experiments", a.createExperiment)
+	g.GET("/experiments/:id", a.getExperiment)
 	g.PATCH("/experiments/:id", a.updateExperiment)
 	g.POST("/experiments/:id/validate", a.validateExperiment)
 	g.POST("/experiments/:id/publish", a.publishExperiment)
@@ -59,6 +61,35 @@ func (a experimentAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/experiments/:id/groups", a.createGroup)
 	g.GET("/experiments/:id/groups", a.listGroups)
 	g.POST("/groups/:id/members", a.upsertGroupMember)
+	g.DELETE("/groups/:id/members/:student_id", a.removeGroupMember)
+}
+
+// listTeacherInstances 查询教师可见的活跃实验实例。
+func (a experimentAPI) listTeacherInstances(c *gin.Context) {
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: int64(InstanceStatusReleased), HasMax: true})
+	if !ok {
+		return
+	}
+	if status != 0 && status != InstanceStatusCreating && status != InstanceStatusRunning && status != InstanceStatusPaused && status != InstanceStatusReleased {
+		response.Fail(c, apperr.ErrExperimentInvalid)
+		return
+	}
+	page, size, ok := httpx.Page(c)
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListTeacherInstances(c.Request.Context(), status, page, size)
+	httpx.WritePage(c, out, total, p, s, err)
+}
+
+// getExperiment 读取教师可管理的实验定义,只允许作者或学校管理员访问。
+func (a experimentAPI) getExperiment(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetExperimentForTeacher(c.Request.Context(), id)
+	httpx.Write(c, out, err)
 }
 
 // registerStudentRoutes 注册学生发起实例、判分和报告接口。
@@ -80,8 +111,8 @@ func (a experimentAPI) listPublishedExperiments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListPublishedExperiments(c.Request.Context(), courseID, page, size)
-	httpx.WritePage(c, out, total, p, s, err)
+	out, total, p, s, facets, err := a.svc.ListPublishedExperiments(c.Request.Context(), courseID, page, size)
+	httpx.WritePageWithFacets(c, out, total, p, s, facets, err)
 }
 
 // getPublishedExperiment 向学生返回单个已发布实验的最小安全投影。
@@ -380,6 +411,20 @@ func (a experimentAPI) upsertGroupMember(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.UpsertGroupMember(c.Request.Context(), id, req)
+	httpx.Write(c, out, err)
+}
+
+// removeGroupMember 移除小组成员并同步活跃实例授权。
+func (a experimentAPI) removeGroupMember(c *gin.Context) {
+	groupID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	studentID, ok := httpx.PathID(c, "student_id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.RemoveGroupMember(c.Request.Context(), groupID, studentID)
 	httpx.Write(c, out, err)
 }
 

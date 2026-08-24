@@ -16,7 +16,10 @@ import (
 
 // DownloadGrantRequest 描述一次经过业务鉴权后的受控下载授权请求。
 type DownloadGrantRequest struct {
-	TenantID           int64
+	// TenantID 是消费授权的租户;它必须与下载接口当前会话一致。
+	TenantID int64
+	// ResourceTenantID 是对象所属租户,仅用于校验对象键前缀,可与消费租户不同。
+	ResourceTenantID   int64
 	AccountID          int64
 	AllowPlatformScope bool
 	ObjectRef          string
@@ -29,14 +32,15 @@ type DownloadGrantRequest struct {
 
 // DownloadGrant 表示统一文件服务生成的一次性受控下载授权快照。
 type DownloadGrant struct {
-	TenantID     int64
-	AccountID    int64
-	Module       string
-	ResourceType string
-	ResourceID   string
-	Mode         string `json:"mode"`
-	Object       ObjectRef
-	ExpiresAt    time.Time
+	TenantID         int64
+	ResourceTenantID int64
+	AccountID        int64
+	Module           string
+	ResourceType     string
+	ResourceID       string
+	Mode             string `json:"mode"`
+	Object           ObjectRef
+	ExpiresAt        time.Time
 }
 
 type downloadGrantTokenEnvelope struct {
@@ -46,14 +50,15 @@ type downloadGrantTokenEnvelope struct {
 
 // downloadGrantTokenPayload 是签名令牌的唯一传输结构,雪花 ID 始终编码为十进制字符串。
 type downloadGrantTokenPayload struct {
-	TenantID     string    `json:"tenant_id"`
-	AccountID    string    `json:"account_id"`
-	Module       string    `json:"module"`
-	ResourceType string    `json:"resource_type"`
-	ResourceID   string    `json:"resource_id"`
-	Mode         string    `json:"mode"`
-	ObjectRef    string    `json:"object_ref"`
-	ExpiresAt    time.Time `json:"expires_at"`
+	TenantID         string    `json:"tenant_id"`
+	ResourceTenantID string    `json:"resource_tenant_id"`
+	AccountID        string    `json:"account_id"`
+	Module           string    `json:"module"`
+	ResourceType     string    `json:"resource_type"`
+	ResourceID       string    `json:"resource_id"`
+	Mode             string    `json:"mode"`
+	ObjectRef        string    `json:"object_ref"`
+	ExpiresAt        time.Time `json:"expires_at"`
 }
 
 const maxDownloadGrantTokenLength = 8192
@@ -62,6 +67,9 @@ const maxDownloadGrantTokenLength = 8192
 func BuildDownloadGrant(req DownloadGrantRequest) (DownloadGrant, error) {
 	if req.TenantID < 0 || (req.TenantID == 0 && !req.AllowPlatformScope) {
 		return DownloadGrant{}, fmt.Errorf("下载授权缺少 tenant_id")
+	}
+	if req.ResourceTenantID < 0 || (req.ResourceTenantID == 0 && !req.AllowPlatformScope) {
+		return DownloadGrant{}, fmt.Errorf("下载授权缺少资源 tenant_id")
 	}
 	if req.AccountID <= 0 {
 		return DownloadGrant{}, fmt.Errorf("下载授权缺少 account_id")
@@ -83,7 +91,7 @@ func BuildDownloadGrant(req DownloadGrantRequest) (DownloadGrant, error) {
 	}
 
 	// 统一要求对象 key 落在完整资源前缀下,阻断同租户同类型资源之间的对象引用复用。
-	expectedPrefix, err := ObjectKey(req.TenantID, req.Module, req.ResourceType, req.ResourceID)
+	expectedPrefix, err := ObjectKey(req.ResourceTenantID, req.Module, req.ResourceType, req.ResourceID)
 	if err != nil {
 		return DownloadGrant{}, err
 	}
@@ -92,14 +100,15 @@ func BuildDownloadGrant(req DownloadGrantRequest) (DownloadGrant, error) {
 	}
 
 	return DownloadGrant{
-		TenantID:     req.TenantID,
-		AccountID:    req.AccountID,
-		Module:       req.Module,
-		ResourceType: req.ResourceType,
-		ResourceID:   req.ResourceID,
-		Mode:         mode,
-		Object:       objectRef,
-		ExpiresAt:    req.ExpiresAt.UTC(),
+		TenantID:         req.TenantID,
+		ResourceTenantID: req.ResourceTenantID,
+		AccountID:        req.AccountID,
+		Module:           req.Module,
+		ResourceType:     req.ResourceType,
+		ResourceID:       req.ResourceID,
+		Mode:             mode,
+		Object:           objectRef,
+		ExpiresAt:        req.ExpiresAt.UTC(),
 	}, nil
 }
 
@@ -192,15 +201,20 @@ func downloadGrantTokenPayloadFromGrant(grant DownloadGrant) downloadGrantTokenP
 	if grant.TenantID > 0 {
 		tenantID = ids.Format(grant.TenantID)
 	}
+	resourceTenantID := "0"
+	if grant.ResourceTenantID > 0 {
+		resourceTenantID = ids.Format(grant.ResourceTenantID)
+	}
 	return downloadGrantTokenPayload{
-		TenantID:     tenantID,
-		AccountID:    ids.Format(grant.AccountID),
-		Module:       grant.Module,
-		ResourceType: grant.ResourceType,
-		ResourceID:   grant.ResourceID,
-		Mode:         grant.Mode,
-		ObjectRef:    "minio://" + grant.Object.Bucket + "/" + grant.Object.Key,
-		ExpiresAt:    grant.ExpiresAt.UTC(),
+		TenantID:         tenantID,
+		ResourceTenantID: resourceTenantID,
+		AccountID:        ids.Format(grant.AccountID),
+		Module:           grant.Module,
+		ResourceType:     grant.ResourceType,
+		ResourceID:       grant.ResourceID,
+		Mode:             grant.Mode,
+		ObjectRef:        "minio://" + grant.Object.Bucket + "/" + grant.Object.Key,
+		ExpiresAt:        grant.ExpiresAt.UTC(),
 	}
 }
 
@@ -214,6 +228,14 @@ func (payload downloadGrantTokenPayload) downloadGrant() (DownloadGrant, error) 
 		}
 		tenantID = parsed
 	}
+	resourceTenantID := int64(0)
+	if payload.ResourceTenantID != "0" {
+		parsed, ok := ids.Parse(payload.ResourceTenantID)
+		if !ok {
+			return DownloadGrant{}, fmt.Errorf("下载授权 resource_tenant_id 非法")
+		}
+		resourceTenantID = parsed
+	}
 	accountID, ok := ids.Parse(payload.AccountID)
 	if !ok {
 		return DownloadGrant{}, fmt.Errorf("下载授权 account_id 非法")
@@ -223,7 +245,7 @@ func (payload downloadGrantTokenPayload) downloadGrant() (DownloadGrant, error) 
 		return DownloadGrant{}, err
 	}
 	return DownloadGrant{
-		TenantID: tenantID, AccountID: accountID, Module: payload.Module,
+		TenantID: tenantID, ResourceTenantID: resourceTenantID, AccountID: accountID, Module: payload.Module,
 		ResourceType: payload.ResourceType, ResourceID: payload.ResourceID,
 		Mode: payload.Mode, Object: objectRef, ExpiresAt: payload.ExpiresAt,
 	}, nil
@@ -238,6 +260,9 @@ func decodeDownloadGrantTokenPayload(data []byte, dst *downloadGrantTokenPayload
 func validateDownloadGrant(grant DownloadGrant, now time.Time) error {
 	if grant.TenantID < 0 {
 		return fmt.Errorf("下载授权缺少 tenant_id")
+	}
+	if grant.ResourceTenantID < 0 {
+		return fmt.Errorf("下载授权缺少资源 tenant_id")
 	}
 	if grant.AccountID <= 0 {
 		return fmt.Errorf("下载授权缺少 account_id")
@@ -256,7 +281,7 @@ func validateDownloadGrant(grant DownloadGrant, now time.Time) error {
 	}
 
 	// 重新校验对象 key 是否仍受统一租户前缀约束,避免篡改后的 payload 越权下载其他资源。
-	expectedPrefix, err := ObjectKey(grant.TenantID, grant.Module, grant.ResourceType, grant.ResourceID)
+	expectedPrefix, err := ObjectKey(grant.ResourceTenantID, grant.Module, grant.ResourceType, grant.ResourceID)
 	if err != nil {
 		return err
 	}

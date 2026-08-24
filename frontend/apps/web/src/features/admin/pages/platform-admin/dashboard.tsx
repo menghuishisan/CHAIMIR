@@ -30,6 +30,7 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import {
+  DashboardCompositionSection,
   DashboardGeneratedFooter,
   DashboardQuotaSection,
   DashboardTeachingPracticeSection,
@@ -45,7 +46,7 @@ export default function PlatformDashboardPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '运营' }, { label: '平台看板' }]} />}
+        kicker={<Breadcrumb items={[{ label: '运营' }]} />}
         title="平台看板"
         description="全平台学校、账号、课程、实验与竞赛的当下概览,以及近期的运营趋势。"
         icon={LayoutDashboard}
@@ -77,6 +78,10 @@ export default function PlatformDashboardPage() {
 
 /**
  * DashboardContent 渲染平台概览指标带与资源配额快照。
+ *
+ * 归族:看板族(规范 §6.5.3 第 ② 族)—— 全族唯一保留 Stat 大卡的一族,
+ * 因为这一页的主体就是数字本身。指标带用 `metric-band`(auto-fit)而不是定列数栅格:
+ * 「师生构成」只有两项,摊进四列栅格会拉成两张半屏宽的巨卡。
  */
 function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
   const navigate = useNavigate()
@@ -84,7 +89,7 @@ function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
   return (
     <>
       <PageSection title="学校" description="已开通的学校与待处理的入驻申请。">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="metric-band gap-4">
           <Stat label="学校数" value={dashboard.tenant_count ?? 0} icon={Building} />
           <Stat
             label="待审入驻申请"
@@ -102,12 +107,7 @@ function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
         </div>
       </PageSection>
 
-      <PageSection title="师生构成" description="全平台教师与学生的开通规模。">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Stat label="教师" value={dashboard.teacher_count} icon={Users} />
-          <Stat label="学生" value={dashboard.student_count} icon={Users} />
-        </div>
-      </PageSection>
+      <DashboardCompositionSection dashboard={dashboard} />
 
       <DashboardTeachingPracticeSection dashboard={dashboard} />
 

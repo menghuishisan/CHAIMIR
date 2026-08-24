@@ -982,6 +982,19 @@ func (t *txStore) QueryAuditLogs(ctx context.Context, query AuditQueryInput) ([]
 	return out, total, nil
 }
 
+// QueryAuditActionFacets 按与审计列表完全相同的权限和过滤条件统计动作。
+func (t *txStore) QueryAuditActionFacets(ctx context.Context, query AuditQueryInput) ([]AuditFacetRow, error) {
+	rows, err := t.q.QueryAuditActionFacets(ctx, sqlcgen.QueryAuditActionFacetsParams{Column1: query.TenantID, Column2: query.ActorID, Column3: query.Action, Column4: query.TargetType, Column5: timex.Timestamptz(query.From), Column6: timex.Timestamptz(query.To)})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AuditFacetRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, AuditFacetRow{Action: row.Action, Count: row.Count})
+	}
+	return out, nil
+}
+
 // PlatformStats 读取平台身份统计。
 func (t *txStore) PlatformStats(ctx context.Context) (StatsRow, error) {
 	row, err := t.q.PlatformStats(ctx)

@@ -15,13 +15,12 @@ import {
 import { useState } from 'react'
 import type { CourseOutline } from '@chaimir/api-client'
 import {
-  Badge,
   Breadcrumb,
   Button,
+  MetricStrip,
+  ObjectIdentity,
   PageHeader,
   PageScaffold,
-  PageSection,
-  Stat,
   StatusIndicator,
   Tabs,
   TabsContent,
@@ -95,68 +94,81 @@ function CourseDetailContent({ courseId, outline, onRefresh }: CourseDetailConte
 
   return (
     <>
+      {/*
+        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的课程名承担,
+        故 PageHeader 只出面包屑 —— 一页只该有一个 h1(§6.5.0 通则 1)。
+        面包屑末节到「课程管理」为止,不再重复课程名。
+      */}
       <PageHeader
         kicker={
           <Breadcrumb
             items={[
               { label: '教学' },
               { label: '课程管理', href: '/teacher/courses' },
-              { label: course.name },
             ]}
           />
         }
-        title={course.name}
-        description={course.description || '还没有填写课程简介。'}
-        icon={Book}
-        actions={
-          <div className="flex items-center gap-2">
-            <StatusIndicator tone={courseStatusTone(course.status)} label={courseStatusLabel(course.status)} />
-            <Button variant="outline" leftIcon={Pencil} onClick={() => setEditOpen(true)}>
-              编辑课程
-            </Button>
-          </div>
-        }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat
-            label="选课人数"
-            value={stats.data ? stats.data.member_count : '—'}
-            icon={Users}
+      {/*
+        对象身份区:课程名 + 状态 + 关键属性横排 + 对象级动作。
+        属性用横排而不是 Stat 大卡 —— 学分、学期、课程类型是**属性**不是指标,
+        套上 Display 字号会用排数字的方式排正文(§2.3)。
+        全班进度那三个数字是真指标,放在下方的分组里(它们要与课时列表对照着看)。
+      */}
+      <ObjectIdentity
+        name={course.name}
+        status={
+          <StatusIndicator
+            tone={courseStatusTone(course.status)}
+            label={courseStatusLabel(course.status)}
           />
-          <Stat
-            label="课时数"
-            value={stats.data ? stats.data.lesson_count : outline.lessons.length}
-            icon={Layers}
-          />
-          <Stat
-            label="累计完成课时"
-            value={stats.data ? stats.data.completed_count : '—'}
-            icon={ClipboardList}
-            hint="全班累计的课时完成次数"
-          />
-          <Stat
-            label="课程学分"
-            value={course.credits}
-            icon={Book}
-            hint={`${course.semester} · ${courseTypeLabel(course.type)}`}
-          />
-        </div>
-      </PageSection>
+        }
+        subtitle={course.description || '还没有填写课程简介。'}
+        actions={
+          <Button variant="outline" leftIcon={Pencil} onClick={() => setEditOpen(true)}>
+            编辑课程
+          </Button>
+        }
+        properties={[
+          { label: '学分', value: course.credits },
+          { label: '学期', value: course.semester },
+          { label: '课程类型', value: courseTypeLabel(course.type) },
+          { label: '难度', value: teachingDifficultyLabel(course.difficulty) },
+          { label: '可见范围', value: courseVisibilityLabel(course.visibility) },
+          {
+            label: '开课区间',
+            value: `${formatDate(course.start_at)} — ${formatDate(course.end_at)}`,
+          },
+          {
+            label: '邀请码',
+            value: course.invite_code ? (
+              <span className="font-mono">{course.invite_code}</span>
+            ) : (
+              '未启用'
+            ),
+          },
+        ]}
+      />
 
-      <PageSection>
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge tone="neutral">{teachingDifficultyLabel(course.difficulty)}</Badge>
-          <Badge tone="neutral">{courseVisibilityLabel(course.visibility)}</Badge>
-          <Badge tone="neutral">
-            {formatDate(course.start_at)} — {formatDate(course.end_at)}
-          </Badge>
-          {course.invite_code ? (
-            <Badge tone="jade">邀请码 {course.invite_code}</Badge>
-          ) : null}
-        </div>
-      </PageSection>
+      {/* 全班进度摘要:三项都取教师专用聚合接口,不是大纲里的本人视角(§6.5.4 全量口径) */}
+      <MetricStrip
+        label="全班进度摘要"
+        className="mt-4 mb-5"
+        items={[
+          { label: '选课人数', value: stats.data ? stats.data.member_count : '—', hint: '在读成员' },
+          {
+            label: '课时数',
+            value: stats.data ? stats.data.lesson_count : outline.lessons.length,
+            hint: '已编排的课时',
+          },
+          {
+            label: '累计完成课时',
+            value: stats.data ? stats.data.completed_count : '—',
+            hint: '全班累计的课时完成次数',
+          },
+        ]}
+      />
 
       <Tabs defaultValue="chapters">
         <TabsList>

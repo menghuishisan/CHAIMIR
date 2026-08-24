@@ -2,6 +2,7 @@
 // 对应后端 M11 模块的当前接口。
 
 import { ApiClient, encodePathSegment } from '../client'
+import type { BoolFilter } from '../constants/filters'
 import type {
   GradeAppealStatus,
   GradeReviewStatus,
@@ -85,6 +86,8 @@ export class GradeApi {
    */
   async listReviews(params?: {
     status?: GradeReviewStatus
+    /** 锁定状态:0=不限、1=已锁定、2=未锁定;由服务端过滤,total 与筛选同口径 */
+    is_locked?: BoolFilter
     page?: number
     size?: number
   }): Promise<PaginatedResponse<GradeReview>> {

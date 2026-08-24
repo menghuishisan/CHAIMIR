@@ -531,6 +531,14 @@ export class IdentityApi {
   }
 
   /**
+   * getApplication 读取单份入驻申请。
+   * 审核详情页用它做深链首屏读取 —— 不再拉全量申请列表在浏览器里筛单条。
+   */
+  async getApplication(applicationId: string): Promise<TenantApplication> {
+    return this.client.get(`/platform/applications/${encodePathSegment(applicationId)}`)
+  }
+
+  /**
    * 通过入驻申请
    */
   async approveApplication(applicationId: string, data: ReviewApplicationRequest): Promise<{ tenant: Tenant; activation_code?: string }> {

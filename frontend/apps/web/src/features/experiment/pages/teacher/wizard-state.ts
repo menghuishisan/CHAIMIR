@@ -8,7 +8,8 @@
 
 import { useCallback, useState } from 'react'
 import type {
-  ComponentConfig,
+  ComponentConfigRequest,
+  EnvComponentRequest,
   Experiment,
   ExperimentCollabMode,
   ExperimentRequest,
@@ -28,14 +29,17 @@ export const WIZARD_STEPS = [
 /** WIZARD_STEP_COUNT 供进度表达与越界夹取共用同一来源。 */
 export const WIZARD_STEP_COUNT = WIZARD_STEPS.length
 
-/** ExperimentDraft 是向导内的完整草稿形状,与后端 ExperimentRequest 对齐。 */
+/**
+ * ExperimentDraft 是向导内的完整草稿形状,与后端 ExperimentRequest 对齐。
+ * components 用「声明」而非「读取投影」:服务端算出的组合摘要不能回填成提交字段(§6.3)。
+ */
 export interface ExperimentDraft {
   course_id?: string
   template_ref: string
   template_version: string
   name: string
   description: string
-  components: ComponentConfig
+  components: ComponentConfigRequest
   collab_mode: ExperimentCollabMode
   group_config: GroupConfig
   require_report: boolean
@@ -43,7 +47,7 @@ export interface ExperimentDraft {
 }
 
 /** emptyComponents 给出空组件配置,四类组件都以空数组起步(后端要求字段存在)。 */
-export function emptyComponents(): ComponentConfig {
+export function emptyComponents(): ComponentConfigRequest {
   return { envs: [], sims: [], checkpoints: [], stages: [] }
 }
 
@@ -58,12 +62,24 @@ export function draftFromExperiment(experiment: Experiment): ExperimentDraft {
     template_version: experiment.template_version ?? '',
     name: experiment.name,
     description: experiment.description,
-    components: experiment.components,
+    components: {
+      ...experiment.components,
+      // 只保留声明字段:composition_digest 是编译结果,回填就等于把服务端事实当输入
+      envs: experiment.components.envs.map(envRequestFromProjection),
+    },
     collab_mode: experiment.collab_mode,
     group_config: experiment.group_config,
     require_report: experiment.require_report,
     wizard_step: experiment.wizard_step,
   }
+}
+
+/** envRequestFromProjection 剥掉读取投影里的服务端摘要,只留可提交的声明。 */
+function envRequestFromProjection({
+  composition_digest: _digest,
+  ...declaration
+}: Experiment['components']['envs'][number]): EnvComponentRequest {
+  return declaration
 }
 
 /** toRequest 把草稿转成后端更新请求;course_id 可缺省(不挂课程的独立实验)。 */
@@ -104,7 +120,6 @@ export interface WizardPersistence {
 export function useWizardPersistence(
   experimentId: string,
   initialStep: number,
-  onSaved: () => void,
 ): WizardPersistence {
   // 服务端 wizard_step 从 1 起;越界时夹到有效范围,避免刷新后落到不存在的步骤
   const [stepIndex, setStepIndex] = useState(() =>
@@ -126,7 +141,6 @@ export function useWizardPersistence(
         })
         setSavedAt(new Date())
         setStepIndex(nextIndex)
-        onSaved()
         return true
       } catch (error) {
         setSaveError(userFacingErrorMessage(error, '这一步没有保存成功,请稍后重试。'))
@@ -135,7 +149,7 @@ export function useWizardPersistence(
         setSaving(false)
       }
     },
-    [experimentId, onSaved],
+    [experimentId],
   )
 
   const goBack = useCallback(() => {

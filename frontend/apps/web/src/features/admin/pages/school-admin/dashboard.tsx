@@ -26,6 +26,7 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import {
+  DashboardCompositionSection,
   DashboardGeneratedFooter,
   DashboardQuotaSection,
   DashboardTeachingPracticeSection,
@@ -41,7 +42,7 @@ export default function SchoolAdminDashboardPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '概览' }, { label: '学校看板' }]} />}
+        kicker={<Breadcrumb items={[{ label: '概览' }]} />}
         title="学校看板"
         description="本校账号、课程、实验与竞赛的当下概览,以及近期的运营趋势。"
         icon={LayoutDashboard}
@@ -73,17 +74,19 @@ export default function SchoolAdminDashboardPage() {
 
 /**
  * DashboardContent 渲染概览指标带与资源配额快照。
+ *
+ * 归族:看板族(规范 §6.5.3 第 ② 族)—— 全族唯一保留 Stat 大卡的一族,
+ * 因为这一页的主体就是数字本身。指标带用 `metric-band`(auto-fit),项数变化时不留空版面。
  */
 function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
   const navigate = useNavigate()
 
   return (
     <>
-      <PageSection title="账号" description="教师与学生的开通与活跃情况。">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="账号总数" value={dashboard.account_count} icon={Users} />
-          <Stat label="教师" value={dashboard.teacher_count} icon={Users} />
-          <Stat label="学生" value={dashboard.student_count} icon={Users} />
+      {/* 教师/学生两项不在这里重复:它们的构成由下方环图回答(§6.5.0 通则 1 不重复说同一件事) */}
+      <PageSection title="账号" description="本校账号的开通规模与活跃情况。">
+        <div className="metric-band gap-4">
+          <Stat label="账号总数" value={dashboard.account_count} icon={Users} hint="含管理员" />
           <Stat
             label="活跃账号"
             value={dashboard.active_account_count}
@@ -92,6 +95,8 @@ function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
           />
         </div>
       </PageSection>
+
+      <DashboardCompositionSection dashboard={dashboard} />
 
       <DashboardTeachingPracticeSection dashboard={dashboard} />
 

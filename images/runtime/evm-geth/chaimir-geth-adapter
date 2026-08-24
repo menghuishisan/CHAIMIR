@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# runtime/evm-geth 的原生链能力插件,通过 geth dev JSON-RPC 完成标准动作。
+set -euo pipefail
+
+action="${1:-}"
+rpc_url="${CHAIMIR_EVM_RPC_URL:-http://127.0.0.1:${CHAIMIR_RUNTIME_RPC_PORT:-8545}}"
+state_dir="${CHAIMIR_CHAIN_STATE_DIR:-/runtime-state}"
+last_contract_file="$state_dir/last-contract-address"
+
+fail() { printf '%s\n' "$1" >&2; exit "${2:-1}"; }
+payload="$(cat)"; [ -n "$payload" ] || payload='{}'
+jq -e . >/dev/null <<<"$payload" || fail "输入不是有效 JSON" 22
+
+rpc() {
+  local method="$1"; local params="${2:-[]}"
+  local request response
+  request="$(jq -cn --arg method "$method" --argjson params "$params" '{jsonrpc:"2.0",id:1,method:$method,params:$params}')"
+  response="$(curl -fsS --max-time 30 -H 'Content-Type: application/json' --data "$request" "$rpc_url")" || fail "JSON-RPC 请求失败" 70
+  if jq -e '.error != null' >/dev/null <<<"$response"; then
+    jq -c '.error' <<<"$response" >&2
+    exit 70
+  fi
+  jq -c '.result' <<<"$response"
+}
+
+first_account() {
+  local accounts
+  accounts="$(rpc eth_accounts)"
+  jq -r '.[0] // empty' <<<"$accounts"
+}
+
+wait_receipt() {
+  local tx_hash="$1"; local receipt="null"
+  for _ in $(seq 1 60); do
+    receipt="$(rpc eth_getTransactionReceipt "$(jq -cn --arg hash "$tx_hash" '[ $hash ]')")"
+    if [ "$receipt" != "null" ]; then printf '%s' "$receipt"; return; fi
+    sleep 1
+  done
+  fail "交易未在超时时间内确认" 70
+}
+
+send_transaction() {
+  local tx_json="$1"; local tx_hash receipt address
+  tx_hash="$(rpc eth_sendTransaction "$(jq -cn --argjson tx "$tx_json" '[ $tx ]')" | jq -r '.')"
+  [ -n "$tx_hash" ] && [ "$tx_hash" != "null" ] || fail "节点未返回交易哈希" 70
+  receipt="$(wait_receipt "$tx_hash")"
+  address="$(jq -r '.contractAddress // empty' <<<"$receipt")"
+  if [ -n "$address" ]; then
+    mkdir -p "$state_dir"; printf '%s' "$address" > "$last_contract_file"
+  fi
+  jq -cn --arg tx_hash "$tx_hash" --argjson receipt "$receipt" '{tx_hash:$tx_hash,receipt:$receipt}'
+}
+
+case "$action" in
+  deploy)
+    bytecode="$(jq -r '.bytecode // empty' <<<"$payload")"
+    [ -n "$bytecode" ] || fail "deploy payload requires bytecode" 22
+    from="$(jq -r '.from // empty' <<<"$payload")"; [ -n "$from" ] || from="$(first_account)"
+    [ -n "$from" ] || fail "节点没有可用部署账户" 70
+    tx_json="$(jq -cn --arg from "$from" --arg data "$bytecode" '{from:$from,data:$data}')"
+    send_transaction "$tx_json"
+    ;;
+  tx)
+    to="$(jq -r '.to // empty' <<<"$payload")"
+    if [ -z "$to" ] && [ -f "$last_contract_file" ]; then to="$(cat "$last_contract_file")"; fi
+    data="$(jq -r '.data // empty' <<<"$payload")"; [ -n "$to" ] && [ -n "$data" ] || fail "tx payload requires to and data" 22
+    from="$(jq -r '.from // empty' <<<"$payload")"; [ -n "$from" ] || from="$(first_account)"
+    value="$(jq -r '.value // empty' <<<"$payload")"
+    tx_json="$(jq -cn --arg from "$from" --arg to "$to" --arg data "$data" --arg value "$value" '({from:$from,to:$to,data:$data} + (if $value != "" then {value:$value} else {} end))')"
+    send_transaction "$tx_json"
+    ;;
+  query)
+    target="$(jq -r '.target // empty' <<<"$payload")"; [ -n "$target" ] || fail "query target is required" 22
+    case "$target" in
+      chainId) result="$(rpc eth_chainId)"; jq -cn --arg target "$target" --arg value "$(jq -r '.' <<<"$result")" '{target:$target,chain_id:$value}' ;;
+      latest|blockNumber) result="$(rpc eth_blockNumber)"; jq -cn --arg target "$target" --arg value "$(jq -r '.' <<<"$result")" '{target:$target,block_number:$value}' ;;
+      balance:*) address="${target#balance:}"; result="$(rpc eth_getBalance "$(jq -cn --arg address "$address" '[ $address, "latest" ]')")"; jq -cn --arg target "$target" --arg value "$(jq -r '.' <<<"$result")" '{target:$target,balance:$value}' ;;
+      code:*) address="${target#code:}"; result="$(rpc eth_getCode "$(jq -cn --arg address "$address" '[ $address, "latest" ]')")"; jq -cn --arg target "$target" --arg value "$(jq -r '.' <<<"$result")" '{target:$target,code:$value}' ;;
+      *) fail "unsupported query target" 22 ;;
+    esac
+    ;;
+  *) fail "unknown chain action" 64 ;;
+esac

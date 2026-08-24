@@ -1,5 +1,5 @@
 /**
- * CompareBarChart:维度对比柱状图(规范 §8.1 维度对比,>5 类别时替代饼图)。
+ * CompareBarChart:离散类别对比柱状图(规范 §8.1「离散类别比高低」;类别 >5 时代替占比环)。
  * 与 TrendLineChart 同风格:系列色经 useChartColors 从令牌派生,圆角柱顶;
  * 第 2 个系列起用斜纹 pattern 填充区分形状(色非唯一区分铁律,§8.2);
  * 图例可点切换系列显隐(§8.2 强制);reduced-motion 时关闭入场动画。

@@ -11,8 +11,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
-import { BookOpen, CheckCheck, Download, FlaskConical, Network } from 'lucide-react'
-import { LessonContentType, ProgressStatus, type Lesson, type Progress } from '@chaimir/api-client'
+import { BookOpen, CheckCheck, Download, FlaskConical, ListTree, Network } from 'lucide-react'
+import {
+  LessonContentType,
+  ProgressStatus,
+  type CourseOutline,
+  type Lesson,
+  type Progress,
+} from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
@@ -21,11 +27,18 @@ import {
   Card,
   CardBody,
   CardHeader,
+  cn,
   DescriptionList,
-  PageBody,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  Icon,
   PageHeader,
   PageScaffold,
-  PageSection,
+  ReadingLayout,
   Skeleton,
   StatusIndicator,
   toast,
@@ -43,10 +56,10 @@ import { errorDiagnostics, userFacingErrorMessage } from '../../../../utils/user
 import { isLessonMaterialType } from '../../rules'
 import { progressStatusTone } from '../../statusPresentation'
 
-/** LessonView 是课时页所需的一次性读取结果:课时本体 + 本人在该课时的进度。 */
+/** LessonView 是课时页的静态部分:课时本体 + 课程大纲(供目录)。进度另取,见下。 */
 interface LessonView {
   lesson: Lesson
-  progress: Progress | undefined
+  outline: CourseOutline
 }
 
 /** 视频播放位置回写节流:每 15 秒最多写一次,避免播放中高频打服务端。 */
@@ -54,19 +67,28 @@ const VIDEO_POSITION_REPORT_INTERVAL_MS = 15_000
 
 /**
  * StudentLessonPage 呈现课时内容并上报学习进度。
+ *
+ * 取数分两份是有意的:
+ *   静态部分(课时本体 + 大纲)进入页面读一次 —— 学习阅读族的骨架要一列目录(§6.5.3 第 ⑦),
+ *   而大纲里的章节课时在页面停留期间不会变;
+ *   进度单独走 `getMyProgress`,上报后只重取它 —— 一次「标记学完」不该把整份大纲再拉一遍。
  */
 export default function StudentLessonPage() {
   const { courseId = '', lessonId = '' } = useParams<{ courseId: string; lessonId: string }>()
 
   const view = useAsyncResource<LessonView>(
     () =>
-      Promise.all([api.teaching.getLesson(lessonId), api.teaching.getMyProgress(courseId)]).then(
-        ([lesson, progressList]) => ({
-          lesson,
-          progress: progressList.find((item) => item.lesson_id === lessonId),
-        }),
-      ),
+      Promise.all([
+        api.teaching.getLesson(lessonId),
+        api.teaching.getCourseOutline(courseId),
+      ]).then(([lesson, outline]) => ({ lesson, outline })),
     [courseId, lessonId],
+    () => false,
+  )
+
+  const progressList = useAsyncResource(
+    () => api.teaching.getMyProgress(courseId),
+    [courseId],
     () => false,
   )
 
@@ -79,7 +101,12 @@ export default function StudentLessonPage() {
         emptyDescription="老师还没有为这个课时设置内容。"
       >
         {(data) => (
-          <LessonContent courseId={courseId} view={data} onProgressChanged={view.reload} />
+          <LessonContent
+            courseId={courseId}
+            view={data}
+            progressList={progressList.data ?? []}
+            onProgressChanged={progressList.reload}
+          />
         )}
       </ResourceState>
     </PageScaffold>
@@ -89,41 +116,50 @@ export default function StudentLessonPage() {
 interface LessonContentProps {
   courseId: string
   view: LessonView
+  /** 本人在该课程各课时的进度;由页面单独取,上报后只重取这一份 */
+  progressList: Progress[]
   onProgressChanged: () => void
 }
 
 /**
  * LessonContent 渲染课时头部、正文与进度动作区。
  */
-function LessonContent({ courseId, view, onProgressChanged }: LessonContentProps) {
-  const { lesson, progress } = view
+/**
+ * LessonContent 渲染课时头部、目录、限宽正文与进度动作区。
+ *
+ * 归族:学习阅读族(规范 §6.5.3 第 ⑦)。全族唯一限宽正文的一族 ——
+ * 读整段文字时行太长会让眼睛回到下一行时找错位置。骨架由 ReadingLayout 给出:
+ * 左目录 + 限宽正文 + 右进度栏,`<lg` 目录收成一条触发器、进度栏排到正文之后。
+ */
+function LessonContent({ courseId, view, progressList, onProgressChanged }: LessonContentProps) {
+  const { lesson, outline } = view
+  const progress = progressList.find((item) => item.lesson_id === lesson.id)
   const status = progress ? progress.status : ProgressStatus.NOT_STARTED
 
   return (
     <>
+      {/* 页头只出课程上下文与面包屑:课时名由正文区的标题承担,不在页头再说一遍(§6.5.0 通则 1) */}
       <PageHeader
         kicker={
           <Breadcrumb
             items={[
               { label: '我的课程', href: '/student/courses' },
-              { label: '课程详情', href: `/student/courses/${courseId}` },
-              { label: lesson.title },
+              { label: outline.course.name, href: `/student/courses/${courseId}` },
             ]}
           />
         }
-        title={lesson.title}
-        description="学完这一节后标记完成,进度会保存在服务器上,换设备也能接着看。"
-        icon={BookOpen}
-        actions={
-          <div className="flex items-center gap-2">
-            <Badge tone="neutral">{lessonContentTypeLabel(lesson.content_type)}</Badge>
-            <StatusIndicator tone={progressStatusTone(status)} label={progressStatusLabel(status)} />
-          </div>
-        }
       />
 
-      <PageBody
-        rail={
+      <ReadingLayout
+        toc={
+          <LessonToc
+            courseId={courseId}
+            outline={outline}
+            progressList={progressList}
+            currentLessonId={lesson.id}
+          />
+        }
+        aside={
           <LessonProgressCard
             lessonId={lesson.id}
             progress={progress}
@@ -131,10 +167,126 @@ function LessonContent({ courseId, view, onProgressChanged }: LessonContentProps
           />
         }
       >
-        <PageSection title="课时内容">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <h1 className="min-w-0 font-display text-2xl text-ink">{lesson.title}</h1>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Badge tone="neutral">{lessonContentTypeLabel(lesson.content_type)}</Badge>
+              <StatusIndicator
+                tone={progressStatusTone(status)}
+                label={progressStatusLabel(status)}
+              />
+            </div>
+          </div>
           <LessonBody lesson={lesson} progress={progress} onProgressChanged={onProgressChanged} />
-        </PageSection>
-      </PageBody>
+        </div>
+      </ReadingLayout>
+    </>
+  )
+}
+
+interface LessonTocProps {
+  courseId: string
+  outline: CourseOutline
+  /** 各课时进度:与正文区同一份,上报后一起刷新 */
+  progressList: Progress[]
+  currentLessonId: string
+}
+
+/**
+ * LessonToc 是学习阅读族的目录列(§6.5.3 第 ⑦)。
+ *
+ * `≥lg` 常驻左栏;`<lg` 收成一条「当前位置 + 本章目录」触发器,完整目录走 Drawer ——
+ * 抽屉的焦点陷阱与 Esc 由 Drawer 保证,这里不重复实现(ReadingLayout 注释里的约定)。
+ * 课时按章节顺序、章内按 sort 排;每条带学习状态点,读者能看出自己学到哪儿。
+ */
+function LessonToc({ courseId, outline, progressList, currentLessonId }: LessonTocProps) {
+  const navigate = useNavigate()
+  const [drawerOpen, setDrawerOpen] = useState(false)
+
+  const progressByLesson = useMemo(
+    () => new Map(progressList.map((item) => [item.lesson_id, item.status])),
+    [progressList],
+  )
+
+  /** 章节顺序 + 章内 sort:与课程详情页同一排序口径,两处目录顺序必须一致 */
+  const chapters = useMemo(
+    () =>
+      outline.chapters.map((chapter) => ({
+        chapter,
+        lessons: outline.lessons
+          .filter((item) => item.chapter_id === chapter.id)
+          .sort((a, b) => a.sort - b.sort),
+      })),
+    [outline.chapters, outline.lessons],
+  )
+
+  const ordered = useMemo(() => chapters.flatMap((entry) => entry.lessons), [chapters])
+  const currentIndex = ordered.findIndex((item) => item.id === currentLessonId)
+
+  const openLesson = (lessonId: string) => {
+    setDrawerOpen(false)
+    navigate(`/student/courses/${courseId}/lessons/${lessonId}`)
+  }
+
+  const tocList = (
+    <nav aria-label="课程目录" className="flex flex-col gap-3">
+      {chapters.map((entry) => (
+        <div key={entry.chapter.id} className="flex flex-col gap-1">
+          <p className="px-2 text-xs font-medium text-ink-sub">{entry.chapter.title}</p>
+          {entry.lessons.map((item) => {
+            const isCurrent = item.id === currentLessonId
+            const itemStatus = progressByLesson.get(item.id) ?? ProgressStatus.NOT_STARTED
+            return (
+              <button
+                key={item.id}
+                type="button"
+                aria-current={isCurrent ? 'true' : undefined}
+                onClick={() => openLesson(item.id)}
+                className={cn(
+                  'hit-target flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm',
+                  'transition-colors duration-fast ease-out',
+                  isCurrent
+                    ? 'bg-primary-soft font-medium text-primary'
+                    : 'text-ink-sub hover:bg-surface-hover hover:text-ink',
+                )}
+              >
+                <span className="min-w-0 truncate">{item.title}</span>
+                {itemStatus === ProgressStatus.DONE ? (
+                  <Icon icon={CheckCheck} size="sm" className="shrink-0 text-success" />
+                ) : null}
+              </button>
+            )
+          })}
+        </div>
+      ))}
+    </nav>
+  )
+
+  return (
+    <>
+      {/* ≥lg:目录常驻左栏 */}
+      <div className="hidden rounded-lg bg-surface p-3 shadow-xs lg:block">{tocList}</div>
+
+      {/* <lg:一条当前位置 + 展开触发;完整目录进抽屉 */}
+      <div className="flex items-center justify-between gap-3 rounded-lg bg-surface px-4 py-3 shadow-xs lg:hidden">
+        <span className="min-w-0 truncate text-sm text-ink-sub tabular-nums">
+          第 {currentIndex + 1} / {ordered.length} 节
+        </span>
+        <Button variant="ghost" size="sm" leftIcon={ListTree} onClick={() => setDrawerOpen(true)}>
+          课程目录
+        </Button>
+      </div>
+
+      <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+        <DrawerContent side="bottom">
+          <DrawerHeader>
+            <DrawerTitle>课程目录</DrawerTitle>
+            <DrawerDescription>选一节继续学习,已学完的课时右侧有对勾。</DrawerDescription>
+          </DrawerHeader>
+          <DrawerBody>{tocList}</DrawerBody>
+        </DrawerContent>
+      </Drawer>
     </>
   )
 }

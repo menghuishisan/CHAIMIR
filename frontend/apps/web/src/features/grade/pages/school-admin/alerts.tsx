@@ -8,7 +8,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { RefreshCw, Settings2, TriangleAlert, UserCheck } from 'lucide-react'
+import { RefreshCw, Settings2, TriangleAlert } from 'lucide-react'
 import {
   GradeWarningStatus,
   BaseIdentity,
@@ -22,9 +22,11 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  DataPanel,
   FilterBar,
   FilterField,
   FormField,
+  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -34,11 +36,9 @@ import {
   ModalTitle,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
   Select,
-  Stat,
   StatusIndicator,
   Table,
   toast,
@@ -183,7 +183,7 @@ export default function SchoolAdminAlertsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '教务与成绩' }, { label: '学业预警' }]} />}
+        kicker={<Breadcrumb items={[{ label: '教务与成绩' }]} />}
         title="学业预警"
         description="按预警规则扫描出的学业风险。学生在自己的页面确认后状态变为已确认。"
         icon={TriangleAlert}
@@ -203,29 +203,21 @@ export default function SchoolAdminAlertsPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat
-            label="预警总数"
-            value={totalCount ?? '—'}
-            icon={TriangleAlert}
-            hint="不受下方筛选影响"
-          />
-          <Stat
-            label="待确认"
-            value={pendingCount ?? '—'}
-            icon={TriangleAlert}
-            hint="学生尚未查看"
-          />
-          <Stat label="已确认" value={acknowledgedCount ?? '—'} icon={UserCheck} />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是预警记录 */}
+      <MetricStrip
+        label="预警总量摘要"
+        className="mb-5"
+        items={[
+          { label: '预警总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
+          { label: '待确认', value: pendingCount ?? '—', hint: '学生尚未查看' },
+          { label: '已确认', value: acknowledgedCount ?? '—', hint: '确认由学生本人完成' },
+        ]}
+      />
 
-      <PageSection
-        title="预警记录"
-        description={`共 ${warnings.total} 条。确认动作由学生本人完成。`}
-      >
-        <div className="flex flex-col gap-4">
+      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
+      <DataPanel
+        label="预警记录"
+        filter={
           <FilterBar label="预警记录筛选">
             <FilterField label="确认状态" group>
               <SegmentedControl
@@ -252,7 +244,16 @@ export default function SchoolAdminAlertsPage() {
               />
             </FilterField>
           </FilterBar>
-
+        }
+        footer={
+          <Pagination
+            page={warnings.page}
+            pageSize={warnings.pageSize}
+            total={warnings.total}
+            onPageChange={warnings.setPage}
+          />
+        }
+      >
           <ResourceState
             resource={warnings}
             emptyIcon={TriangleAlert}
@@ -262,22 +263,29 @@ export default function SchoolAdminAlertsPage() {
                 ? '换个学生或状态看看,也可以清空条件查看全部。'
                 : '执行扫描后,达到预警条件的学生会出现在这里。'
             }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (
-              <div className="flex flex-col gap-4">
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={warnings.page}
-                  pageSize={warnings.pageSize}
-                  total={warnings.total}
-                  onPageChange={warnings.setPage}
-                />
-              </div>
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):学生名一行、预警原因与时间一行
+                mobileCard={(item) => ({
+                  title: studentById.get(item.student_id)?.name ?? '未登记学生',
+                  meta: `${gradeWarningTypeLabel(item.type)} · ${formatDateTime(item.created_at)}`,
+                  badge: (
+                    <StatusIndicator
+                      tone={gradeWarningStatusTone(item.status)}
+                      label={gradeWarningStatusLabel(item.status)}
+                    />
+                  ),
+                })}
+              />
             )}
           </ResourceState>
-        </div>
-      </PageSection>
+      </DataPanel>
 
       {scanOpen ? (
         <ScanWarningsModal

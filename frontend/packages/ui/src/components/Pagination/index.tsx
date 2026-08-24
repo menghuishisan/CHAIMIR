@@ -1,8 +1,8 @@
 /**
- * Pagination:分页控件(§5.1 / §6.5 数据区)。
- * 上一页/下一页 + 窗口化页码(首末页常显、中间省略),当前页玉实底;
- * 右侧展示总条数。total<=pageSize(单页)时仍渲染但翻页禁用——
- * 是否在单页时整体隐藏由页面自行决定,组件不做隐藏。
+ * Pagination:分页控件(§5.1 / §6.5.4 跨族元件规则)。
+ * 上一页/下一页 + 窗口化页码(首末页常显、中间省略),当前页玉实底;右侧展示总条数。
+ * 总页数 ≤1 时只渲染总条数、不渲染翻页控件(§6.5.4)——
+ * 一页装得下时页码是噪声,但「一共多少条」仍是有效信息。
  */
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "../../lib/cn";
@@ -49,8 +49,19 @@ const BUTTON_BASE =
 export function Pagination({ page, pageSize, total, onPageChange, className }: PaginationProps) {
   // pageSize 防御:<=0 或小数会算出 Infinity/NaN 页,先夹到至少 1 的整数
   const safePageSize = Math.max(1, Math.floor(pageSize));
-  // 至少 1 页:total 为 0 时也渲染禁用态骨干,避免布局跳动
+  // 至少 1 页:total 为 0 时也按 1 页算,分支走下方的「只给总条数」
   const totalPages = Math.max(1, Math.ceil(total / safePageSize));
+
+  // 总页数 ≤1:不渲染翻页控件(§6.5.4)。此时页码只有一个「1」,前后箭头都是禁用态,
+  // 三个控件加起来不提供任何可用操作;总条数保留,它回答的是「一共多少条」而非「怎么翻页」。
+  if (totalPages <= 1) {
+    return (
+      <p className={cn("flex items-center justify-end text-sm text-ink-sub tabular-nums", className)}>
+        共 {total} 条
+      </p>
+    );
+  }
+
   const items = buildPageItems(page, totalPages);
 
   return (

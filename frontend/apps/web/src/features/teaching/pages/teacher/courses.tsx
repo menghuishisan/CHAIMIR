@@ -11,16 +11,22 @@ import {
   ClipboardCopy,
   Copy,
   KeyRound,
-  Layers,
   MoreVertical,
   Share2,
 } from 'lucide-react'
-import { CourseStatus, CourseVisibility, type Course } from '@chaimir/api-client'
+import {
+  BOOL_FILTER,
+  CourseStatus,
+  CourseVisibility,
+  type BoolFilter,
+  type Course,
+} from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
   Button,
   Callout,
+  DataPanel,
   FilterBar,
   FilterField,
   FormField,
@@ -31,6 +37,7 @@ import {
   MenuItem,
   MenuSeparator,
   MenuTrigger,
+  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -40,10 +47,8 @@ import {
   ModalTitle,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
-  Stat,
   StatusIndicator,
   Table,
   toast,
@@ -70,6 +75,16 @@ const STATUS_FILTERS = [
   { value: String(CourseStatus.DRAFT), label: '草稿' },
   { value: String(CourseStatus.RUNNING), label: '进行中' },
   { value: String(CourseStatus.ENDED), label: '已结课' },
+] as const
+
+/**
+ * SHARED_FILTERS 是「是否已共享」筛选项。
+ * 布尔列没法用「缺省即不过滤」表达三种意图,全平台统一用 BoolFilter(0 不限 / 1 是 / 2 否)。
+ */
+const SHARED_FILTERS = [
+  { value: BOOL_FILTER.ANY, label: '不限' },
+  { value: BOOL_FILTER.YES, label: '已共享' },
+  { value: BOOL_FILTER.NO, label: '未共享' },
 ] as const
 
 /** 需要二次确认的状态流转:这三个动作不可逆或影响学生可见性。 */
@@ -99,6 +114,7 @@ const CONFIRM_COPY: Record<ConfirmAction, { title: string; description: string; 
 export default function TeacherCoursesPage() {
   const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [sharedFilter, setSharedFilter] = useState<BoolFilter>(BOOL_FILTER.ANY)
   const [createOpen, setCreateOpen] = useState(false)
   const [confirm, setConfirm] = useState<{ action: ConfirmAction; course: Course }>()
   const [cloneTarget, setCloneTarget] = useState<Course>()
@@ -110,9 +126,10 @@ export default function TeacherCoursesPage() {
       api.teaching.getCourses({
         role: 'teacher',
         status: statusFilter ? (Number(statusFilter) as CourseStatus) : undefined,
+        is_shared: sharedFilter,
         ...params,
       }),
-    [statusFilter],
+    [sharedFilter, statusFilter],
   )
 
   /** runStatusAction 执行状态流转并刷新列表。 */
@@ -164,8 +181,8 @@ export default function TeacherCoursesPage() {
     [courses],
   )
 
-  // 指标带取服务端全量口径,不随下方状态筛选变化。
-  // 「已共享」没有服务端筛选参数,故不做这张卡:共享状态在每一行的标签里可见(规范 §6.5)。
+  // 指标带取服务端全量口径,不随下方筛选变化(§6.5.4)。
+  // 「已共享」现在也走服务端 is_shared 参数,不再用当前页切片数 —— 那是错数。
   const totalCount = useResourceTotal(
     (params) => api.teaching.getCourses({ role: 'teacher', ...params }),
     [],
@@ -181,6 +198,10 @@ export default function TeacherCoursesPage() {
   )
   const endedCount = useResourceTotal(
     (params) => api.teaching.getCourses({ role: 'teacher', status: CourseStatus.ENDED, ...params }),
+    [],
+  )
+  const sharedCount = useResourceTotal(
+    (params) => api.teaching.getCourses({ role: 'teacher', is_shared: BOOL_FILTER.YES, ...params }),
     [],
   )
 
@@ -269,7 +290,8 @@ export default function TeacherCoursesPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '教学' }, { label: '课程管理' }]} />}
+        // 面包屑只到父级:末节与 h1 同名等于白占一行(§6.5.0 通则 1)
+        kicker={<Breadcrumb items={[{ label: '教学' }]} />}
         title="课程管理"
         description="创建课程、组织章节课时与作业,把邀请码发给学生即可开课。"
         icon={Book}
@@ -280,20 +302,32 @@ export default function TeacherCoursesPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="我的课程" value={totalCount ?? '—'} icon={Book} hint="不受下方筛选影响" />
-          <Stat label="进行中" value={runningCount ?? '—'} icon={Layers} />
-          <Stat label="草稿" value={draftCount ?? '—'} icon={BookPlus} hint="发布后学生才可加入" />
-          <Stat label="已结课" value={endedCount ?? '—'} icon={Share2} hint="可归档结算成绩" />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是列表,四张 Display 大卡会把表格推到折叠线以下。
+          口径仍是服务端全量,不随下方状态筛选变化(§6.5.4) */}
+      <MetricStrip
+        label="课程总量摘要"
+        className="mb-5"
+        items={[
+          { label: '课程总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
+          { label: '进行中', value: runningCount ?? '—', hint: '学生可进入学习' },
+          { label: '草稿', value: draftCount ?? '—', hint: '发布后学生才可加入' },
+          { label: '已结课', value: endedCount ?? '—', hint: '可归档结算成绩' },
+          { label: '已共享', value: sharedCount ?? '—', hint: '其他学校可复用' },
+        ]}
+      />
 
-      <PageSection
-        title="课程列表"
-        description={`共 ${courses.total} 门课程`}
-      >
-        <div className="flex flex-col gap-4">
+      {/* 动作失败就近内联(§6.7 C),排在数据区之前,不被表格滚动带走 */}
+      {actionError ? (
+        <Callout tone="danger" className="mb-4">
+          {actionError}
+        </Callout>
+      ) : null}
+
+      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2 / §6.5.3 第 ① 族):
+          井不得直接摆在光面上,一个逻辑数据区也不该被渲染成三个并排的盒子 */}
+      <DataPanel
+        label="课程列表"
+        filter={
           <FilterBar label="课程筛选">
             <FilterField label="课程状态" group>
               <SegmentedControl
@@ -304,40 +338,68 @@ export default function TeacherCoursesPage() {
                 onValueChange={setStatusFilter}
               />
             </FilterField>
+            <FilterField label="是否已共享" group>
+              <SegmentedControl
+                aria-label="按是否已共享筛选"
+                size="sm"
+                options={SHARED_FILTERS.map((item) => ({
+                  value: String(item.value),
+                  label: item.label,
+                }))}
+                value={String(sharedFilter)}
+                onValueChange={(value) => setSharedFilter(Number(value) as BoolFilter)}
+              />
+            </FilterField>
           </FilterBar>
-
-          {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
-          <ResourceState
-            resource={courses}
-            emptyIcon={Book}
-            emptyTitle={statusFilter ? '这个状态下没有课程' : '还没有课程'}
-            emptyDescription={
-              statusFilter ? '换个状态看看。' : '新建课程后可以添加章节课时、布置作业并邀请学生。'
-            }
-            emptyAction={
-              statusFilter ? undefined : (
-                <Button variant="primary" leftIcon={BookPlus} onClick={() => setCreateOpen(true)}>
-                  新建课程
-                </Button>
-              )
-            }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-          >
-            {(page) => (
-              <>
-                <Table columns={columns} data={page.list} rowKey={(course) => course.id} />
-                <Pagination
-                  page={courses.page}
-                  pageSize={courses.pageSize}
-                  total={courses.total}
-                  onPageChange={courses.setPage}
-                />
-              </>
-            )}
-          </ResourceState>
-        </div>
-      </PageSection>
+        }
+        footer={
+          <Pagination
+            page={courses.page}
+            pageSize={courses.pageSize}
+            total={courses.total}
+            onPageChange={courses.setPage}
+          />
+        }
+      >
+        <ResourceState
+          resource={courses}
+          emptyIcon={Book}
+          emptyTitle={statusFilter ? '这个状态下没有课程' : '还没有课程'}
+          emptyDescription={
+            statusFilter ? '换个状态看看。' : '新建课程后可以添加章节课时、布置作业并邀请学生。'
+          }
+          emptyAction={
+            statusFilter ? undefined : (
+              <Button variant="primary" leftIcon={BookPlus} onClick={() => setCreateOpen(true)}>
+                新建课程
+              </Button>
+            )
+          }
+          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+        >
+          {(page) => (
+            <Table
+              columns={columns}
+              data={page.list}
+              rowKey={(course) => course.id}
+              // 表格在 DataPanel 内部,抬起片由容器给(§6.5.1 不出现第三级)
+              elevated={false}
+              // <md 六列挤不进 343px,换行卡(§6.4.1 规则 3):课程名一行、次要信息一行、状态在右
+              mobileCard={(course) => ({
+                title: course.name,
+                meta: `${course.credits} 学分 · ${course.semester} · ${course.invite_code ?? '无邀请码'}`,
+                badge: (
+                  <StatusIndicator
+                    tone={courseStatusTone(course.status)}
+                    label={courseStatusLabel(course.status)}
+                  />
+                ),
+              })}
+              onRowClick={(course) => navigate(`/teacher/courses/${course.id}`)}
+            />
+          )}
+        </ResourceState>
+      </DataPanel>
 
       {createOpen ? (
         <CourseFormModal

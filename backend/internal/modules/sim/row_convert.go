@@ -106,23 +106,25 @@ func sessionFromRow(row sqlcgen.SimSession) (Session, error) {
 		return Session{}, apperr.ErrSimSessionDataCorrupt.WithCause(fmt.Errorf("仿真会话 %d 的 init_params 数据异常: %w", row.ID, err))
 	}
 	return Session{
-		ID:             row.ID,
-		TenantID:       row.TenantID,
-		PackageID:      row.PackageID,
-		SourceRef:      row.SourceRef,
-		OwnerAccountID: row.OwnerAccountID,
-		Seed:           row.Seed,
-		InitParams:     params,
-		Compute:        row.Compute,
-		Status:         row.Status,
-		CreatedAt:      timex.FromTimestamptz(row.CreatedAt),
-		UpdatedAt:      timex.FromTimestamptz(row.UpdatedAt),
+		ID:               row.ID,
+		TenantID:         row.TenantID,
+		PackageID:        row.PackageID,
+		SourceRef:        row.SourceRef,
+		ScopeRef:         row.ScopeRef,
+		OwnerAccountID:   row.OwnerAccountID,
+		SharedAccountIDs: row.SharedAccountIds,
+		Seed:             row.Seed,
+		InitParams:       params,
+		Compute:          row.Compute,
+		Status:           row.Status,
+		CreatedAt:        timex.FromTimestamptz(row.CreatedAt),
+		UpdatedAt:        timex.FromTimestamptz(row.UpdatedAt),
 	}, nil
 }
 
 // sessionWithPackageFromRow 转换回放所需的会话和包摘要。
 func sessionWithPackageFromRow(row sqlcgen.GetSimSessionWithPackageRow) (SessionWithPackage, error) {
-	session, err := sessionFromRow(sqlcgen.SimSession{ID: row.ID, TenantID: row.TenantID, PackageID: row.PackageID, SourceRef: row.SourceRef, OwnerAccountID: row.OwnerAccountID, Seed: row.Seed, InitParams: row.InitParams, Compute: row.Compute, Status: row.Status, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt})
+	session, err := sessionFromRow(sqlcgen.SimSession{ID: row.ID, TenantID: row.TenantID, PackageID: row.PackageID, SourceRef: row.SourceRef, ScopeRef: row.ScopeRef, OwnerAccountID: row.OwnerAccountID, SharedAccountIds: row.SharedAccountIds, Seed: row.Seed, InitParams: row.InitParams, Compute: row.Compute, Status: row.Status, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt})
 	if err != nil {
 		return SessionWithPackage{}, err
 	}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -85,12 +86,23 @@ func run() error {
 
 	select {
 	case <-ctx.Done():
+		infra.beginDraining()
+		drainTimer := time.NewTimer(time.Duration(cfg.Server.EndpointDrainSeconds) * time.Second)
+		<-drainTimer.C
+		drainTimer.Stop()
+		var shutdownErrs []error
+		if err := infra.wsHub.CloseAll("server_draining"); err != nil {
+			shutdownErrs = append(shutdownErrs, fmt.Errorf("WebSocket 连接关闭失败: %w", err))
+		}
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.Server.ShutdownTimeoutSeconds)*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("HTTP 服务关闭失败: %w", err)
+			shutdownErrs = append(shutdownErrs, fmt.Errorf("HTTP 服务关闭失败: %w", err))
 		}
-		return <-errCh
+		if err := <-errCh; err != nil {
+			shutdownErrs = append(shutdownErrs, err)
+		}
+		return errors.Join(shutdownErrs...)
 	case err := <-errCh:
 		return err
 	}
@@ -107,6 +119,14 @@ type infrastructure struct {
 	auth     *auth.Manager
 	wsHub    *ws.Hub
 	ids      snowflake.Generator
+	draining atomic.Bool
+}
+
+// beginDraining 标记当前副本正在下线,让 readiness 先于 HTTP 关闭失效。
+func (i *infrastructure) beginDraining() {
+	if i != nil {
+		i.draining.Store(true)
+	}
 }
 
 // newInfrastructure 初始化所有模块共享的基础设施,任何依赖不可用都 fail-fast。
@@ -257,6 +277,10 @@ func readinessProbe(cfg *config.Config, infra *infrastructure) gin.HandlerFunc {
 		{"kubernetes", func(i *infrastructure, ctx context.Context) error { return i.k8s.Healthz(ctx) }},
 	}
 	return func(c *gin.Context) {
+		if infra != nil && infra.draining.Load() {
+			c.String(http.StatusServiceUnavailable, "not ready")
+			return
+		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(cfg.Server.HealthTimeoutSeconds)*time.Second)
 		defer cancel()
 		for _, dependency := range dependencies {
@@ -344,7 +368,7 @@ func assembleModules(ctx context.Context, router gin.IRouter, cfg *config.Config
 	if err != nil {
 		return err
 	}
-	contestSvc, err := RegisterContestModule(ctx, ContestModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Contest, AuthConfig: cfg.Auth, FileService: infra.files, Storage: infra.storage, Content: contentSvc, ContentImport: contentSvc, Sandbox: sandboxSvc, Judge: judgeSvc, Fingerprint: judgeSvc, Audit: auditWriter, EventBus: infra.bus, Auth: infra.auth, Roles: identitySvc})
+	contestSvc, err := RegisterContestModule(ctx, ContestModuleDeps{Router: router, Database: infra.database, IDs: infra.ids, Config: cfg.Contest, AuthConfig: cfg.Auth, FileService: infra.files, Storage: infra.storage, Content: contentSvc, ContentImport: contentSvc, Sandbox: sandboxSvc, Judge: judgeSvc, Fingerprint: judgeSvc, Audit: auditWriter, EventBus: infra.bus, WSHub: infra.wsHub, Auth: infra.auth, Roles: identitySvc})
 	if err != nil {
 		return err
 	}

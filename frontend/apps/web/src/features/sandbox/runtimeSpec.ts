@@ -35,15 +35,17 @@ export function runtimeSidecarCount(spec: Record<string, unknown>): number {
   return Array.isArray(spec.infra_sidecars) ? spec.infra_sidecars.length : 0
 }
 
-/** runtimeDefaultToolCodes 返回默认工具编码列表。 */
-export function runtimeDefaultToolCodes(spec: Record<string, unknown>): string[] {
-  return Array.isArray(spec.default_tool_codes)
-    ? spec.default_tool_codes.filter((item): item is string => typeof item === 'string')
-    : []
-}
-
 /** runtimeHasDeployCommand 判断声明中是否存在部署命令。 */
 export function runtimeHasDeployCommand(spec: Record<string, unknown>): boolean {
   const command = asRecord(asRecord(spec.capability_commands)?.deploy)?.command
   return Array.isArray(command) && command.length > 0
+}
+
+/**
+ * runtimeDisabledReason 返回服务端写入的不可部署原因。
+ * 它由平台目录同步产出(镜像缺证明、manifest 声明不可部署、尚未完成自检等),
+ * 是用户向说明,页面原样展示 —— 前端不自己推断也不隐藏(对齐清单 §6.3 / §8.3)。
+ */
+export function runtimeDisabledReason(spec: Record<string, unknown>): string {
+  return readString(spec, 'disabled_reason')
 }

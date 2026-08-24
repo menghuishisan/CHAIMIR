@@ -244,6 +244,7 @@ type TeachingGradeEventOutbox struct {
 	EventUpdatedAt time.Time
 	Status         int16
 	RetryCount     int32
+	NextAttemptAt  time.Time
 	LastError      string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -252,10 +253,11 @@ type TeachingGradeEventOutbox struct {
 }
 
 type CourseListFilter struct {
-	Role   string
-	Status int16
-	Page   int
-	Size   int
+	Role     string
+	Status   int16
+	IsShared int16
+	Page     int
+	Size     int
 }
 
 type ProgressStats struct {

@@ -24,9 +24,13 @@ import {
   Input,
   PageHeader,
   PageScaffold,
-  PageSection,
   SegmentedControl,
   Skeleton,
+  StickySaveBar,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -68,7 +72,7 @@ export default function SchoolAdminAuthConfigPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '系统配置' }, { label: '认证配置' }]} />}
+        kicker={<Breadcrumb items={[{ label: '系统配置' }]} />}
         title="认证配置"
         description="接入学校统一认证或目录服务。配置好并启用后,师生可以用校内账号登录。"
         icon={Shield}
@@ -84,21 +88,34 @@ export default function SchoolAdminAuthConfigPage() {
         {() => null}
       </ResourceState>
 
-      <PageSection
-        title="学校统一认证(CAS)"
-        description="师生跳转到学校的统一认证页登录,回跳后按名单匹配到平台账号。"
-      >
-        <CasConfigCard config={byType.get(SsoType.CAS)} onSaved={configs.reload} />
-      </PageSection>
+      {/*
+        归族:配置表单族(§6.5.3 第 ③)。两种认证方式是两套互不相干的参数、两次独立提交,
+        故用 Tabs 让一次只出现一套表单 —— 这样底部粘性保存条也只服务当前那一套。
+        并排两张卡各带一个保存按钮时,「我改的是哪一套、存的是哪一套」要靠位置去猜。
+        学校在租户配置页选定的登录方式只有一种,故一次只配一套是常态。
+      */}
+      <Tabs defaultValue="cas">
+        <TabsList aria-label="认证方式">
+          <TabsTrigger value="cas">学校统一认证(CAS)</TabsTrigger>
+          <TabsTrigger value="ldap">目录服务(LDAP)</TabsTrigger>
+        </TabsList>
 
-      <PageSection
-        title="目录服务(LDAP)"
-        description="在平台登录页输入校内账号密码,由平台向目录服务校验。"
-      >
-        <LdapConfigCard config={byType.get(SsoType.LDAP)} onSaved={configs.reload} />
-      </PageSection>
+        <TabsContent value="cas">
+          <p className="mb-4 text-sm text-ink-sub">
+            师生跳转到学校的统一认证页登录,回跳后按名单匹配到平台账号。
+          </p>
+          <CasConfigCard config={byType.get(SsoType.CAS)} onSaved={configs.reload} />
+        </TabsContent>
 
-      <Callout tone="info">
+        <TabsContent value="ldap">
+          <p className="mb-4 text-sm text-ink-sub">
+            在平台登录页输入校内账号密码,由平台向目录服务校验。
+          </p>
+          <LdapConfigCard config={byType.get(SsoType.LDAP)} onSaved={configs.reload} />
+        </TabsContent>
+      </Tabs>
+
+      <Callout tone="info" className="mt-4">
         配置只是接入参数。要让师生真正用这种方式登录,还要在租户配置页把登录方式切换过来。
       </Callout>
     </PageScaffold>
@@ -147,6 +164,13 @@ function CasConfigCard({ config, onSaved }: ConfigCardProps) {
     },
     [enabled, matchField, onSaved, serverUrl],
   )
+
+  /** 未保存改动数:逐项与服务端配置比对(§6.5.3 第 ③ 族的保存态要「改了几处」) */
+  const dirtyCount = [
+    serverUrl.trim() !== readString(config?.config, CAS_SERVER_URL),
+    Number(matchField) !== (config?.match_field ?? SsoMatchField.NO),
+    enabled !== (config?.enabled ?? false),
+  ].filter(Boolean).length
 
   return (
     <Card>
@@ -197,14 +221,16 @@ function CasConfigCard({ config, onSaved }: ConfigCardProps) {
 
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
-          <div className="flex items-center gap-2">
-            <Button type="submit" variant="primary" leftIcon={CircleCheck} loading={working}>
-              保存 CAS 配置
-            </Button>
-            <span className="text-sm text-ink-sub">
-              保存后可以在登录页的统一认证入口自测一次。
-            </span>
-          </div>
+          <StickySaveBar
+            dirtyCount={dirtyCount}
+            saving={working}
+            hint="保存后可以在登录页的统一认证入口自测一次。"
+            saveAction={
+              <Button type="submit" variant="primary" leftIcon={CircleCheck} loading={working}>
+                保存 CAS 配置
+              </Button>
+            }
+          />
         </form>
       </CardBody>
     </Card>
@@ -276,6 +302,21 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
     },
     [baseDn, bindDn, bindPassword, enabled, matchAttribute, matchField, onSaved, url, userFilter],
   )
+
+  /**
+   * 未保存改动数:逐项与服务端配置比对(§6.5.3 第 ③ 族)。
+   * 绑定密码只要填了就算一处改动 —— 后端不回显它,与服务端值无从比对。
+   */
+  const ldapDirtyCount = [
+    url.trim() !== readString(config?.config, LDAP_FIELDS.url),
+    bindDn.trim() !== readString(config?.config, LDAP_FIELDS.bindDn),
+    bindPassword !== '',
+    baseDn.trim() !== readString(config?.config, LDAP_FIELDS.baseDn),
+    userFilter.trim() !== readString(config?.config, LDAP_FIELDS.userFilter),
+    matchAttribute.trim() !== readString(config?.config, LDAP_FIELDS.matchAttribute),
+    Number(matchField) !== (config?.match_field ?? SsoMatchField.NO),
+    enabled !== (config?.enabled ?? false),
+  ].filter(Boolean).length
 
   return (
     <Card>
@@ -416,14 +457,16 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
 
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
-          <div className="flex items-center gap-2">
-            <Button type="submit" variant="primary" leftIcon={ShieldCheck} loading={working}>
-              保存 LDAP 配置
-            </Button>
-            <span className="text-sm text-ink-sub">
-              平台只向目录服务发起加密连接,不会把师生密码保存下来。
-            </span>
-          </div>
+          <StickySaveBar
+            dirtyCount={ldapDirtyCount}
+            saving={working}
+            hint="平台只向目录服务发起加密连接,不会把师生密码保存下来。"
+            saveAction={
+              <Button type="submit" variant="primary" leftIcon={ShieldCheck} loading={working}>
+                保存 LDAP 配置
+              </Button>
+            }
+          />
         </form>
       </CardBody>
     </Card>

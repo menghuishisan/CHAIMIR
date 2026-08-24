@@ -1,0 +1,6 @@
+# 内置中间件部署形态的密钥组件,复用统一 SecretStore 与远端键约定。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - external-secret-data.yaml
+  - external-secret-tls.yaml

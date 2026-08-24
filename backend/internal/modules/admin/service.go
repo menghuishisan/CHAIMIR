@@ -501,6 +501,42 @@ func (s *Service) ListConfigs(ctx context.Context, scope int16) ([]ConfigDTO, er
 	})
 }
 
+// GetConfig 查询单条系统配置并返回脱敏值,避免详情页依赖全量列表。
+func (s *Service) GetConfig(ctx context.Context, scope int16, key string) (ConfigDTO, error) {
+	id, err := s.currentAdminIdentity(ctx)
+	if err != nil {
+		return ConfigDTO{}, err
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return ConfigDTO{}, apperr.ErrAdminConfigInvalid
+	}
+	tenantID := int64(0)
+	if id.IsPlatform {
+		if scope == 0 {
+			scope = ScopeGlobal
+		}
+		if scope != ScopeGlobal {
+			return ConfigDTO{}, apperr.ErrAdminConfigInvalid
+		}
+	} else {
+		scope = ScopeTenant
+		tenantID = id.TenantID
+	}
+	out, err := runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) (ConfigDTO, error) {
+		cfg, err := tx.GetSystemConfig(ctx, scope, tenantID, key)
+		if err != nil {
+			return ConfigDTO{}, apperr.ErrAdminConfigNotFound.WithCause(err)
+		}
+		return cfg, nil
+	})
+	if err != nil {
+		return ConfigDTO{}, err
+	}
+	out.Value = secretmap.Mask(out.Value)
+	return out, nil
+}
+
 // UpdateConfig 更新或创建系统配置。
 func (s *Service) UpdateConfig(ctx context.Context, key string, req ConfigUpdateRequest) (ConfigDTO, error) {
 	id, err := s.currentAdminIdentity(ctx)
@@ -719,7 +755,7 @@ func (s *Service) UpdateAlertRule(ctx context.Context, ruleID int64, req AlertRu
 }
 
 // ListAlertEvents 查询告警事件。
-func (s *Service) ListAlertEvents(ctx context.Context, status int16, page, size int) ([]AlertEventDTO, int64, int, int, error) {
+func (s *Service) ListAlertEvents(ctx context.Context, status, level int16, page, size int) ([]AlertEventDTO, int64, int, int, error) {
 	id, err := s.currentAdminIdentity(ctx)
 	if err != nil {
 		return nil, 0, page, size, err
@@ -731,7 +767,7 @@ func (s *Service) ListAlertEvents(ctx context.Context, status int16, page, size 
 	}
 	var total int64
 	rows, err := runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) ([]AlertEventDTO, error) {
-		out, count, err := tx.ListAlertEvents(ctx, status, tenantID, page, size)
+		out, count, err := tx.ListAlertEvents(ctx, status, level, tenantID, page, size)
 		total = count
 		return out, err
 	})

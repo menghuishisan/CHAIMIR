@@ -9,7 +9,7 @@ LABEL org.opencontainers.image.title="tool/slither"
 LABEL org.opencontainers.image.description="Chaimir Slither security scanner image"
 
 USER root
-ADD https://binaries.soliditylang.org/linux-amd64/${SOLC_PATH} /usr/local/bin/solc-${SOLC_VERSION}
+ADD --checksum=sha256:d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef https://binaries.soliditylang.org/linux-amd64/${SOLC_PATH} /usr/local/bin/solc-${SOLC_VERSION}
 RUN apk upgrade --no-cache \
     && apk add --no-cache bash ca-certificates gcompat git libstdc++ py3-pip python3 \
     && echo "${SOLC_SHA256}  /usr/local/bin/solc-${SOLC_VERSION}" | sha256sum -c - \

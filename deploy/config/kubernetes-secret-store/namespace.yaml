@@ -1,0 +1,8 @@
+# 密钥源独立命名空间,不与应用和数据工作负载共享权限边界。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chaimir-secrets
+  labels:
+    app.kubernetes.io/part-of: chaimir
+    chaimir.io/sensitivity: secrets

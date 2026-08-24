@@ -14,7 +14,7 @@
 
 import { useCallback, useState } from 'react'
 import { BellRing, CircleCheck, CircleSlash, Plus, Settings2 } from 'lucide-react'
-import { AdminScope, AlertStatus, type AlertEvent, type AlertRule } from '@chaimir/api-client'
+import { AdminScope, AlertLevel, AlertStatus, type AlertEvent, type AlertRule } from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
@@ -24,11 +24,14 @@ import {
   CardBody,
   CardHeader,
   Checkbox,
+  DataPanel,
   DescriptionList,
+  EventTimeline,
   FilterBar,
   FilterField,
   FormField,
   Input,
+  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -43,20 +46,18 @@ import {
   SegmentedControl,
   Select,
   Skeleton,
-  Stat,
-  StatusIndicator,
-  Table,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
   toast,
-  type TableColumn,
+  type EventTone,
+  type TimelineDay,
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../hooks'
-import { formatDateTime } from '../../../utils/formatters'
+import { formatDate, formatDateTime, formatTime } from '../../../utils/formatters'
 import {
   alertConditionOperatorLabel,
   alertLevelLabel,
@@ -65,7 +66,6 @@ import {
 } from '../../../utils/labels/admin'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
 import { ALERT_CONDITION_OPERATORS, ALERT_LEVELS, ALERT_METRICS } from '../options'
-import { alertLevelTone, alertStatusTone } from '../statusPresentation'
 
 /** 告警条件里的结构化键。 */
 const CONDITION_FIELDS = {
@@ -80,6 +80,15 @@ const STATUS_FILTERS = [
   { value: String(AlertStatus.PENDING), label: '待处理' },
   { value: String(AlertStatus.HANDLED), label: '已处理' },
   { value: String(AlertStatus.IGNORED), label: '已忽略' },
+] as const
+
+/**
+ * LEVEL_FILTERS 是告警级别筛选项:值为空串表示不限。
+ * 后端 listAlertEvents 的 level 以「不传」表示不限,故空串换算成 undefined。
+ */
+const LEVEL_FILTERS = [
+  { value: '', label: '全部级别' },
+  ...ALERT_LEVELS.map((level) => ({ value: String(level), label: alertLevelLabel(level) })),
 ] as const
 
 /** 两种作用范围的页面文案:范围决定了事件覆盖面与规则归属,故各自说清。 */
@@ -130,7 +139,7 @@ export default function SystemAlertsPage({ scope }: SystemAlertsPageProps) {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: copy.group }, { label: copy.title }]} />}
+        kicker={<Breadcrumb items={[{ label: copy.group }]} />}
         title={copy.title}
         description={copy.description}
         icon={BellRing}
@@ -167,6 +176,7 @@ export default function SystemAlertsPage({ scope }: SystemAlertsPageProps) {
  */
 function AlertEventsSection({ eventScope }: { eventScope: string }) {
   const [statusFilter, setStatusFilter] = useState<string>(String(AlertStatus.PENDING))
+  const [levelFilter, setLevelFilter] = useState<string>('')
   const [target, setTarget] = useState<{ event: AlertEvent; status: AlertStatus }>()
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
@@ -175,9 +185,10 @@ function AlertEventsSection({ eventScope }: { eventScope: string }) {
     (params) =>
       api.admin.listAlertEvents({
         status: statusFilter ? (Number(statusFilter) as AlertStatus) : undefined,
+        level: levelFilter ? (Number(levelFilter) as AlertLevel) : undefined,
         ...params,
       }),
-    [statusFilter]
+    [levelFilter, statusFilter]
   )
 
   const handle = useCallback(async () => {
@@ -196,9 +207,8 @@ function AlertEventsSection({ eventScope }: { eventScope: string }) {
     }
   }, [events, target])
 
-  // 指标带取服务端全量口径,不随下方状态筛选变化。
-  // 告警级别没有服务端筛选参数,故不做「紧急」卡:用当前页数出来的紧急数是错数,
-  // 级别本身在表格里逐条可见(见规范 §6.5 指标带口径)。
+  // 指标带取服务端全量口径,不随下方筛选变化(§6.5.4)。
+  // 「待处理紧急」现在也走服务端 level 参数,不再用当前页切片数 —— 那是错数。
   const totalCount = useResourceTotal((params) => api.admin.listAlertEvents(params), [])
   const pendingCount = useResourceTotal(
     (params) => api.admin.listAlertEvents({ status: AlertStatus.PENDING, ...params }),
@@ -208,91 +218,114 @@ function AlertEventsSection({ eventScope }: { eventScope: string }) {
     (params) => api.admin.listAlertEvents({ status: AlertStatus.HANDLED, ...params }),
     []
   )
+  const urgentPendingCount = useResourceTotal(
+    (params) =>
+      api.admin.listAlertEvents({
+        status: AlertStatus.PENDING,
+        level: AlertLevel.CRITICAL,
+        ...params,
+      }),
+    []
+  )
 
-  const columns: TableColumn<AlertEvent>[] = [
-    {
-      key: 'level',
-      header: '级别',
-      render: (event) => (
-        <StatusIndicator tone={alertLevelTone(event.level)} label={alertLevelLabel(event.level)} />
-      ),
-    },
-    {
-      key: 'message',
-      header: '告警内容',
-      render: (event) => <span className="line-clamp-2 text-sm text-ink">{event.message}</span>,
-    },
-    {
-      key: 'triggered_at',
-      header: '触发时间',
-      render: (event) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDateTime(event.triggered_at)}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (event) => (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <StatusIndicator
-            tone={alertStatusTone(event.status)}
-            label={alertStatusLabel(event.status)}
-          />
-          {event.handled_at ? (
-            <Badge tone="neutral">{formatDateTime(event.handled_at)}</Badge>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (event) =>
-        event.status === AlertStatus.PENDING ? (
-          <div className="flex items-center justify-end gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              leftIcon={CircleCheck}
-              onClick={() => setTarget({ event, status: AlertStatus.HANDLED })}
-            >
-              已处理
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              leftIcon={CircleSlash}
-              onClick={() => setTarget({ event, status: AlertStatus.IGNORED })}
-            >
-              忽略
-            </Button>
-          </div>
-        ) : (
-          <span className="text-sm text-ink-faint">已处理</span>
-        ),
-    },
-  ]
+  /**
+   * alertTimelineTone 把告警映射成事件轴的状态点语义。
+   * 已处理/已忽略的一律退成 normal(灰点):它们已经不需要注意力,
+   * 仍按级别染色会让一屏红点里分不出「还没处理的」是哪几条。
+   */
+  const alertTimelineTone = (event: AlertEvent): EventTone => {
+    if (event.status !== AlertStatus.PENDING) return 'normal'
+    return event.level === AlertLevel.NOTICE ? 'normal' : event.level === AlertLevel.WARNING ? 'warning' : 'danger'
+  }
+
+  /**
+   * groupByDay 把告警按天分组成事件轴的输入(§6.5.3 第 ⑥ 族)。
+   * 告警的读法是「最近出了什么、还有哪些没处理」,时间序是主轴;
+   * 五列等宽表格把级别、内容、时间、状态、动作摊平,反而看不出「哪天集中爆了一批」。
+   * 级别映射到状态点的形状 + 色(FE-2 双通道),级别文字仍在细节行里给出。
+   */
+  const groupByDay = (list: AlertEvent[]): TimelineDay[] => {
+    const today = new Date()
+    const dayKey = (value: Date) => `${value.getFullYear()}-${value.getMonth()}-${value.getDate()}`
+    const todayKey = dayKey(today)
+    const yesterday = new Date(today)
+    yesterday.setDate(today.getDate() - 1)
+    const yesterdayKey = dayKey(yesterday)
+
+    const days: TimelineDay[] = []
+    for (const event of list) {
+      const at = new Date(event.triggered_at)
+      const key = dayKey(at)
+      const label =
+        key === todayKey
+          ? `今天 · ${formatDate(event.triggered_at)}`
+          : key === yesterdayKey
+            ? `昨天 · ${formatDate(event.triggered_at)}`
+            : formatDate(event.triggered_at)
+      let day = days.find((entry) => entry.label === label)
+      if (!day) {
+        day = { label, events: [] }
+        days.push(day)
+      }
+      day.events.push({
+        id: event.id,
+        time: formatTime(event.triggered_at),
+        tone: alertTimelineTone(event),
+        title: event.message,
+        detail: `${alertLevelLabel(event.level)} · ${alertStatusLabel(event.status)}${
+          event.handled_at ? ` · 处理于 ${formatDateTime(event.handled_at)}` : ''
+        }`,
+        action:
+          event.status === AlertStatus.PENDING ? (
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                leftIcon={CircleCheck}
+                onClick={() => setTarget({ event, status: AlertStatus.HANDLED })}
+              >
+                已处理
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                leftIcon={CircleSlash}
+                onClick={() => setTarget({ event, status: AlertStatus.IGNORED })}
+              >
+                忽略
+              </Button>
+            </div>
+          ) : undefined,
+      })
+    }
+    return days
+  }
 
   return (
     <>
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat
-            label="告警总数"
-            value={totalCount ?? '—'}
-            icon={BellRing}
-            hint="不受下方筛选影响"
-          />
-          <Stat label="待处理" value={pendingCount ?? '—'} icon={BellRing} hint="需要跟进" />
-          <Stat label="已处理" value={handledCount ?? '—'} icon={BellRing} />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族口径):本页主体是告警事件流 */}
+      <MetricStrip
+        label="告警总量摘要"
+        className="mb-5"
+        items={[
+          { label: '告警总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
+          { label: '待处理', value: pendingCount ?? '—', hint: '需要跟进' },
+          { label: '待处理特急', value: urgentPendingCount ?? '—', hint: '优先处理这些' },
+          { label: '已处理', value: handledCount ?? '—', hint: '含已忽略' },
+        ]}
+      />
 
-      <PageSection title="告警事件" description={`共 ${events.total} 条,范围为${eventScope}。`}>
-        <div className="flex flex-col gap-4">
+      {/* 动作失败就近内联(§6.7 C) */}
+      {actionError ? (
+        <Callout tone="danger" className="mb-4">
+          {actionError}
+        </Callout>
+      ) : null}
+
+      {/* 时间流族:筛选井 + 按天事件轴 + 分页同处一块抬起片(§6.5.3 第 ⑥ 族) */}
+      <DataPanel
+        label="告警事件"
+        filter={
           <FilterBar label="告警事件筛选">
             <FilterField label="处理状态" group>
               <SegmentedControl
@@ -303,33 +336,40 @@ function AlertEventsSection({ eventScope }: { eventScope: string }) {
                 onValueChange={setStatusFilter}
               />
             </FilterField>
+            <FilterField label="告警级别" group>
+              <SegmentedControl
+                aria-label="按告警级别筛选"
+                size="sm"
+                options={LEVEL_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={levelFilter}
+                onValueChange={setLevelFilter}
+              />
+            </FilterField>
           </FilterBar>
-
-          {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
-          <ResourceState
-            resource={events}
-            emptyIcon={BellRing}
-            emptyTitle={statusFilter ? '这个状态下没有告警' : '暂无告警'}
-            emptyDescription={
-              statusFilter ? '换个状态看看。' : '资源或业务指标超过规则阈值时会产生告警。'
-            }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-          >
-            {(page) => (
-              <>
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={events.page}
-                  pageSize={events.pageSize}
-                  total={events.total}
-                  onPageChange={events.setPage}
-                />
-              </>
-            )}
-          </ResourceState>
-        </div>
-      </PageSection>
+        }
+        footer={
+          <Pagination
+            page={events.page}
+            pageSize={events.pageSize}
+            total={events.total}
+            onPageChange={events.setPage}
+          />
+        }
+      >
+        <ResourceState
+          resource={events}
+          emptyIcon={BellRing}
+          emptyTitle={statusFilter || levelFilter ? '这个筛选下没有告警' : '暂无告警'}
+          emptyDescription={
+            statusFilter || levelFilter
+              ? '换个状态或级别看看。'
+              : '资源或业务指标超过规则阈值时会产生告警。'
+          }
+          skeleton={<Skeleton variant="line" lines={6} />}
+        >
+          {(page) => <EventTimeline label={`告警事件,范围为${eventScope}`} days={groupByDay(page.list)} />}
+        </ResourceState>
+      </DataPanel>
 
       <Modal open={target !== undefined} onOpenChange={(open) => !open && setTarget(undefined)}>
         <ModalContent size="sm">

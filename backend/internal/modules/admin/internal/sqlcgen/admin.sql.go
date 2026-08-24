@@ -15,16 +15,18 @@ const countAlertEvents = `-- name: CountAlertEvents :one
 SELECT count(*)::bigint
 FROM alert_event
 WHERE ($1::smallint = 0 OR status = $1::smallint)
-  AND (($2::bigint IS NULL) OR tenant_id = $2::bigint)
+  AND ($2::smallint = 0 OR level = $2::smallint)
+  AND (($3::bigint IS NULL) OR tenant_id = $3::bigint)
 `
 
 type CountAlertEventsParams struct {
 	Status   int16       `json:"status"`
+	Level    int16       `json:"level"`
 	TenantID pgtype.Int8 `json:"tenant_id"`
 }
 
 func (q *Queries) CountAlertEvents(ctx context.Context, arg CountAlertEventsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAlertEvents, arg.Status, arg.TenantID)
+	row := q.db.QueryRow(ctx, countAlertEvents, arg.Status, arg.Level, arg.TenantID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -418,13 +420,15 @@ const listAlertEvents = `-- name: ListAlertEvents :many
 SELECT id, rule_id, tenant_id, level, message, status, handler_id, triggered_at, handled_at
 FROM alert_event
 WHERE ($1::smallint = 0 OR status = $1::smallint)
-  AND (($2::bigint IS NULL) OR tenant_id = $2::bigint)
+  AND ($2::smallint = 0 OR level = $2::smallint)
+  AND (($3::bigint IS NULL) OR tenant_id = $3::bigint)
 ORDER BY triggered_at DESC
-LIMIT $4::int OFFSET $3::int
+LIMIT $5::int OFFSET $4::int
 `
 
 type ListAlertEventsParams struct {
 	Status     int16       `json:"status"`
+	Level      int16       `json:"level"`
 	TenantID   pgtype.Int8 `json:"tenant_id"`
 	PageOffset int32       `json:"page_offset"`
 	PageLimit  int32       `json:"page_limit"`
@@ -433,6 +437,7 @@ type ListAlertEventsParams struct {
 func (q *Queries) ListAlertEvents(ctx context.Context, arg ListAlertEventsParams) ([]AlertEvent, error) {
 	rows, err := q.db.Query(ctx, listAlertEvents,
 		arg.Status,
+		arg.Level,
 		arg.TenantID,
 		arg.PageOffset,
 		arg.PageLimit,

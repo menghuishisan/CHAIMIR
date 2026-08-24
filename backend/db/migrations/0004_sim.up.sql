@@ -67,7 +67,9 @@ CREATE TABLE IF NOT EXISTS sim_session (
     tenant_id BIGINT NOT NULL REFERENCES tenant(id),
     package_id BIGINT NOT NULL REFERENCES sim_package(id),
     source_ref VARCHAR(128) NOT NULL,
+    scope_ref VARCHAR(128) NOT NULL,
     owner_account_id BIGINT NOT NULL,
+    shared_account_ids BIGINT[] NOT NULL DEFAULT '{}'::BIGINT[],
     seed BIGINT NOT NULL,
     init_params JSONB NOT NULL DEFAULT '{}'::jsonb,
     compute SMALLINT NOT NULL CHECK (compute IN (1, 2)),
@@ -75,7 +77,11 @@ CREATE TABLE IF NOT EXISTS sim_session (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
+    UNIQUE (tenant_id, scope_ref),
     CHECK (source_ref ~ '^[a-z]+:[0-9]{4}:[a-z][a-z0-9_-]*:[0-9A-Za-z_-]+$'),
+    CONSTRAINT chk_sim_session_shared_accounts_positive CHECK (0 < ALL(shared_account_ids)),
+    CONSTRAINT chk_sim_session_shared_accounts_no_null CHECK (array_position(shared_account_ids, NULL) IS NULL),
+    CONSTRAINT chk_sim_session_shared_accounts_exclude_owner CHECK (NOT (shared_account_ids @> ARRAY[owner_account_id])),
     FOREIGN KEY (tenant_id, owner_account_id) REFERENCES account(tenant_id, id)
 );
 

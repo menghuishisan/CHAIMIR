@@ -27,9 +27,16 @@ upstream:
   reuse_policy: pypi-source-build
 data_driven: true
 capabilities:
-  - security-scan
-  - symbolic-execution
-  - solc-compile
+  provides:
+    - security-scan
+    - symbolic-execution
+    - solc-compile
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: public
 tool:
   kind: command-tool
   eco_tags:

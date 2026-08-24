@@ -15,13 +15,16 @@ import {
   Card,
   CardBody,
   CardHeader,
+  DataPanel,
   DescriptionList,
+  FilterBar,
+  FilterField,
+  MetricStrip,
   PageBody,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
-  Stat,
+  SegmentedControl,
   StatusIndicator,
   Table,
   toast,
@@ -39,6 +42,13 @@ import {
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { gradeWarningStatusTone } from '../../statusPresentation'
 
+/** 状态筛选项:值为空串表示不过滤。 */
+const STATUS_FILTERS = [
+  { value: '', label: '全部' },
+  { value: String(GradeWarningStatus.PENDING), label: '待确认' },
+  { value: String(GradeWarningStatus.ACKNOWLEDGED), label: '已确认' },
+] as const
+
 /**
  * StudentAlertsPage 列出本人学业预警并提供确认。
  */
@@ -46,10 +56,15 @@ export default function StudentAlertsPage() {
   const navigate = useNavigate()
   const [ackingId, setAckingId] = useState<string>()
   const [actionError, setActionError] = useState<string>()
+  const [statusFilter, setStatusFilter] = useState<string>('')
 
   const warnings = usePagedResource<GradeWarning>(
-    (params) => api.grade.listWarnings(params),
-    [],
+    (params) =>
+      api.grade.listWarnings({
+        status: statusFilter ? (Number(statusFilter) as GradeWarningStatus) : undefined,
+        ...params,
+      }),
+    [statusFilter],
   )
   const semesters = useAsyncResource(() => api.grade.listSemesters(), [], () => false)
 
@@ -150,46 +165,99 @@ export default function StudentAlertsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '学业区' }, { label: '学业预警' }]} />}
+        kicker={<Breadcrumb items={[{ label: '学业区' }]} />}
         title="学业预警"
         description="学校根据你的成绩情况发出的提醒。确认后表示你已知悉,建议同时联系辅导员或任课老师。"
         icon={TriangleAlert}
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="全部预警" value={totalCount ?? '—'} icon={TriangleAlert} />
-          <Stat label="待确认" value={pendingCount ?? '—'} icon={ShieldCheck} hint="确认后不再提示" />
-          <Stat label="已确认" value={acknowledgedCount ?? '—'} icon={CheckCheck} />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是预警记录与「该怎么办」,不是三个数字 */}
+      <MetricStrip
+        label="预警总量摘要"
+        className="mb-5"
+        items={[
+          { label: '全部预警', value: totalCount ?? '—', hint: '不受下方筛选影响' },
+          { label: '待确认', value: pendingCount ?? '—', hint: '确认后不再提示' },
+          { label: '已确认', value: acknowledgedCount ?? '—', hint: '你已知悉的提醒' },
+        ]}
+      />
 
       <PageBody rail={<AlertGuidanceCard onOpenGrades={() => navigate('/student/grades')} />}>
-        <PageSection title="预警记录" description="按预警时间从新到旧排列。">
-          <div className="flex flex-col gap-4">
-            {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
+        {actionError ? (
+          <Callout tone="danger" className="mb-4">
+            {actionError}
+          </Callout>
+        ) : null}
 
-            <ResourceState
-              resource={warnings}
-              emptyIcon={ShieldCheck}
-              emptyTitle="没有学业预警"
-              emptyDescription="你的学业情况正常。保持下去,继续按课程节奏推进即可。"
-              skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-            >
-              {(page) => (
-                <>
-                  <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                  <Pagination
-                    page={warnings.page}
-                    pageSize={warnings.pageSize}
-                    total={warnings.total}
-                    onPageChange={warnings.setPage}
-                  />
-                </>
-              )}
-            </ResourceState>
-          </div>
-        </PageSection>
+        {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
+        <DataPanel
+          label="预警记录"
+          filter={
+            <FilterBar label="预警筛选">
+              <FilterField label="确认状态" group>
+                <SegmentedControl
+                  aria-label="按确认状态筛选"
+                  size="sm"
+                  options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                  value={statusFilter}
+                  onValueChange={setStatusFilter}
+                />
+              </FilterField>
+            </FilterBar>
+          }
+          footer={
+            <Pagination
+              page={warnings.page}
+              pageSize={warnings.pageSize}
+              total={warnings.total}
+              onPageChange={warnings.setPage}
+            />
+          }
+        >
+          <ResourceState
+            resource={warnings}
+            emptyIcon={ShieldCheck}
+            emptyTitle={statusFilter ? '这个状态下没有预警' : '没有学业预警'}
+            emptyDescription={
+              statusFilter
+                ? '换个状态看看,或查看全部预警。'
+                : '你的学业情况正常。保持下去,继续按课程节奏推进即可。'
+            }
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+          >
+            {(page) => (
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):预警类型一行、学期与时间一行,状态在右
+                mobileCard={(item) => ({
+                  title: gradeWarningTypeLabel(item.type),
+                  meta: `${semesterName.get(item.semester_id) ?? '未登记学期'} · ${formatShortDateTime(item.created_at)}`,
+                  badge: (
+                    <StatusIndicator
+                      tone={gradeWarningStatusTone(item.status)}
+                      label={gradeWarningStatusLabel(item.status)}
+                    />
+                  ),
+                  action:
+                    item.status === GradeWarningStatus.PENDING ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        leftIcon={CheckCheck}
+                        loading={ackingId === item.id}
+                        onClick={() => void ackWarning(item)}
+                      >
+                        我已知悉
+                      </Button>
+                    ) : undefined,
+                })}
+              />
+            )}
+          </ResourceState>
+        </DataPanel>
       </PageBody>
     </PageScaffold>
   )

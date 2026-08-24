@@ -33,6 +33,10 @@ deploy/**/*.local.yaml
 coverage.*
 # 后端测试文件只保留本地验证，不上传公共仓库。
 backend/**/*_test.go
+# 性能回归门禁使用的稳定热点基准属于 CI 契约,必须随源码版本化。
+!backend/pkg/chainassert/chainassert_benchmark_test.go
+!backend/pkg/crypto/hash_benchmark_test.go
+!backend/pkg/snowflake/snowflake_benchmark_test.go
 # 本地 .env(含 dev 密钥)绝不提交;仅提交 .env.example 模板。
 .env
 **/.env.local

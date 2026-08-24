@@ -61,7 +61,8 @@ func staticHandler(root string) http.Handler {
 
 		rel := strings.TrimPrefix(filepath.Clean("/"+r.URL.Path), string(filepath.Separator))
 		target := filepath.Join(root, rel)
-		if !strings.HasPrefix(target, root) {
+		relativeTarget, err := filepath.Rel(root, target)
+		if err != nil || relativeTarget == ".." || strings.HasPrefix(relativeTarget, ".."+string(filepath.Separator)) {
 			http.NotFound(w, r)
 			return
 		}

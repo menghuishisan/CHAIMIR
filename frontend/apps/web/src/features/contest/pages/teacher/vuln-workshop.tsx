@@ -31,17 +31,18 @@ import {
   Card,
   CardBody,
   CardHeader,
+  DataPanel,
   DescriptionList,
   Empty,
   FilterBar,
   FilterField,
+  MetricStrip,
   PageHeader,
   PageScaffold,
   PageSection,
   Pagination,
   SegmentedControl,
   Select,
-  Stat,
   StatusIndicator,
   Table,
   toast,
@@ -78,12 +79,21 @@ const STATUS_FILTERS = [
   { value: String(VulnProblemStatus.DISCARDED), label: '已弃用' },
 ] as const
 
+/** 预验证状态筛选项:值为空串表示不过滤。 */
+const PREVALIDATE_FILTERS = [
+  { value: '', label: '全部' },
+  { value: String(VulnPrevalidateStatus.PENDING), label: '尚未验证' },
+  { value: String(VulnPrevalidateStatus.PASSED), label: '验证通过' },
+  { value: String(VulnPrevalidateStatus.FAILED), label: '验证未通过' },
+] as const
+
 /**
  * TeacherVulnWorkshopPage 承载漏洞源维护与漏洞题转化。
  */
 export default function TeacherVulnWorkshopPage() {
   const [sourceFilter, setSourceFilter] = useState<string>('')
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [prevalidateFilter, setPrevalidateFilter] = useState<string>('')
   const [sourceForm, setSourceForm] = useState<{ source?: VulnSource } | undefined>()
   const [problemForm, setProblemForm] = useState<{ sources: VulnSource[] } | undefined>()
   const [prevalidateTarget, setPrevalidateTarget] = useState<VulnProblem>()
@@ -97,9 +107,12 @@ export default function TeacherVulnWorkshopPage() {
       api.contest.listVulnProblems({
         source_id: sourceFilter || undefined,
         status: statusFilter ? (Number(statusFilter) as VulnProblemStatus) : undefined,
+        prevalidate_status: prevalidateFilter
+          ? (Number(prevalidateFilter) as VulnPrevalidateStatus)
+          : undefined,
         ...params,
       }),
-    [sourceFilter, statusFilter],
+    [prevalidateFilter, sourceFilter, statusFilter],
   )
 
   const sourceList = useMemo(() => sources.data ?? [], [sources.data])
@@ -127,9 +140,8 @@ export default function TeacherVulnWorkshopPage() {
     [problems],
   )
 
-  // 指标带取服务端全量口径,不随下方筛选变化。
-  // 预验证状态没有服务端筛选参数,故不做「验证通过/尚未验证」两张卡:
-  // 用当前页数出来的数字在总量更大时是错数,验证状态本身在表格里逐条可见(规范 §6.5)。
+  // 指标带取服务端全量口径,不随下方筛选变化(§6.5.4)。
+  // 预验证状态现在也走服务端 prevalidate_status 参数,不再用当前页切片数 —— 那是错数。
   const totalCount = useResourceTotal((params) => api.contest.listVulnProblems(params), [])
   const draftCount = useResourceTotal(
     (params) => api.contest.listVulnProblems({ status: VulnProblemStatus.DRAFT, ...params }),
@@ -137,6 +149,22 @@ export default function TeacherVulnWorkshopPage() {
   )
   const finalizedCount = useResourceTotal(
     (params) => api.contest.listVulnProblems({ status: VulnProblemStatus.FINALIZED, ...params }),
+    [],
+  )
+  const passedCount = useResourceTotal(
+    (params) =>
+      api.contest.listVulnProblems({
+        prevalidate_status: VulnPrevalidateStatus.PASSED,
+        ...params,
+      }),
+    [],
+  )
+  const unvalidatedCount = useResourceTotal(
+    (params) =>
+      api.contest.listVulnProblems({
+        prevalidate_status: VulnPrevalidateStatus.PENDING,
+        ...params,
+      }),
     [],
   )
 
@@ -232,7 +260,6 @@ export default function TeacherVulnWorkshopPage() {
             items={[
               { label: '实践' },
               { label: '赛事组织', href: '/teacher/contests' },
-              { label: '漏洞题工坊' },
             ]}
           />
         }
@@ -250,13 +277,18 @@ export default function TeacherVulnWorkshopPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="漏洞题总数" value={totalCount ?? '—'} icon={Bug} hint="不受下方筛选影响" />
-          <Stat label="草稿" value={draftCount ?? '—'} icon={FlaskConical} hint="预验证通过后可固化" />
-          <Stat label="已固化" value={finalizedCount ?? '—'} icon={Database} hint="可作为赛题引用" />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是漏洞题草稿列表 */}
+      <MetricStrip
+        label="漏洞题总量摘要"
+        className="mb-5"
+        items={[
+          { label: '漏洞题总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
+          { label: '草稿', value: draftCount ?? '—', hint: '预验证通过后可固化' },
+          { label: '验证通过', value: passedCount ?? '—', hint: '可解可判,能固化' },
+          { label: '尚未验证', value: unvalidatedCount ?? '—', hint: '需要先跑双向验证' },
+          { label: '已固化', value: finalizedCount ?? '—', hint: '可作为赛题引用' },
+        ]}
+      />
 
       <PageSection
         title="漏洞来源"
@@ -297,11 +329,17 @@ export default function TeacherVulnWorkshopPage() {
         </ResourceState>
       </PageSection>
 
-      <PageSection
-        title="漏洞题草稿"
-        description={`共 ${problems.total} 条草稿。验证通过后固化进题库,才能作为赛题引用。`}
-      >
-        <div className="flex flex-col gap-4">
+      {/* 动作失败就近内联(§6.7 C) */}
+      {actionError ? (
+        <Callout tone="danger" className="mb-4">
+          {actionError}
+        </Callout>
+      ) : null}
+
+      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
+      <DataPanel
+        label="漏洞题草稿"
+        filter={
           <FilterBar label="漏洞题草稿筛选">
             <FilterField label="草稿状态" group>
               <SegmentedControl
@@ -310,6 +348,18 @@ export default function TeacherVulnWorkshopPage() {
                 options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
                 value={statusFilter}
                 onValueChange={setStatusFilter}
+              />
+            </FilterField>
+            <FilterField label="预验证状态" group>
+              <SegmentedControl
+                aria-label="按预验证状态筛选"
+                size="sm"
+                options={PREVALIDATE_FILTERS.map((item) => ({
+                  value: item.value,
+                  label: item.label,
+                }))}
+                value={prevalidateFilter}
+                onValueChange={setPrevalidateFilter}
               />
             </FilterField>
             <FilterField label="来源" htmlFor="vuln-source-filter">
@@ -325,8 +375,16 @@ export default function TeacherVulnWorkshopPage() {
               />
             </FilterField>
           </FilterBar>
-          {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
+        }
+        footer={
+          <Pagination
+            page={problems.page}
+            pageSize={problems.pageSize}
+            total={problems.total}
+            onPageChange={problems.setPage}
+          />
+        }
+      >
           <ResourceState
             resource={problems}
             emptyIcon={Bug}
@@ -336,22 +394,29 @@ export default function TeacherVulnWorkshopPage() {
                 ? '换个条件再看,或清空筛选查看全部草稿。'
                 : '从来源同步案例,或手工录入一条漏洞题。'
             }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (
-              <>
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={problems.page}
-                  pageSize={problems.pageSize}
-                  total={problems.total}
-                  onPageChange={problems.setPage}
-                />
-              </>
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):题目标题一行、来源编号一行
+                mobileCard={(item) => ({
+                  title: item.title,
+                  meta: `${vulnLevelLabel(item.level)} · ${item.external_ref ?? '手工录入'}`,
+                  badge: (
+                    <StatusIndicator
+                      tone={vulnProblemStatusTone(item.status)}
+                      label={vulnProblemStatusLabel(item.status)}
+                    />
+                  ),
+                })}
+              />
             )}
           </ResourceState>
-        </div>
-      </PageSection>
+      </DataPanel>
 
       <Callout tone="info">
         固化会把漏洞题写入本校题库并自动发布,答案与判题配置在写入时即被标记为敏感字段,学生取题面时看不到。

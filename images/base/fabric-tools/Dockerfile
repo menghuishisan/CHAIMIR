@@ -17,13 +17,16 @@ USER 1000:1000
 WORKDIR /src/fabric
 # 代理环境下限制 Go 构建并发,避免完整 Fabric 依赖图同时建立过多外部连接导致模块下载被截断。
 ENV GOMAXPROCS=2
+ARG GO_MODULE_PROXY=
 RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 \
     --mount=type=cache,target=/tmp/go-cache,uid=1000,gid=1000 \
-    go mod download \
+    if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}"; fi \
+    && go mod download \
     && go get golang.org/x/text@v0.39.0 google.golang.org/grpc@v1.82.1 \
     && go mod tidy \
     && go mod vendor \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/peer ./cmd/peer \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/orderer ./cmd/orderer \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/configtxgen ./cmd/configtxgen \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/configtxlator ./cmd/configtxlator \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/cryptogen ./cmd/cryptogen \

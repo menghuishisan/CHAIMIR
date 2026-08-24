@@ -1,0 +1,40 @@
+#!/usr/bin/env sh
+# runtime/evm-hardhat 的原生链能力插件,复用镜像内固定版本 cast 连接 Anvil。
+set -eu
+
+action="${1:-}"
+rpc_url="${CHAIMIR_EVM_RPC_URL:-http://127.0.0.1:${CHAIMIR_RUNTIME_RPC_PORT:-8545}}"
+state_dir="${CHAIMIR_CHAIN_STATE_DIR:-/runtime-state}"
+last_contract_file="$state_dir/last-contract-address"
+payload="$(cat)"; [ -n "$payload" ] || payload='{}'
+printf '%s' "$payload" | jq -e . >/dev/null
+
+first_account() { cast rpc --rpc-url "$rpc_url" eth_accounts | jq -r '.[0] // empty'; }
+case "$action" in
+  deploy)
+    bytecode="$(printf '%s' "$payload" | jq -r '.bytecode // empty')"; [ -n "$bytecode" ] || { echo 'deploy payload requires bytecode' >&2; exit 22; }
+    from="$(printf '%s' "$payload" | jq -r '.from // empty')"; [ -n "$from" ] || from="$(first_account)"; [ -n "$from" ] || { echo 'node has no deployer account' >&2; exit 70; }
+    receipt="$(cast send --rpc-url "$rpc_url" --from "$from" --unlocked --create "$bytecode" --json)"
+    address="$(printf '%s' "$receipt" | jq -r '.contractAddress // .contract_address // empty')"; [ -n "$address" ] || { echo 'deploy did not return contract address' >&2; exit 70; }
+    mkdir -p "$state_dir"; printf '%s' "$address" > "$last_contract_file"
+    jq -cn --arg contract_address "$address" --argjson receipt "$receipt" '{contract_address:$contract_address,receipt:$receipt}'
+    ;;
+  tx)
+    to="$(printf '%s' "$payload" | jq -r '.to // empty')"; if [ -z "$to" ] && [ -f "$last_contract_file" ]; then to="$(cat "$last_contract_file")"; fi
+    data="$(printf '%s' "$payload" | jq -r '.data // empty')"; [ -n "$to" ] && [ -n "$data" ] || { echo 'tx payload requires to and data' >&2; exit 22; }
+    from="$(printf '%s' "$payload" | jq -r '.from // empty')"; [ -n "$from" ] || from="$(first_account)"; value="$(printf '%s' "$payload" | jq -r '.value // empty')"
+    if [ -n "$value" ]; then receipt="$(cast send --rpc-url "$rpc_url" --from "$from" --unlocked --value "$value" "$to" "$data" --json)"; else receipt="$(cast send --rpc-url "$rpc_url" --from "$from" --unlocked "$to" "$data" --json)"; fi
+    jq -cn --argjson receipt "$receipt" '{receipt:$receipt}'
+    ;;
+  query)
+    target="$(printf '%s' "$payload" | jq -r '.target // empty')"; [ -n "$target" ] || { echo 'query target is required' >&2; exit 22; }
+    case "$target" in
+      chainId) value="$(cast chain-id --rpc-url "$rpc_url")"; jq -cn --arg target "$target" --arg value "$value" '{target:$target,chain_id:$value}' ;;
+      latest|blockNumber) value="$(cast block-number --rpc-url "$rpc_url")"; jq -cn --arg target "$target" --arg value "$value" '{target:$target,block_number:$value}' ;;
+      balance:*) address="${target#balance:}"; value="$(cast balance --rpc-url "$rpc_url" "$address")"; jq -cn --arg target "$target" --arg value "$value" '{target:$target,balance:$value}' ;;
+      code:*) address="${target#code:}"; value="$(cast code --rpc-url "$rpc_url" "$address")"; jq -cn --arg target "$target" --arg value "$value" '{target:$target,code:$value}' ;;
+      *) echo 'unsupported query target' >&2; exit 22 ;;
+    esac
+    ;;
+  *) echo 'unknown chain action' >&2; exit 64 ;;
+esac

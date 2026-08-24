@@ -27,6 +27,7 @@ import {
   Checkbox,
   FormField,
   Input,
+  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -46,6 +47,7 @@ import {
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
 import { usePagedResource } from '../../../hooks'
+import { facetCount } from '../../../utils/facets'
 import { formatDateTime } from '../../../utils/formatters'
 import { announcementScopeLabel } from '../../../utils/labels/notify'
 import { userRoleLabel } from '../../../utils/labels/identity'
@@ -103,10 +105,19 @@ export default function AnnouncementsPage({ publisher }: AnnouncementsPageProps)
     [],
   )
 
+  // 按范围分桶取后端 facets.scope:全量分组计数,不用当前页切片去数(§6.5.4)
+  const platformCount = facetCount(
+    announcements.data?.facets,
+    'scope',
+    AnnouncementScope.PLATFORM,
+  )
+  const tenantCount = facetCount(announcements.data?.facets, 'scope', AnnouncementScope.TENANT)
+  const roleCount = facetCount(announcements.data?.facets, 'scope', AnnouncementScope.ROLES)
+
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: copy.group }, { label: '系统公告' }]} />}
+        kicker={<Breadcrumb items={[{ label: copy.group }]} />}
         title="系统公告"
         description={copy.description}
         icon={Megaphone}
@@ -117,10 +128,27 @@ export default function AnnouncementsPage({ publisher }: AnnouncementsPageProps)
         }
       />
 
-      {/* 不做指标带:公告总数已在下方分组说明里给出,而按范围分桶(平台/全校/定向)没有服务端聚合,
-          用当前页数出来就是错数;「覆盖学校 全部」是范围常量而非可度量数字(规范 §6.5)。
-          每条公告的范围与定向角色在卡片标题的标签里可见。 */}
-      <PageSection title="已发布公告" description={`共 ${announcements.total} 条。${copy.listDescription}`}>
+      {/*
+        归族:资源列表族的卡片列表形态(§6.5.3 第 ① 族 + §6.5.2 第二条出路)。
+        为什么不是时间流族(第 ⑥):⑥ 的每条是「时间 + 状态点 + 一句主文」,
+        而公告的主体是整段正文,压不进一行事件条。故按卡片列表排,卡本身就是抬起片,
+        不再套 DataPanel(那会成为片里套片)。
+
+        指标退为一行内联摘要:按范围分桶(平台/全校/定向)走后端聚合契约(facets.scope),
+        是全量口径而非当前页切片(§6.5.4)。每条公告的定向角色仍在卡片标题的标签里可见。
+      */}
+      <MetricStrip
+        label="公告总量摘要"
+        className="mb-5"
+        items={[
+          { label: '公告总数', value: announcements.total, hint: '你能看到的全部' },
+          { label: '平台公告', value: platformCount, hint: '所有学校可见' },
+          { label: '全校公告', value: tenantCount, hint: '本校全员可见' },
+          { label: '定向公告', value: roleCount, hint: '只发给指定角色' },
+        ]}
+      />
+
+      <PageSection title="已发布公告" description={copy.listDescription}>
         <ResourceState
           resource={announcements}
           emptyIcon={Megaphone}
@@ -179,7 +207,7 @@ export default function AnnouncementsPage({ publisher }: AnnouncementsPageProps)
         </ResourceState>
       </PageSection>
 
-      <Callout tone="info">
+      <Callout tone="info" className="mt-4">
         公告发布后不能撤回或修改。如果内容有误,请发一条新公告说明更正。
       </Callout>
 

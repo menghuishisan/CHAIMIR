@@ -1,0 +1,43 @@
+# ExternalSecret 专用身份,只能读取 chaimir-secrets 中的源 Secret。
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chaimir-secret-reader
+  namespace: chaimir-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chaimir-secret-reader
+  namespace: chaimir-data
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: chaimir-secret-reader
+  namespace: chaimir-secrets
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["chaimir"]
+    verbs: ["get"]
+  - apiGroups: ["authorization.k8s.io"]
+    resources: ["selfsubjectrulesreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: chaimir-secret-readers
+  namespace: chaimir-secrets
+subjects:
+  - kind: ServiceAccount
+    name: chaimir-secret-reader
+    namespace: chaimir-system
+  - kind: ServiceAccount
+    name: chaimir-secret-reader
+    namespace: chaimir-data
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: chaimir-secret-reader

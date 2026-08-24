@@ -6,22 +6,21 @@
 //                            platform_admin 表也没有手机号/学工号/职称/租户列)
 // 是否渲染换绑手机号由 props 显式声明,页面不在运行时判角色枚举 —— 与铃铛归属同一处理。
 
-import { useCallback, useId, useMemo, useState } from 'react'
-import { KeyRound, LogOut, ShieldCheck, Smartphone, UserCog } from 'lucide-react'
+import { useCallback, useId, useMemo, useState, type ReactNode } from 'react'
+import { KeyRound, LogOut, ShieldCheck, Smartphone } from 'lucide-react'
 import { SessionStatus, SmsScene, TenantStatus, type Session } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   Card,
   CardBody,
   CardHeader,
-  DescriptionList,
+  DataPanel,
   FormField,
   Input,
+  ObjectIdentity,
   PageBody,
-  PageHeader,
   PageScaffold,
   PageSection,
   StatusIndicator,
@@ -81,40 +80,46 @@ export default function ProfilePage({ canChangePhone, statusKind = 'account' }: 
           label: accountStatusLabel(account.status),
         }
 
-  const profileItems = useMemo(() => {
-    const items = [
-      { term: '姓名', description: account.name },
-      { term: '角色', description: userRolesLabel(account.roles) || '—' },
-    ]
-    // 平台账号不返回这些字段(getPlatformMe 只填 id/name/roles/status),缺失即不渲染空行
+  /**
+   * 身份区的关键属性横排。
+   * 平台账号不返回编号/职称/手机号(getPlatformMe 只填 id/name/roles/status),缺失即不渲染空项 ——
+   * 属性表里出现一排「—」会让人以为资料没填全。
+   */
+  const identityProperties = useMemo(() => {
+    const items: { label: string; value: ReactNode }[] = []
     if (account.no) {
       items.push({
-        term: account.base_identity ? `${baseIdentityLabel(account.base_identity)}编号` : '编号',
-        description: account.no,
+        label: account.base_identity ? `${baseIdentityLabel(account.base_identity)}编号` : '编号',
+        value: <span className="font-mono">{account.no}</span>,
       })
     }
-    if (account.title) items.push({ term: '职称', description: account.title })
-    if (account.phone_masked) items.push({ term: '手机号', description: account.phone_masked })
-    if (account.created_at) items.push({ term: '账号创建', description: formatDateTime(account.created_at) })
+    if (account.title) items.push({ label: '职称', value: account.title })
+    if (account.phone_masked) {
+      items.push({ label: '手机号', value: <span className="font-mono">{account.phone_masked}</span> })
+    }
+    if (account.created_at) {
+      items.push({ label: '账号创建', value: formatDateTime(account.created_at) })
+    }
     return items
   }, [account])
 
   return (
     <PageScaffold>
-      <PageHeader
-        kicker={<Breadcrumb items={[{ label: '个人中心' }]} />}
-        title="个人中心"
-        description="查看账号资料、修改密码,并管理你在各设备上的登录状态。"
-        icon={UserCog}
-        actions={
-          <StatusIndicator
-            tone={statusPresentation.tone}
-            label={statusPresentation.label}
-          />
-        }
+      {/*
+        归族:详情族(§6.5.3 第 ④)。这一页核对的对象就是「我的账号」——
+        h1 由 ObjectIdentity 的姓名承担,故不再出 PageHeader:
+        个人中心从顶栏头像菜单进入,没有父级可挂面包屑,空页面头只会白占一行(§6.5.0 通则 1)。
+        改密与换绑手机号是表单类动作区(§6.5.4),留在右栏各成一块可聚焦抬起片。
+      */}
+      <ObjectIdentity
+        name={account.name}
+        status={<StatusIndicator tone={statusPresentation.tone} label={statusPresentation.label} />}
+        subtitle={`${userRolesLabel(account.roles) || '未分配角色'} · 资料由学校维护,如需更正请联系管理员`}
+        properties={identityProperties}
       />
 
       <PageBody
+        className="mt-6"
         rail={
           <div className="flex flex-col gap-4">
             <PasswordCard />
@@ -122,10 +127,6 @@ export default function ProfilePage({ canChangePhone, statusKind = 'account' }: 
           </div>
         }
       >
-        <PageSection title="账号资料" description="资料由学校维护,如需更正请联系管理员。">
-          <DescriptionList columns={2} items={profileItems} />
-        </PageSection>
-
         <SessionsSection />
       </PageBody>
     </PageScaffold>
@@ -425,6 +426,7 @@ function SessionsSection() {
   ]
 
   return (
+    // 列表型页内子视图走 DataPanel 片段(§6.5.5 B):会话清单一次回齐,不分页也不筛选
     <PageSection
       title="登录会话"
       description="这里列出你的登录记录。如果看到不认识的设备,请立即修改密码。"
@@ -437,15 +439,35 @@ function SessionsSection() {
           </span>
         </Callout>
 
-        <ResourceState
-          resource={sessions}
-          emptyIcon={ShieldCheck}
-          emptyTitle="暂无登录记录"
-          emptyDescription="登录记录会在你从新设备登录后出现。"
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-        >
-          {(list) => <Table columns={columns} data={list} rowKey={(session) => session.id} />}
-        </ResourceState>
+        <DataPanel label="登录会话">
+          <ResourceState
+            resource={sessions}
+            emptyIcon={ShieldCheck}
+            emptyTitle="暂无登录记录"
+            emptyDescription="登录记录会在你从新设备登录后出现。"
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+          >
+            {(list) => (
+              <Table
+                columns={columns}
+                data={list}
+                rowKey={(session) => session.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):设备一行、地址与时间一行
+                mobileCard={(session) => ({
+                  title: session.device_info || '未知设备',
+                  meta: `${session.ip || '地址未知'} · ${formatDateTime(session.created_at)}`,
+                  badge: (
+                    <StatusIndicator
+                      tone={sessionStatusTone(session.status)}
+                      label={sessionStatusLabel(session.status)}
+                    />
+                  ),
+                })}
+              />
+            )}
+          </ResourceState>
+        </DataPanel>
       </div>
     </PageSection>
   )

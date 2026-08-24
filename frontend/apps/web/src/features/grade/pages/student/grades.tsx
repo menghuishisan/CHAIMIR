@@ -28,6 +28,7 @@ import {
   CardHeader,
   ChartContainer,
   CompareBarChart,
+  DataPanel,
   Empty,
   FilterBar,
   FilterField,
@@ -35,7 +36,6 @@ import {
   PageBody,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
   Select,
@@ -50,7 +50,7 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { useSession } from '../../../../components/RoleGuard'
 import { useAsyncResource } from '../../../../hooks'
 import { downloadAttachment } from '../../../../utils/downloadAttachment'
-import { formatDateTime, formatGpa, formatScore } from '../../../../utils/formatters'
+import { formatGpa, formatScore } from '../../../../utils/formatters'
 import { transcriptScopeLabel } from '../../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
@@ -100,7 +100,7 @@ export default function StudentGradesPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '学业区' }, { label: '成绩中心' }]} />}
+        kicker={<Breadcrumb items={[{ label: '学业区' }]} />}
         title="成绩中心"
         description="这里是你的课程成绩、平均学分绩点与成绩单。对成绩有疑问可以在这里提出申诉。"
         icon={GraduationCap}
@@ -191,19 +191,21 @@ function GradeContent({
 
   return (
     <>
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat
-            label="本范围绩点"
-            value={formatGpa(summary.gpa)}
-            icon={GraduationCap}
-            hint={semesterId ? '所选学期' : '全部学期'}
-          />
-          <Stat label="累计绩点" value={formatGpa(summary.cumulative_gpa)} icon={GraduationCap} />
-          <Stat label="已修学分" value={summary.total_credits} icon={Layers} />
-          <Stat label="课程数" value={summary.total} icon={FileText} />
-        </div>
-      </PageSection>
+      {/*
+          归族:看板 + 资源列表混合。绩点与学分确实是这一页的主体读数(学生进来先看"我几分"),
+          故这四项**保留 Stat 大卡**(§6.5.3 第 ② 族:数字就是主角);下方课程成绩清单走第 ① 族。
+      */}
+      <div className="mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat
+          label="本范围绩点"
+          value={formatGpa(summary.gpa)}
+          icon={GraduationCap}
+          hint={semesterId ? '所选学期' : '全部学期'}
+        />
+        <Stat label="累计绩点" value={formatGpa(summary.cumulative_gpa)} icon={GraduationCap} hint="全部学期加权" />
+        <Stat label="已修学分" value={summary.total_credits} icon={Layers} hint="仅计已通过课程" />
+        <Stat label="课程数" value={summary.total} icon={FileText} hint="本范围内" />
+      </div>
 
       <PageBody
         rail={
@@ -213,11 +215,10 @@ function GradeContent({
           </div>
         }
       >
-        <PageSection
-          title="课程成绩"
-          description={`共 ${summary.total} 门课程 · 统计时间 ${formatDateTime(summary.computed_at)}`}
-        >
-          <div className="flex flex-col gap-4">
+        {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
+        <DataPanel
+          label="课程成绩"
+          filter={
             <FilterBar label="课程成绩筛选">
               <FilterField label="学期" group>
                 <SegmentedControl
@@ -229,32 +230,40 @@ function GradeContent({
                 />
               </FilterField>
             </FilterBar>
-
-            <Table
-              columns={columns}
-              data={summary.list}
-              rowKey={(grade) => grade.course_id}
-              empty={
-                <Empty
-                  icon={GraduationCap}
-                  title="这个范围内还没有成绩"
-                  description="换个学期看看,或等课程成绩审核通过后再来。"
-                />
-              }
-            />
+          }
+          footer={
             <Pagination
               page={page}
               pageSize={summary.size}
               total={summary.total}
               onPageChange={onPageChange}
             />
-          </div>
-        </PageSection>
+          }
+        >
+          <Table
+            columns={columns}
+            data={summary.list}
+            rowKey={(grade) => grade.course_id}
+            elevated={false}
+            // <md 换行卡(§6.4.1 规则 3):课程名一行、学分与绩点一行,等级在右
+            mobileCard={(grade) => ({
+              title: courses.get(grade.course_id)?.name ?? '已归档的课程',
+              meta: `${grade.credits} 学分 · 总评 ${formatScore(grade.final_total)}`,
+            })}
+            empty={
+              <Empty
+                icon={GraduationCap}
+                title="这个范围内还没有成绩"
+                description="换个学期看看,或等课程成绩审核通过后再来。"
+              />
+            }
+          />
+        </DataPanel>
 
         {history.length > 0 ? (
-          <PageSection>
+          <div className="mt-6">
             <SemesterGpaList history={history} semesters={semesters} />
-          </PageSection>
+          </div>
         ) : null}
       </PageBody>
     </>

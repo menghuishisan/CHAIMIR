@@ -35,7 +35,7 @@ ARG SOLC_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
 LABEL org.opencontainers.image.title="tool/mythril"
 LABEL org.opencontainers.image.description="Chaimir Mythril symbolic execution tool image"
 
-ADD https://binaries.soliditylang.org/linux-amd64/${SOLC_PATH} /usr/local/bin/solc-${SOLC_VERSION}
+ADD --checksum=sha256:d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef https://binaries.soliditylang.org/linux-amd64/${SOLC_PATH} /usr/local/bin/solc-${SOLC_VERSION}
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     packages='ca-certificates libstdc++ python-3.10=3.10.20-r10' \
     && for attempt in 1 2 3 4 5 6 7 8; do \

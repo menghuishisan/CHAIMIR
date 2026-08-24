@@ -12,7 +12,7 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         sleep $((attempt * 3)); \
     done \
     && python3.13 -m venv /opt/wallet-sim \
-    && /opt/wallet-sim/bin/pip install --no-cache-dir "setuptools>=78.1.1" "msgpack>=1.2.1" "eth-account==0.13.7" \
+    && /opt/wallet-sim/bin/pip install --no-cache-dir "setuptools==80.9.0" "eth-account==0.13.7" \
     && addgroup -g 1000 chaimir \
     && adduser -D -u 1000 -G chaimir -h /app -s /sbin/nologin chaimir
 

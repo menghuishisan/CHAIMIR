@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"strings"
 	"time"
 
@@ -158,7 +159,11 @@ func (s *Service) ListCatalogJudgers(ctx context.Context) ([]CatalogJudger, erro
 
 // CreateJudger 注册或更新判题器定义。
 func (s *Service) CreateJudger(ctx context.Context, req JudgerRequest) (JudgerDTO, error) {
-	spec, err := validateJudgerRequest(req)
+	execution, err := validateJudgerRequest(req)
+	if err != nil {
+		return JudgerDTO{}, err
+	}
+	spec, err := s.compileJudgerResourceSpec(ctx, req, execution)
 	if err != nil {
 		return JudgerDTO{}, err
 	}
@@ -184,7 +189,11 @@ func (s *Service) UpdateJudger(ctx context.Context, id int64, req JudgerRequest)
 	if id <= 0 {
 		return JudgerDTO{}, apperr.ErrPathIDInvalid
 	}
-	spec, err := validateJudgerRequest(req)
+	execution, err := validateJudgerRequest(req)
+	if err != nil {
+		return JudgerDTO{}, err
+	}
+	spec, err := s.compileJudgerResourceSpec(ctx, req, execution)
 	if err != nil {
 		return JudgerDTO{}, err
 	}
@@ -323,9 +332,10 @@ func (s *Service) ExactFingerprints(ctx context.Context, tenantID int64, problem
 	return out, nil
 }
 
-// Similarity 读取对象生成特征向量并返回相似命中。
+// Similarity 使用已落库的提交指纹计算相似命中。
+// 查重页面只需要提交代码哈希,基准向量由服务端从同题指纹中解析,避免把对象存储引用暴露给浏览器。
 func (s *Service) Similarity(ctx context.Context, tenantID int64, req FingerprintSimilarityRequest) ([]contracts.FingerprintMatch, error) {
-	if tenantID <= 0 || strings.TrimSpace(req.ProblemRef) == "" || strings.TrimSpace(req.CodeStorageKey) == "" {
+	if tenantID <= 0 || strings.TrimSpace(req.ProblemRef) == "" {
 		return nil, apperr.ErrFingerprintRequestInvalid
 	}
 	threshold := req.Threshold
@@ -334,10 +344,6 @@ func (s *Service) Similarity(ctx context.Context, tenantID int64, req Fingerprin
 	}
 	if threshold <= 0 || threshold >= 1 {
 		return nil, apperr.ErrFingerprintRequestInvalid
-	}
-	vector, err := s.buildSubmissionVector(ctx, req.CodeStorageKey)
-	if err != nil {
-		return nil, err
 	}
 	var items []SubmissionFingerprint
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
@@ -349,6 +355,26 @@ func (s *Service) Similarity(ctx context.Context, tenantID int64, req Fingerprin
 		return nil
 	}); err != nil {
 		return nil, err
+	}
+	if len(items) == 0 {
+		return []contracts.FingerprintMatch{}, nil
+	}
+	vector := items[0].SimVector
+	if hash := strings.TrimSpace(req.CodeHash); hash != "" {
+		if !pkgcrypto.ValidSHA256Hex(hash) {
+			return nil, apperr.ErrFingerprintRequestInvalid
+		}
+		found := false
+		for _, item := range items {
+			if strings.EqualFold(item.CodeHash, hash) {
+				vector = item.SimVector
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, apperr.ErrFingerprintNotFound
+		}
 	}
 	out := []contracts.FingerprintMatch{}
 	for _, item := range items {
@@ -376,6 +402,9 @@ func (s *Service) loadAvailableJudger(ctx context.Context, code string) (Judger,
 	if j.Status != JudgerStatusAvailable || j.SelftestStatus != JudgerSelftestPassed {
 		return Judger{}, apperr.ErrJudgerUnavailable
 	}
+	if err := validateJudgerResourceSpecForUse(j); err != nil {
+		return Judger{}, apperr.ErrJudgerUnavailable.WithCause(err)
+	}
 	return j, nil
 }
 
@@ -392,6 +421,9 @@ func (s *Service) buildInputSnapshot(j Judger, spec contracts.ContentJudgeSpec, 
 	if err != nil {
 		return JudgeInputSnapshot{}, err
 	}
+	if err := validateJudgerResourceSpecForUse(j); err != nil {
+		return JudgeInputSnapshot{}, err
+	}
 	return JudgeInputSnapshot{
 		ItemCode:            spec.ItemCode,
 		ItemVersion:         spec.ItemVersion,
@@ -401,10 +433,8 @@ func (s *Service) buildInputSnapshot(j Judger, spec contracts.ContentJudgeSpec, 
 		SuiteRef:            spec.SuiteRef,
 		SuiteArchiveName:    j.ResourceSpec.SuiteArchiveName,
 		VersionHash:         spec.VersionHash,
-		RuntimeCode:         j.ResourceSpec.RuntimeCode,
-		RuntimeImageVersion: j.ResourceSpec.RuntimeImageVersion,
+		CompositionSnapshot: j.ResourceSpec.CompositionSnapshot,
 		GenesisRef:          j.ResourceSpec.GenesisRef,
-		ToolCodes:           append([]string(nil), j.ResourceSpec.ToolCodes...),
 		InitScriptRef:       j.ResourceSpec.InitScriptRef,
 		Command:             append([]string(nil), j.ResourceSpec.Command...),
 		ExecTarget:          strings.TrimSpace(j.ResourceSpec.ExecTarget),
@@ -415,6 +445,50 @@ func (s *Service) buildInputSnapshot(j Judger, spec contracts.ContentJudgeSpec, 
 		Expectation:         expectation,
 		ExtraInput:          safeExtra,
 	}, nil
+}
+
+// compileJudgerResourceSpec 将平台管理请求中的组合声明交给 M2 编译，并只返回可持久化的执行事实。
+func (s *Service) compileJudgerResourceSpec(ctx context.Context, req JudgerRequest, execution JudgerExecutionSpec) (JudgerResourceSpec, error) {
+	spec := JudgerResourceSpec{
+		GenesisRef:        strings.TrimSpace(execution.GenesisRef),
+		InitScriptRef:     strings.TrimSpace(execution.InitScriptRef),
+		Command:           append([]string(nil), execution.Command...),
+		ExecTarget:        strings.TrimSpace(execution.ExecTarget),
+		ExecutionSidecars: append([]workload.ComponentSpec(nil), execution.ExecutionSidecars...),
+		TimeoutSec:        execution.TimeoutSec,
+		MaxRetries:        execution.MaxRetries,
+		SuiteArchiveName:  strings.TrimSpace(execution.SuiteArchiveName),
+		Selftest:          maps.Clone(execution.Selftest),
+	}
+	if judgerNeedsSandbox(req.Type, req.RuntimeRequired) {
+		snapshot, err := s.sandbox.CompilePlatformSandboxComposition(ctx, req.Composition)
+		if err != nil {
+			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
+		}
+		spec.CompositionSnapshot = snapshot
+	}
+	if err := validateJudgerResourceSpecForUse(Judger{Type: req.Type, RuntimeRequired: req.RuntimeRequired, ResourceSpec: spec}); err != nil {
+		return JudgerResourceSpec{}, err
+	}
+	return spec, nil
+}
+
+// validateJudgerResourceSpecForUse 拒绝没有完整 M2 快照的判题器进入自检或判题链路。
+func validateJudgerResourceSpecForUse(j Judger) error {
+	if !judgerNeedsSandbox(j.Type, j.RuntimeRequired) {
+		return nil
+	}
+	if j.ResourceSpec.CompositionSnapshot.Spec.AccessProfile != contracts.SandboxAccessJudgePrivate {
+		return apperr.ErrJudgeSpecUnavailable
+	}
+	if strings.TrimSpace(j.ResourceSpec.CompositionSnapshot.Digest) == "" {
+		return apperr.ErrJudgeSpecUnavailable
+	}
+	digest, err := contracts.CanonicalSnapshotDigest(j.ResourceSpec.CompositionSnapshot)
+	if err != nil || digest != j.ResourceSpec.CompositionSnapshot.Digest {
+		return apperr.ErrJudgeSpecUnavailable
+	}
+	return nil
 }
 
 // validateJudgerSandboxMode 约束 reuse 只能用于链上断言只读现场状态,其他判题必须使用 fresh judge 沙箱。
@@ -561,7 +635,7 @@ func (s *Service) checkSubmitRate(ctx context.Context, task JudgeTask) error {
 		if !ok || window <= 0 {
 			return apperr.ErrJudgeTaskEnqueueFailed
 		}
-		recent, err = tx.ListRecentJudgeTasksBySubmitterProblem(ctx, task.TenantID, task.SubmitterID, task.ProblemRef, window)
+		recent, err = tx.ListRecentJudgeTasksBySubmitterProblem(ctx, task.TenantID, task.SubmitterTenantID, task.SubmitterID, task.ProblemRef, window)
 		return err
 	}); err != nil {
 		return apperr.ErrJudgeTaskEnqueueFailed.WithCause(err)

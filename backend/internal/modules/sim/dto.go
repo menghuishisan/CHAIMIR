@@ -27,12 +27,14 @@ type RejectReviewRequest struct {
 
 // CreateSessionRequest 是内部服务创建仿真会话的 HTTP 请求。
 type CreateSessionRequest struct {
-	PackageCode    string         `json:"package_code"`
-	Version        string         `json:"version"`
-	Seed           int64          `json:"seed"`
-	InitParams     map[string]any `json:"init_params"`
-	OwnerAccountID ids.ID         `json:"owner_account_id"`
-	SourceRef      string         `json:"source_ref"`
+	PackageCode          string         `json:"package_code"`
+	Version              string         `json:"version"`
+	Seed                 int64          `json:"seed"`
+	InitParams           map[string]any `json:"init_params"`
+	OwnerAccountID       ids.ID         `json:"owner_account_id"`
+	AuthorizedAccountIDs []ids.ID       `json:"authorized_account_ids"`
+	SourceRef            string         `json:"source_ref"`
+	ScopeRef             string         `json:"scope_ref"`
 }
 
 // ReportActionRequest 是前端异步上报的确定性操作记录。
@@ -50,9 +52,10 @@ type ReportCheckpointRequest struct {
 	Achieved     bool            `json:"achieved"`
 }
 
-// RecycleRequest 是内部服务按来源归档会话的请求。
+// RecycleRequest 是内部服务按生命周期作用域归档会话的请求。
 type RecycleRequest struct {
 	SourceRef string `json:"source_ref"`
+	ScopeRef  string `json:"scope_ref"`
 	Reason    string `json:"reason"`
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/contest/internal/sqlcgen"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/intx"
@@ -30,6 +31,9 @@ type Store interface {
 type TxStore interface {
 	CreateContest(context.Context, Contest) (Contest, error)
 	GetContest(context.Context, int64, int64) (Contest, error)
+	FindPublishedContestTenant(context.Context, int64) (int64, error)
+	FindTeamTenant(context.Context, int64) (int64, error)
+	FindBattleMatchTenant(context.Context, int64) (int64, error)
 	ListContests(context.Context, int64, int16, int, int) ([]Contest, int64, error)
 	ListStudentContests(context.Context, int64, int16, int, int) ([]Contest, int64, error)
 	UpdateContest(context.Context, Contest) (Contest, error)
@@ -46,8 +50,16 @@ type TxStore interface {
 	AddTeamMember(context.Context, TeamMember) (TeamMember, error)
 	ListTeamMembers(context.Context, int64, int64) ([]TeamMember, error)
 	AccountTeamIDs(context.Context, int64, int64, int64, int64) ([]int64, error)
+	GetContestAccessGrant(context.Context, int64, int64) (ContestAccessGrant, error)
+	GetContestAccessGrantForSubject(context.Context, int64, int64, int64, int64) (ContestAccessGrant, error)
+	FindContestAccessGrantForSubject(context.Context, int64, int64, int64) (ContestAccessGrant, error)
+	UpsertContestAccessGrant(context.Context, ContestAccessGrant) (ContestAccessGrant, error)
+	RevokeContestAccessGrantsForSandbox(context.Context, int64, int64) error
+	ListContestAccessGrantsForSandbox(context.Context, int64, int64) ([]ContestAccessGrant, error)
+	ListContestAccessGrantsForContest(context.Context, int64, int64) ([]ContestAccessGrant, error)
 	CreateSolveSubmission(context.Context, SolveSubmission) (SolveSubmission, error)
 	GetSolveSubmission(context.Context, int64, int64) (SolveSubmission, error)
+	FindSolveSubmissionTenant(context.Context, int64) (int64, error)
 	GetSolveSubmissionByJudgeTask(context.Context, int64, string) (SolveSubmission, error)
 	UpdateSolveSubmissionResult(context.Context, int64, int64, bool, int32) (SolveSubmission, error)
 	RecentSolveCount(context.Context, int64, int64, int64, int64, int) (int64, error)
@@ -91,8 +103,8 @@ type TxStore interface {
 	MarkVulnSourceSynced(context.Context, int64, int64) (VulnSource, error)
 	UpsertVulnProblem(context.Context, VulnProblem) (VulnProblem, error)
 	GetVulnProblem(context.Context, int64, int64) (VulnProblem, error)
-	ListVulnProblems(context.Context, int64, int64, int16, int, int) ([]VulnProblem, int64, error)
-	SetVulnProblemPrevalidate(context.Context, int64, int64, int16, map[string]any) (VulnProblem, error)
+	ListVulnProblems(context.Context, int64, int64, int16, int16, int, int) ([]VulnProblem, int64, error)
+	SetVulnProblemPrevalidate(context.Context, int64, int64, int16, map[string]any, string, *contracts.SandboxCompositionSnapshot, string, string) (VulnProblem, error)
 	FinalizeVulnProblem(context.Context, int64, int64, string, string) (VulnProblem, error)
 	ListStudentContestRecords(context.Context, int64, int64) ([]StudentContestRecord, error)
 	Stats(context.Context, int64) (ContestStatsSnapshot, error)
@@ -172,6 +184,33 @@ func (tx *txStore) GetContest(ctx context.Context, tenantID, id int64) (Contest,
 	return contestFromRow(row)
 }
 
+// FindPublishedContestTenant 在受控特权事务中解析公开竞赛所属租户,不暴露跨租户读写能力。
+func (tx *txStore) FindPublishedContestTenant(ctx context.Context, contestID int64) (int64, error) {
+	row, err := tx.q.FindPublishedContestTenant(ctx, contestID)
+	if err != nil {
+		return 0, apperr.ErrContestNotFound.WithCause(err)
+	}
+	return row, nil
+}
+
+// FindTeamTenant 在受控特权事务中解析队伍所属租户。
+func (tx *txStore) FindTeamTenant(ctx context.Context, teamID int64) (int64, error) {
+	row, err := tx.q.FindTeamTenant(ctx, teamID)
+	if err != nil {
+		return 0, apperr.ErrContestTeamNotFound.WithCause(err)
+	}
+	return row, nil
+}
+
+// FindBattleMatchTenant 在受控特权事务中解析对局所属组织租户。
+func (tx *txStore) FindBattleMatchTenant(ctx context.Context, matchID int64) (int64, error) {
+	row, err := tx.q.FindBattleMatchTenant(ctx, matchID)
+	if err != nil {
+		return 0, apperr.ErrContestBattleMatchNotFound.WithCause(err)
+	}
+	return row, nil
+}
+
 // ListContests 查询竞赛列表。
 func (tx *txStore) ListContests(ctx context.Context, tenantID int64, status int16, page, size int) ([]Contest, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
@@ -246,7 +285,11 @@ func (tx *txStore) UpsertContestProblem(ctx context.Context, item ContestProblem
 	if err != nil {
 		return ContestProblem{}, err
 	}
-	row, err := tx.q.UpsertContestProblem(ctx, sqlcgen.UpsertContestProblemParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: dynamic, BattleConfig: battleConfig, BattleRule: pgtypex.Int2(item.BattleRule), Seq: item.Seq})
+	snapshot, err := encodeOptionalJSON(item.CompositionSnapshot, apperr.ErrContestProblemInvalid)
+	if err != nil {
+		return ContestProblem{}, err
+	}
+	row, err := tx.q.UpsertContestProblem(ctx, sqlcgen.UpsertContestProblemParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: dynamic, BattleConfig: battleConfig, BattleRule: pgtypex.Int2(item.BattleRule), Seq: item.Seq, CompositionDigest: pgtypex.Text(item.CompositionDigest), CompositionSnapshot: snapshot})
 	if err != nil {
 		return ContestProblem{}, apperr.ErrContestProblemInvalid.WithCause(err)
 	}
@@ -363,13 +406,95 @@ func (tx *txStore) AccountTeamIDs(ctx context.Context, tenantID, contestID, memb
 	return tx.q.AccountTeamIDs(ctx, sqlcgen.AccountTeamIDsParams{TenantID: tenantID, ContestID: contestID, MemberTenantID: memberTenantID, AccountID: accountID})
 }
 
+// GetContestAccessGrant 读取单条跨校竞赛授权。
+func (tx *txStore) GetContestAccessGrant(ctx context.Context, tenantID, id int64) (ContestAccessGrant, error) {
+	row, err := tx.q.GetContestAccessGrant(ctx, sqlcgen.GetContestAccessGrantParams{TenantID: tenantID, ID: id})
+	if err != nil {
+		return ContestAccessGrant{}, apperr.ErrContestTeamAccessDenied.WithCause(err)
+	}
+	return contestAccessGrantFromRow(row)
+}
+
+// GetContestAccessGrantForSubject 按沙箱与受权主体读取跨校授权。
+func (tx *txStore) GetContestAccessGrantForSubject(ctx context.Context, tenantID, sandboxID, memberTenantID, memberAccountID int64) (ContestAccessGrant, error) {
+	row, err := tx.q.GetContestAccessGrantForSubject(ctx, sqlcgen.GetContestAccessGrantForSubjectParams{TenantID: tenantID, SandboxID: sandboxID, MemberTenantID: memberTenantID, MemberAccountID: memberAccountID})
+	if err != nil {
+		return ContestAccessGrant{}, apperr.ErrContestTeamAccessDenied.WithCause(err)
+	}
+	return contestAccessGrantFromRow(row)
+}
+
+// FindContestAccessGrantForSubject 在受控特权事务中按成员身份查找唯一的跨校沙箱授权。
+func (tx *txStore) FindContestAccessGrantForSubject(ctx context.Context, sandboxID, memberTenantID, memberAccountID int64) (ContestAccessGrant, error) {
+	row, err := tx.q.FindContestAccessGrantForSubject(ctx, sqlcgen.FindContestAccessGrantForSubjectParams{SandboxID: sandboxID, MemberTenantID: memberTenantID, MemberAccountID: memberAccountID})
+	if err != nil {
+		return ContestAccessGrant{}, apperr.ErrContestTeamAccessDenied.WithCause(err)
+	}
+	return contestAccessGrantFromRow(row)
+}
+
+// UpsertContestAccessGrant 签发或刷新一个沙箱范围的跨校授权。
+func (tx *txStore) UpsertContestAccessGrant(ctx context.Context, item ContestAccessGrant) (ContestAccessGrant, error) {
+	capabilities, err := jsonx.AnyBytes(item.Capabilities, apperr.ErrContestTeamAccessDenied)
+	if err != nil {
+		return ContestAccessGrant{}, err
+	}
+	row, err := tx.q.UpsertContestAccessGrant(ctx, sqlcgen.UpsertContestAccessGrantParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, TeamID: item.TeamID, SandboxID: item.SandboxID, MemberTenantID: item.MemberTenantID, MemberAccountID: item.MemberAccountID, Capabilities: capabilities, SourceRef: item.SourceRef, ExpiresAt: timex.Timestamptz(item.ExpiresAt)})
+	if err != nil {
+		return ContestAccessGrant{}, apperr.ErrContestTeamAccessDenied.WithCause(err)
+	}
+	return contestAccessGrantFromRow(row)
+}
+
+// RevokeContestAccessGrantsForSandbox 使指定沙箱的全部跨校授权立即失效。
+func (tx *txStore) RevokeContestAccessGrantsForSandbox(ctx context.Context, tenantID, sandboxID int64) error {
+	if err := tx.q.RevokeContestAccessGrantsForSandbox(ctx, sqlcgen.RevokeContestAccessGrantsForSandboxParams{TenantID: tenantID, SandboxID: sandboxID}); err != nil {
+		return apperr.ErrContestTeamAccessDenied.WithCause(err)
+	}
+	return nil
+}
+
+// ListContestAccessGrantsForSandbox 列出沙箱当前和历史授权,供撤销通知与审计使用。
+func (tx *txStore) ListContestAccessGrantsForSandbox(ctx context.Context, tenantID, sandboxID int64) ([]ContestAccessGrant, error) {
+	rows, err := tx.q.ListContestAccessGrantsForSandbox(ctx, sqlcgen.ListContestAccessGrantsForSandboxParams{TenantID: tenantID, SandboxID: sandboxID})
+	if err != nil {
+		return nil, apperr.ErrContestTeamAccessDenied.WithCause(err)
+	}
+	out := make([]ContestAccessGrant, 0, len(rows))
+	for _, row := range rows {
+		item, err := contestAccessGrantFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// ListContestAccessGrantsForContest 读取竞赛仍有效的全部沙箱授权，供归档时一次性撤销。
+func (tx *txStore) ListContestAccessGrantsForContest(ctx context.Context, tenantID, contestID int64) ([]ContestAccessGrant, error) {
+	rows, err := tx.q.ListContestAccessGrantsForContest(ctx, sqlcgen.ListContestAccessGrantsForContestParams{TenantID: tenantID, ContestID: contestID})
+	if err != nil {
+		return nil, apperr.ErrContestTeamAccessDenied.WithCause(err)
+	}
+	out := make([]ContestAccessGrant, 0, len(rows))
+	for _, row := range rows {
+		item, err := contestAccessGrantFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
 // CreateSolveSubmission 创建解题提交记录。
 func (tx *txStore) CreateSolveSubmission(ctx context.Context, item SolveSubmission) (SolveSubmission, error) {
 	content, err := jsonx.AnyBytes(item.ContentRef, apperr.ErrContestSubmissionInvalid)
 	if err != nil {
 		return SolveSubmission{}, err
 	}
-	row, err := tx.q.CreateSolveSubmission(ctx, sqlcgen.CreateSolveSubmissionParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ProblemID: item.ProblemID, TeamID: item.TeamID, SubmitterID: item.SubmitterID, ContentRef: content, SourceRef: item.SourceRef, JudgeTaskRef: pgtypex.Text(item.JudgeTaskRef), SandboxRef: pgtypex.Text(item.SandboxRef)})
+	row, err := tx.q.CreateSolveSubmission(ctx, sqlcgen.CreateSolveSubmissionParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ProblemID: item.ProblemID, TeamID: item.TeamID, SubmitterTenantID: item.SubmitterTenantID, SubmitterID: item.SubmitterID, ContentRef: content, SourceRef: item.SourceRef, JudgeTaskRef: pgtypex.Text(item.JudgeTaskRef), SandboxRef: pgtypex.Text(item.SandboxRef)})
 	if err != nil {
 		return SolveSubmission{}, apperr.ErrContestSubmissionInvalid.WithCause(err)
 	}
@@ -383,6 +508,15 @@ func (tx *txStore) GetSolveSubmission(ctx context.Context, tenantID, id int64) (
 		return SolveSubmission{}, apperr.ErrContestSubmissionNotFound.WithCause(err)
 	}
 	return submissionFromRow(row)
+}
+
+// FindSolveSubmissionTenant 解析提交所属竞赛租户,供跨校学生读取提交。
+func (tx *txStore) FindSolveSubmissionTenant(ctx context.Context, id int64) (int64, error) {
+	row, err := tx.q.FindSolveSubmissionTenant(ctx, id)
+	if err != nil {
+		return 0, apperr.ErrContestSubmissionNotFound.WithCause(err)
+	}
+	return row, nil
 }
 
 // GetSolveSubmissionByJudgeTask 按判题任务读取解题提交。
@@ -918,9 +1052,9 @@ func (tx *txStore) GetVulnProblem(ctx context.Context, tenantID, id int64) (Vuln
 }
 
 // ListVulnProblems 查询漏洞题草稿和总数。
-func (tx *txStore) ListVulnProblems(ctx context.Context, tenantID, sourceID int64, status int16, page, size int) ([]VulnProblem, int64, error) {
+func (tx *txStore) ListVulnProblems(ctx context.Context, tenantID, sourceID int64, status, prevalidateStatus int16, page, size int) ([]VulnProblem, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := tx.q.ListVulnProblems(ctx, sqlcgen.ListVulnProblemsParams{TenantID: tenantID, Column2: sourceID, Column3: status, Limit: limit, Offset: offset})
+	rows, err := tx.q.ListVulnProblems(ctx, sqlcgen.ListVulnProblemsParams{TenantID: tenantID, SourceID: sourceID, Status: status, PrevalidateStatus: prevalidateStatus, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, apperr.ErrContestVulnProblemInvalid.WithCause(err)
 	}
@@ -932,7 +1066,7 @@ func (tx *txStore) ListVulnProblems(ctx context.Context, tenantID, sourceID int6
 		}
 		out = append(out, item)
 	}
-	total, err := tx.q.CountVulnProblems(ctx, sqlcgen.CountVulnProblemsParams{TenantID: tenantID, Column2: sourceID, Column3: status})
+	total, err := tx.q.CountVulnProblems(ctx, sqlcgen.CountVulnProblemsParams{TenantID: tenantID, SourceID: sourceID, Status: status, PrevalidateStatus: prevalidateStatus})
 	if err != nil {
 		return nil, 0, apperr.ErrContestVulnProblemInvalid.WithCause(err)
 	}
@@ -940,12 +1074,16 @@ func (tx *txStore) ListVulnProblems(ctx context.Context, tenantID, sourceID int6
 }
 
 // SetVulnProblemPrevalidate 保存预验证结论。
-func (tx *txStore) SetVulnProblemPrevalidate(ctx context.Context, tenantID, id int64, status int16, detail map[string]any) (VulnProblem, error) {
+func (tx *txStore) SetVulnProblemPrevalidate(ctx context.Context, tenantID, id int64, status int16, detail map[string]any, digest string, snapshot *contracts.SandboxCompositionSnapshot, initCodeRef, initScriptRef string) (VulnProblem, error) {
 	raw, err := jsonx.AnyBytes(detail, apperr.ErrContestVulnProblemInvalid)
 	if err != nil {
 		return VulnProblem{}, err
 	}
-	row, err := tx.q.SetVulnProblemPrevalidate(ctx, sqlcgen.SetVulnProblemPrevalidateParams{TenantID: tenantID, ID: id, PrevalidateStatus: status, PrevalidateDetail: raw})
+	snapshotRaw, err := encodeOptionalJSON(snapshot, apperr.ErrContestVulnProblemInvalid)
+	if err != nil {
+		return VulnProblem{}, err
+	}
+	row, err := tx.q.SetVulnProblemPrevalidate(ctx, sqlcgen.SetVulnProblemPrevalidateParams{TenantID: tenantID, ID: id, PrevalidateStatus: status, PrevalidateDetail: raw, CompositionDigest: pgtypex.Text(digest), CompositionSnapshot: snapshotRaw, InitCodeRef: pgtypex.Text(initCodeRef), InitScriptRef: pgtypex.Text(initScriptRef)})
 	if err != nil {
 		return VulnProblem{}, apperr.ErrContestVulnPrevalidateFailed.WithCause(err)
 	}
@@ -963,7 +1101,7 @@ func (tx *txStore) FinalizeVulnProblem(ctx context.Context, tenantID, id int64, 
 
 // ListStudentContestRecords 查询学生竞赛战绩。
 func (tx *txStore) ListStudentContestRecords(ctx context.Context, tenantID, accountID int64) ([]StudentContestRecord, error) {
-	rows, err := tx.q.ListStudentContestRecords(ctx, sqlcgen.ListStudentContestRecordsParams{TenantID: tenantID, AccountID: accountID})
+	rows, err := tx.q.ListStudentContestRecords(ctx, sqlcgen.ListStudentContestRecordsParams{MemberTenantID: tenantID, AccountID: accountID})
 	if err != nil {
 		return nil, apperr.ErrContestInvalid.WithCause(err)
 	}

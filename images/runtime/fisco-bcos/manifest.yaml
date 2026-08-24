@@ -1,4 +1,4 @@
-# 本文件声明 runtime/fisco-bcos 镜像的职责、端口、安全、资源和供应链约束。
+﻿# 本文件声明 runtime/fisco-bcos 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: runtime
 name: fisco-bcos
@@ -19,19 +19,30 @@ source:
   type: thin-wrapper
 upstream:
   image: fiscoorg/fiscobcos:v3.12.1
+  version: v3.12.1
   digest: sha256:93db5277a5c896fde402f2165d133cc3d346effef4165ec417ef098eb2ede74b
   runtime: alpine:3.23
+  runtime_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: official-static-binary-on-supported-base
 data_driven: true
+env_keys:
+  config:
+    - CHAIMIR_FISCO_CONFIG
+  secret: []
 capabilities:
-  - chain-runtime
-  - fisco-node
-  - contract-dev
+  provides:
+    - chain-runtime
+    - fisco-node
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 runtime:
   eco: fisco
-  adapter_level: 2
-  default_tool_codes:
-    - code-server
+  adapter_level: 1
+  runtime_config_required: true
 ports:
   - name: p2p
     container_port: 20200
@@ -59,6 +70,11 @@ security:
   drop_capabilities:
     - ALL
   network_policy: deny-all
+security_exceptions:
+  - field: writable_mounts
+    reason: FISCO BCOS 节点需要写账本、日志和运行态;配置文件由 M2 注入,状态只允许写入 runtime-state。
+    writable_mounts:
+      - runtime-state
 student_access:
   enabled: false
   shell: none
@@ -84,4 +100,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

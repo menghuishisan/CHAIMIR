@@ -116,7 +116,7 @@
 /api/v1/sim/internal/sessions/recycle:
   post:
     tags: [sim]
-    summary: 按 source_ref 批量回收仿真会话
+    summary: 按 scope_ref 批量回收仿真会话
     operationId: simRecycleSessions
     x-chaimir-audience: internal
     x-chaimir-internal: true

@@ -1,6 +1,6 @@
 /**
  * Icon:Lucide 图标统一封装(FE-3)。
- * 尺寸走令牌阶(sm16/md18/lg20),描边统一 1.8;
+ * 尺寸走令牌阶(xs12/sm16/md18/lg20),描边统一 1.8;
  * 默认装饰性(aria-hidden),传 label 时转为语义图标(role=img)。
  */
 import type { LucideIcon } from "lucide-react";

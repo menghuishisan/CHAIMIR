@@ -27,10 +27,26 @@ upstream:
   reuse_policy: mature-security-toolchain-wrapper
 data_driven: true
 capabilities:
-  - judger
-  - static-security-scan
+  provides:
+    - judger
+    - static-security-scan
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 judger:
   type: static-scan
+  runtime_code: evm-foundry
+  genesis_ref: genesis/evm-foundry/platform-selftest.json
+  command:
+    - run-static-scan
+  exec_target: sandbox/static-scan
+  env:
+    - name: CHAIMIR_SUBMISSION_DIR
+      value: /judge-private
+  suite_archive_name: platform-selftest.tar
   modes:
     - slither
     - swc

@@ -9,6 +9,7 @@ import {
   Badge,
   Button,
   Callout,
+  DataPanel,
   Empty,
   FormField,
   IconButton,
@@ -117,27 +118,55 @@ export function ContentCategories() {
       <div className="flex flex-col gap-4">
         {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
-        <ResourceState
-          resource={categories}
-          emptyIcon={FolderTree}
-          emptyTitle="还没有分类"
-          emptyDescription="分类不是必填项,但按领域分类后检索与组卷会更方便。"
-          emptyAction={
-            <Button variant="primary" leftIcon={Plus} onClick={() => setFormTarget({})}>
-              新建分类
-            </Button>
-          }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-        >
-          {() => (
-            <Table
-              columns={columns}
-              data={rows}
-              rowKey={(row) => row.category.id}
-              empty={<Empty icon={FolderTree} title="还没有分类" />}
-            />
-          )}
-        </ResourceState>
+        {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):与同父页的「题目」标签同构 ——
+            那一块是 DataPanel(筛选井 + 表 + 分页),这里没有筛选与分页,只用片本身 */}
+        <DataPanel label="题库分类">
+          <ResourceState
+            resource={categories}
+            emptyIcon={FolderTree}
+            emptyTitle="还没有分类"
+            emptyDescription="分类不是必填项,但按领域分类后检索与组卷会更方便。"
+            emptyAction={
+              <Button variant="primary" leftIcon={Plus} onClick={() => setFormTarget({})}>
+                新建分类
+              </Button>
+            }
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+          >
+            {() => (
+              <Table
+                columns={columns}
+                data={rows}
+                rowKey={(row) => row.category.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):分类名一行、层级与排序一行,增删改在右
+                mobileCard={(row) => ({
+                  title: row.category.name,
+                  meta: `第 ${row.depth + 1} 层 · 排序 ${row.category.sort}${row.childCount > 0 ? ` · ${row.childCount} 个子分类` : ''}`,
+                  action: (
+                    <div className="flex gap-1">
+                      <IconButton
+                        variant="ghost"
+                        size="sm"
+                        icon={Pencil}
+                        aria-label={`编辑分类 ${row.category.name}`}
+                        onClick={() => setFormTarget({ category: row.category })}
+                      />
+                      <IconButton
+                        variant="ghost"
+                        size="sm"
+                        icon={Trash2}
+                        aria-label={`删除分类 ${row.category.name}`}
+                        onClick={() => setDeleteTarget(row)}
+                      />
+                    </div>
+                  ),
+                })}
+                empty={<Empty icon={FolderTree} title="还没有分类" />}
+              />
+            )}
+          </ResourceState>
+        </DataPanel>
       </div>
 
       {formTarget ? (

@@ -4,6 +4,7 @@ package experiment
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"chaimir/internal/modules/experiment/internal/sqlcgen"
@@ -31,15 +32,18 @@ type TxStore interface {
 	CreateExperiment(context.Context, Experiment) (Experiment, error)
 	GetExperiment(context.Context, int64, int64) (Experiment, error)
 	ListExperiments(context.Context, int64, int64, int16, int, int) ([]Experiment, int64, error)
+	CountPublishedExperimentsByShape(context.Context, int64, int64) (map[string]map[string]int64, error)
 	UpdateExperiment(context.Context, Experiment) (Experiment, error)
 	SetExperimentStatus(context.Context, int64, int64, int16) (Experiment, error)
 	CreateGroup(context.Context, ExperimentGroup) (ExperimentGroup, error)
 	GetGroup(context.Context, int64, int64) (ExperimentGroup, error)
+	GetGroupForUpdate(context.Context, int64, int64) (ExperimentGroup, error)
 	ListGroupsByExperiment(context.Context, int64, int64) ([]ExperimentGroup, error)
 	ListGroupMembers(context.Context, int64, int64) ([]GroupMember, error)
 	GetGroupMember(context.Context, int64, int64, int64) (GroupMember, error)
 	ListStudentGroupsForExperiments(context.Context, int64, int64, []int64) (map[int64]int64, error)
 	UpsertGroupMember(context.Context, GroupMember) (GroupMember, error)
+	DeleteGroupMember(context.Context, int64, int64, int64) error
 	LockInstanceCreation(context.Context, int64) error
 	GetActiveGroupInstance(context.Context, int64, int64, int64) (ExperimentInstance, error)
 	GetActiveOwnerInstance(context.Context, int64, int64, int64) (ExperimentInstance, error)
@@ -54,6 +58,7 @@ type TxStore interface {
 	TouchInstance(context.Context, int64, int64) (ExperimentInstance, error)
 	ClaimRecyclableInstances(context.Context, int, int, int32) ([]ExperimentInstance, error)
 	ListLiveInstancesByCourse(context.Context, int64, int64) ([]ExperimentInstance, error)
+	ListTeacherInstances(context.Context, int64, int64, int16, int, int) ([]ExperimentInstance, int64, error)
 	UpsertCheckpoint(context.Context, CheckpointResult) (CheckpointResult, error)
 	GetCheckpointByJudgeTask(context.Context, int64, string) (CheckpointResult, error)
 	ListCheckpoints(context.Context, int64, int64) ([]CheckpointResult, error)
@@ -147,6 +152,20 @@ func (tx *txStore) ListExperiments(ctx context.Context, tenantID, courseID int64
 	return out, total, nil
 }
 
+// CountPublishedExperimentsByShape 统计学生可见已发布实验的协作与报告形态。
+func (tx *txStore) CountPublishedExperimentsByShape(ctx context.Context, tenantID, courseID int64) (map[string]map[string]int64, error) {
+	rows, err := tx.q.CountPublishedExperimentsByShape(ctx, sqlcgen.CountPublishedExperimentsByShapeParams{TenantID: tenantID, Column2: courseID})
+	if err != nil {
+		return nil, apperr.ErrExperimentInvalid.WithCause(err)
+	}
+	out := map[string]map[string]int64{"collab_mode": {}, "require_report": {"true": 0, "false": 0}}
+	for _, row := range rows {
+		out["collab_mode"][strconv.Itoa(int(row.CollabMode))] += row.Count
+		out["require_report"][strconv.FormatBool(row.RequireReport)] += row.Count
+	}
+	return out, nil
+}
+
 // UpdateExperiment 更新草稿实验定义。
 func (tx *txStore) UpdateExperiment(ctx context.Context, item Experiment) (Experiment, error) {
 	components, err := jsonx.AnyBytes(item.Components, apperr.ErrExperimentInvalid)
@@ -193,6 +212,15 @@ func (tx *txStore) GetGroup(ctx context.Context, tenantID, id int64) (Experiment
 		return ExperimentGroup{}, apperr.ErrExperimentGroupInvalid.WithCause(err)
 	}
 	return groupFromRows(row, members), nil
+}
+
+// GetGroupForUpdate 锁住小组行,使成员变更与共享沙箱授权同步串行化。
+func (tx *txStore) GetGroupForUpdate(ctx context.Context, tenantID, id int64) (ExperimentGroup, error) {
+	row, err := tx.q.GetExperimentGroupForUpdate(ctx, sqlcgen.GetExperimentGroupForUpdateParams{TenantID: tenantID, ID: id})
+	if err != nil {
+		return ExperimentGroup{}, apperr.ErrExperimentGroupNotFound.WithCause(err)
+	}
+	return groupFromRows(row, nil), nil
 }
 
 // ListGroupsByExperiment 按实验一次取齐全部分组及其成员,供教师编组视角使用。
@@ -264,6 +292,14 @@ func (tx *txStore) UpsertGroupMember(ctx context.Context, item GroupMember) (Gro
 	return groupMemberFromRow(row), nil
 }
 
+// DeleteGroupMember 移除小组成员;删除不存在的成员按幂等成功处理。
+func (tx *txStore) DeleteGroupMember(ctx context.Context, tenantID, groupID, studentID int64) error {
+	if err := tx.q.DeleteGroupMember(ctx, sqlcgen.DeleteGroupMemberParams{TenantID: tenantID, GroupID: groupID, StudentID: studentID}); err != nil {
+		return apperr.ErrExperimentGroupInvalid.WithCause(err)
+	}
+	return nil
+}
+
 // LockInstanceCreation 锁定同一实验实例创建键,保证幂等检查和创建处于同一事务序列。
 func (tx *txStore) LockInstanceCreation(ctx context.Context, lockKey int64) error {
 	return tx.q.LockInstanceCreation(ctx, lockKey)
@@ -275,7 +311,7 @@ func (tx *txStore) GetActiveGroupInstance(ctx context.Context, tenantID, experim
 	if err != nil {
 		return ExperimentInstance{}, err
 	}
-	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
 // GetActiveOwnerInstance 查询单人当前活跃实例。
@@ -284,12 +320,12 @@ func (tx *txStore) GetActiveOwnerInstance(ctx context.Context, tenantID, experim
 	if err != nil {
 		return ExperimentInstance{}, err
 	}
-	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
 // CreateInstance 创建实验实例控制记录。
 func (tx *txStore) CreateInstance(ctx context.Context, item ExperimentInstance) (ExperimentInstance, error) {
-	row, err := tx.q.CreateExperimentInstance(ctx, sqlcgen.CreateExperimentInstanceParams{ID: item.ID, TenantID: item.TenantID, ExperimentID: item.ExperimentID, OwnerAccountID: item.OwnerAccountID, GroupID: pgtypex.Int8(item.GroupID), SourceRef: item.SourceRef})
+	row, err := tx.q.CreateExperimentInstance(ctx, sqlcgen.CreateExperimentInstanceParams{ID: item.ID, TenantID: item.TenantID, ExperimentID: item.ExperimentID, OwnerAccountID: item.OwnerAccountID, GroupID: pgtypex.Int8(item.GroupID), SourceRef: item.SourceRef, ScopeRef: item.ScopeRef})
 	if err != nil {
 		return ExperimentInstance{}, apperr.ErrExperimentInstanceInvalid.WithCause(err)
 	}
@@ -367,7 +403,7 @@ func (tx *txStore) UpdateInstanceScoreIfChanged(ctx context.Context, tenantID, i
 	if err != nil {
 		return ExperimentInstance{}, false, apperr.ErrExperimentScoreInvalid.WithCause(err)
 	}
-	item, err := instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	item, err := instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 	if err != nil {
 		return ExperimentInstance{}, false, err
 	}
@@ -380,7 +416,7 @@ func (tx *txStore) TouchInstance(ctx context.Context, tenantID, id int64) (Exper
 	if err != nil {
 		return ExperimentInstance{}, apperr.ErrExperimentInstanceNotFound.WithCause(err)
 	}
-	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
+	return instanceFromFields(row.ID, row.TenantID, row.ExperimentID, row.OwnerAccountID, row.GroupID, row.SourceRef, row.ScopeRef, row.SandboxRefs, row.SimSessionRefs, row.Status, row.Score, row.StartedAt, row.FinishedAt, row.LastActiveAt)
 }
 
 // ClaimRecyclableInstances 跨租户认领需要回收的 M7 自有实例。
@@ -415,6 +451,28 @@ func (tx *txStore) ListLiveInstancesByCourse(ctx context.Context, tenantID, cour
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+// ListTeacherInstances 查询教师可见的活跃实例及全量总数。
+func (tx *txStore) ListTeacherInstances(ctx context.Context, tenantID, teacherID int64, status int16, page, size int) ([]ExperimentInstance, int64, error) {
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := tx.q.ListTeacherInstances(ctx, sqlcgen.ListTeacherInstancesParams{TenantID: tenantID, TeacherID: teacherID, Status: status, PageLimit: limit, PageOffset: offset})
+	if err != nil {
+		return nil, 0, apperr.ErrExperimentInvalid.WithCause(err)
+	}
+	out := make([]ExperimentInstance, 0, len(rows))
+	for _, row := range rows {
+		item, err := instanceFromTeacherRow(row)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, item)
+	}
+	total, err := tx.q.CountTeacherInstances(ctx, sqlcgen.CountTeacherInstancesParams{TenantID: tenantID, TeacherID: teacherID, Status: status})
+	if err != nil {
+		return nil, 0, apperr.ErrExperimentInvalid.WithCause(err)
+	}
+	return out, total, nil
 }
 
 // UpsertCheckpoint 新增或更新检查点结果。

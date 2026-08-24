@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
@@ -26,7 +27,7 @@ func validateExperimentRequest(req ExperimentRequest, validJudgeMode func(string
 	if req.Name == "" || len(req.Name) > 255 {
 		return ExperimentRequest{}, apperr.ErrExperimentInvalid
 	}
-	if req.CourseID < 0 || req.WizardStep < 1 || req.WizardStep > 6 {
+	if req.CourseID < 0 || req.WizardStep < 1 || req.WizardStep > 4 {
 		return ExperimentRequest{}, apperr.ErrExperimentInvalid
 	}
 	if req.CollabMode == 0 {
@@ -36,7 +37,7 @@ func validateExperimentRequest(req ExperimentRequest, validJudgeMode func(string
 		return ExperimentRequest{}, apperr.ErrExperimentInvalid
 	}
 	if req.Components.Envs == nil {
-		req.Components.Envs = []EnvComponent{}
+		req.Components.Envs = []EnvComponentRequest{}
 	}
 	if req.Components.Sims == nil {
 		req.Components.Sims = []SimComponent{}
@@ -55,13 +56,13 @@ func validateExperimentRequest(req ExperimentRequest, validJudgeMode func(string
 }
 
 // validateComponentConfig 校验自由组合组件的引用完整性和分值边界。
-func validateComponentConfig(cfg ComponentConfig, collabMode int16, group GroupConfig, validJudgeMode func(string) bool) error {
+func validateComponentConfig(cfg ComponentConfigRequest, collabMode int16, group GroupConfig, validJudgeMode func(string) bool) error {
 	ids := map[string]bool{}
 	envIDs := map[string]bool{}
 	simIDs := map[string]bool{}
 	for _, env := range cfg.Envs {
 		id := strings.TrimSpace(env.ID)
-		if !componentIDPattern.MatchString(id) || ids[id] || strings.TrimSpace(env.RuntimeCode) == "" {
+		if !componentIDPattern.MatchString(id) || ids[id] || strings.TrimSpace(env.PrimaryRuntime.Code) == "" || strings.TrimSpace(env.PrimaryRuntime.ImageVersion) == "" || !env.AccessProfile.Valid() {
 			return apperr.ErrExperimentInvalid
 		}
 		if err := validateEnvComponentSandboxContract(env); err != nil {
@@ -106,11 +107,16 @@ func validateComponentConfig(cfg ComponentConfig, collabMode int16, group GroupC
 }
 
 // normalizeComponentConfig 统一清理当前组件契约中的标识和引用,保证持久化值与校验值一致。
-func normalizeComponentConfig(cfg ComponentConfig) ComponentConfig {
+func normalizeComponentConfig(cfg ComponentConfigRequest) ComponentConfigRequest {
 	for idx := range cfg.Envs {
 		cfg.Envs[idx].ID = strings.TrimSpace(cfg.Envs[idx].ID)
-		cfg.Envs[idx].RuntimeCode = strings.TrimSpace(cfg.Envs[idx].RuntimeCode)
-		cfg.Envs[idx].RuntimeImageVersion = strings.TrimSpace(cfg.Envs[idx].RuntimeImageVersion)
+		cfg.Envs[idx].PrimaryRuntime.Code = strings.TrimSpace(cfg.Envs[idx].PrimaryRuntime.Code)
+		cfg.Envs[idx].PrimaryRuntime.ImageVersion = strings.TrimSpace(cfg.Envs[idx].PrimaryRuntime.ImageVersion)
+		cfg.Envs[idx].AccessProfile = contracts.SandboxAccessProfile(strings.TrimSpace(string(cfg.Envs[idx].AccessProfile)))
+		for toolIdx := range cfg.Envs[idx].Tools {
+			cfg.Envs[idx].Tools[toolIdx].Code = strings.TrimSpace(cfg.Envs[idx].Tools[toolIdx].Code)
+			cfg.Envs[idx].Tools[toolIdx].Selection = strings.TrimSpace(cfg.Envs[idx].Tools[toolIdx].Selection)
+		}
 	}
 	for idx := range cfg.Sims {
 		cfg.Sims[idx].ID = strings.TrimSpace(cfg.Sims[idx].ID)
@@ -152,7 +158,7 @@ func normalizeComponentConfig(cfg ComponentConfig) ComponentConfig {
 }
 
 // validateEnvComponentSandboxContract 在 M7 输入边界落实 M2 沙箱配置合同,避免保存无法启动的实验定义。
-func validateEnvComponentSandboxContract(env EnvComponent) error {
+func validateEnvComponentSandboxContract(env EnvComponentRequest) error {
 	if env.KeepAlive {
 		if env.KeepAliveMinutes <= 0 {
 			return apperr.ErrExperimentInvalid
@@ -170,8 +176,50 @@ func validateEnvComponentSandboxContract(env EnvComponent) error {
 	return nil
 }
 
+// componentConfigRequestFromModel 将持久化快照投影为发布校验所需的声明,不把编译结果重新作为输入。
+func componentConfigRequestFromModel(cfg ComponentConfig) ComponentConfigRequest {
+	out := ComponentConfigRequest{
+		Envs:        make([]EnvComponentRequest, 0, len(cfg.Envs)),
+		Sims:        append([]SimComponent(nil), cfg.Sims...),
+		Checkpoints: append([]CheckpointComponent(nil), cfg.Checkpoints...),
+		Stages:      append([]StageConfig(nil), cfg.Stages...),
+	}
+	for _, env := range cfg.Envs {
+		spec := env.CompositionSnapshot.Spec
+		out.Envs = append(out.Envs, EnvComponentRequest{
+			ID:                       env.ID,
+			PrimaryRuntime:           spec.PrimaryRuntime,
+			Infra:                    append([]contracts.CompositionComponentRef(nil), spec.Infra...),
+			Tools:                    append([]contracts.CompositionComponentRef(nil), spec.Tools...),
+			Links:                    append([]contracts.CompositionLink(nil), spec.Links...),
+			AccessProfile:            spec.AccessProfile,
+			ResourceProfile:          spec.ResourceProfile,
+			NetworkProfile:           spec.NetworkProfile,
+			InitCodeRef:              env.InitCodeRef,
+			InitScriptRef:            env.InitScriptRef,
+			KeepAlive:                env.KeepAlive,
+			SnapshotEnabled:          env.SnapshotEnabled,
+			KeepAliveMinutes:         env.KeepAliveMinutes,
+			SnapshotRetentionMinutes: env.SnapshotRetentionMinutes,
+		})
+	}
+	return out
+}
+
+// validatePersistedCompositionSnapshot 校验实验持久化的完整快照与 digest 一致。
+func validatePersistedCompositionSnapshot(env EnvComponent) error {
+	digest, err := contracts.CanonicalSnapshotDigest(env.CompositionSnapshot)
+	if err != nil || strings.TrimSpace(env.CompositionSnapshot.Digest) == "" || digest != env.CompositionSnapshot.Digest {
+		return apperr.ErrExperimentInvalid
+	}
+	if env.ID == "" || env.ID != env.CompositionSnapshot.Spec.ID {
+		return apperr.ErrExperimentInvalid
+	}
+	return nil
+}
+
 // validateStageConfig 校验阶段编排引用完整性、解锁条件和参数绑定来源。
-func validateStageConfig(cfg ComponentConfig, envIDs, simIDs, checkpointIDs map[string]bool) error {
+func validateStageConfig(cfg ComponentConfigRequest, envIDs, simIDs, checkpointIDs map[string]bool) error {
 	if len(cfg.Stages) == 0 {
 		return nil
 	}

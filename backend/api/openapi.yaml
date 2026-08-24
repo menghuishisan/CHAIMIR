@@ -72,6 +72,8 @@ paths:
     $ref: './paths/identity.yaml#/api/v1/auth/sso/{tenant_code}/ldap'
   /api/v1/platform/applications:
     $ref: './paths/identity.yaml#/api/v1/platform/applications'
+  /api/v1/platform/applications/{id}:
+    $ref: './paths/identity.yaml#/api/v1/platform/applications/{id}'
   /api/v1/platform/applications/{id}/approve:
     $ref: './paths/identity.yaml#/api/v1/platform/applications/{id}/approve'
   /api/v1/platform/applications/{id}/reject:
@@ -414,6 +416,8 @@ paths:
     $ref: './paths/teaching.yaml#/api/v1/teaching/internal/courses/{id}/grades'
   /api/v1/experiment/experiments:
     $ref: './paths/experiment.yaml#/api/v1/experiment/experiments'
+  /api/v1/experiment/instances:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/instances'
   /api/v1/experiment/student/experiments:
     $ref: './paths/experiment.yaml#/api/v1/experiment/student/experiments'
   /api/v1/experiment/student/experiments/{id}:
@@ -456,6 +460,8 @@ paths:
     $ref: './paths/experiment.yaml#/api/v1/experiment/groups/{id}'
   /api/v1/experiment/groups/{id}/members:
     $ref: './paths/experiment.yaml#/api/v1/experiment/groups/{id}/members'
+  /api/v1/experiment/groups/{id}/members/{student_id}:
+    $ref: './paths/experiment.yaml#/api/v1/experiment/groups/{id}/members/{student_id}'
   /api/v1/experiment/internal/instances/{id}/score:
     $ref: './paths/experiment.yaml#/api/v1/experiment/internal/instances/{id}/score'
   /api/v1/experiment/internal/stats:
@@ -510,6 +516,26 @@ paths:
     $ref: './paths/contest.yaml#/api/v1/contest/matches/{id}/replay'
   /api/v1/contest/matches/{id}/replay/download-grant:
     $ref: './paths/contest.yaml#/api/v1/contest/matches/{id}/replay/download-grant'
+  /api/v1/contest/sandboxes/{id}:
+    $ref: './paths/contest.yaml#/api/v1/contest/sandboxes/{id}'
+  /api/v1/contest/sandboxes/{id}/progress:
+    $ref: './paths/contest.yaml#/api/v1/contest/sandboxes/{id}/progress'
+  /api/v1/contest/sandboxes/{id}/terminal:
+    $ref: './paths/contest.yaml#/api/v1/contest/sandboxes/{id}/terminal'
+  /api/v1/contest/sandboxes/{id}/files:
+    $ref: './paths/contest.yaml#/api/v1/contest/sandboxes/{id}/files'
+  /api/v1/contest/sandboxes/{id}/files/save:
+    $ref: './paths/contest.yaml#/api/v1/contest/sandboxes/{id}/files/save'
+  /api/v1/contest/sandboxes/{id}/command-tools/{tool_code}/run:
+    $ref: './paths/contest.yaml#/api/v1/contest/sandboxes/{id}/command-tools/{tool_code}/run'
+  /api/v1/contest/sandboxes/{id}/chain/deploy:
+    $ref: './paths/contest.yaml#/api/v1/contest/sandboxes/{id}/chain/deploy'
+  /api/v1/contest/sandboxes/{id}/chain/tx:
+    $ref: './paths/contest.yaml#/api/v1/contest/sandboxes/{id}/chain/tx'
+  /api/v1/contest/sandboxes/{id}/chain/query:
+    $ref: './paths/contest.yaml#/api/v1/contest/sandboxes/{id}/chain/query'
+  /api/v1/contest/sandboxes/{id}/tools/{tool_code}/{proxy_path}:
+    $ref: './paths/contest.yaml#/api/v1/contest/sandboxes/{id}/tools/{tool_code}/{proxy_path}'
   /api/v1/contest/my/contest-records:
     $ref: './paths/contest.yaml#/api/v1/contest/my/contest-records'
   /api/v1/contest/student/contests:

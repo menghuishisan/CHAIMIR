@@ -1,0 +1,7 @@
+# 私有化与验收使用的 Kubernetes 密钥源组件,应用侧仍统一通过 ExternalSecret 消费。
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - secret-stores.yaml

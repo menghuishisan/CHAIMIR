@@ -60,11 +60,11 @@ func (s *txStore) GetCourseByInviteCode(ctx context.Context, code string) (Cours
 // ListTeacherCourses 查询教师课程分页。
 func (s *txStore) ListTeacherCourses(ctx context.Context, tenantID, teacherID int64, filter CourseListFilter) ([]Course, int64, error) {
 	limit, offset := pagex.LimitOffset(filter.Page, filter.Size)
-	rows, err := s.q.ListTeacherCourses(ctx, sqlcgen.ListTeacherCoursesParams{TenantID: tenantID, TeacherID: teacherID, Column3: filter.Status, Limit: limit, Offset: offset})
+	rows, err := s.q.ListTeacherCourses(ctx, sqlcgen.ListTeacherCoursesParams{TenantID: tenantID, TeacherID: teacherID, Status: filter.Status, IsShared: filter.IsShared, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := s.q.CountTeacherCourses(ctx, sqlcgen.CountTeacherCoursesParams{TenantID: tenantID, TeacherID: teacherID, Column3: filter.Status})
+	total, err := s.q.CountTeacherCourses(ctx, sqlcgen.CountTeacherCoursesParams{TenantID: tenantID, TeacherID: teacherID, Status: filter.Status, IsShared: filter.IsShared})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -82,11 +82,11 @@ func (s *txStore) ListTeacherCourses(ctx context.Context, tenantID, teacherID in
 // ListStudentCourses 查询学生课程分页。
 func (s *txStore) ListStudentCourses(ctx context.Context, tenantID, studentID int64, filter CourseListFilter) ([]Course, int64, error) {
 	limit, offset := pagex.LimitOffset(filter.Page, filter.Size)
-	rows, err := s.q.ListStudentCourses(ctx, sqlcgen.ListStudentCoursesParams{TenantID: tenantID, StudentID: studentID, Column3: filter.Status, Limit: limit, Offset: offset})
+	rows, err := s.q.ListStudentCourses(ctx, sqlcgen.ListStudentCoursesParams{TenantID: tenantID, StudentID: studentID, Status: filter.Status, IsShared: filter.IsShared, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := s.q.CountStudentCourses(ctx, sqlcgen.CountStudentCoursesParams{TenantID: tenantID, StudentID: studentID, Column3: filter.Status})
+	total, err := s.q.CountStudentCourses(ctx, sqlcgen.CountStudentCoursesParams{TenantID: tenantID, StudentID: studentID, Status: filter.Status, IsShared: filter.IsShared})
 	if err != nil {
 		return nil, 0, err
 	}

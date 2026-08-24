@@ -24,6 +24,14 @@
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sandbox/runtimes/{id}:
+  get:
+    tags: [sandbox]
+    summary: 运行时详情
+    operationId: sandboxGetRuntime
+    x-chaimir-audience: platform-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   patch:
     tags: [sandbox]
     summary: 更新运行时配置
@@ -123,8 +131,8 @@
 /api/v1/sandbox/internal/sandboxes/recycle:
   post:
     tags: [sandbox]
-    summary: 按 source_ref 批量回收沙箱
-    operationId: sandboxRecycleBySourceRef
+    summary: 按 scope_ref 批量回收沙箱
+    operationId: sandboxRecycleByScopeRef
     x-chaimir-audience: internal
     x-chaimir-internal: true
     security: [{ serviceAuth: [] }]

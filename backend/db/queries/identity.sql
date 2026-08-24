@@ -574,6 +574,18 @@ WHERE ($1::bigint = -1 OR ($1::bigint <> -1 AND ($1::bigint = 0 OR tenant_id = $
 ORDER BY created_at DESC, id DESC
 LIMIT $7 OFFSET $8;
 
+-- name: QueryAuditActionFacets :many
+SELECT action, COUNT(*)::bigint AS count
+FROM audit_log
+WHERE ($1::bigint = -1 OR ($1::bigint <> -1 AND ($1::bigint = 0 OR tenant_id = $1)))
+  AND ($2::bigint = 0 OR actor_id = $2)
+  AND ($3::text = '' OR action = $3)
+  AND ($4::text = '' OR target_type = $4)
+  AND ($5::timestamptz IS NULL OR created_at >= $5)
+  AND ($6::timestamptz IS NULL OR created_at <= $6)
+GROUP BY action
+ORDER BY action;
+
 -- name: PlatformStats :one
 SELECT
   (SELECT COUNT(*) FROM tenant) AS tenant_count,

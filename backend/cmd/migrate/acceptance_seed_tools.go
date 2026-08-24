@@ -4,9 +4,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -16,7 +16,41 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// acceptanceToolDefinition 是写入 tool 表所需的规范化工具定义。
+// platformStableID 根据逻辑编码生成跨迁移运行稳定的正数 ID,不依赖目录遍历顺序。
+func platformStableID(namespace, code string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(namespace + "\x00" + strings.TrimSpace(code)))
+	return 900000000000000000 + int64(h.Sum64()%99999999999999999)
+}
+
+func platformCatalogRuntimeID(code string) int64      { return platformStableID("runtime", code) }
+func platformCatalogRuntimeImageID(code string) int64 { return platformStableID("runtime-image", code) }
+
+// imageVersionFromURL 把不可变 digest 的短前缀作为展示版本,不再维护一份硬编码版本号。
+func imageVersionFromURL(imageURL string) string {
+	imageURL = strings.TrimSpace(imageURL)
+	if at := strings.Index(imageURL, "@sha256:"); at >= 0 {
+		digest := imageURL[at+len("@sha256:"):]
+		if len(digest) > 16 {
+			digest = digest[:16]
+		}
+		if digest != "" {
+			return "sha256-" + digest
+		}
+	}
+	return "unverified"
+}
+
+// platformRuntimeImageVersion 从当前供应链证明推导组合引用版本,避免旧的固定版本号漂移。
+func platformRuntimeImageVersion(code string) string {
+	url, proven := platformProof("runtime/" + strings.TrimSpace(code))
+	if !proven {
+		return "unverified"
+	}
+	return imageVersionFromURL(url)
+}
+
+// acceptanceToolDefinition 是 manifest 转换阶段的规范化工具定义。
 type acceptanceToolDefinition struct {
 	ID           int64
 	Code         string
@@ -27,31 +61,40 @@ type acceptanceToolDefinition struct {
 	Status       int16
 }
 
-const acceptanceTerminalToolID int64 = 910000000000001099
-
 type toolManifest struct {
-	SchemaVersion      int                   `json:"schema_version"`
-	Category           string                `json:"category"`
-	Name               string                `json:"name"`
-	Image              string                `json:"image"`
-	Description        string                `json:"description"`
-	Source             map[string]any        `json:"source"`
-	Upstream           map[string]any        `json:"upstream"`
-	DataDriven         bool                  `json:"data_driven"`
-	Tool               toolManifestTool      `json:"tool"`
-	Ports              []toolManifestPort    `json:"ports"`
-	LocalDev           map[string]any        `json:"local_dev"`
-	Auth               map[string]any        `json:"auth"`
-	Security           toolManifestSecurity  `json:"security"`
-	SecurityExceptions []map[string]any      `json:"security_exceptions"`
-	StudentAccess      map[string]any        `json:"student_access"`
-	Resources          toolManifestResources `json:"resources"`
-	Build              map[string]any        `json:"build"`
-	Selftest           map[string]any        `json:"selftest"`
-	SupplyChain        map[string]any        `json:"supply_chain"`
-	EnvKeys            map[string]any        `json:"env_keys"`
-	Labels             map[string]string     `json:"labels"`
-	Capabilities       []string              `json:"capabilities"`
+	SchemaVersion      int                         `json:"schema_version"`
+	Category           string                      `json:"category"`
+	Name               string                      `json:"name"`
+	Image              string                      `json:"image"`
+	Description        string                      `json:"description"`
+	Source             map[string]any              `json:"source"`
+	Upstream           map[string]any              `json:"upstream"`
+	DataDriven         bool                        `json:"data_driven"`
+	Tool               toolManifestTool            `json:"tool"`
+	Ports              []toolManifestPort          `json:"ports"`
+	LocalDev           map[string]any              `json:"local_dev"`
+	Auth               map[string]any              `json:"auth"`
+	Security           toolManifestSecurity        `json:"security"`
+	SecurityExceptions []map[string]any            `json:"security_exceptions"`
+	StudentAccess      map[string]any              `json:"student_access"`
+	Resources          toolManifestResources       `json:"resources"`
+	Build              map[string]any              `json:"build"`
+	Selftest           map[string]any              `json:"selftest"`
+	SupplyChain        map[string]any              `json:"supply_chain"`
+	SecretsRequired    []manifestSecretRequirement `json:"secrets_required"`
+	EnvKeys            map[string]any              `json:"env_keys"`
+	Labels             map[string]string           `json:"labels"`
+	Capabilities       manifestCapabilities        `json:"capabilities"`
+}
+
+type manifestCapabilities struct {
+	Provides      []string       `json:"provides"`
+	Requires      []string       `json:"requires"`
+	Conflicts     []string       `json:"conflicts"`
+	Cardinality   string         `json:"cardinality"`
+	Placement     string         `json:"placement"`
+	ConfigSchema  map[string]any `json:"config_schema"`
+	StudentAccess string         `json:"student_access"`
 }
 
 type toolManifestTool struct {
@@ -63,9 +106,11 @@ type toolManifestTool struct {
 	Command               []string                      `json:"command"`
 	Args                  []string                      `json:"args"`
 	Env                   []workload.EnvVarSpec         `json:"env"`
+	MountDomains          []string                      `json:"mount_domains"`
 	EphemeralMounts       []workload.EphemeralMountSpec `json:"ephemeral_mounts"`
 	ReadinessPath         string                        `json:"readiness_path"`
 	KeepaliveCommand      []string                      `json:"keepalive_command"`
+	RequiredBindings      []string                      `json:"required_bindings"`
 	CommandPolicy         map[string]any                `json:"command_policy"`
 }
 
@@ -94,65 +139,12 @@ type toolManifestResources struct {
 	MemoryRequest         string `json:"memory_request"`
 	MemoryLimit           string `json:"memory_limit"`
 	EphemeralStorageLimit string `json:"ephemeral_storage_limit"`
+	TimeoutSeconds        int32  `json:"timeout_seconds"`
 }
 
 type toolManifestSelftestCommand struct {
 	Name    string   `json:"name"`
 	Command []string `json:"command"`
-}
-
-// acceptanceToolDefinitions 读取全部 tool manifest 并转换为 tool 表种子数据。
-func acceptanceToolDefinitions() ([]acceptanceToolDefinition, error) {
-	root, err := acceptanceImagesRoot()
-	if err != nil {
-		return nil, err
-	}
-	toolRoot := filepath.Join(root, "tool")
-	entries, err := os.ReadDir(toolRoot)
-	if err != nil {
-		return nil, fmt.Errorf("读取工具镜像目录失败: %w", err)
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-	defs := make([]acceptanceToolDefinition, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		manifest, err := readToolManifest(filepath.Join(toolRoot, entry.Name(), "manifest.yaml"))
-		if err != nil {
-			return nil, err
-		}
-		if !toolManifestDeployable(manifest) {
-			continue
-		}
-		def, err := toolDefinitionFromManifest(len(defs), manifest)
-		if err != nil {
-			return nil, fmt.Errorf("生成工具定义失败 %s: %w", manifest.Name, err)
-		}
-		defs = append(defs, def)
-	}
-	if len(defs) == 0 {
-		return nil, fmt.Errorf("未发现工具 manifest")
-	}
-	return defs, nil
-}
-
-// acceptanceSeedToolDefinitions 返回验收 seed 使用的完整工具集合,包含镜像工具和平台终端工具。
-func acceptanceSeedToolDefinitions() ([]acceptanceToolDefinition, error) {
-	defs, err := acceptanceToolDefinitions()
-	if err != nil {
-		return nil, err
-	}
-	defs = append(defs, acceptanceToolDefinition{
-		ID:           acceptanceTerminalToolID,
-		Code:         "terminal",
-		Name:         "受控终端",
-		Kind:         contracts.SandboxToolKindTerminal,
-		EcoTags:      []string{"*"},
-		ResourceSpec: map[string]any{},
-		Status:       1,
-	})
-	return defs, nil
 }
 
 // acceptanceImagesRoot 从当前工作目录向上定位仓库 images 目录。
@@ -163,14 +155,35 @@ func acceptanceImagesRoot() (string, error) {
 	}
 	for dir := wd; ; dir = filepath.Dir(dir) {
 		candidate := filepath.Join(dir, "images")
-		if info, err := os.Stat(filepath.Join(candidate, "tool")); err == nil && info.IsDir() {
+		if info, statErr := os.Stat(filepath.Join(candidate, "tool")); statErr == nil && info.IsDir() {
 			return candidate, nil
 		}
-		if parent := filepath.Dir(dir); parent == dir {
+		parent := filepath.Dir(dir)
+		if parent == dir {
 			break
 		}
 	}
 	return "", fmt.Errorf("未找到 images 目录")
+}
+
+// toolDefinitionFromManifest 把工具 manifest 转换为 M2 工具资源规格。
+func toolDefinitionFromManifest(manifest toolManifest) (acceptanceToolDefinition, error) {
+	imageURL, err := acceptanceImageURL(manifest.Image)
+	if err != nil {
+		return acceptanceToolDefinition{}, err
+	}
+	kind, err := toolKindFromManifest(manifest.Tool.Kind)
+	if err != nil {
+		return acceptanceToolDefinition{}, err
+	}
+	spec, err := toolResourceSpecFromManifest(manifest, imageURL, kind)
+	if err != nil {
+		return acceptanceToolDefinition{}, err
+	}
+	return acceptanceToolDefinition{
+		ID: platformCatalogToolID(manifest.Name), Code: manifest.Name, Name: manifestDisplayName(manifest),
+		Kind: kind, EcoTags: manifest.Tool.EcoTags, ResourceSpec: spec, Status: toolStatusFromManifest(manifest),
+	}, nil
 }
 
 // readToolManifest 严格读取单个工具 manifest。
@@ -186,39 +199,20 @@ func readToolManifest(path string) (toolManifest, error) {
 	if manifest.Category != "tool" || strings.TrimSpace(manifest.Name) == "" || manifest.Image != "tool/"+manifest.Name {
 		return toolManifest{}, fmt.Errorf("工具 manifest 分类或镜像名不一致: %s", path)
 	}
+	studentAccess := strings.TrimSpace(manifest.Capabilities.StudentAccess)
+	if studentAccess != "public" && studentAccess != "private" {
+		return toolManifest{}, fmt.Errorf("工具 manifest capabilities.student_access 无效: %s", path)
+	}
+	enabled, ok := manifest.StudentAccess["enabled"].(bool)
+	if !ok || (enabled && studentAccess != "public") || (!enabled && studentAccess != "private") {
+		return toolManifest{}, fmt.Errorf("工具 manifest 能力访问级别与 student_access.enabled 不一致: %s", path)
+	}
 	return manifest, nil
 }
 
-// toolDefinitionFromManifest 把镜像 manifest 转换为 M2 tool.resource_spec。
-func toolDefinitionFromManifest(index int, manifest toolManifest) (acceptanceToolDefinition, error) {
-	imageURL, err := acceptanceImageURL(manifest.Image)
-	if err != nil {
-		return acceptanceToolDefinition{}, err
-	}
-	kind, err := toolKindFromManifest(manifest.Tool.Kind)
-	if err != nil {
-		return acceptanceToolDefinition{}, err
-	}
-	spec, err := toolResourceSpecFromManifest(manifest, imageURL, kind)
-	if err != nil {
-		return acceptanceToolDefinition{}, err
-	}
-	return acceptanceToolDefinition{
-		ID:           acceptanceToolID(manifest.Name, index),
-		Code:         manifest.Name,
-		Name:         manifestDisplayName(manifest),
-		Kind:         kind,
-		EcoTags:      manifest.Tool.EcoTags,
-		ResourceSpec: spec,
-		Status:       toolStatusFromManifest(manifest),
-	}, nil
-}
-
-// toolStatusFromManifest 避免把仍需运行时/实验注入私有配置的工具误标为可调度。
+// toolStatusFromManifest 返回已通过供应链与 WorkloadSpec 校验的目录状态。
+// 运行时配置由组合编译器根据 config_schema 和 links 生成,不能再作为永久停用理由。
 func toolStatusFromManifest(manifest toolManifest) int16 {
-	if manifest.Tool.RuntimeConfigRequired {
-		return sandbox.ToolStatusDisabled
-	}
 	return sandbox.ToolStatusAvailable
 }
 
@@ -236,10 +230,13 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 		if len(command) == 0 {
 			return nil, fmt.Errorf("显式工具 WorkloadSpec 必须声明 selftest.commands 作为预拉取自检命令: %s", manifest.Name)
 		}
+		appendManifestSecretEnv(spec, manifest.SecretsRequired)
 		spec["prepull_command"] = command
+		spec["required_bindings"] = append([]string(nil), manifest.Tool.RequiredBindings...)
 		if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
 			return nil, err
 		}
+		applyManifestCapabilities(spec, manifest)
 		return spec, nil
 	}
 	component, err := toolComponentFromManifest(manifest, imageURL, kind)
@@ -266,10 +263,58 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 	if len(command) > 0 {
 		spec["prepull_command"] = command
 	}
+	spec["required_bindings"] = append([]string(nil), manifest.Tool.RequiredBindings...)
 	if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
 		return nil, err
 	}
+	applyManifestCapabilities(spec, manifest)
 	return spec, nil
+}
+
+// appendManifestSecretEnv 将显式 WorkloadSpec 的敏感环境变量统一绑定到平台 Secret。
+func appendManifestSecretEnv(spec map[string]any, requirements []manifestSecretRequirement) {
+	if len(requirements) == 0 {
+		return
+	}
+	components, ok := spec["components"].([]any)
+	if !ok || len(components) == 0 {
+		return
+	}
+	component, ok := components[0].(map[string]any)
+	if !ok {
+		return
+	}
+	secretEnv := make([]any, 0, len(requirements))
+	for _, requirement := range requirements {
+		name := strings.TrimSpace(requirement.Env)
+		if name == "" {
+			continue
+		}
+		secretEnv = append(secretEnv, map[string]any{"name": name, "secret_name": "chaimir-secret", "secret_key": name})
+	}
+	if len(secretEnv) > 0 {
+		component["secret_env"] = secretEnv
+	}
+}
+
+// applyManifestCapabilities 将镜像清单的原子能力写入唯一的工具资源声明。
+func applyManifestCapabilities(spec map[string]any, manifest toolManifest) {
+	provides := make([]string, 0, len(manifest.Capabilities.Provides))
+	for _, capability := range manifest.Capabilities.Provides {
+		if value := strings.TrimSpace(capability); value != "" {
+			provides = append(provides, value)
+		}
+	}
+	studentAccess := strings.TrimSpace(manifest.Capabilities.StudentAccess)
+	spec["capabilities"] = map[string]any{
+		"provides":       provides,
+		"requires":       append([]string(nil), manifest.Capabilities.Requires...),
+		"conflicts":      append([]string(nil), manifest.Capabilities.Conflicts...),
+		"cardinality":    manifest.Capabilities.Cardinality,
+		"placement":      manifest.Capabilities.Placement,
+		"config_schema":  manifest.Capabilities.ConfigSchema,
+		"student_access": studentAccess,
+	}
 }
 
 // normalizeExplicitToolResourceSpec 校验显式 WorkloadSpec 的基本形态,并把 @self 替换为本镜像 digest。
@@ -453,9 +498,11 @@ func toolComponentFromManifest(manifest toolManifest, imageURL string, kind int1
 		Command:                manifest.Tool.Command,
 		Args:                   manifest.Tool.Args,
 		Env:                    manifest.Tool.Env,
+		SecretEnv:              secretEnvFromManifest(manifest.SecretsRequired),
 		Resources:              workload.ResourceSpec{Requests: map[string]string{"cpu": manifest.Resources.CPURequest, "memory": manifest.Resources.MemoryRequest}, Limits: map[string]string{"cpu": manifest.Resources.CPULimit, "memory": manifest.Resources.MemoryLimit}},
 		ReadOnlyRootFilesystem: &manifest.Security.ReadOnlyRootFilesystem,
 		MountWorkspace:         &mountWorkspace,
+		MountDomains:           append([]string(nil), manifest.Tool.MountDomains...),
 		EphemeralMounts:        manifest.Tool.EphemeralMounts,
 	}
 	if kind == contracts.SandboxToolKindWebEmbed {
@@ -498,9 +545,14 @@ func toolComponentName(kind int16) string {
 	return "web"
 }
 
-// acceptanceToolID 返回工具确定性 ID。
-func acceptanceToolID(name string, index int) int64 {
-	return 910000000000001100 + int64(index)
+// platformCatalogToolID 返回平台工具目录的确定性 ID。
+func platformCatalogToolID(name string) int64 {
+	return platformStableID("tool", name)
+}
+
+// platformCatalogInfraID 返回基础设施目录的确定性 ID,与教师工具区间分离。
+func platformCatalogInfraID(name string) int64 {
+	return platformStableID("infra", name)
 }
 
 // manifestDisplayName 选择工具展示名。

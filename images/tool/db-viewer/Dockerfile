@@ -8,6 +8,7 @@ ARG PGWEB_COMMIT=6b0b0244d1aefd6971999b03481eeeaa4ec7cf55
 
 RUN git clone --branch "${PGWEB_VERSION}" --depth 1 https://github.com/sosedoff/pgweb.git /src/pgweb
 WORKDIR /src/pgweb
+COPY entrypoint.go /src/entrypoint.go
 RUN test "$(git rev-parse HEAD)" = "${PGWEB_COMMIT}" \
     && go get \
         github.com/sirupsen/logrus@v1.9.4 \
@@ -16,7 +17,8 @@ RUN test "$(git rev-parse HEAD)" = "${PGWEB_COMMIT}" \
         golang.org/x/text@v0.39.0 \
         google.golang.org/grpc@v1.82.1 \
     && go mod tidy \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/pgweb .
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/pgweb . \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/chaimir-pgweb-entrypoint /src/entrypoint.go
 
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:b7bb25d9f7c31d2bdd1982feb4dafcaf137703c7075dbe2febb41c24212b946f
 
@@ -24,8 +26,9 @@ LABEL org.opencontainers.image.title="tool/db-viewer"
 LABEL org.opencontainers.image.description="Chaimir database viewer tool image"
 
 COPY --from=build /out/pgweb /usr/local/bin/pgweb
+COPY --from=build /out/chaimir-pgweb-entrypoint /usr/local/bin/chaimir-pgweb-entrypoint
 
 USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8081
-CMD ["pgweb", "--bind=0.0.0.0", "--listen=8081"]
+ENTRYPOINT ["/usr/local/bin/chaimir-pgweb-entrypoint"]

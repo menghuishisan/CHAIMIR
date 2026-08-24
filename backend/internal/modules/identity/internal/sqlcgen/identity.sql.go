@@ -2456,6 +2456,60 @@ func (q *Queries) PromoteClasses(ctx context.Context, arg PromoteClassesParams) 
 	return result.RowsAffected(), nil
 }
 
+const queryAuditActionFacets = `-- name: QueryAuditActionFacets :many
+SELECT action, COUNT(*)::bigint AS count
+FROM audit_log
+WHERE ($1::bigint = -1 OR ($1::bigint <> -1 AND ($1::bigint = 0 OR tenant_id = $1)))
+  AND ($2::bigint = 0 OR actor_id = $2)
+  AND ($3::text = '' OR action = $3)
+  AND ($4::text = '' OR target_type = $4)
+  AND ($5::timestamptz IS NULL OR created_at >= $5)
+  AND ($6::timestamptz IS NULL OR created_at <= $6)
+GROUP BY action
+ORDER BY action
+`
+
+type QueryAuditActionFacetsParams struct {
+	Column1 int64              `json:"column_1"`
+	Column2 int64              `json:"column_2"`
+	Column3 string             `json:"column_3"`
+	Column4 string             `json:"column_4"`
+	Column5 pgtype.Timestamptz `json:"column_5"`
+	Column6 pgtype.Timestamptz `json:"column_6"`
+}
+
+type QueryAuditActionFacetsRow struct {
+	Action string `json:"action"`
+	Count  int64  `json:"count"`
+}
+
+func (q *Queries) QueryAuditActionFacets(ctx context.Context, arg QueryAuditActionFacetsParams) ([]QueryAuditActionFacetsRow, error) {
+	rows, err := q.db.Query(ctx, queryAuditActionFacets,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Column4,
+		arg.Column5,
+		arg.Column6,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryAuditActionFacetsRow{}
+	for rows.Next() {
+		var i QueryAuditActionFacetsRow
+		if err := rows.Scan(&i.Action, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const queryAuditLogs = `-- name: QueryAuditLogs :many
 SELECT id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at, COUNT(*) OVER() AS total_count
 FROM audit_log

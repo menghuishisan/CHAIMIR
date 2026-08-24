@@ -10,6 +10,9 @@
  * 于是在输入框里按回车就等于点按钮,不必每个页面自己再包一层 form。
  *
  * 层次上它是抬起片内部的凹陷井(§6.5.1 第 2 级),不画边框。
+ * **必须放进它所筛的那块抬起片里** —— 用 `DataPanel` 的 `filter` 槽位(§6.5.2)。
+ * 直接摆在光面上会让筛选井与数据表各成一个盒子并排堆叠,一个逻辑数据区被渲染成两块,
+ * 那是 §6.5.1 红线第 3 条禁止的情形。
  */
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
@@ -73,11 +76,23 @@ export interface FilterBarProps {
   submitting?: boolean;
   /** 重置(可选):排在提交之后,由页面决定清掉哪些状态 */
   onReset?: () => void;
+  /**
+   * 无底形态:去掉凹陷井底色与内距,只保留字段排布。
+   *
+   * 用在**卡片网格型列表页**——那类页面的数据区是一排并列的 `Card`(本身就是抬起片),
+   * 把它们塞进 `DataPanel` 会变成片里套片(§6.5.1 不出现第三级)。此时筛选按 §6.5.1 红线的
+   * 另一条出路走:「标题 + 内容」不带容器,直接排在光面上而**不带井底色** ——
+   * 井色摆在光面上表达不出凹陷,那才是问题所在,不是「排在光面上」本身有问题。
+   *
+   * 表格型列表页不要用这个:那里应当走 `DataPanel` 的 filter 槽位,让井回到抬起片内部。
+   */
+  bare?: boolean;
   className?: string;
 }
 
-/** 筛选条内部排布:控件底对齐、按需折行 */
-const BAR_CLASS = "well flex flex-wrap items-end gap-x-4 gap-y-3 p-3";
+/** 筛选条内部排布:控件底对齐、按需折行。井形态自带凹陷底色与内距,bare 形态只保留排布 */
+const BAR_LAYOUT = "flex flex-wrap items-end gap-x-4 gap-y-3";
+const BAR_WELL = "well p-3";
 
 /**
  * FilterBar 渲染一条筛选区。
@@ -91,8 +106,10 @@ export function FilterBar({
   submitIcon = Search,
   submitting = false,
   onReset,
+  bare = false,
   className,
 }: FilterBarProps) {
+  const barClass = cn(BAR_LAYOUT, !bare && BAR_WELL, className);
   const tail = (
     <>
       {onSubmit && (
@@ -110,7 +127,7 @@ export function FilterBar({
 
   if (!onSubmit) {
     return (
-      <section aria-label={label} className={cn(BAR_CLASS, className)}>
+      <section aria-label={label} className={barClass}>
         {children}
         {tail}
       </section>
@@ -120,7 +137,7 @@ export function FilterBar({
   return (
     <form
       aria-label={label}
-      className={cn(BAR_CLASS, className)}
+      className={barClass}
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit();

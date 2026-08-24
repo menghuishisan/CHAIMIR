@@ -16,6 +16,7 @@ import {
 import {
   Button,
   Callout,
+  Checkbox,
   FormField,
   Input,
   Modal,
@@ -33,6 +34,13 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { useAsyncResource } from '../../../../hooks'
+import { CompositionDeclarationFields } from '../../../sandbox/components/CompositionDeclarationFields'
+import {
+  declarationFromSpec,
+  derivedInfraFromSpec,
+  readScenarioNeutralSpec,
+  scenarioNeutralSpecFromDeclaration,
+} from '../../../sandbox/composition'
 import { CONTENT_DIFFICULTIES, CONTENT_TYPES, CONTENT_VISIBILITIES } from '../../options'
 import {
   contentDifficultyLabel,
@@ -52,7 +60,8 @@ const BODY_KEYS = {
   options: 'options',
   answer: 'answer',
   explanation: 'explanation',
-  runtimeCode: 'runtime_code',
+  /** 实操题的环境声明:M2 组合契约,竞赛按它编译并起环境 */
+  composition: 'composition',
   submitKey: 'submit_key',
   /** 三种类型共用的附件字段:按类型各起一个名就是三套同义结构 */
   attachments: 'attachments',
@@ -156,7 +165,8 @@ interface ItemFormProps {
 function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
   const fieldId = useId()
   const editing = item !== undefined
-  const body = snapshot?.body ?? {}
+  // 正文快照只读一次即定型:包进 useMemo,避免每次渲染都换一个新对象引用
+  const body = useMemo(() => snapshot?.body ?? {}, [snapshot?.body])
 
   const [code, setCode] = useState(item?.code ?? '')
   const [version, setVersion] = useState(item?.version ?? '1.0.0')
@@ -178,7 +188,12 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
   const [options, setOptions] = useState(readStringArray(body, BODY_KEYS.options).join('\n'))
   const [answer, setAnswer] = useState(readString(body, BODY_KEYS.answer))
   const [explanation, setExplanation] = useState(readString(body, BODY_KEYS.explanation))
-  const [runtimeCode, setRuntimeCode] = useState(readString(body, BODY_KEYS.runtimeCode))
+  const savedComposition = useMemo(
+    () => readScenarioNeutralSpec(body, BODY_KEYS.composition),
+    [body],
+  )
+  const [envEnabled, setEnvEnabled] = useState(savedComposition !== undefined)
+  const [declaration, setDeclaration] = useState(() => declarationFromSpec(savedComposition))
   const [submitKey, setSubmitKey] = useState(readString(body, BODY_KEYS.submitKey))
   const [attachments, setAttachments] = useState<ContentAttachment[]>(readAttachments(body))
 
@@ -200,7 +215,7 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
         ...shared,
         [BODY_KEYS.summary]: summary.trim(),
         [BODY_KEYS.steps]: splitLines(steps),
-        [BODY_KEYS.runtimeCode]: runtimeCode.trim(),
+        // 实验环境由实验编排向导按组合声明配置,模板正文不再写运行时
         // 判题配置由检查点在实验编排里绑定判题器提供,题目正文不写判题细节
       }
     }
@@ -209,8 +224,18 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
         ...shared,
         [BODY_KEYS.scenario]: scenario.trim(),
         [BODY_KEYS.statement]: statement.trim(),
-        // 实操类竞赛题写运行时:学生答题工作台按它起实操环境(对齐清单 §6.19)
-        ...(runtimeCode.trim() !== '' ? { [BODY_KEYS.runtimeCode]: runtimeCode.trim() } : {}),
+        // 实操类赛题写环境声明:竞赛按它编译成不可变快照再起环境(对齐清单 §6.3)。
+        // 访问边界不在这里定 —— 同一道题进解题赛还是对抗赛由竞赛侧决定。
+        ...(envEnabled
+          ? {
+              [BODY_KEYS.composition]: scenarioNeutralSpecFromDeclaration(
+                code.trim() || item?.code || 'contest-problem',
+                declaration,
+                derivedInfraFromSpec(savedComposition),
+                savedComposition?.links ?? [],
+              ),
+            }
+          : {}),
         // 提交键是表单字段名而不是答案,随题面下发;取值要与判题配置里的 flag_input_key 相同
         ...(submitKey.trim() !== '' ? { [BODY_KEYS.submitKey]: submitKey.trim() } : {}),
       }
@@ -225,9 +250,13 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
   }, [
     answer,
     attachments,
+    code,
+    declaration,
+    envEnabled,
     explanation,
+    item?.code,
     options,
-    runtimeCode,
+    savedComposition,
     scenario,
     statement,
     steps,
@@ -481,17 +510,6 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
                       onChange={(event) => setSteps(event.target.value)}
                     />
                   </FormField>
-                  <FormField
-                    label="建议运行时"
-                    htmlFor={`${fieldId}-runtime`}
-                    helper="实验编排时会按这个运行时准备环境,填写运行时名称"
-                  >
-                    <Input
-                      id={`${fieldId}-runtime`}
-                      value={runtimeCode}
-                      onChange={(event) => setRuntimeCode(event.target.value)}
-                    />
-                  </FormField>
                 </>
               ) : null}
 
@@ -520,33 +538,48 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
                       onChange={(event) => setStatement(event.target.value)}
                     />
                   </FormField>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <FormField
-                      label="实操运行时"
-                      htmlFor={`${fieldId}-contest-runtime`}
-                      helper="填写运行时名称后,学生答题时会准备实操环境;纯答题题留空"
-                    >
-                      <Input
-                        id={`${fieldId}-contest-runtime`}
-                        value={runtimeCode}
-                        placeholder="ethereum-hardhat"
-                        onChange={(event) => setRuntimeCode(event.target.value)}
-                      />
-                    </FormField>
-                    <FormField
-                      label="答案提交字段"
-                      htmlFor={`${fieldId}-submit-key`}
-                      helper="学生输入的答案放在哪个字段中;需与判题配置保持一致;纯代码题留空"
-                    >
-                      <Input
-                        id={`${fieldId}-submit-key`}
-                        className="font-mono text-sm"
-                        value={submitKey}
-                        placeholder="例如 answer"
-                        onChange={(event) => setSubmitKey(event.target.value)}
-                      />
-                    </FormField>
+                  <FormField
+                    label="答案提交字段"
+                    htmlFor={`${fieldId}-submit-key`}
+                    helper="学生输入的答案放在哪个字段中;需与判题配置保持一致;纯代码题留空"
+                  >
+                    <Input
+                      id={`${fieldId}-submit-key`}
+                      className="font-mono text-sm"
+                      value={submitKey}
+                      placeholder="例如 answer"
+                      onChange={(event) => setSubmitKey(event.target.value)}
+                    />
+                  </FormField>
+
+                  <div className="flex flex-col gap-4 well p-4">
+                    <Checkbox
+                      checked={envEnabled}
+                      label="这道题需要实操环境(学生要写代码或操作链上合约)"
+                      onCheckedChange={(checked) => setEnvEnabled(checked === true)}
+                    />
+                    {envEnabled ? (
+                      <>
+                        <p className="text-sm text-ink-sub">
+                          环境随题目版本一起锁定:编排赛事时不再另配一套,平台换镜像也不会改变已开赛的赛题。
+                        </p>
+                        <CompositionDeclarationFields
+                          idPrefix={`${fieldId}-composition`}
+                          value={declaration}
+                          onChange={setDeclaration}
+                          toolsHelper="学生答这道题时能打开哪些工具"
+                          derivedInfraCodes={derivedInfraFromSpec(savedComposition).map(
+                            (infra) => infra.code,
+                          )}
+                        />
+                      </>
+                    ) : (
+                      <p className="text-sm text-ink-sub">
+                        纯答题类赛题不需要环境,学生按上面的提交字段填答案即可。
+                      </p>
+                    )}
                   </div>
+
                   <Callout tone="info">
                     判题配置与答案内容不在这里填写,也不会传给学生。提交键只是表单字段名,
                     随题面下发,学生据此知道答案该放在哪里。

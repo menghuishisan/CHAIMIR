@@ -19,6 +19,7 @@ source:
   type: platform-built
 upstream:
   image: node:24-alpine3.23
+  version: 24-alpine3.23
   digest: sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
   reuse_policy: runtime-base
 env_keys:
@@ -39,12 +40,17 @@ secrets_required:
     runtime_value: secret-or-kms
 data_driven: true
 capabilities:
-  - wallet-backend
+  provides:
+    - wallet-backend
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 infra:
   eco_tags:
     - evm
-    - fabric
-    - fisco
   roles:
     - wallet
     - signing-teaching

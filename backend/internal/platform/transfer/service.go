@@ -202,6 +202,7 @@ func (s *Service) BuildDownloadGrant(ctx context.Context, tenantID, taskID, acco
 	}
 	token, grant, err := s.files.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
 		TenantID:           task.TenantID,
+		ResourceTenantID:   task.TenantID,
 		AccountID:          task.AccountID,
 		AllowPlatformScope: task.TenantID == 0,
 		ObjectRef:          task.Artifact.ObjectRef,

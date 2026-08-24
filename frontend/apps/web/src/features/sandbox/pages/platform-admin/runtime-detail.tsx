@@ -1,13 +1,13 @@
 // 运行时详情页(平台深页,/platform-admin/runtimes/:runtimeId)。
 //
-// 这里做完运行时从登记到可用的后三步:登记镜像版本 → 预拉取到各节点 → 自检。
-// 顺序是后端的硬前置(RunRuntimeSelftest 要求默认镜像已预拉取成功且内置创世),
-// 所以页面按这个顺序排,并在前置没满足时说明为什么还不能自检,而不是让人点了才知道。
+// 这里做完运行时从登记到可用的后三步:登记镜像版本 → 为已发布组合预拉取 → 平台自检。
+// 五件事分开呈现,任一未过运行时就不该出现在教师的可选项里(对齐清单 §6.3 / §8.3):
+// 镜像证明、内置创世、组合预拉取、平台自检、调度状态 —— 镜像拉到节点或容器起得来都不算通过。
+// 预拉取属于组合闭包,必须显式输入 composition_digest;运行时镜像本身不保存默认或单布尔状态。
 //
 // 镜像摘要不让人手填:后端要求 digest 与镜像地址里的 @sha256: 部分完全一致,
 // 手抄两遍必然出错 —— 这里从地址里解析出来只读展示。
 //
-// 后端没有单条运行时读取接口,故从运行时列表里定位这一条。
 
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
@@ -23,11 +23,12 @@ import {
 import {
   ImagePrepullStatus,
   RuntimeImageStatus,
-	RuntimeSelftestStatus,
-	RuntimeStatus,
-	type SandboxRuntime,
-	type SandboxRuntimeImage,
-	type SandboxRuntimeSelftestDetail,
+  RuntimeSelftestStatus,
+  RuntimeStatus,
+  type SandboxRuntime,
+  type SandboxRuntimeImage,
+  type SandboxPrepullStatus,
+  type SandboxRuntimeSelftestDetail,
 } from '@chaimir/api-client'
 import {
   Badge,
@@ -35,6 +36,7 @@ import {
   Button,
   Callout,
   Checkbox,
+  DataPanel,
   DescriptionList,
   FormField,
   Input,
@@ -45,6 +47,7 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
+  ObjectIdentity,
   PageHeader,
   PageScaffold,
   PageSection,
@@ -57,7 +60,6 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
-import { formatDateTime } from '../../../../utils/formatters'
 import {
   imagePrepullStatusLabel,
   runtimeImageStatusLabel,
@@ -73,10 +75,10 @@ import {
 import {
   runtimeContainerName,
   runtimeContainerPortCount,
-  runtimeDefaultToolCodes,
-  runtimeSidecarCount,
+  runtimeDisabledReason,
   runtimeWorkspaceDir,
 } from '../../runtimeSpec'
+import { selftestReasonText, selftestResultText, selftestStageText } from '../../selftestText'
 
 /**
  * PlatformRuntimeDetailPage 承载单条运行时的镜像、预拉取与自检。
@@ -85,45 +87,37 @@ export default function PlatformRuntimeDetailPage() {
   const { runtimeId = '' } = useParams<{ runtimeId: string }>()
   const navigate = useNavigate()
 
-  const runtimes = useAsyncResource(() => api.sandbox.listRuntimes(), [], () => false)
+  // 单读走 getRuntime:深链首屏不再拉全量列表在浏览器里筛这一条
+  const runtime = useAsyncResource(
+    () => api.sandbox.getRuntime(runtimeId),
+    [runtimeId],
+    () => false
+  )
   const images = useAsyncResource(
     () => api.sandbox.listRuntimeImages(runtimeId),
     [runtimeId],
-    () => false,
-  )
-
-  const runtime = useMemo(
-    () => (runtimes.data ?? []).find((item) => item.id === runtimeId),
-    [runtimeId, runtimes.data],
+    () => false
   )
 
   return (
     <PageScaffold>
+      {/*
+        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的运行时名承担,
+        故页面头只出面包屑,末节到「链运行时」为止(§6.5.0 通则 1)。
+      */}
       <PageHeader
         kicker={
           <Breadcrumb
-            items={[
-              { label: '底层资源' },
-              { label: '链运行时', href: '/platform-admin/runtimes' },
-              { label: runtime ? runtime.name : '运行时详情' },
-            ]}
+            items={[{ label: '底层资源' }, { label: '链运行时', href: '/platform-admin/runtimes' }]}
           />
-        }
-        title={runtime ? runtime.name : '运行时详情'}
-        description="登记镜像版本、预拉取到各节点,再自检。自检通过后这条运行时才对学校开放。"
-        icon={Server}
-        actions={
-          <Button variant="outline" onClick={() => navigate('/platform-admin/runtimes')}>
-            返回运行时列表
-          </Button>
         }
       />
 
       <ResourceState
-        resource={runtimes}
+        resource={runtime}
         emptyIcon={Server}
-        emptyTitle="还没有登记链运行时"
-        emptyDescription="回列表登记第一条运行时。"
+        emptyTitle="运行时不存在"
+        emptyDescription="这条运行时可能已被移除,回列表重新选择。"
         skeleton={
           <div className="flex flex-col gap-4">
             <Skeleton variant="block" />
@@ -131,115 +125,155 @@ export default function PlatformRuntimeDetailPage() {
           </div>
         }
       >
-        {() =>
-          runtime ? (
-            <RuntimeOverview runtime={runtime} images={images.data ?? []} />
-          ) : (
-            <Callout tone="warning" title="没有找到这条运行时">
-              运行时可能已被移除,回列表重新选择。
-            </Callout>
-          )
-        }
+        {(data) => (
+          <>
+            <RuntimeOverview
+              runtime={data}
+              images={images.data ?? []}
+              onBack={() => navigate('/platform-admin/runtimes')}
+            />
+
+            <ImagesSection
+              runtimeId={runtimeId}
+              images={images}
+              onChanged={() => {
+                images.reload()
+                runtime.reload()
+              }}
+            />
+
+            <SelftestSection
+              runtime={data}
+              images={images.data ?? []}
+              onDone={() => {
+                runtime.reload()
+                images.reload()
+              }}
+            />
+          </>
+        )}
       </ResourceState>
-
-      <ImagesSection
-        runtimeId={runtimeId}
-        images={images}
-        onChanged={() => {
-          images.reload()
-          runtimes.reload()
-        }}
-      />
-
-      {runtime ? (
-        <SelftestSection
-          runtime={runtime}
-          images={images.data ?? []}
-          onDone={() => {
-            runtimes.reload()
-            images.reload()
-          }}
-        />
-      ) : null}
     </PageScaffold>
   )
 }
 
 /**
- * RuntimeOverview 渲染运行时声明摘要与当前状态。
+ * RuntimeOverview 渲染运行时的对象身份区与声明属性表。
  */
 function RuntimeOverview({
   runtime,
   images,
+  onBack,
 }: {
   runtime: SandboxRuntime
   images: SandboxRuntimeImage[]
+  onBack: () => void
 }) {
-  const defaultImage = images.find((item) => item.is_default)
+  const disabledReason = runtimeDisabledReason(runtime.adapter_spec)
+  const available = runtime.status === RuntimeStatus.AVAILABLE
+  const passed = runtime.selftest_status === RuntimeSelftestStatus.PASSED
+  // 只有「开放 + 自检通过」才算教师可选:两者缺一个都不能显示成可用(§8.3)
+  const selectable = available && passed
+  const genesisImages = images.filter(
+    (item) => item.genesis_baked && item.status === RuntimeImageStatus.AVAILABLE
+  )
 
   return (
-    <PageSection title="当前状态" description="声明内容在运行时列表页的「修改声明」里改。">
-      <div className="flex flex-col gap-4">
-        {/* 开放状态与自检结果已由下方两个状态指示灯表达,镜像版本数与默认镜像是声明属性,
-            统一进属性表,不占指标位(规范 §6.5) */}
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h3 className="text-base font-semibold text-ink">{runtime.code}</h3>
-              <p className="mt-0.5 text-sm text-ink-sub">
-                {runtime.eco} · 适配层级 {runtime.adapter_level}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusIndicator
-                tone={runtimeStatusTone(runtime.status)}
-                label={runtimeStatusLabel(runtime.status)}
-              />
-              <StatusIndicator
-                tone={runtimeSelftestStatusTone(runtime.selftest_status)}
-                label={runtimeSelftestStatusLabel(runtime.selftest_status)}
-              />
-            </div>
+    <>
+      {/*
+        对象身份区:运行时名 + 开放状态与自检状态 + 关键属性横排(§6.5.3 第 ④)。
+        两个状态各自成一个指示灯 —— 「对学校开放了吗」与「自检过了吗」是两件独立的事,
+        合成一个标签会让「已开放但自检失败」这种要紧组合读不出来。
+        适配清单里的目录、端口、组件数是声明细节,下沉到属性表。
+      */}
+      <ObjectIdentity
+        name={runtime.name}
+        status={
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusIndicator
+              tone={runtimeStatusTone(runtime.status)}
+              label={runtimeStatusLabel(runtime.status)}
+            />
+            <StatusIndicator
+              tone={runtimeSelftestStatusTone(runtime.selftest_status)}
+              label={runtimeSelftestStatusLabel(runtime.selftest_status)}
+            />
           </div>
+        }
+        subtitle={`${runtime.code} · ${runtime.eco} · 适配层级 ${runtime.adapter_level}`}
+        actions={
+          <Button variant="outline" onClick={onBack}>
+            返回运行时列表
+          </Button>
+        }
+        properties={[
+          { label: '教师可否选用', value: selectable ? '可以选用' : '暂不可选' },
+          { label: '镜像版本数', value: `${images.length} 个` },
+          { label: '可自检版本', value: `${genesisImages.length} 个` },
+          { label: '对外端口', value: `${runtimeContainerPortCount(runtime.adapter_spec)} 个` },
+          {
+            label: '主环境',
+            value: <span className="font-mono">{runtimeContainerName(runtime.adapter_spec)}</span>,
+          },
+        ]}
+      />
 
+      {!selectable ? (
+        <Callout tone="warning" title="这条运行时现在不会出现在教师的可选项里" className="mt-4">
+          {disabledReason ||
+            (passed
+              ? '自检已通过,但运行时还没有转为对学校开放。'
+              : '要先通过平台自检,运行时才会转为对学校开放。')}
+        </Callout>
+      ) : null}
+
+      <PageSection
+        title="接入链路"
+        description="镜像证明、内置创世、组合预拉取、平台自检、调度状态是五件独立的事,任一未过都不算可用 —— 镜像拉到节点或容器起得来都不代表通过。"
+        className="mt-6"
+      >
+        <div className="rounded-lg bg-surface p-5 shadow-xs">
           <DescriptionList
             columns={2}
             items={[
               {
-                term: '开放状态',
+                term: '镜像证明',
                 description:
-                  runtime.status === RuntimeStatus.AVAILABLE
-                    ? `${runtimeStatusLabel(runtime.status)} · 学校可以选用`
-                    : `${runtimeStatusLabel(runtime.status)} · 暂不分配给学校`,
+                  images.length > 0
+                    ? `${images.length} 个版本已登记(登记时校验私有仓库、签名与漏洞扫描)`
+                    : '还没有登记镜像版本',
               },
               {
-                term: '默认镜像',
-                description: defaultImage
-                  ? `${defaultImage.version}(自检与新环境用这个版本)`
-                  : '未指定,指定后才能自检',
+                term: '内置创世',
+                description:
+                  genesisImages.length > 0
+                    ? `${genesisImages.map((item) => item.version).join('、')} 已内置创世状态`
+                    : '还没有「已启用且内置创世」的版本,自检起不来',
               },
-              { term: '镜像版本数', description: `${images.length} 个` },
+              {
+                term: '组合预拉取',
+                description: '按已发布组合把镜像闭包分发到各节点,在下方镜像版本区按组合摘要执行',
+              },
+              {
+                term: '平台自检',
+                description: `${runtimeSelftestStatusLabel(runtime.selftest_status)}${
+                  passed ? '' : ' · 通过后才对学校开放'
+                }`,
+              },
+              {
+                term: '调度状态',
+                description: available
+                  ? `${runtimeStatusLabel(runtime.status)} · 学校可以选用`
+                  : `${runtimeStatusLabel(runtime.status)} · 暂不分配给学校`,
+              },
+              {
+                term: '不可用原因',
+                description: disabledReason || '无',
+              },
               {
                 term: '工作区目录',
                 description: runtimeWorkspaceDir(runtime.adapter_spec),
                 mono: true,
-              },
-              {
-                term: '主环境',
-                description: runtimeContainerName(runtime.adapter_spec),
-                mono: true,
-              },
-              {
-                term: '对外端口',
-                description: `${runtimeContainerPortCount(runtime.adapter_spec)} 个`,
-              },
-              {
-                term: '附加组件',
-                description: `${runtimeSidecarCount(runtime.adapter_spec)} 个`,
-              },
-              {
-                term: '默认工具',
-                description: runtimeDefaultToolCodes(runtime.adapter_spec).join('、') || '未指定',
               },
               {
                 term: '能力实现',
@@ -249,8 +283,8 @@ function RuntimeOverview({
             ]}
           />
         </div>
-      </div>
-    </PageSection>
+      </PageSection>
+    </>
   )
 }
 
@@ -266,6 +300,8 @@ interface ImagesSectionProps {
 function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
   const [createOpen, setCreateOpen] = useState(false)
   const [busyId, setBusyId] = useState<string>()
+  const [compositionDigest, setCompositionDigest] = useState('')
+  const [prepullStates, setPrepullStates] = useState<Record<string, SandboxPrepullStatus>>({})
   const [disableTarget, setDisableTarget] = useState<SandboxRuntimeImage>()
   const [actionError, setActionError] = useState<string>()
 
@@ -275,11 +311,17 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
       setBusyId(image.id)
       setActionError(undefined)
       try {
-        const status = await api.sandbox.prepullRuntimeImage(runtimeId, image.id)
+        const digest = compositionDigest.trim()
+        if (!digest) {
+          setActionError('请先填写已发布组合摘要,再执行预拉取。')
+          return
+        }
+        const status = await api.sandbox.prepullRuntimeImage(runtimeId, image.id, digest)
+        setPrepullStates((current) => ({ ...current, [image.id]: status }))
         toast.success(
           status.prepull_status === ImagePrepullStatus.SUCCEEDED
             ? `预拉取完成,${status.ready_nodes} 个节点已就绪`
-            : `预拉取已开始,当前 ${status.ready_nodes}/${status.desired_nodes} 个节点就绪`,
+            : `预拉取已开始,当前 ${status.ready_nodes}/${status.desired_nodes} 个节点就绪`
         )
         onChanged()
       } catch (error) {
@@ -288,7 +330,7 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
         setBusyId(undefined)
       }
     },
-    [onChanged, runtimeId],
+    [compositionDigest, onChanged, runtimeId]
   )
 
   /** refreshPrepull 重新读取预拉取进度:拉取在后台进行,页面不轮询,由管理员按需刷新。 */
@@ -297,7 +339,13 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
       setBusyId(image.id)
       setActionError(undefined)
       try {
-        const status = await api.sandbox.getRuntimeImagePrepull(runtimeId, image.id)
+        const digest = compositionDigest.trim()
+        if (!digest) {
+          setActionError('请先填写已发布组合摘要,再查询预拉取进度。')
+          return
+        }
+        const status = await api.sandbox.getRuntimeImagePrepull(runtimeId, image.id, digest)
+        setPrepullStates((current) => ({ ...current, [image.id]: status }))
         toast.success(`${status.ready_nodes}/${status.desired_nodes} 个节点已就绪`)
         onChanged()
       } catch (error) {
@@ -306,7 +354,7 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
         setBusyId(undefined)
       }
     },
-    [onChanged, runtimeId],
+    [compositionDigest, onChanged, runtimeId]
   )
 
   const columns: TableColumn<SandboxRuntimeImage>[] = [
@@ -317,7 +365,6 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="font-medium text-ink">{image.version}</span>
-            {image.is_default ? <Badge tone="jade">默认</Badge> : null}
             {image.genesis_baked ? <Badge tone="neutral">内置创世</Badge> : null}
           </div>
           <div className="truncate font-mono text-xs text-ink-sub">{image.image_url}</div>
@@ -326,20 +373,18 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
     },
     {
       key: 'prepull_status',
-      header: '预拉取',
-      render: (image) => (
-        <div className="flex flex-col gap-1">
-          <StatusIndicator
-            tone={imagePrepullStatusTone(image.prepull_status)}
-            label={imagePrepullStatusLabel(image.prepull_status)}
-          />
-          {image.prepulled_at ? (
-            <span className="font-mono text-xs text-ink-faint">
-              {formatDateTime(image.prepulled_at)}
-            </span>
-          ) : null}
-        </div>
-      ),
+      header: '组合预拉取',
+      render: (image) => {
+        const status = prepullStates[image.id]
+        return (
+          <div className="flex flex-col gap-1">
+            <StatusIndicator
+              tone={status ? imagePrepullStatusTone(status.prepull_status) : 'neutral'}
+              label={status ? imagePrepullStatusLabel(status.prepull_status) : '未查询'}
+            />
+          </div>
+        )
+      },
     },
     {
       key: 'status',
@@ -356,7 +401,7 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
       align: 'right',
       render: (image) => (
         <div className="flex items-center justify-end gap-1">
-          {image.prepull_status === ImagePrepullStatus.SUCCEEDED ? (
+          {prepullStates[image.id]?.prepull_status === ImagePrepullStatus.SUCCEEDED ? (
             <Button
               variant="ghost"
               size="sm"
@@ -374,7 +419,9 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
               loading={busyId === image.id}
               onClick={() => void prepull(image)}
             >
-              {image.prepull_status === ImagePrepullStatus.RUNNING ? '查看进度' : '预拉取'}
+              {prepullStates[image.id]?.prepull_status === ImagePrepullStatus.RUNNING
+                ? '查看进度'
+                : '预拉取'}
             </Button>
           )}
           {image.status === RuntimeImageStatus.AVAILABLE ? (
@@ -405,20 +452,51 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
       <div className="flex flex-col gap-4">
         {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
-        <ResourceState
-          resource={images}
-          emptyIcon={Container}
-          emptyTitle="还没有登记镜像版本"
-          emptyDescription="登记一个内置创世的版本并设为默认,预拉取成功后才能自检。"
-          emptyAction={
-            <Button variant="outline" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
-              登记镜像版本
-            </Button>
-          }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-        >
-          {(list) => <Table columns={columns} data={list} rowKey={(item) => item.id} />}
-        </ResourceState>
+        <FormField label="已发布组合摘要" helper="预拉取只针对该摘要锁定的完整镜像闭包">
+          <Input
+            value={compositionDigest}
+            placeholder="sha256:..."
+            className="font-mono text-sm"
+            onChange={(event) => setCompositionDigest(event.target.value)}
+          />
+        </FormField>
+
+        {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):镜像清单一次回齐,不分页也不筛选 */}
+        <DataPanel label="镜像版本">
+          <ResourceState
+            resource={images}
+            emptyIcon={Container}
+            emptyTitle="还没有登记镜像版本"
+            emptyDescription="登记一个带不可变摘要且内置创世的镜像版本,通过组合预拉取后再自检。"
+            emptyAction={
+              <Button variant="outline" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
+                登记镜像版本
+              </Button>
+            }
+            skeleton={
+              <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
+            }
+          >
+            {(list) => (
+              <Table
+                columns={columns}
+                data={list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):版本号一行、镜像摘要一行,预拉取状态在右
+                mobileCard={(item) => ({
+                  title: item.version,
+                  meta: digestFromImageUrl(item.image_url),
+                  badge: (
+                    <Badge tone={item.genesis_baked ? 'neutral' : 'warning'}>
+                      {item.genesis_baked ? '内置创世' : '未内置创世'}
+                    </Badge>
+                  ),
+                })}
+              />
+            )}
+          </ResourceState>
+        </DataPanel>
 
         <Callout tone="info">
           镜像必须来自平台私有仓库且通过签名与漏洞扫描,登记时后端会校验;停用版本不影响已在运行的环境。
@@ -465,7 +543,6 @@ function ImageFormModal({ runtimeId, onClose, onSaved }: ImageFormModalProps) {
   const [imageUrl, setImageUrl] = useState('')
   const [version, setVersion] = useState('')
   const [genesisBaked, setGenesisBaked] = useState(true)
-  const [isDefault, setIsDefault] = useState(true)
   const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
@@ -493,7 +570,6 @@ function ImageFormModal({ runtimeId, onClose, onSaved }: ImageFormModalProps) {
           version: version.trim(),
           digest,
           genesis_baked: genesisBaked,
-          is_default: isDefault,
         })
         toast.success('镜像版本已登记,接下来做预拉取')
         onSaved()
@@ -501,14 +577,14 @@ function ImageFormModal({ runtimeId, onClose, onSaved }: ImageFormModalProps) {
         setFormError(
           userFacingErrorMessage(
             error,
-            '登记没有成功。请确认镜像来自平台私有仓库,且已完成签名与漏洞扫描。',
-          ),
+            '登记没有成功。请确认镜像来自平台私有仓库,且已完成签名与漏洞扫描。'
+          )
         )
       } finally {
         setWorking(false)
       }
     },
-    [digest, genesisBaked, imageUrl, isDefault, onSaved, runtimeId, version],
+    [digest, genesisBaked, imageUrl, onSaved, runtimeId, version]
   )
 
   return (
@@ -539,10 +615,7 @@ function ImageFormModal({ runtimeId, onClose, onSaved }: ImageFormModalProps) {
               />
             </FormField>
 
-            <FormField
-              label="内容摘要"
-              helper="从镜像地址里自动读取,不需要手填"
-            >
+            <FormField label="内容摘要" helper="从镜像地址里自动读取,不需要手填">
               <Input readOnly className="font-mono text-sm" value={digest || '等待填写镜像地址'} />
             </FormField>
 
@@ -568,15 +641,10 @@ function ImageFormModal({ runtimeId, onClose, onSaved }: ImageFormModalProps) {
                 label="镜像内已内置创世状态"
                 onCheckedChange={(checked) => setGenesisBaked(checked === true)}
               />
-              <Checkbox
-                checked={isDefault}
-                label="设为默认版本(自检与新建环境都用它)"
-                onCheckedChange={(checked) => setIsDefault(checked === true)}
-              />
             </div>
 
             <Callout tone="info">
-              自检要求默认版本内置创世且预拉取成功。不内置创世的版本可以登记,但不能用来自检。
+              自检要求至少有一个可用且内置创世的镜像版本。不内置创世的版本可以登记,但不能用来自检。
             </Callout>
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
@@ -640,11 +708,6 @@ function DisableImageModal({ runtimeId, image, onClose, onDone }: DisableImageMo
               { term: '镜像地址', description: image.image_url, mono: true },
             ]}
           />
-          {image.is_default ? (
-            <Callout tone="warning" title="这是默认版本">
-              停用默认版本后,自检与新建环境会找不到可用镜像。请先登记新版本并设为默认。
-            </Callout>
-          ) : null}
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
         </ModalBody>
         <ModalFooter>
@@ -672,21 +735,21 @@ interface SelftestSectionProps {
  * 前置不满足时按后端条件说明缺什么,不让人点了才看到失败。
  */
 function SelftestSection({ runtime, images, onDone }: SelftestSectionProps) {
-	const [detail, setDetail] = useState<SandboxRuntimeSelftestDetail>()
+  const [detail, setDetail] = useState<SandboxRuntimeSelftestDetail>()
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
-  const defaultImage = images.find((item) => item.is_default)
+  const selftestImage = images.find(
+    (item) => item.status === RuntimeImageStatus.AVAILABLE && item.genesis_baked
+  )
   const blockers = useMemo(() => {
     const out: string[] = []
-    if (!defaultImage) out.push('还没有设为默认的镜像版本')
-    else {
-      if (!defaultImage.genesis_baked) out.push('默认版本没有内置创世状态')
-      if (defaultImage.prepull_status !== ImagePrepullStatus.SUCCEEDED)
-        out.push('默认版本还没有在所有节点预拉取成功')
-    }
+    if (!selftestImage) out.push('还没有可用且内置创世的镜像版本')
+    // 服务端已经写明不可部署原因时原样带出:自检点下去也只会按同一原因失败
+    const reason = runtimeDisabledReason(runtime.adapter_spec)
+    if (reason) out.push(reason)
     return out
-  }, [defaultImage])
+  }, [runtime.adapter_spec, selftestImage])
 
   const runSelftest = useCallback(async () => {
     setWorking(true)
@@ -697,7 +760,7 @@ function SelftestSection({ runtime, images, onDone }: SelftestSectionProps) {
       toast.success(
         result.selftest_status === RuntimeSelftestStatus.PASSED
           ? '自检通过,运行时已开放给学校'
-          : '自检没有通过,详情见下方',
+          : '自检没有通过,详情见下方'
       )
       onDone()
     } catch (error) {
@@ -721,22 +784,18 @@ function SelftestSection({ runtime, images, onDone }: SelftestSectionProps) {
     }
   }, [runtime.id])
 
+  // 自检明细只有四个稳定字段,逐个转成用户向文案:原因码不直接抛到界面上(§8 文案规范)
   const detailItems = useMemo(() => {
     if (!detail) return []
-    return Object.entries(detail).map(([key, value]) => ({
-      term: selftestStepLabel(key),
-      description:
-        typeof value === 'string'
-          ? value
-          : typeof value === 'boolean'
-            ? value
-              ? '通过'
-              : '未通过'
-            : typeof value === 'number'
-              ? String(value)
-              : '有更详细的记录,请查看服务端日志',
-    }))
+    const out: { term: string; description: string; mono?: boolean }[] = []
+    if (detail.result) out.push({ term: '自检结果', description: selftestResultText(detail.result) })
+    if (detail.stage) out.push({ term: '停在哪一步', description: selftestStageText(detail.stage) })
+    if (detail.reason) out.push({ term: '原因', description: selftestReasonText(detail.reason) })
+    if (detail.trace_id) out.push({ term: '报障编号', description: detail.trace_id, mono: true })
+    return out
   }, [detail])
+
+  const failed = runtime.selftest_status === RuntimeSelftestStatus.FAILED
 
   return (
     <PageSection
@@ -754,7 +813,7 @@ function SelftestSection({ runtime, images, onDone }: SelftestSectionProps) {
             disabled={blockers.length > 0}
             onClick={() => void runSelftest()}
           >
-            开始自检
+            {failed ? '重新自检' : '开始自检'}
           </Button>
         </div>
       }
@@ -774,8 +833,8 @@ function SelftestSection({ runtime, images, onDone }: SelftestSectionProps) {
               <h3 className="text-base font-semibold text-ink">自检状态</h3>
               <p className="mt-0.5 text-sm text-ink-sub">
                 {runtime.selftest_status === RuntimeSelftestStatus.PASSED
-                  ? '这条运行时已经通过自检。改了声明或换了默认镜像后建议重新自检。'
-                  : '自检通过后运行时才会转为可用。'}
+                  ? '这条运行时已经通过自检。改了声明或镜像版本后建议重新自检。'
+                  : '自检通过后运行时才会转为可用。镜像已拉到节点、容器能起来都不算通过。'}
               </p>
             </div>
             <StatusIndicator
@@ -804,22 +863,3 @@ function digestFromImageUrl(imageUrl: string): string {
   return parts[1]
 }
 
-/** 自检分步的用户向名称:未登记的键给通用名,不把内部标识抛到界面上。 */
-const SELFTEST_STEP_LABELS: Record<string, string> = {
-	result: '自检结果',
-	stage: '失败阶段',
-	trace_id: '报障编号',
-	workspace: '工作区读写',
-  terminal: '终端接入',
-  deploy: '合约部署',
-  tx: '发起交易',
-  query: '链上查询',
-  reset: '重置链状态',
-  message: '失败说明',
-  error: '失败说明',
-}
-
-/** selftestStepLabel 返回自检分步名称。 */
-function selftestStepLabel(key: string): string {
-  return SELFTEST_STEP_LABELS[key] ?? '其他检查项'
-}

@@ -153,13 +153,49 @@ func validatePackageRequest(req SubmitPackageRequest, authorID int64) error {
 
 // validateCreateSession 校验内部会话创建请求。
 func validateCreateSession(req CreateSessionRequest, tenantID int64) error {
-	if tenantID <= 0 || !simCodePattern.MatchString(strings.TrimSpace(req.PackageCode)) || !semverPattern.MatchString(strings.TrimSpace(req.Version)) || req.OwnerAccountID <= 0 || !auth.ValidSourceRef(req.SourceRef) {
+	if tenantID <= 0 || !simCodePattern.MatchString(strings.TrimSpace(req.PackageCode)) || !semverPattern.MatchString(strings.TrimSpace(req.Version)) || req.OwnerAccountID <= 0 || !auth.ValidSourceRef(req.SourceRef) || !auth.ValidScopeRef(req.ScopeRef) {
 		return apperr.ErrSimSessionInvalid
 	}
 	if req.InitParams == nil {
 		req.InitParams = map[string]any{}
 	}
 	return nil
+}
+
+// normalizeSessionSharedAccountIDs 生成会话创建事务要写入的唯一非 owner 共享账号集合。
+func normalizeSessionSharedAccountIDs(ownerAccountID int64, authorizedAccountIDs []int64) ([]int64, error) {
+	if ownerAccountID <= 0 {
+		return nil, apperr.ErrSimSessionInvalid
+	}
+	seen := map[int64]struct{}{ownerAccountID: {}}
+	out := make([]int64, 0, len(authorizedAccountIDs))
+	for _, accountID := range authorizedAccountIDs {
+		if accountID <= 0 {
+			return nil, apperr.ErrSimSessionInvalid
+		}
+		if _, exists := seen[accountID]; exists {
+			continue
+		}
+		seen[accountID] = struct{}{}
+		out = append(out, accountID)
+	}
+	return out, nil
+}
+
+// sessionAccountAuthorized 判断账号是否为会话 owner 或创建时明确记录的共享成员。
+func sessionAccountAuthorized(session Session, accountID int64) bool {
+	if accountID <= 0 {
+		return false
+	}
+	if session.OwnerAccountID == accountID {
+		return true
+	}
+	for _, sharedAccountID := range session.SharedAccountIDs {
+		if sharedAccountID == accountID {
+			return true
+		}
+	}
+	return false
 }
 
 // validateAction 校验客户端上报的操作序列内容。

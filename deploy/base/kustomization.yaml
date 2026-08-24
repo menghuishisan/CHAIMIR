@@ -1,6 +1,6 @@
 # base 层 Kustomize 聚合:平台通用资源(命名空间/RBAC/应用/配置/入口/策略/定时任务)。
 # 依据 docs/总-部署架构设计.md §四:base 定义通用资源,overlays 覆盖环境差异。
-# 镜像名为逻辑占位,由各 overlay 的 images: 覆盖 registry+tag。
+# 平台服务镜像在本层按不可变 digest 统一锁定,overlay 不得重复覆盖。
 # ConfigMap/Secret 由 generator 生成(带哈希后缀,变更自动触发滚动更新)。
 #
 # 注:networkpolicy/sandbox-template.yaml 为后端运行时模板,故意不列入资源
@@ -12,6 +12,7 @@ resources:
   - namespaces/namespaces.yaml
   - rbac/backend-sa.yaml
   - backend/deployment.yaml
+  - backend/pdb.yaml
   - backend/rbac-provisioner-deployment.yaml
   - frontend/deployment.yaml
   - migrate/migrate-job.yaml
@@ -21,32 +22,31 @@ resources:
   - admission/image-signature-policy.yaml
   - cronjobs/cronjobs.yaml
 
-configMapGenerator:
-  - name: chaimir-frontend-runtime-config
-    namespace: chaimir-system
-    files:
-      - runtime-config.js=frontend/runtime-config.js
-
 # 环境变量键:由 config component 从「唯一」env 源 ../config/chaimir.env 生成
 #   chaimir-config(chaimir-system)+ chaimir-data-config(chaimir-data)。
 # overlay 用 configMapGenerator behavior: merge 覆盖差异键(DEPLOY_MODE 等)。
 components:
   - ../config
 
-# 密钥真实值(Secret chaimir-secret / chaimir-data-secret)不放 base —— 因密钥处理按形态不同:
-#   acceptance / prod-school:overlay 用 secretGenerator 从 gitignored secret.env 生成;
-#   staging / prod-saas:overlay 引用 ../config/external-secret component,由 External Secrets/KMS 同步。
-# base 资源以字面名引用;overlay 有 secretGenerator 时 kustomize 自动改写为带哈希名。
-# 模板见 config/secret.env.example(复制为 config/secret.env,本地文件不入仓)。
+# 密钥真实值(Secret chaimir-secret / chaimir-data-secret)不放 base:
+#   所有形态统一由 ExternalSecret 从环境 SecretStore 同步,provider 由基础设施配置。
+# base 资源只引用固定名称,避免把密钥内容纳入 Kustomize 输入或生成哈希名称。
+# 受控密钥源输入模板见 config/secret.env.example,实际输入文件不入仓。
 
-# 镜像占位:overlay 覆盖。
+# 平台服务镜像引用由镜像晋级脚本从 images/image-digests.lock 同步。
 images:
   - name: chaimir/backend
-    newTag: placeholder
+    newName: registry.chaimir.io/service/backend
+    digest: sha256:5820e19f27f68508f24237fdc0a6dd00c58346cf8c4f708949b0bdfb4c8d8181
   - name: chaimir/frontend
-    newTag: placeholder
+    newName: registry.chaimir.io/service/frontend
+    digest: sha256:5332373e86cd28ea1c5d5f9c5cbd98f8f05fd8622579ce895ebecae79fca20aa
   - name: chaimir/migrate
-    newTag: placeholder
+    newName: registry.chaimir.io/service/migrate
+    digest: sha256:f0706e9147f490befb8c1ccb009fdb98ec7d0799beca3a9f2951d1cc7336c227
+  - name: chaimir/cron
+    newName: registry.chaimir.io/service/cron
+    digest: sha256:e92365afa1a570182a2777f1dff1a8287b3e2736eef885ab68bcd99ae2b23de4
 
 # generator 默认行为:加哈希后缀(配置变更触发滚动)。
 generatorOptions:

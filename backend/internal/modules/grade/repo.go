@@ -40,7 +40,7 @@ type TxStore interface {
 	LockSemesterCurrentScope(context.Context, int64) error
 	ClearCurrentSemesters(context.Context) error
 	CreateGradeReview(context.Context, int64, int64, int64, ReviewRequest) (ReviewDTO, error)
-	ListGradeReviews(context.Context, int16, int, int) ([]ReviewDTO, int64, error)
+	ListGradeReviews(context.Context, int16, int16, int, int) ([]ReviewDTO, int64, error)
 	ListOwnGradeReviews(context.Context, int64, int16, int, int) ([]ReviewDTO, int64, error)
 	GetGradeReview(context.Context, int64) (ReviewDTO, error)
 	GetLatestApprovedReviewByCourse(context.Context, int64) (ReviewDTO, error)
@@ -51,6 +51,7 @@ type TxStore interface {
 	RelockGradeReview(context.Context, int64, int64, string) (ReviewDTO, error)
 	CreateGradeLockOutbox(context.Context, int64, ReviewDTO, bool, string, string) (GradeLockOutbox, error)
 	ClaimPendingGradeLockOutbox(context.Context, int32, int32, time.Time, time.Time) ([]GradeLockOutbox, error)
+	RequeueExhaustedGradeLockOutbox(context.Context, int32) (int64, error)
 	MarkGradeLockOutboxPublished(context.Context, int64, int64, string) (GradeLockOutbox, error)
 	MarkGradeLockOutboxFailed(context.Context, int64, int64, string, string) (GradeLockOutbox, error)
 	UpsertStudentSemesterGrade(context.Context, int64, int64, int64, int64, float64, float64, float64) (GradeSummaryDTO, error)

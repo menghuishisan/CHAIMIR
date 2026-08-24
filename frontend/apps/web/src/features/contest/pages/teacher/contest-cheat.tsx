@@ -36,6 +36,7 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
+  DataPanel,
   PageBody,
   PageSection,
   Pagination,
@@ -134,34 +135,50 @@ export function ContestCheat({ contest }: ContestCheatProps) {
     <PageBody rail={<SuspectsCard contest={contest} onHandle={(sourceRef) => setRecordTarget({ sourceRef })} />}>
       <PageSection
         title="违规处理记录"
-        description={`共 ${records.total} 条记录。扣分与取消资格会立即影响榜单。`}
+        description="扣分与取消资格会立即影响榜单。"
         actions={
           <Button variant="primary" leftIcon={ShieldAlert} onClick={() => setRecordTarget({})}>
             登记违规
           </Button>
         }
       >
-        <div className="flex flex-col gap-4">
+        {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):数据表与分页同处一块抬起片 */}
+        <DataPanel
+          label="违规处理记录"
+          footer={
+            <Pagination
+              page={records.page}
+              pageSize={records.pageSize}
+              total={records.total}
+              onPageChange={records.setPage}
+            />
+          }
+        >
           <ResourceState
             resource={records}
             emptyIcon={ShieldAlert}
             emptyTitle="还没有违规记录"
             emptyDescription="确认队伍违规后在这里登记处理。记录会留档并计入审计。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (
-              <>
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={records.page}
-                  pageSize={records.pageSize}
-                  total={records.total}
-                  onPageChange={records.setPage}
-                />
-              </>
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):处理时间一行、违规类型与依据一行,处理方式在右
+                mobileCard={(item) => ({
+                  title: formatDateTime(item.created_at),
+                  meta: `${cheatTypeLabel(item.type)} · ${readString(item.evidence, EVIDENCE_NOTE) || '未填写说明'}`,
+                  badge: (
+                    <Badge tone={cheatActionTone(item.action)}>{cheatActionLabel(item.action)}</Badge>
+                  ),
+                })}
+              />
             )}
           </ResourceState>
-        </div>
+        </DataPanel>
       </PageSection>
 
       {recordTarget ? (

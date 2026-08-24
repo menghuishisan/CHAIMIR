@@ -19,17 +19,35 @@ source:
   type: platform-built
 upstream:
   components:
-    - image: ghcr.io/foundry-rs/foundry:v1.7.1@sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
+    - image: ghcr.io/foundry-rs/foundry:v1.7.1
+      digest: sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
       role: foundry-toolchain
     - image: node:24-alpine3.23
+      digest: sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
       role: node-runtime
   reuse_policy: self-developed-judger
 data_driven: true
 capabilities:
-  - judger
-  - evm-testcase-runner
+  provides:
+    - judger
+    - evm-testcase-runner
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 judger:
   type: testcase
+  runtime_code: evm-foundry
+  genesis_ref: genesis/evm-foundry/platform-selftest.json
+  command:
+    - run-evm-tests
+  exec_target: sandbox/testcase-evm
+  env:
+    - name: CHAIMIR_SUBMISSION_DIR
+      value: /judge-private
+  suite_archive_name: platform-selftest.tar
   modes:
     - hardhat
     - foundry

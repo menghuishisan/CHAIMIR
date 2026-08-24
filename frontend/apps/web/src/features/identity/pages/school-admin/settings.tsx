@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router'
 import { CircleCheck, KeyRound, Settings, Shield } from 'lucide-react'
 import { AuthMode, type Tenant } from '@chaimir/api-client'
 import {
+  AnchorNav,
   Badge,
   Breadcrumb,
   Button,
@@ -25,9 +26,9 @@ import {
   Input,
   PageHeader,
   PageScaffold,
-  PageSection,
   SegmentedControl,
   Skeleton,
+  StickySaveBar,
   Switch,
   TenantCrest,
   toast,
@@ -42,6 +43,13 @@ import { authModeLabel, deployModeLabel } from '../../../../utils/labels/identit
 import { readTenantModules, TENANT_MODULES_KEY } from '../../tenantModules'
 import { TENANT_MODULE_OPTIONS } from '../../options'
 
+/** 配置分组锚点(§6.5.3 第 ③ 族):id 与下方各分组卡的 id 一一对应。 */
+const SETTINGS_GROUPS = [
+  { id: 'settings-display', label: '展示信息' },
+  { id: 'settings-modules', label: '业务模块' },
+  { id: 'settings-auth', label: '登录与开通' },
+]
+
 /**
  * SchoolAdminSettingsPage 维护学校展示信息与开通策略。
  */
@@ -55,7 +63,7 @@ export default function SchoolAdminSettingsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '系统配置' }, { label: '学校配置' }]} />}
+        kicker={<Breadcrumb items={[{ label: '系统配置' }]} />}
         title="学校配置"
         description="学校的展示信息、启用的业务模块、登录方式与账号开通策略。"
         icon={Settings}
@@ -149,20 +157,65 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
     [authModeValue, displayName, enableActivation, modules, onSaved, tenant.feature_flags]
   )
 
+  /**
+   * 未保存改动数:逐项与服务端配置比对(§6.5.3 第 ③ 族的保存态要「改了几处」而不是「有改动」)。
+   * 校徽不计入:它上传即落库,不走这个表单的提交。
+   */
+  const dirtyCount = useMemo(() => {
+    const savedModules = readTenantModules(tenant.feature_flags)
+    const moduleChanged =
+      savedModules.length !== modules.length ||
+      savedModules.some((code) => !modules.includes(code))
+    return [
+      displayName.trim() !== (tenant.display_name ?? tenant.name),
+      authModeValue !== tenant.auth_mode,
+      enableActivation !== tenant.enable_activation_code,
+      moduleChanged,
+    ].filter(Boolean).length
+  }, [
+    authModeValue,
+    displayName,
+    enableActivation,
+    modules,
+    tenant.auth_mode,
+    tenant.display_name,
+    tenant.enable_activation_code,
+    tenant.feature_flags,
+    tenant.name,
+  ])
+
+  /** discard 把表单退回服务端当前值 —— 放弃改动是这一族保存条的标准动作 */
+  const discard = useCallback(() => {
+    setDisplayName(tenant.display_name ?? tenant.name)
+    setAuthMode(String(tenant.auth_mode))
+    setEnableActivation(tenant.enable_activation_code)
+    setModules(readTenantModules(tenant.feature_flags))
+    setFormError(undefined)
+  }, [tenant])
+
   return (
     <>
-      <PageSection title="学校档案" description="这些信息由平台开通时设定,校内不可修改。">
-        <DescriptionList dense columns={2} items={profileItems} />
-      </PageSection>
+      {/*
+        归族:配置表单族(§6.5.3 第 ③)。左侧分组锚点 + 右侧分组表单 + 底部粘性保存条。
+        保存条常显解决的是「改完中间某一项要滚到最底才能存,而且不知道改了几处」。
+      */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
+        <div className="min-w-0 lg:w-48 lg:shrink-0">
+          <AnchorNav label="学校配置分组" items={SETTINGS_GROUPS} />
+        </div>
 
-      <PageSection title="可修改的配置">
-        <Card>
-          <CardHeader
-            title="展示与策略"
-            description="显示名与校徽出现在登录页与顶栏;开通策略影响新账号怎么首次登录。"
-          />
-          <CardBody>
-            <form onSubmit={submit} noValidate className="flex flex-col gap-4">
+        <form onSubmit={submit} noValidate className="flex min-w-0 flex-1 flex-col gap-4">
+          <Card id="settings-display" className="scroll-mt-20">
+            <CardHeader
+              title="展示信息"
+              description="显示名与校徽出现在登录页与顶栏。学校名称与短码由平台开通时设定,校内不可修改。"
+            />
+            <CardBody className="flex flex-col gap-4">
+              {/* 只读档案进井(§6.5.3 第 ③:只读信息与可改字段分层) */}
+              <div className="well p-4">
+                <DescriptionList dense columns={2} items={profileItems} />
+              </div>
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <FormField
                   label="学校显示名"
@@ -206,12 +259,16 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                   />
                 </FormField>
               </div>
+            </CardBody>
+          </Card>
 
-              <FormField
-                label="启用的业务模块"
-                required
-                helper="关掉的模块对师生不可见。已有数据不会删除,重新开启即恢复"
-              >
+          <Card id="settings-modules" className="scroll-mt-20">
+            <CardHeader
+              title="业务模块"
+              description="关掉的模块对师生不可见。已有数据不会删除,重新开启即恢复。"
+            />
+            <CardBody>
+              <FormField label="启用的业务模块" required>
                 <div className="flex flex-col gap-3">
                   {TENANT_MODULE_OPTIONS.map((option) => (
                     <div key={option.value} className="flex items-start justify-between gap-3">
@@ -234,7 +291,15 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                   ))}
                 </div>
               </FormField>
+            </CardBody>
+          </Card>
 
+          <Card id="settings-auth" className="scroll-mt-20">
+            <CardHeader
+              title="登录与开通"
+              description="师生用哪种方式登录,以及新账号怎么首次进入系统。"
+            />
+            <CardBody className="flex flex-col gap-4">
               <FormField
                 label="登录方式"
                 required
@@ -292,19 +357,28 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                   </Badge>
                 </div>
               </div>
+            </CardBody>
+          </Card>
 
-              {formError ? <Callout tone="danger">{formError}</Callout> : null}
+          {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
-              <div className="flex items-center gap-2">
-                <Button type="submit" variant="primary" leftIcon={CircleCheck} loading={working}>
-                  保存配置
-                </Button>
-                <span className="text-sm text-ink-sub">修改会记入审计日志。</span>
-              </div>
-            </form>
-          </CardBody>
-        </Card>
-      </PageSection>
+          <StickySaveBar
+            dirtyCount={dirtyCount}
+            saving={working}
+            hint="修改会记入审计日志。"
+            discardAction={
+              <Button type="button" variant="ghost" onClick={discard}>
+                放弃改动
+              </Button>
+            }
+            saveAction={
+              <Button type="submit" variant="primary" leftIcon={CircleCheck} loading={working}>
+                保存配置
+              </Button>
+            }
+          />
+        </form>
+      </div>
     </>
   )
 }

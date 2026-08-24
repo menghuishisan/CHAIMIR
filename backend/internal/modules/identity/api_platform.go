@@ -21,11 +21,26 @@ func registerPlatformRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
 	g := r.Group("/platform")
 	g.POST("/applications", httpx.RateLimitMiddleware(svc.redis, "identity:application-rate", svc.cfg.ApplicationRateMax, time.Duration(svc.cfg.ApplicationRateWindowSeconds)*time.Second), api.createApplication)
 	g.GET("/applications", authn.Middleware(), auth.RequirePlatformIdentity(), api.listApplications)
+	g.GET("/applications/:id", authn.Middleware(), auth.RequirePlatformIdentity(), api.getApplication)
 	g.POST("/applications/:id/approve", authn.Middleware(), auth.RequirePlatformIdentity(), api.approveApplication)
 	g.POST("/applications/:id/reject", authn.Middleware(), auth.RequirePlatformIdentity(), api.rejectApplication)
 	g.GET("/tenants", authn.Middleware(), auth.RequirePlatformIdentity(), api.listTenants)
 	g.GET("/tenants/:id", authn.Middleware(), auth.RequirePlatformIdentity(), api.getTenant)
 	g.PATCH("/tenants/:id", authn.Middleware(), auth.RequirePlatformIdentity(), api.updateTenant)
+}
+
+// getApplication 读取平台管理员可见的单个入驻申请。
+func (a platformAPI) getApplication(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetApplicationByPlatform(c.Request.Context(), id)
+	if err != nil {
+		httpx.Write(c, struct{}{}, err)
+		return
+	}
+	httpx.Write(c, ToTenantApplicationDTO(out), nil)
 }
 
 // createApplication 绑定公开入驻申请请求,该入口不创建账号也不直接开通学校。

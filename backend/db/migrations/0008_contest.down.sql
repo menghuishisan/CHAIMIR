@@ -8,11 +8,14 @@ DROP POLICY IF EXISTS battle_match_tenant_rls ON battle_match;
 DROP POLICY IF EXISTS battle_entry_tenant_rls ON battle_entry;
 DROP POLICY IF EXISTS solve_submission_tenant_rls ON solve_submission;
 DROP POLICY IF EXISTS team_member_tenant_rls ON team_member;
+DROP POLICY IF EXISTS contest_access_grant_tenant_rls ON contest_access_grant;
 DROP POLICY IF EXISTS team_tenant_rls ON team;
 DROP POLICY IF EXISTS contest_problem_tenant_rls ON contest_problem;
 DROP POLICY IF EXISTS contest_tenant_rls ON contest;
 
 DROP INDEX IF EXISTS uniq_vuln_problem_source_external;
+DROP INDEX IF EXISTS idx_contest_access_grant_subject;
+DROP INDEX IF EXISTS idx_contest_access_grant_sandbox;
 
 DROP TABLE IF EXISTS vuln_problem;
 DROP TABLE IF EXISTS vuln_source;
@@ -22,6 +25,7 @@ DROP TABLE IF EXISTS ladder_rank;
 DROP TABLE IF EXISTS battle_match;
 DROP TABLE IF EXISTS battle_entry;
 DROP TABLE IF EXISTS solve_submission;
+DROP TABLE IF EXISTS contest_access_grant;
 DROP TABLE IF EXISTS team_member;
 DROP TABLE IF EXISTS team;
 DROP TABLE IF EXISTS contest_problem;

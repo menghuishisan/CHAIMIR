@@ -7,6 +7,13 @@ type EnvVarSpec struct {
 	Value string `json:"value"`
 }
 
+// SecretEnvVarSpec 描述由当前沙箱命名空间 Secret 注入的敏感环境变量。
+type SecretEnvVarSpec struct {
+	Name       string `json:"name"`
+	SecretName string `json:"secret_name"`
+	SecretKey  string `json:"secret_key"`
+}
+
 // PortSpec 描述组件容器端口和平台代理暴露口径。
 type PortSpec struct {
 	Name          string `json:"name"`
@@ -44,6 +51,7 @@ type ComponentSpec struct {
 	Command                []string             `json:"command"`
 	Args                   []string             `json:"args"`
 	Env                    []EnvVarSpec         `json:"env"`
+	SecretEnv              []SecretEnvVarSpec   `json:"secret_env,omitempty"`
 	Ports                  []PortSpec           `json:"ports"`
 	Resources              ResourceSpec         `json:"resources"`
 	ReadinessProbe         ProbeSpec            `json:"readiness_probe"`
@@ -52,9 +60,12 @@ type ComponentSpec struct {
 	ReadOnlyRootFilesystem *bool                `json:"read_only_root_filesystem"`
 	Labels                 map[string]string    `json:"labels"`
 	MountWorkspace         *bool                `json:"mount_workspace"`
+	MountDomains           []string             `json:"mount_domains,omitempty"`
 	EphemeralMounts        []EphemeralMountSpec `json:"ephemeral_mounts"`
 	PrepullCommand         []string             `json:"prepull_command"`
 	PrepullHold            bool                 `json:"prepull_hold"`
+	RunAsUser              *int64               `json:"run_as_user,omitempty"`
+	RunAsGroup             *int64               `json:"run_as_group,omitempty"`
 }
 
 // PodSpec 描述一个工作负载 Pod 及其组件组。

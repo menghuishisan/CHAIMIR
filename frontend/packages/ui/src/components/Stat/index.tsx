@@ -1,8 +1,12 @@
 /**
- * Stat:统计指标卡(§5.1 / §6.5 指标带)。
+ * Stat:统计指标卡(§5.1 / §6.5.3 第 ② 族「看板」的指标带)。
  * Display 字体大数字 + tabular-nums;可带 Lucide 图标、涨跌 delta、补充说明,
  * 以及迷你链进度(chain:数值下方渲染 sm 号 ChainProgress,§5.1「可带迷你链」)。
  * delta 色非唯一:方向永远配 TrendingUp/TrendingDown 图标,不依赖颜色传达。
+ *
+ * **只用于看板族。** 资源列表族的指标改用 `MetricStrip`(§6.5.3 第 ① 族):
+ * 那一族的主体是列表,四张 Display 字号大卡会占掉首屏三分之一并压过真正的主角。
+ * 数值口径两族同受 §6.5.4 约束:只承载可度量的数字、必须是服务端全量聚合。
  */
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";

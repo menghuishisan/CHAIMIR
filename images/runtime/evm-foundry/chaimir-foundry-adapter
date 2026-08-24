@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
-# 本脚本为 Foundry 运行时提供受控的 EVM 链部署、交易、查询和重置能力。
+# 本脚本是 Foundry runtime 自带的原生链能力插件,通过 stdin/stdout JSON 提供受控动作。
 set -eu
 
-cmd="${1:-}"
+action="${1:-}"
 rpc_url="${CHAIMIR_EVM_RPC_URL:-http://127.0.0.1:${CHAIMIR_RUNTIME_RPC_PORT:-8545}}"
 state_dir="${CHAIMIR_CHAIN_STATE_DIR:-/runtime-state}"
 last_contract_file="$state_dir/last-contract-address"
@@ -14,10 +14,8 @@ fail() {
 
 read_payload() {
   payload="$(cat)"
-  if [ -z "$payload" ]; then
-    payload='{}'
-  fi
-  printf '%s' "$payload" | jq -e . >/dev/null
+  [ -n "$payload" ] || payload='{}'
+  printf '%s' "$payload" | jq -e . >/dev/null || fail "输入不是有效 JSON" 22
   printf '%s' "$payload"
 }
 
@@ -25,13 +23,7 @@ json_string() {
   jq -r "$1 // empty"
 }
 
-case "$cmd" in
-  reset)
-    mkdir -p "$state_dir"
-    cast rpc --rpc-url "$rpc_url" anvil_reset >/dev/null
-    rm -f "$last_contract_file"
-    printf '{}'
-    ;;
+case "$action" in
   deploy)
     payload="$(read_payload)"
     bytecode="$(printf '%s' "$payload" | json_string '.bytecode')"
@@ -39,9 +31,7 @@ case "$cmd" in
     artifact="$(printf '%s' "$payload" | json_string '.artifact')"
     private_key="$(printf '%s' "$payload" | json_string '.private_key')"
     from="$(printf '%s' "$payload" | json_string '.from')"
-    if [ -z "$private_key" ]; then
-      private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-}"
-    fi
+    [ -n "$private_key" ] || private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-}"
     if [ -z "$bytecode" ] && [ -n "$project_dir" ] && [ -n "$artifact" ]; then
       bytecode="$(jq -r '.bytecode.object // .bytecode // empty' "$project_dir/$artifact")"
     fi
@@ -67,12 +57,8 @@ case "$cmd" in
     value="$(printf '%s' "$payload" | json_string '.value')"
     private_key="$(printf '%s' "$payload" | json_string '.private_key')"
     from="$(printf '%s' "$payload" | json_string '.from')"
-    if [ -z "$to" ] && [ -f "$last_contract_file" ]; then
-      to="$(cat "$last_contract_file")"
-    fi
-    if [ -z "$private_key" ]; then
-      private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-}"
-    fi
+    [ -n "$to" ] || [ ! -f "$last_contract_file" ] || to="$(cat "$last_contract_file")"
+    [ -n "$private_key" ] || private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-}"
     [ -n "$to" ] || fail "tx payload requires to or a previous deployment" 22
     [ -n "$data" ] || fail "tx payload requires data" 22
     if [ -n "$private_key" ] && [ -n "$value" ]; then
@@ -99,7 +85,7 @@ case "$cmd" in
         ;;
       chainId)
         value="$(cast chain-id --rpc-url "$rpc_url")"
-        jq -cn --arg target "$target" --argjson chain_id "$value" '{target:$target,chain_id:$chain_id}'
+        jq -cn --arg target "$target" --arg chain_id "$value" '{target:$target,chain_id:$chain_id}'
         ;;
       balance:*)
         address="${target#balance:}"
@@ -117,10 +103,11 @@ case "$cmd" in
     esac
     ;;
   selftest)
-    command -v cast >/dev/null
-    command -v jq >/dev/null
+    command -v cast >/dev/null || fail "cast 不可用" 70
+    command -v jq >/dev/null || fail "jq 不可用" 70
+    printf '{"result":"passed"}\n'
     ;;
   *)
-    fail "unknown chain command" 64
+    fail "unknown chain action" 64
     ;;
 esac

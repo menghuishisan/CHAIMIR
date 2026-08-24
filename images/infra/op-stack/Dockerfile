@@ -38,13 +38,17 @@ RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}";
     && go mod tidy \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -p=2 -trimpath -ldflags="-s -w -X github.com/ethereum-optimism/optimism/op-node/version.Version=${OP_NODE_VERSION}-chaimir-secure -X github.com/ethereum-optimism/optimism/op-node/version.Meta=source-rebuild" -o /src/op-node ./op-node/cmd
 
+COPY entrypoint.go /src/chaimir-op-node-entrypoint.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /src/chaimir-op-node-entrypoint /src/chaimir-op-node-entrypoint.go
+
 FROM ${RUNTIME_IMAGE}
 
 LABEL org.opencontainers.image.title="infra/op-stack"
 LABEL org.opencontainers.image.description="Chaimir OP Stack op-node source rebuild image"
 
 COPY --from=op-node-build /src/op-node /usr/local/bin/op-node
+COPY --from=op-node-build /src/chaimir-op-node-entrypoint /usr/local/bin/chaimir-op-node-entrypoint
 USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8545 9003
-ENTRYPOINT ["op-node"]
+ENTRYPOINT ["/usr/local/bin/chaimir-op-node-entrypoint"]

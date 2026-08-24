@@ -4,40 +4,66 @@ package experiment
 import (
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 )
 
 // ExperimentRequest 是创建或更新实验定义的请求。
 type ExperimentRequest struct {
-	CourseID        ids.ID          `json:"course_id"`
-	TemplateRef     string          `json:"template_ref"`
-	TemplateVersion string          `json:"template_version"`
-	Name            string          `json:"name"`
-	Description     string          `json:"description"`
-	Components      ComponentConfig `json:"components"`
-	CollabMode      int16           `json:"collab_mode"`
-	GroupConfig     GroupConfig     `json:"group_config"`
-	RequireReport   bool            `json:"require_report"`
-	WizardStep      int16           `json:"wizard_step"`
+	CourseID        ids.ID                 `json:"course_id"`
+	TemplateRef     string                 `json:"template_ref"`
+	TemplateVersion string                 `json:"template_version"`
+	Name            string                 `json:"name"`
+	Description     string                 `json:"description"`
+	Components      ComponentConfigRequest `json:"components"`
+	CollabMode      int16                  `json:"collab_mode"`
+	GroupConfig     GroupConfig            `json:"group_config"`
+	RequireReport   bool                   `json:"require_report"`
+	WizardStep      int16                  `json:"wizard_step"`
 }
 
 // ExperimentDTO 是实验定义的用户向输出。
 type ExperimentDTO struct {
-	ID              ids.ID          `json:"id"`
-	CourseID        ids.ID          `json:"course_id,omitempty"`
-	AuthorID        ids.ID          `json:"author_id"`
-	TemplateRef     string          `json:"template_ref,omitempty"`
-	TemplateVersion string          `json:"template_version,omitempty"`
-	Name            string          `json:"name"`
-	Description     string          `json:"description"`
-	Components      ComponentConfig `json:"components"`
-	CollabMode      int16           `json:"collab_mode"`
-	GroupConfig     GroupConfig     `json:"group_config"`
-	RequireReport   bool            `json:"require_report"`
-	WizardStep      int16           `json:"wizard_step"`
-	Status          int16           `json:"status"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
+	ID              ids.ID                    `json:"id"`
+	CourseID        ids.ID                    `json:"course_id,omitempty"`
+	AuthorID        ids.ID                    `json:"author_id"`
+	TemplateRef     string                    `json:"template_ref,omitempty"`
+	TemplateVersion string                    `json:"template_version,omitempty"`
+	Name            string                    `json:"name"`
+	Description     string                    `json:"description"`
+	Components      TeacherComponentConfigDTO `json:"components"`
+	CollabMode      int16                     `json:"collab_mode"`
+	GroupConfig     GroupConfig               `json:"group_config"`
+	RequireReport   bool                      `json:"require_report"`
+	WizardStep      int16                     `json:"wizard_step"`
+	Status          int16                     `json:"status"`
+	CreatedAt       time.Time                 `json:"created_at"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
+}
+
+// TeacherComponentConfigDTO 是教师读取实验定义时的安全投影,不暴露编译快照中的镜像和适配器细节。
+type TeacherComponentConfigDTO struct {
+	Envs        []TeacherEnvComponentDTO `json:"envs"`
+	Sims        []SimComponent           `json:"sims"`
+	Checkpoints []CheckpointComponent    `json:"checkpoints"`
+	Stages      []StageConfig            `json:"stages"`
+}
+
+// TeacherEnvComponentDTO 展示声明和服务端生成的摘要,摘要不能由客户端提交或修改。
+type TeacherEnvComponentDTO struct {
+	ID                       string                              `json:"id"`
+	PrimaryRuntime           contracts.CompositionRuntimeRef     `json:"primary_runtime"`
+	Infra                    []contracts.CompositionComponentRef `json:"infra"`
+	Tools                    []contracts.CompositionComponentRef `json:"tools"`
+	Links                    []contracts.CompositionLink         `json:"links"`
+	AccessProfile            contracts.SandboxAccessProfile      `json:"access_profile"`
+	CompositionDigest        string                              `json:"composition_digest"`
+	InitCodeRef              string                              `json:"init_code_ref"`
+	InitScriptRef            string                              `json:"init_script_ref"`
+	KeepAlive                bool                                `json:"keep_alive"`
+	SnapshotEnabled          bool                                `json:"snapshot_enabled"`
+	KeepAliveMinutes         int32                               `json:"keep_alive_minutes"`
+	SnapshotRetentionMinutes int32                               `json:"snapshot_retention_minutes"`
 }
 
 // StudentExperimentDTO 是学生可发现实验视图，不包含初始化脚本、答案和判题配置。
@@ -66,9 +92,13 @@ type StudentComponentConfig struct {
 
 // StudentEnvComponent 描述学生可见的运行环境和工具。
 type StudentEnvComponent struct {
-	ID          string   `json:"id"`
-	RuntimeCode string   `json:"runtime_code"`
-	Tools       []string `json:"tools"`
+	ID                string                              `json:"id"`
+	PrimaryRuntime    contracts.CompositionRuntimeRef     `json:"primary_runtime"`
+	Infra             []contracts.CompositionComponentRef `json:"infra"`
+	Tools             []contracts.CompositionComponentRef `json:"tools"`
+	Links             []contracts.CompositionLink         `json:"links"`
+	AccessProfile     contracts.SandboxAccessProfile      `json:"access_profile"`
+	CompositionDigest string                              `json:"composition_digest"`
 }
 
 // StudentSimComponent 描述学生可见的仿真包锁定版本。
@@ -180,8 +210,8 @@ type ReportUploadRequest struct {
 
 // GradeReportRequest 是教师批改实验报告的请求。
 type GradeReportRequest struct {
-	ManualScore float64 `json:"manual_score"`
-	Comment     string  `json:"comment"`
+	ManualScore *float64 `json:"manual_score"`
+	Comment     string   `json:"comment"`
 }
 
 // ReportDTO 是实验报告输出。

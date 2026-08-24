@@ -4,6 +4,7 @@ package content
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"chaimir/internal/modules/content/internal/sqlcgen"
 	"chaimir/internal/platform/db"
@@ -41,6 +42,7 @@ type TxStore interface {
 	ReplacePaperItems(ctx context.Context, tenantID, paperID int64, items []PaperItem) ([]PaperItem, error)
 	GetPaper(ctx context.Context, tenantID, id int64) (Paper, error)
 	ListPapers(ctx context.Context, tenantID int64, page, size int) ([]Paper, int64, error)
+	CountPapersByGenMode(ctx context.Context, tenantID int64) (map[string]int64, error)
 	ListPaperItems(ctx context.Context, tenantID, paperID int64) ([]PaperItem, error)
 	RandomPickItems(ctx context.Context, tenantID int64, criteria PaperCriteria) ([]Item, error)
 }
@@ -343,6 +345,19 @@ func (s *txStore) ListPapers(ctx context.Context, tenantID int64, page, size int
 		out = append(out, paper)
 	}
 	return out, total, nil
+}
+
+// CountPapersByGenMode 按试卷生成方式统计全量数量。
+func (s *txStore) CountPapersByGenMode(ctx context.Context, tenantID int64) (map[string]int64, error) {
+	rows, err := s.q.CountPapersByGenMode(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		out[strconv.Itoa(int(row.GenMode))] = row.Count
+	}
+	return out, nil
 }
 
 // ListPaperItems 查询卷题集合。

@@ -8,6 +8,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { Calculator, Download, Pencil, Percent, Send } from 'lucide-react'
 import {
   GradeSource,
+  PAGINATION_MAX_SIZE,
   type Assignment,
   type GradeWeightInput,
   type TeachingCourseGrade,
@@ -28,6 +29,7 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
+  DataPanel,
   PageSection,
   Pagination,
   Select,
@@ -207,20 +209,45 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
         <div className="flex flex-col gap-4">
           {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
-          <ResourceState
-            resource={grades}
-            emptyIcon={Send}
-            emptyTitle="还没有成绩记录"
-            emptyDescription="配置权重后点「按权重计算」生成全班成绩。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+          {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):数据表与分页同处一块抬起片 */}
+          <DataPanel
+            label="全班成绩"
+            footer={
+              <Pagination
+                page={grades.page}
+                pageSize={grades.pageSize}
+                total={grades.total}
+                onPageChange={grades.setPage}
+              />
+            }
           >
-            {(page) => (
-              <div className="flex flex-col gap-4">
-                <Table columns={columns} data={page.list} rowKey={(grade) => grade.student_id} />
-                <Pagination page={grades.page} pageSize={grades.pageSize} total={grades.total} onPageChange={grades.setPage} />
-              </div>
-            )}
-          </ResourceState>
+            <ResourceState
+              resource={grades}
+              emptyIcon={Send}
+              emptyTitle="还没有成绩记录"
+              emptyDescription="配置权重后点「按权重计算」生成全班成绩。"
+              skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+            >
+              {(page) => (
+                <Table
+                  columns={columns}
+                  data={page.list}
+                  rowKey={(grade) => grade.student_id}
+                  elevated={false}
+                  // <md 换行卡(§6.4.1 规则 3):学生一行、按权重与调整分一行,总评在右
+                  mobileCard={(grade) => ({
+                    title: grade.is_locked ? '成绩已锁定' : '在读学生',
+                    meta: `按权重 ${formatScore(grade.auto_total)}${grade.is_overridden ? ` · 人工调整 ${formatScore(grade.override_total)}` : ''} · ${grade.credits} 学分`,
+                    badge: (
+                      <span className="font-mono text-sm font-medium text-ink tabular-nums">
+                        总评 {formatScore(grade.final_total)}
+                      </span>
+                    ),
+                  })}
+                />
+              )}
+            </ResourceState>
+          </DataPanel>
         </div>
       </PageSection>
 
@@ -276,7 +303,16 @@ function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModa
   const [working, setWorking] = useState(false)
 
   // 作业选项:权重的 source_ref 指向具体作业,教师从清单里选而不是手填编号
-  const assignmentList = usePagedResource<Assignment>((params) => api.teaching.listCourseAssignments(courseId, params), [courseId])
+  /**
+   * 课程作业一次取齐(PAGINATION_MAX_SIZE)。
+   * 不给下拉配翻页控件:那等于让教师先翻页才能选到作业;
+   * 浮层里也不出现分页 —— 需要分页说明它其实是一页(规范 §6.5.5 A)。
+   */
+  const assignmentList = useAsyncResource(
+    () => api.teaching.listCourseAssignments(courseId, { page: 1, size: PAGINATION_MAX_SIZE }),
+    [courseId],
+    (value) => value.list.length === 0,
+  )
 
   const total = rows.reduce((sum, row) => sum + row.weight, 0)
 
@@ -344,24 +380,20 @@ function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModa
                   skeleton={<Skeleton variant="line" lines={1} />}
                 >
                   {() => (
-                    <div className="flex min-w-48 flex-1 flex-col gap-2">
-                      <FormField label="对应作业" htmlFor={`weight-ref-${index}`} className="mb-0">
-                        <Select
-                          id={`weight-ref-${index}`}
-                          size="sm"
-                          options={assignmentOptions}
-                          value={row.source_ref}
-                          placeholder="选择作业"
-                          onValueChange={(value) => updateRow(index, { source_ref: value })}
-                        />
-                      </FormField>
-                      <Pagination
-                        page={assignmentList.page}
-                        pageSize={assignmentList.pageSize}
-                        total={assignmentList.total}
-                        onPageChange={assignmentList.setPage}
+                    <FormField
+                      label="对应作业"
+                      htmlFor={`weight-ref-${index}`}
+                      className="mb-0 min-w-48 flex-1"
+                    >
+                      <Select
+                        id={`weight-ref-${index}`}
+                        size="sm"
+                        options={assignmentOptions}
+                        value={row.source_ref}
+                        placeholder="选择作业"
+                        onValueChange={(value) => updateRow(index, { source_ref: value })}
                       />
-                    </div>
+                    </FormField>
                   )}
                 </ResourceState>
               ) : (

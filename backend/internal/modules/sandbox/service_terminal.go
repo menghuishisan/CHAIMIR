@@ -8,13 +8,36 @@ import (
 	"io"
 	"strings"
 
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/workload"
+	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 	k8sexec "k8s.io/client-go/util/exec"
 )
 
 const studentAccessLabel = "chaimir.io/student-access"
+
+// sandboxTerminalSessionScope 隔离同一账号在不同沙箱中的终端连接。
+func sandboxTerminalSessionScope(sandboxID int64) string {
+	return "sandbox:" + ids.Format(sandboxID) + ":terminal"
+}
+
+// sandboxProgressSessionScope 隔离同一账号在不同沙箱中的进度连接。
+func sandboxProgressSessionScope(sandboxID int64) string {
+	return "sandbox:" + ids.Format(sandboxID) + ":progress"
+}
+
+// closeSandboxSessions 关闭被撤销主体在该沙箱上的长连接。
+func (s *Service) closeSandboxSessions(tenantID, accountID, sandboxID int64) error {
+	if s.wsHub == nil {
+		return nil
+	}
+	if err := s.wsHub.CloseSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: sandboxTerminalSessionScope(sandboxID)}); err != nil {
+		return err
+	}
+	return s.wsHub.CloseSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: sandboxProgressSessionScope(sandboxID)})
+}
 
 // TerminalTarget 描述一次终端连接允许进入的沙箱命名空间和容器。
 type TerminalTarget struct {
@@ -68,7 +91,7 @@ func (s *Service) ToolProxyTargetForOwner(ctx context.Context, tenantID, account
 		if err != nil {
 			return apperr.ErrSandboxNotFound.WithCause(err)
 		}
-		if sb.OwnerAccountID != accountID {
+		if !sandboxAccountAuthorized(sb, accountID) {
 			return apperr.ErrSandboxOwnershipInvalid
 		}
 		tools, err = tx.ListSandboxTools(ctx, tenantID, sandboxID)
@@ -166,7 +189,7 @@ func (s *Service) commandToolTargetForOwner(ctx context.Context, tenantID, accou
 		if err != nil {
 			return apperr.ErrSandboxNotFound.WithCause(err)
 		}
-		if sb.OwnerAccountID != accountID {
+		if !sandboxAccountAuthorized(sb, accountID) {
 			return apperr.ErrSandboxOwnershipInvalid
 		}
 		tools, err = tx.ListSandboxTools(ctx, tenantID, sandboxID)
@@ -313,6 +336,11 @@ func runtimeExecTarget(runtime Runtime) string {
 		}
 	}
 	return "sandbox/" + runtime.AdapterSpec.RuntimeContainer.Name
+}
+
+// workspaceExecTarget 返回适配器显式声明的学生工作区 helper 目标。
+func workspaceExecTarget(runtime Runtime) string {
+	return strings.TrimSpace(runtime.AdapterSpec.WorkspaceOps.ExecTarget)
 }
 
 // podGroupForRuntime 复用编排拓扑,让终端和内部 exec 解析同一组 Pod。

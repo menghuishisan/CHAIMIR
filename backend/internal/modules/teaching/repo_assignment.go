@@ -169,11 +169,11 @@ func (s *txStore) ListJudgeOutboxBySubmission(ctx context.Context, tenantID, sub
 // 过滤条件与总数同口径:总数必须按同一 where 条件计,否则分页会走到不存在的页。
 func (s *txStore) ListSubmissionsByAssignment(ctx context.Context, query SubmissionListQuery) ([]Submission, int64, error) {
 	limit, offset := pagex.LimitOffset(query.Page, query.Size)
-	rows, err := s.q.ListSubmissionsByAssignment(ctx, sqlcgen.ListSubmissionsByAssignmentParams{TenantID: query.TenantID, AssignmentID: query.AssignmentID, StudentID: query.StudentID, Status: query.Status, Limit: limit, Offset: offset})
+	rows, err := s.q.ListSubmissionsByAssignment(ctx, sqlcgen.ListSubmissionsByAssignmentParams{TenantID: query.TenantID, AssignmentID: query.AssignmentID, StudentID: query.StudentID, Status: query.Status, IsLate: query.IsLate, Limit: limit, Offset: offset})
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := s.q.CountSubmissionsByAssignment(ctx, sqlcgen.CountSubmissionsByAssignmentParams{TenantID: query.TenantID, AssignmentID: query.AssignmentID, StudentID: query.StudentID, Status: query.Status})
+	total, err := s.q.CountSubmissionsByAssignment(ctx, sqlcgen.CountSubmissionsByAssignmentParams{TenantID: query.TenantID, AssignmentID: query.AssignmentID, StudentID: query.StudentID, Status: query.Status, IsLate: query.IsLate})
 	if err != nil {
 		return nil, 0, err
 	}

@@ -195,8 +195,8 @@ func courseGradeExportRequestFromRow(row sqlcgen.CourseGradeExportRequest) Cours
 }
 
 // teachingGradeEventOutbox 转换成绩变更事件 outbox 行。
-func teachingGradeEventOutboxFromFields(id, tenantID, courseID, studentID int64, traceID string, eventUpdatedAt, createdAt, updatedAt pgtype.Timestamptz, status int16, retryCount int32, lastError pgtype.Text, leaseToken string, leaseUntil pgtype.Timestamptz) TeachingGradeEventOutbox {
-	return TeachingGradeEventOutbox{ID: id, TenantID: tenantID, CourseID: courseID, StudentID: studentID, TraceID: traceID, EventUpdatedAt: timex.FromTimestamptz(eventUpdatedAt), Status: status, RetryCount: retryCount, LastError: pgtypex.TextValue(lastError), CreatedAt: timex.FromTimestamptz(createdAt), UpdatedAt: timex.FromTimestamptz(updatedAt), LeaseToken: leaseToken, LeaseUntil: timex.FromTimestamptz(leaseUntil)}
+func teachingGradeEventOutboxFromFields(id, tenantID, courseID, studentID int64, traceID string, eventUpdatedAt, nextAttemptAt, createdAt, updatedAt pgtype.Timestamptz, status int16, retryCount int32, lastError pgtype.Text, leaseToken string, leaseUntil pgtype.Timestamptz) TeachingGradeEventOutbox {
+	return TeachingGradeEventOutbox{ID: id, TenantID: tenantID, CourseID: courseID, StudentID: studentID, TraceID: traceID, EventUpdatedAt: timex.FromTimestamptz(eventUpdatedAt), Status: status, RetryCount: retryCount, NextAttemptAt: timex.FromTimestamptz(nextAttemptAt), LastError: pgtypex.TextValue(lastError), CreatedAt: timex.FromTimestamptz(createdAt), UpdatedAt: timex.FromTimestamptz(updatedAt), LeaseToken: leaseToken, LeaseUntil: timex.FromTimestamptz(leaseUntil)}
 }
 
 // encodeMap 将 JSON 对象编码为 JSONB 参数。

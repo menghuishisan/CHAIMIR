@@ -5,7 +5,7 @@
 #   /api       → 后端控制面与 M10 统一 WebSocket Hub(chaimir-backend,需 upgrade)
 # 注:/platform 不是独立路径,平台管理员前端为 SPA 由 / 提供;平台层关闭由
 #   PLATFORM_LAYER_ENABLED + 后端鉴权 + 前端路由控制(prod-school overlay)。
-# host 和 TLS Secret 名为统一占位,overlay 只替换域名;各环境分别提供同名 chaimir-tls Secret。
+# 用户入口固定为 www.chaimir.io,各环境分别提供同名 chaimir-tls Secret。
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -26,11 +26,11 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - chaimir
+        - www.chaimir.io
         - tools.chaimir.io
       secretName: chaimir-tls
   rules:
-    - host: chaimir # overlay 覆盖真实域名。
+    - host: www.chaimir.io
       http:
         paths:
           - path: /api
@@ -88,11 +88,11 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - chaimir
+        - www.chaimir.io
         - tools.chaimir.io
       secretName: chaimir-tls
   rules:
-    - host: chaimir
+    - host: www.chaimir.io
       http:
         paths:
           - path: /api/readyz

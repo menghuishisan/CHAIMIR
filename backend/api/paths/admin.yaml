@@ -82,6 +82,14 @@
     parameters: [{ name: scope, in: query, schema: { type: string } }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/configs/{key}:
+  get:
+    tags: [admin]
+    summary: 单条配置
+    operationId: adminGetConfig
+    x-chaimir-audience: platform-admin-or-school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/KeyPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   put:
     tags: [admin]
     summary: 更新配置
@@ -143,7 +151,7 @@
     operationId: adminListAlertEvents
     x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/StatusQuery" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
+    parameters: [{ $ref: "#/components/parameters/StatusQuery" }, { name: level, in: query, schema: { type: integer, minimum: 0, maximum: 4 } }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/alert-events/{id}/handle:
   post:

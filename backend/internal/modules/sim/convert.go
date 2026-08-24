@@ -100,7 +100,7 @@ func sessionToContract(session Session, pkg Package) (contracts.SimSessionInfo, 
 	if err != nil {
 		return contracts.SimSessionInfo{}, err
 	}
-	return contracts.SimSessionInfo{SessionID: session.ID, TenantID: session.TenantID, PackageCode: pkg.Code, Version: pkg.Version, Compute: compute, SourceRef: session.SourceRef}, nil
+	return contracts.SimSessionInfo{SessionID: session.ID, TenantID: session.TenantID, PackageCode: pkg.Code, Version: pkg.Version, Compute: compute, SourceRef: session.SourceRef, ScopeRef: session.ScopeRef}, nil
 }
 
 // replayToContract 转换回放数据为跨模块契约。

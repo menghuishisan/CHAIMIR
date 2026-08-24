@@ -17,6 +17,14 @@
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/contests/{id}:
+  get:
+    tags: [contest]
+    summary: 教师竞赛详情
+    operationId: contestGetContest
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   patch:
     tags: [contest]
     summary: 编辑竞赛
@@ -256,6 +264,162 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+
+/api/v1/contest/sandboxes/{id}:
+  get:
+    tags: [contest]
+    summary: 读取竞赛授权沙箱摘要
+    operationId: contestGetSandbox
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/sandboxes/{id}/progress:
+  get:
+    tags: [contest]
+    summary: 订阅竞赛沙箱准备进度
+    operationId: contestSandboxProgress
+    x-chaimir-audience: student
+    x-chaimir-protocol: websocket
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "101": { description: WebSocket upgrade }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/sandboxes/{id}/terminal:
+  get:
+    tags: [contest]
+    summary: 连接竞赛沙箱终端
+    operationId: contestSandboxTerminal
+    x-chaimir-audience: student
+    x-chaimir-protocol: websocket
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "101": { description: WebSocket upgrade }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/sandboxes/{id}/files:
+  get:
+    tags: [contest]
+    summary: 读取或列出竞赛沙箱工作区
+    operationId: contestSandboxFiles
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: mode, in: query, schema: { type: string } }, { name: path, in: query, schema: { type: string } }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  put:
+    tags: [contest]
+    summary: 写入竞赛沙箱工作区
+    operationId: contestSandboxWriteFile
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/sandboxes/{id}/files/save:
+  post:
+    tags: [contest]
+    summary: 保存竞赛沙箱工作区
+    operationId: contestSandboxSaveFiles
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/sandboxes/{id}/command-tools/{tool_code}/run:
+  post:
+    tags: [contest]
+    summary: 执行竞赛沙箱受控命令工具
+    operationId: contestSandboxCommandTool
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: tool_code, in: path, required: true, schema: { type: string } }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/sandboxes/{id}/chain/deploy:
+  post:
+    tags: [contest]
+    summary: 执行竞赛沙箱链部署
+    operationId: contestSandboxChainDeploy
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/sandboxes/{id}/chain/tx:
+  post:
+    tags: [contest]
+    summary: 执行竞赛沙箱链交易
+    operationId: contestSandboxChainTx
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/sandboxes/{id}/chain/query:
+  get:
+    tags: [contest]
+    summary: 查询竞赛沙箱链状态
+    operationId: contestSandboxChainQuery
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: target, in: query, required: true, schema: { type: string } }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/sandboxes/{id}/tools/{tool_code}/{proxy_path}:
+  get:
+    tags: [contest]
+    summary: 代理竞赛沙箱网页工具
+    operationId: contestSandboxToolProxy
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: tool_code, in: path, required: true, schema: { type: string } }, { name: proxy_path, in: path, required: true, schema: { type: string } }]
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
+  post:
+    tags: [contest]
+    summary: 代理竞赛沙箱网页工具提交
+    operationId: contestSandboxToolProxyPost
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: tool_code, in: path, required: true, schema: { type: string } }, { name: proxy_path, in: path, required: true, schema: { type: string } }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
+  put:
+    tags: [contest]
+    summary: 代理竞赛沙箱网页工具更新
+    operationId: contestSandboxToolProxyPut
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: tool_code, in: path, required: true, schema: { type: string } }, { name: proxy_path, in: path, required: true, schema: { type: string } }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
+  patch:
+    tags: [contest]
+    summary: 代理竞赛沙箱网页工具局部更新
+    operationId: contestSandboxToolProxyPatch
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: tool_code, in: path, required: true, schema: { type: string } }, { name: proxy_path, in: path, required: true, schema: { type: string } }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
+  delete:
+    tags: [contest]
+    summary: 删除竞赛沙箱网页工具资源
+    operationId: contestSandboxToolProxyDelete
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: tool_code, in: path, required: true, schema: { type: string } }, { name: proxy_path, in: path, required: true, schema: { type: string } }]
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
+  head:
+    tags: [contest]
+    summary: 查询竞赛沙箱网页工具响应头
+    operationId: contestSandboxToolProxyHead
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: tool_code, in: path, required: true, schema: { type: string } }, { name: proxy_path, in: path, required: true, schema: { type: string } }]
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
+  options:
+    tags: [contest]
+    summary: 竞赛沙箱网页工具预检
+    operationId: contestSandboxToolProxyOptions
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: tool_code, in: path, required: true, schema: { type: string } }, { name: proxy_path, in: path, required: true, schema: { type: string } }]
+    responses: { "200": { description: 工具代理响应 }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/student/contests:
   get:
     tags: [contest]
@@ -333,6 +497,7 @@
     parameters:
       - { name: source_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
       - { $ref: "#/components/parameters/StatusQuery" }
+      - { name: prevalidate_status, in: query, schema: { type: integer, minimum: 0, maximum: 3 } }
       - { $ref: "#/components/parameters/PageQuery" }
       - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

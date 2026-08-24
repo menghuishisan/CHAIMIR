@@ -26,7 +26,6 @@ type RuntimeImageRequest struct {
 	Version      string `json:"version"`
 	Digest       string `json:"digest"`
 	GenesisBaked bool   `json:"genesis_baked"`
-	IsDefault    bool   `json:"is_default"`
 }
 
 // ToolRequest 是平台管理员注册或更新沙箱工具的请求。
@@ -46,8 +45,7 @@ type RuntimeResponse struct {
 	Name         string `json:"name"`
 	Eco          string `json:"eco"`
 	AdapterLevel int16  `json:"adapter_level"`
-	// AdapterSpec is the validated runtime declaration serialized at the public
-	// boundary. The executable AdapterSpec model stays private to sandbox.
+	// AdapterSpec 是经过校验的运行时声明序列化结果;可执行的内部模型只留在沙箱模块内。
 	AdapterSpec    json.RawMessage `json:"adapter_spec"`
 	CapabilityImpl string          `json:"capability_impl"`
 	PluginRef      string          `json:"plugin_ref"`
@@ -57,27 +55,23 @@ type RuntimeResponse struct {
 
 // RuntimeImageResponse 是运行时镜像接口的稳定输出 DTO。
 type RuntimeImageResponse struct {
-	ID            ids.ID `json:"id"`
-	RuntimeID     ids.ID `json:"runtime_id"`
-	ImageURL      string `json:"image_url"`
-	Version       string `json:"version"`
-	Status        int16  `json:"status"`
-	Prepulled     bool   `json:"prepulled"`
-	PrepullStatus int16  `json:"prepull_status"`
-	PrepulledAt   string `json:"prepulled_at,omitempty"`
-	GenesisBaked  bool   `json:"genesis_baked"`
-	IsDefault     bool   `json:"is_default"`
+	ID           ids.ID `json:"id"`
+	RuntimeID    ids.ID `json:"runtime_id"`
+	ImageURL     string `json:"image_url"`
+	Version      string `json:"version"`
+	Status       int16  `json:"status"`
+	GenesisBaked bool   `json:"genesis_baked"`
 }
 
 // ToolResponse 是沙箱工具管理接口的稳定输出 DTO。
 type ToolResponse struct {
-	ID      ids.ID   `json:"id"`
-	Code    string   `json:"code"`
-	Name    string   `json:"name"`
-	Kind    int16    `json:"kind"`
-	EcoTags []string `json:"eco_tags"`
-	// ResourceSpec is an opaque, validated tool declaration. Its internal
-	// workload model must not become an API-client type.
+	ID       ids.ID   `json:"id"`
+	Code     string   `json:"code"`
+	Name     string   `json:"name"`
+	Category string   `json:"category"`
+	Kind     int16    `json:"kind"`
+	EcoTags  []string `json:"eco_tags"`
+	// ResourceSpec 是经过校验的工具声明;内部工作负载模型不下沉为 API 客户端类型。
 	ResourceSpec json.RawMessage `json:"resource_spec"`
 	Status       int16           `json:"status"`
 }
@@ -85,59 +79,60 @@ type ToolResponse struct {
 // OrchestrationCatalogResponse 是编排目录接口的输出,只含业务模块选运行时与工具所需字段。
 type OrchestrationCatalogResponse struct {
 	Runtimes []CatalogRuntimeResponse `json:"runtimes"`
+	Infra    []CatalogToolResponse    `json:"infra"`
 	Tools    []CatalogToolResponse    `json:"tools"`
 }
 
 // CatalogRuntimeResponse 是编排目录里的单个运行时,镜像版本内联返回避免调用方 N+1。
 type CatalogRuntimeResponse struct {
-	Code      string                        `json:"code"`
-	Name      string                        `json:"name"`
-	Eco       string                        `json:"eco"`
-	Images    []CatalogRuntimeImageResponse `json:"images"`
-	ToolCodes []string                      `json:"tool_codes"`
+	Code         string                        `json:"code"`
+	Name         string                        `json:"name"`
+	Eco          string                        `json:"eco"`
+	Images       []CatalogRuntimeImageResponse `json:"images"`
+	Capabilities CapabilityConstraints         `json:"capabilities"`
 }
 
 // CatalogRuntimeImageResponse 是编排目录里的镜像版本,不含镜像地址与预拉取状态。
 type CatalogRuntimeImageResponse struct {
-	Version   string `json:"version"`
-	IsDefault bool   `json:"is_default"`
+	Version string `json:"version"`
 }
 
 // CatalogToolResponse 是编排目录里的单个工具,不含资源清单。
 type CatalogToolResponse struct {
-	Code string `json:"code"`
-	Name string `json:"name"`
-	Kind int16  `json:"kind"`
+	Code         string                `json:"code"`
+	Name         string                `json:"name"`
+	Kind         int16                 `json:"kind"`
+	Capabilities CapabilityConstraints `json:"capabilities"`
 }
 
 // CreateSandboxRequest 是内部 HTTP 创建沙箱请求。
 type CreateSandboxRequest struct {
-	TenantID                 ids.ID   `json:"tenant_id"`
-	RuntimeCode              string   `json:"runtime_code"`
-	RuntimeImageVersion      string   `json:"runtime_image_version"`
-	Tools                    []string `json:"tools"`
-	InitCodeRef              string   `json:"init_code_ref"`
-	InitScriptRef            string   `json:"init_script_ref"`
-	OwnerAccountID           ids.ID   `json:"owner_account_id"`
-	SourceRef                string   `json:"source_ref"`
-	KeepAlive                bool     `json:"keep_alive"`
-	SnapshotEnabled          bool     `json:"snapshot_enabled"`
-	KeepAliveMinutes         int32    `json:"keep_alive_minutes"`
-	SnapshotRetentionMinutes int32    `json:"snapshot_retention_minutes"`
+	TenantID                 ids.ID                               `json:"tenant_id"`
+	CompositionSnapshot      contracts.SandboxCompositionSnapshot `json:"composition_snapshot"`
+	OwnerAccountID           ids.ID                               `json:"owner_account_id"`
+	AuthorizedAccountIDs     []ids.ID                             `json:"authorized_account_ids"`
+	SourceRef                string                               `json:"source_ref"`
+	ScopeRef                 string                               `json:"scope_ref"`
+	KeepAlive                bool                                 `json:"keep_alive"`
+	SnapshotEnabled          bool                                 `json:"snapshot_enabled"`
+	KeepAliveMinutes         int32                                `json:"keep_alive_minutes"`
+	SnapshotRetentionMinutes int32                                `json:"snapshot_retention_minutes"`
 }
 
-// RecycleRequest 是内部 HTTP 来源级联回收请求。
+// RecycleRequest 是内部 HTTP 生命周期作用域级联回收请求。
 type RecycleRequest struct {
 	TenantID  ids.ID `json:"tenant_id"`
 	SourceRef string `json:"source_ref"`
+	ScopeRef  string `json:"scope_ref"`
 	Reason    string `json:"reason"`
 }
 
 // FileWriteRequest 是用户或内部服务写入工作区文件的请求。
 type FileWriteRequest struct {
-	TenantID      ids.ID `json:"tenant_id"`
-	RelativePath  string `json:"relative_path"`
-	ContentBase64 string `json:"content_base64"`
+	TenantID         ids.ID `json:"tenant_id"`
+	RelativePath     string `json:"relative_path"`
+	ContentBase64    string `json:"content_base64"`
+	ExpectedRevision int64  `json:"expected_revision"`
 }
 
 // ChainRequest 是链部署或交易的统一请求体。
@@ -174,17 +169,24 @@ type QuotaRequest struct {
 
 // PrepullResponse 描述镜像预拉取状态响应。
 type PrepullResponse struct {
-	ImageID       ids.ID `json:"image_id"`
-	PrepullStatus int16  `json:"prepull_status"`
-	DesiredNodes  int32  `json:"desired_nodes"`
-	ReadyNodes    int32  `json:"ready_nodes"`
-	ImageCount    int    `json:"image_count"`
+	ImageID           ids.ID `json:"image_id"`
+	CompositionDigest string `json:"composition_digest"`
+	PrepullStatus     int16  `json:"prepull_status"`
+	DesiredNodes      int32  `json:"desired_nodes"`
+	ReadyNodes        int32  `json:"ready_nodes"`
+	ImageCount        int    `json:"image_count"`
+}
+
+// PrepullRequest 是组合预拉取请求,只允许提交已发布组合摘要。
+type PrepullRequest struct {
+	CompositionDigest string `json:"composition_digest"`
 }
 
 // RuntimeSelftestDetail 是平台界面可读取的接入自检摘要,不包含编排资源标识。
 type RuntimeSelftestDetail struct {
 	Result  string `json:"result,omitempty"`
 	Stage   string `json:"stage,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 	TraceID string `json:"trace_id,omitempty"`
 }
 
@@ -209,20 +211,23 @@ type SandboxResponse struct {
 	ToolAccess          []contracts.SandboxToolAccess  `json:"tool_access"`
 	Capabilities        contracts.SandboxCapabilities  `json:"capabilities"`
 	ResourceUsage       contracts.SandboxResourceUsage `json:"resource_usage"`
+	WorkspaceRevision   int64                          `json:"workspace_revision"`
 }
 
 // FileSaveResponse 描述立即保存工作区后的对象引用和内容哈希。
 type FileSaveResponse struct {
-	CodeStorageKey string `json:"code_storage_key"`
-	CodeHash       string `json:"code_hash"`
+	CodeStorageKey    string `json:"code_storage_key"`
+	CodeHash          string `json:"code_hash"`
+	WorkspaceRevision int64  `json:"workspace_revision"`
 }
 
 // FileReadResponse 描述工作区文件读取响应。
 type FileReadResponse struct {
-	RelativePath  string `json:"relative_path"`
-	ContentBase64 string `json:"content_base64"`
-	ContentSHA256 string `json:"content_sha256"`
-	ContentSize   int64  `json:"content_size"`
+	RelativePath      string `json:"relative_path"`
+	ContentBase64     string `json:"content_base64"`
+	ContentSHA256     string `json:"content_sha256"`
+	ContentSize       int64  `json:"content_size"`
+	WorkspaceRevision int64  `json:"workspace_revision"`
 }
 
 // FileEntryResponse 描述工作区目录列表中的单个安全条目。

@@ -107,7 +107,7 @@ type TxStore interface {
 	SetCourseGradeExportRequestNextCheck(context.Context, int64, int64, time.Time) (CourseGradeExportRequest, error)
 	DeleteCourseGradeExportRequest(context.Context, int64, int64) error
 	CreateTeachingGradeEventOutbox(context.Context, int64, int64, int64, int64, string, time.Time) (TeachingGradeEventOutbox, error)
-	ClaimPendingTeachingGradeEventOutbox(context.Context, int32, int32, time.Time, string, time.Time) ([]TeachingGradeEventOutbox, error)
+	ClaimPendingTeachingGradeEventOutbox(context.Context, int32, time.Time, string, time.Time) ([]TeachingGradeEventOutbox, error)
 	MarkTeachingGradeEventOutboxPublished(context.Context, int64, int64, string) (TeachingGradeEventOutbox, error)
 	MarkTeachingGradeEventOutboxFailed(context.Context, int64, int64, string, string) (TeachingGradeEventOutbox, error)
 	Stats(context.Context, int64) (contractsStats, error)
@@ -128,6 +128,7 @@ type SubmissionListQuery struct {
 	AssignmentID int64
 	StudentID    int64
 	Status       int16
+	IsLate       int16
 	Page         int
 	Size         int
 }

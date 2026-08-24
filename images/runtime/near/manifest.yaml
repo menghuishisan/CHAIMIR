@@ -1,4 +1,4 @@
-# 本文件声明 runtime/near 镜像的职责、端口、安全、资源和供应链约束。
+﻿# 本文件声明 runtime/near 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: runtime
 name: near
@@ -23,15 +23,23 @@ upstream:
   digest: sha256:66c87335fb18b7311e5f619c45b544743336d993bdc4c077430d6541743ae8a8
   reuse_policy: thin-wrapper
 data_driven: true
+env_keys:
+  config:
+    - CHAIMIR_NEAR_HOME
+  secret: []
 capabilities:
-  - chain-runtime
-  - near-localnet
-  - contract-dev
+  provides:
+    - chain-runtime
+    - near-localnet
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 runtime:
   eco: near
-  adapter_level: 2
-  default_tool_codes:
-    - code-server
+  adapter_level: 1
 ports:
   - name: rpc
     container_port: 3030
@@ -79,4 +87,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

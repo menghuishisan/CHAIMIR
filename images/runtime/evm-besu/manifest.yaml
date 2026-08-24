@@ -1,4 +1,4 @@
-# 本文件声明 runtime/evm-besu 镜像的职责、端口、安全、资源和供应链约束。
+﻿# 本文件声明 runtime/evm-besu 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: runtime
 name: evm-besu
@@ -30,18 +30,28 @@ upstream:
     - curl=8.21.0-r1
     - openjdk-25-jre=25.0.3-r5
     - libstdc++=16.1.0-r4
+  patch_artifact_checksum_file: patch-artifacts.sha256
+  patch_artifact_checksum_file_sha256: sha256:5ad98c95ee1e9531538372681a9d3c167bbe3ca7f04db0344003f5d1142118a3
   reuse_policy: thin-wrapper
 data_driven: true
+env_keys:
+  config:
+    - CHAIMIR_RUNTIME_RPC_PORT
+  secret: []
 capabilities:
-  - chain-runtime
-  - evm-json-rpc
-  - enterprise-evm
+  provides:
+    - chain-runtime
+    - evm-json-rpc
+    - enterprise-evm
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 runtime:
   eco: evm
-  adapter_level: 2
-  default_tool_codes:
-    - code-server
-    - blockscout
+  adapter_level: 1
 ports:
   - name: rpc
     container_port: 8545
@@ -97,9 +107,10 @@ selftest:
       command:
         - besu
         - --version
+capability_selftest:
+  query_target: chainId
 supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

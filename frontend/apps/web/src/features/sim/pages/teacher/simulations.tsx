@@ -9,7 +9,7 @@
 // (见 docs/04-仿真可视化引擎/02-架构设计.md §8),不是提交时的可选项。
 
 import { useState } from 'react'
-import { CircleCheck, FileSearch, Network, Pencil, Plus, Upload } from 'lucide-react'
+import { FileSearch, Network, Pencil, Plus } from 'lucide-react'
 import {
   SIM_COMPUTE,
   SIM_PACKAGE_STATUS,
@@ -21,14 +21,14 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  DataPanel,
   FilterBar,
   FilterField,
+  MetricStrip,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
-  Stat,
   StatusIndicator,
   Table,
   type TableColumn,
@@ -177,7 +177,7 @@ export default function TeacherSimulationsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '资源' }, { label: '仿真场景' }]} />}
+        kicker={<Breadcrumb items={[{ label: '资源' }]} />}
         title="仿真场景"
         description="提交与维护你的仿真场景包。提交后由平台审核,通过后学生即可在仿真实验室里使用。"
         icon={Network}
@@ -188,29 +188,32 @@ export default function TeacherSimulationsPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="我提交的场景" value={mineTotalCount ?? '—'} icon={Network} hint="不受下方筛选影响" />
-          <Stat label="已上架" value={minePublishedCount ?? '—'} icon={CircleCheck} hint="学生可使用" />
-          <Stat label="审核中" value={mineReviewingCount ?? '—'} icon={Upload} hint="等待平台审核" />
-          <Stat
-            label="已退回"
-            value={mineRejectedCount ?? '—'}
-            icon={Pencil}
-            hint={mineRejectedCount === 0 ? '暂无退回' : '按审核意见修改后重新提交'}
-          />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是场景列表 */}
+      <MetricStrip
+        label="场景总量摘要"
+        className="mb-5"
+        items={[
+          { label: '我提交的', value: mineTotalCount ?? '—', hint: '不受下方筛选影响' },
+          { label: '已上架', value: minePublishedCount ?? '—', hint: '学生可使用' },
+          { label: '审核中', value: mineReviewingCount ?? '—', hint: '等待平台审核' },
+          {
+            label: '已退回',
+            value: mineRejectedCount ?? '—',
+            hint: mineRejectedCount === 0 ? '暂无退回' : '按审核意见修改后重新提交',
+          },
+        ]}
+      />
 
-      <PageSection
-        title={mine ? '我提交的场景' : '全部可用场景'}
-        description={
-          mine
-            ? `共 ${packages.total} 个场景。草稿与已退回的可以更新后重新提交。`
-            : `共 ${packages.total} 个已上架场景。这些场景可以在实验编排里作为组件引用。`
-        }
-      >
-        <div className="flex flex-col gap-4">
+      {mine ? null : (
+        <Callout tone="info" className="mb-4">
+          这里是全平台已上架的场景,包含平台内置场景。它们由各自的提交者维护,你只能查看。
+        </Callout>
+      )}
+
+      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
+      <DataPanel
+        label={mine ? '我提交的场景' : '全部可用场景'}
+        filter={
           <FilterBar label="场景包筛选">
             <FilterField label="场景视角" group>
               <SegmentedControl
@@ -236,12 +239,16 @@ export default function TeacherSimulationsPage() {
               </FilterField>
             ) : null}
           </FilterBar>
-          {mine ? null : (
-            <Callout tone="info">
-              这里是全平台已上架的场景,包含平台内置场景。它们由各自的提交者维护,你只能查看。
-            </Callout>
-          )}
-
+        }
+        footer={
+          <Pagination
+            page={packages.page}
+            pageSize={packages.pageSize}
+            total={packages.total}
+            onPageChange={packages.setPage}
+          />
+        }
+      >
           <ResourceState
             resource={packages}
             emptyIcon={Network}
@@ -260,22 +267,24 @@ export default function TeacherSimulationsPage() {
                 </Button>
               ) : undefined
             }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (
-              <>
-                <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                <Pagination
-                  page={packages.page}
-                  pageSize={packages.pageSize}
-                  total={packages.total}
-                  onPageChange={packages.setPage}
-                />
-              </>
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):场景名一行、版本与提交者一行
+                mobileCard={(item) => ({
+                  title: item.name,
+                  meta: `${simCategoryLabel(item.category)} · 版本 ${item.version}`,
+                  badge: <StatusIndicator tone={simPackageStatusTone(item.status)} label={simPackageStatusLabel(item.status)} />,
+                })}
+              />
             )}
           </ResourceState>
-        </div>
-      </PageSection>
+      </DataPanel>
 
       {formTarget ? (
         <SimPackageFormModal

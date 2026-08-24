@@ -169,9 +169,9 @@ func (t *txStore) CreateAlertEvent(ctx context.Context, id, ruleID, tenantID int
 }
 
 // ListAlertEvents 查询告警事件和总数。
-func (t *txStore) ListAlertEvents(ctx context.Context, status int16, tenantID int64, page, size int) ([]AlertEventDTO, int64, error) {
+func (t *txStore) ListAlertEvents(ctx context.Context, status, level int16, tenantID int64, page, size int) ([]AlertEventDTO, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := t.q.ListAlertEvents(ctx, sqlcgen.ListAlertEventsParams{Status: status, TenantID: pgtypex.Int8(tenantID), PageOffset: offset, PageLimit: limit})
+	rows, err := t.q.ListAlertEvents(ctx, sqlcgen.ListAlertEventsParams{Status: status, Level: level, TenantID: pgtypex.Int8(tenantID), PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -179,7 +179,7 @@ func (t *txStore) ListAlertEvents(ctx context.Context, status int16, tenantID in
 	for _, row := range rows {
 		out = append(out, alertEventDTO(row))
 	}
-	total, err := t.q.CountAlertEvents(ctx, sqlcgen.CountAlertEventsParams{Status: status, TenantID: pgtypex.Int8(tenantID)})
+	total, err := t.q.CountAlertEvents(ctx, sqlcgen.CountAlertEventsParams{Status: status, Level: level, TenantID: pgtypex.Int8(tenantID)})
 	if err != nil {
 		return nil, 0, err
 	}

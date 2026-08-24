@@ -2,6 +2,8 @@
 # 本脚本启动 Aptos 本地测试网。
 set -eu
 
+export HOME="${HOME:-/runtime-state/aptos}"
+mkdir -p "$HOME"
 exec aptos node run-local-testnet \
   --test-dir /runtime-state/aptos \
   --with-faucet \

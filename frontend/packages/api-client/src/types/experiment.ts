@@ -1,6 +1,12 @@
 // ===== M7 Experiment 模块 =====
 
 import type { SnowflakeID } from './common'
+import type {
+  CompositionComponentRef,
+  CompositionLink,
+  CompositionRuntimeRef,
+} from './composition'
+import type { SandboxAccessProfile } from '../constants/composition'
 import type { JudgeSandboxMode } from '../constants/judge'
 import type {
   ExperimentCollabMode,
@@ -53,10 +59,18 @@ export interface StudentComponentConfig {
   stages: StudentStageConfig[]
 }
 
+/**
+ * StudentEnvComponent 是学生可见的环境摘要:能看到用哪个运行时、挂了哪些工具与连接,
+ * 但看不到镜像地址、适配器规格与启动命令 —— 那些只在服务端快照里。
+ */
 export interface StudentEnvComponent {
   id: string
-  runtime_code: string
-  tools: string[]
+  primary_runtime: CompositionRuntimeRef
+  infra: CompositionComponentRef[]
+  tools: CompositionComponentRef[]
+  links: CompositionLink[]
+  access_profile: SandboxAccessProfile
+  composition_digest: string
 }
 
 export interface StudentSimComponent {
@@ -79,24 +93,51 @@ export interface StudentStageConfig {
   unlock_condition?: UnlockCondition
 }
 
+/**
+ * ComponentConfig 是教师读取实验定义时的安全投影。
+ * 它与提交用的 ComponentConfigRequest 只差 envs 一项:读取多带一个服务端算出的
+ * composition_digest,而那一项不能回填成提交字段(§6.3 高级视图只读)。
+ */
 export interface ComponentConfig {
-  envs: EnvComponent[]
+  envs: TeacherEnvComponent[]
   sims: SimComponent[]
   checkpoints: CheckpointConfig[]
   stages: StageConfig[]
 }
 
-export interface EnvComponent {
+/** ComponentConfigRequest 是教师提交的声明,只含 runtime/tools/infra/links/参数。 */
+export interface ComponentConfigRequest {
+  envs: EnvComponentRequest[]
+  sims: SimComponent[]
+  checkpoints: CheckpointConfig[]
+  stages: StageConfig[]
+}
+
+/**
+ * EnvComponentRequest 是教师声明的一个环境:主运行时 + 组件 + 连接 + 访问边界 + 生命周期。
+ * 镜像地址、digest、启动命令与安全上下文都由服务端编译产出,不在这里提交(§7.5)。
+ */
+export interface EnvComponentRequest {
   id: string
-  runtime_code: string
-  runtime_image_version?: string
-  tools: string[]
+  primary_runtime: CompositionRuntimeRef
+  infra: CompositionComponentRef[]
+  tools: CompositionComponentRef[]
+  links: CompositionLink[]
+  access_profile: SandboxAccessProfile
+  resource_profile?: Record<string, string>
+  network_profile?: Record<string, unknown>
   init_code_ref?: string
   init_script_ref?: string
-  keep_alive?: boolean
-  snapshot_enabled?: boolean
-  keep_alive_minutes?: number
-  snapshot_retention_minutes?: number
+  keep_alive: boolean
+  snapshot_enabled: boolean
+  keep_alive_minutes: number
+  snapshot_retention_minutes: number
+}
+
+/** TeacherEnvComponent 是读取时的环境投影:声明字段 + 服务端算出的组合摘要。 */
+export interface TeacherEnvComponent extends EnvComponentRequest {
+  /** composition_digest 是服务端编译后的不可变摘要,只读展示,不作为提交输入 */
+  composition_digest: string
 }
 
 export interface SimComponent {
@@ -159,7 +200,7 @@ export interface ExperimentRequest {
   template_version: string
   name: string
   description: string
-  components: ComponentConfig
+  components: ComponentConfigRequest
   collab_mode: ExperimentCollabMode
   group_config: GroupConfig
   require_report: boolean

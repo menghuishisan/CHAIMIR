@@ -22,11 +22,11 @@ import {
   FilterBar,
   FilterField,
   PageHeader,
+  MetricStrip,
   PageScaffold,
   PageSection,
   SegmentedControl,
   Skeleton,
-  Stat,
   StatusIndicator,
   toast,
 } from '@chaimir/ui'
@@ -85,7 +85,7 @@ export default function PlatformJudgesPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }, { label: '判题器' }]} />}
+        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="判题器"
         description="判一道题用哪种方式。教师出题时按短名引用,登记后建议先自测一次再开放。"
         icon={Cpu}
@@ -96,21 +96,30 @@ export default function PlatformJudgesPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="判题器总数" value={list.length} icon={Cpu} />
-          <Stat label="可用" value={stats.available} icon={ShieldCheck} hint="教师可以引用" />
-          <Stat label="需要链环境" value={stats.runtimeBound} icon={Cpu} hint="判题时会准备实验环境" />
-          <Stat label="人工评分" value={stats.manual} icon={Settings2} hint="由教师打分" />
-        </div>
-      </PageSection>
+      {/*
+        归族:资源列表族的卡片网格形态(§6.5.3 第 ① 族)。指标降为内联摘要 ——
+        Stat 大卡是看板族才保留的形态,四张大卡在这一族会把卡片网格推到折叠线以下;
+        `<md` 竖排四张大卡更是 §6.4.1 规则 2 明令禁止的。
+        四项由一次取齐的全量判题器算出(接口不分页,故是全量口径,§6.5.4)。
+      */}
+      <MetricStrip
+        label="判题器总量摘要"
+        className="mb-5"
+        items={[
+          { label: '判题器总数', value: list.length, hint: '含已停用' },
+          { label: '可用', value: stats.available, hint: '教师可以引用' },
+          { label: '需要链环境', value: stats.runtimeBound, hint: '判题时会准备实验环境' },
+          { label: '人工评分', value: stats.manual, hint: '由教师打分' },
+        ]}
+      />
 
       <PageSection
         title="判题器列表"
         description="按类型筛选。停用的判题器不会分配新任务,已排队的任务照旧执行完。"
       >
         <div className="flex flex-col gap-4">
-          <FilterBar label="判题器筛选">
+          {/* 数据区是一排 JudgerCard(已是抬起片),故筛选走 bare 无底形态而非井,避免片里套片(§6.5.2) */}
+          <FilterBar label="判题器筛选" bare>
             <FilterField label="判题器类型" group>
               <SegmentedControl
                 aria-label="按判题器类型筛选"
@@ -208,6 +217,8 @@ function JudgerCard({ judger, onEdit, onSelftested, onError }: JudgerCardProps) 
   }, [judger.id, onError, onSelftested])
 
   const spec = judger.resource_spec
+  // 组合快照是服务端编译冻结的事实,页面只读展示,不回填成编辑输入(§8.3)
+  const snapshot = spec.composition_snapshot
 
   const items = useMemo(() => {
     const base = [
@@ -220,17 +231,26 @@ function JudgerCard({ judger, onEdit, onSelftested, onError }: JudgerCardProps) 
         }`,
       },
     ]
-    if (judger.runtime_required || spec.runtime_code) {
+    if (judger.runtime_required || snapshot) {
       base.push({
-        term: '链环境',
-        description: spec.runtime_code
-          ? `${spec.runtime_code} · ${spec.runtime_image_version ?? '未指定版本'}`
-          : '需要链环境但未指定',
+        term: '判题环境',
+        description: snapshot
+          ? `${snapshot.runtime.code} · ${snapshot.runtime.image_version}`
+          : '需要判题环境但还没有冻结出可执行快照',
         mono: true,
       })
     }
-    if (spec.tool_codes && spec.tool_codes.length > 0) {
-      base.push({ term: '需要的工具', description: spec.tool_codes.join('、') })
+    if (snapshot && (snapshot.components?.length ?? 0) > 0) {
+      base.push({
+        term: '环境组件',
+        description: (snapshot.components ?? []).map((item) => item.code).join('、'),
+      })
+    }
+    if (snapshot) {
+      base.push({
+        term: '锁定镜像',
+        description: `${snapshot.image_closure.length} 个(发布后不随目录变动)`,
+      })
     }
     if (spec.command && spec.command.length > 0) {
       base.push({ term: '执行命令', description: spec.command.join(' '), mono: true })
@@ -242,7 +262,7 @@ function JudgerCard({ judger, onEdit, onSelftested, onError }: JudgerCardProps) 
       base.push({ term: '最近更新', description: formatDateTime(judger.updated_at), mono: true })
     }
     return base
-  }, [judger, spec])
+  }, [judger, snapshot, spec])
 
   return (
     <Card>

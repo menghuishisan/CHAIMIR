@@ -848,11 +848,7 @@ func (s *Service) RunTeachingGradeEventOutboxOnce(ctx context.Context) error {
 			return tokenErr
 		}
 		leaseUntil := staleBefore.Add(time.Duration(s.cfg.GradeEventOutboxStaleMs) * time.Millisecond)
-		maxAttempts, maxErr := intx.Int32(s.cfg.GradeEventOutboxMaxAttempts)
-		if !maxErr || maxAttempts <= 0 {
-			return apperr.ErrTeachingGradeEventPublishFailed
-		}
-		items, err = tx.ClaimPendingTeachingGradeEventOutbox(ctx, limit, maxAttempts, staleBefore, leaseToken, leaseUntil)
+		items, err = tx.ClaimPendingTeachingGradeEventOutbox(ctx, limit, staleBefore, leaseToken, leaseUntil)
 		if err != nil {
 			return apperr.ErrTeachingGradeEventPublishFailed.WithCause(err)
 		}

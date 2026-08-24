@@ -8,7 +8,7 @@
 // 逐个院系去调专业接口会产生 N+1,而三张表的量级本就适合一次取回。
 
 import { useMemo, useState } from 'react'
-import { Building2, GraduationCap, Network, Users } from 'lucide-react'
+import { Building2, Network, Users } from 'lucide-react'
 import { ClassStatus, type Class, type Department, type Major } from '@chaimir/api-client'
 import {
   Badge,
@@ -18,10 +18,10 @@ import {
   CardBody,
   CardHeader,
   Empty,
+  MetricStrip,
   PageHeader,
   PageScaffold,
   PageSection,
-  Stat,
 } from '@chaimir/ui'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
@@ -50,7 +50,7 @@ export default function TeacherOrganizationPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '组织与成绩' }, { label: '组织查看' }]} />}
+        kicker={<Breadcrumb items={[{ label: '组织与成绩' }]} />}
         title="组织查看"
         description="学校的院系、专业与班级结构。这里只做查看,调整组织结构请联系学校管理员。"
         icon={Users}
@@ -97,19 +97,25 @@ function OrgContent({ view, keyword, statusFilter, onKeywordChange, onStatusChan
 
   return (
     <>
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="院系" value={departments.length} icon={Building2} />
-          <Stat label="专业" value={majors.length} icon={GraduationCap} />
-          <Stat label="班级" value={classes.length} icon={Users} />
-          <Stat
-            label="在读班级"
-            value={activeClassCount}
-            icon={Users}
-            hint={`已归档 ${classes.length - activeClassCount} 个`}
-          />
-        </div>
-      </PageSection>
+      {/*
+        归族:资源列表族(§6.5.3 第 ①)。四项由一次取齐的全量列表算出,
+        接口不分页,故客户端聚合就是全量口径(§6.5.4)。指标降为内联摘要:
+        这一页的主体是院系专业卡与班级明细表,不是四个数字。
+      */}
+      <MetricStrip
+        label="组织规模摘要"
+        className="mb-5"
+        items={[
+          { label: '院系', value: departments.length, hint: '已建立的院系' },
+          { label: '专业', value: majors.length, hint: '各院系下设专业' },
+          { label: '班级', value: classes.length, hint: '含已归档' },
+          {
+            label: '在读班级',
+            value: activeClassCount,
+            hint: `已归档 ${classes.length - activeClassCount} 个`,
+          },
+        ]}
+      />
 
       <PageSection title="院系与专业" description="每个院系下设的专业。带的数字是该专业当前的班级数。">
         {departments.length === 0 ? (

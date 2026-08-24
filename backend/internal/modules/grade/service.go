@@ -231,8 +231,12 @@ func (s *Service) GetWarningRules(ctx context.Context) (WarningRules, error) {
 }
 
 // UpdateWarningRules 更新默认等级配置中的学业预警规则。
-func (s *Service) UpdateWarningRules(ctx context.Context, rules WarningRules) (WarningRules, error) {
+func (s *Service) UpdateWarningRules(ctx context.Context, req WarningRulesRequest) (WarningRules, error) {
 	id, err := s.requireSchoolAdmin(ctx)
+	if err != nil {
+		return WarningRules{}, err
+	}
+	rules, err := warningRulesFromRequest(req)
 	if err != nil {
 		return WarningRules{}, err
 	}
@@ -243,17 +247,25 @@ func (s *Service) UpdateWarningRules(ctx context.Context, rules WarningRules) (W
 	if err != nil {
 		return WarningRules{}, err
 	}
-	req := LevelConfigRequest{Name: cfg.Name, Mapping: cfg.Mapping, WarningRules: rules, IsDefault: cfg.IsDefault}
+	updateReq := LevelConfigRequest{Name: cfg.Name, Mapping: cfg.Mapping, WarningRules: rules, IsDefault: cfg.IsDefault}
 	var out LevelConfigDTO
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, err = tx.UpdateLevelConfig(ctx, cfg.ID.Int64(), req)
+		out, err = tx.UpdateLevelConfig(ctx, cfg.ID.Int64(), updateReq)
 		return err
 	})
 	if err != nil {
 		return WarningRules{}, mapGradeConfigErr(err)
 	}
 	return out.WarningRules, nil
+}
+
+// warningRulesFromRequest 把必填更新请求转换为持久化模型,保留显式零值语义。
+func warningRulesFromRequest(req WarningRulesRequest) (WarningRules, error) {
+	if req.FailCount == nil || req.MinGPA == nil {
+		return WarningRules{}, apperr.ErrGradeConfigInvalid
+	}
+	return WarningRules{FailCount: *req.FailCount, MinGPA: *req.MinGPA}, nil
 }
 
 // SubmitReview 提交课程成绩审核。
@@ -289,7 +301,7 @@ func (s *Service) SubmitReview(ctx context.Context, req ReviewRequest) (ReviewDT
 }
 
 // ListReviews 查询成绩审核分页列表。
-func (s *Service) ListReviews(ctx context.Context, status int16, page, size int) ([]ReviewDTO, int64, int, int, error) {
+func (s *Service) ListReviews(ctx context.Context, status, isLocked int16, page, size int) ([]ReviewDTO, int64, int, int, error) {
 	id, err := s.requireSchoolAdmin(ctx)
 	if err != nil {
 		return nil, 0, page, size, err
@@ -299,7 +311,7 @@ func (s *Service) ListReviews(ctx context.Context, status int16, page, size int)
 	var total int64
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, total, err = tx.ListGradeReviews(ctx, status, page, size)
+		out, total, err = tx.ListGradeReviews(ctx, status, isLocked, page, size)
 		return err
 	})
 	return out, total, page, size, mapGradeReviewErr(err)
@@ -450,6 +462,11 @@ func (s *Service) StudentSummary(ctx context.Context, studentID int64) (GradeSum
 		return GradeSummaryDTO{}, apperr.ErrGradeAggregationFailed.WithCause(err)
 	}
 	inputs := courseInputs(grades)
+	if len(inputs) == 0 {
+		out := GradeSummaryDTO{StudentID: ids.ID(studentID), CourseGrades: inputs, ComputedAt: timex.Now()}
+		s.writeSummaryCache(ctx, cacheKey, out)
+		return out, nil
+	}
 	cfg, err := s.defaultConfig(ctx, id.TenantID)
 	if err != nil {
 		return GradeSummaryDTO{}, err
@@ -499,11 +516,16 @@ func (s *Service) StudentGrades(ctx context.Context, studentID, semesterID int64
 		}
 		grades = filterCourseGradesBySemester(grades, semester.Name)
 	}
+	inputs := courseInputs(grades)
+	if len(inputs) == 0 {
+		out := GradeSummaryDTO{StudentID: ids.ID(studentID), SemesterID: ids.ID(semesterID), CourseGrades: inputs, ComputedAt: timex.Now()}
+		s.writeSummaryCache(ctx, cacheKey, out)
+		return out, nil
+	}
 	cfg, err := s.defaultConfig(ctx, id.TenantID)
 	if err != nil {
 		return GradeSummaryDTO{}, err
 	}
-	inputs := courseInputs(grades)
 	gpa, credits, err := ComputeGPA(inputs, cfg.Mapping)
 	if err != nil {
 		return GradeSummaryDTO{}, err
@@ -559,6 +581,13 @@ func (s *Service) StudentGradePage(ctx context.Context, studentID, semesterID in
 
 // aggregateStudentGradePage 按 M6 分页契约流式累计 GPA 标量,内存占用只与单批大小相关。
 func (s *Service) aggregateStudentGradePage(ctx context.Context, tenantID, studentID int64, semesterName string, semesterID int64) (StudentGradeAggregateDTO, error) {
+	first, total, err := s.teaching.ListStudentGrades(ctx, tenantID, studentID, semesterName, 1, pagex.MaximumSize())
+	if err != nil {
+		return StudentGradeAggregateDTO{}, apperr.ErrGradeAggregationFailed.WithCause(err)
+	}
+	if len(first) == 0 {
+		return StudentGradeAggregateDTO{StudentID: ids.ID(studentID), SemesterID: ids.ID(semesterID), ComputedAt: timex.Now(), Total: total}, nil
+	}
 	cfg, err := s.defaultConfig(ctx, tenantID)
 	if err != nil {
 		return StudentGradeAggregateDTO{}, err
@@ -568,14 +597,13 @@ func (s *Service) aggregateStudentGradePage(ctx context.Context, tenantID, stude
 	}
 	ordered := orderedMapping(cfg.Mapping)
 	var weighted, credits float64
-	var total int64
 	for page := 1; ; page++ {
-		batch, batchTotal, err := s.teaching.ListStudentGrades(ctx, tenantID, studentID, semesterName, page, pagex.MaximumSize())
-		if err != nil {
-			return StudentGradeAggregateDTO{}, apperr.ErrGradeAggregationFailed.WithCause(err)
-		}
-		if page == 1 {
-			total = batchTotal
+		batch := first
+		if page > 1 {
+			batch, _, err = s.teaching.ListStudentGrades(ctx, tenantID, studentID, semesterName, page, pagex.MaximumSize())
+			if err != nil {
+				return StudentGradeAggregateDTO{}, apperr.ErrGradeAggregationFailed.WithCause(err)
+			}
 		}
 		for _, row := range batch {
 			if row.Credits <= 0 {
@@ -932,13 +960,14 @@ func (s *Service) DownloadTranscript(ctx context.Context, transcriptID int64) (T
 		}
 	}
 	token, grant, err := s.files.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
-		TenantID:     id.TenantID,
-		AccountID:    id.AccountID,
-		ObjectRef:    record.PDFRef,
-		Module:       gradeModuleName,
-		ResourceType: gradeTranscriptResourceType,
-		ResourceID:   record.StudentID.String(),
-		ExpiresAt:    time.Time{},
+		TenantID:         id.TenantID,
+		ResourceTenantID: id.TenantID,
+		AccountID:        id.AccountID,
+		ObjectRef:        record.PDFRef,
+		Module:           gradeModuleName,
+		ResourceType:     gradeTranscriptResourceType,
+		ResourceID:       record.StudentID.String(),
+		ExpiresAt:        time.Time{},
 	})
 	if err != nil {
 		return TranscriptDownloadGrantDTO{}, apperr.ErrGradeTranscriptFailed.WithCause(err)
@@ -1338,6 +1367,13 @@ func (s *Service) RunLockOutboxOnce(ctx context.Context) error {
 		maxAttempts, ok := intx.Int32(s.cfg.LockOutboxMaxAttempts)
 		if !ok || maxAttempts <= 0 {
 			return apperr.ErrGradeEventPublishFailed
+		}
+		replayDelay := int32(s.cfg.LockOutboxStaleMs / 1000)
+		if replayDelay < 60 {
+			replayDelay = 60
+		}
+		if _, err = tx.RequeueExhaustedGradeLockOutbox(ctx, replayDelay); err != nil {
+			return apperr.ErrGradeEventPublishFailed.WithCause(err)
 		}
 		items, err = tx.ClaimPendingGradeLockOutbox(ctx, limit, maxAttempts, staleBefore, leaseUntil)
 		if err != nil {

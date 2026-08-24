@@ -8,8 +8,13 @@
 // 不再使用的工具改成「已停用」,历史环境的引用不会因此断链。
 
 import { useMemo, useState } from 'react'
-import { Package, Plus, Terminal, Wrench } from 'lucide-react'
-import { SandboxToolKind, ToolStatus, type SandboxToolDefinition } from '@chaimir/api-client'
+import { Package, Plus } from 'lucide-react'
+import {
+  SANDBOX_COMPONENT_CATEGORY,
+  SandboxToolKind,
+  ToolStatus,
+  type SandboxToolDefinition,
+} from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
@@ -22,11 +27,11 @@ import {
   FilterBar,
   FilterField,
   PageHeader,
+  MetricStrip,
   PageScaffold,
   PageSection,
   SegmentedControl,
   Skeleton,
-  Stat,
   StatusIndicator,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -45,8 +50,14 @@ import { asRecord, readString } from '../../runtimeSpec'
 const KIND_FILTERS = [
   { value: '', label: '全部' },
   { value: String(SandboxToolKind.BUILTIN), label: sandboxToolKindLabel(SandboxToolKind.BUILTIN) },
-  { value: String(SandboxToolKind.TERMINAL), label: sandboxToolKindLabel(SandboxToolKind.TERMINAL) },
-  { value: String(SandboxToolKind.WEB_EMBED), label: sandboxToolKindLabel(SandboxToolKind.WEB_EMBED) },
+  {
+    value: String(SandboxToolKind.TERMINAL),
+    label: sandboxToolKindLabel(SandboxToolKind.TERMINAL),
+  },
+  {
+    value: String(SandboxToolKind.WEB_EMBED),
+    label: sandboxToolKindLabel(SandboxToolKind.WEB_EMBED),
+  },
   { value: String(SandboxToolKind.COMMAND), label: sandboxToolKindLabel(SandboxToolKind.COMMAND) },
 ] as const
 
@@ -56,6 +67,7 @@ const KIND_HINTS: Record<SandboxToolKind, string> = {
   [SandboxToolKind.TERMINAL]: '直接连接实验环境的命令行,不需要额外声明',
   [SandboxToolKind.WEB_EMBED]: '独立环境提供的网页工具,经平台代理嵌入工作台',
   [SandboxToolKind.COMMAND]: '在受控白名单内执行命令,独立运行、不开放网络端口',
+  [SandboxToolKind.INFRA]: '只参与组合编排的基础设施,不作为学生工具入口',
 }
 
 /**
@@ -65,30 +77,34 @@ export default function PlatformSandboxToolsPage() {
   const [kindFilter, setKindFilter] = useState<string>('')
   const [createOpen, setCreateOpen] = useState(false)
 
-  const tools = useAsyncResource(() => api.sandbox.listTools(), [], (value) => value.length === 0)
+  const tools = useAsyncResource(
+    () => api.sandbox.listTools(),
+    [],
+    (value) => value.length === 0
+  )
 
   const list = useMemo(() => tools.data ?? [], [tools.data])
 
   const visible = useMemo(
     () => (kindFilter ? list.filter((item) => item.kind === Number(kindFilter)) : list),
-    [kindFilter, list],
+    [kindFilter, list]
   )
 
   const stats = useMemo(
     () => ({
       available: list.filter((item) => item.status === ToolStatus.AVAILABLE).length,
-      web: list.filter((item) => item.kind === SandboxToolKind.WEB_EMBED).length,
-      command: list.filter((item) => item.kind === SandboxToolKind.COMMAND).length,
+      studentTools: list.filter((item) => item.category === SANDBOX_COMPONENT_CATEGORY.TOOL).length,
+      infra: list.filter((item) => item.category === SANDBOX_COMPONENT_CATEGORY.INFRA).length,
     }),
-    [list],
+    [list]
   )
 
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }, { label: '实验工具' }]} />}
+        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="实验工具"
-        description="学生在实验环境里能用到的工具。运行时声明里指定默认工具,教师编排实验时可以再挑。"
+        description="学生在实验环境里能用到的工具。教师在编排环境时显式选择,平台按能力依赖补齐必要组件。"
         icon={Package}
         actions={
           <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
@@ -97,21 +113,29 @@ export default function PlatformSandboxToolsPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="工具总数" value={list.length} icon={Package} />
-          <Stat label="可用" value={stats.available} icon={Wrench} hint="可被实验引用" />
-          <Stat label="网页工具" value={stats.web} icon={Package} />
-          <Stat label="命令工具" value={stats.command} icon={Terminal} />
-        </div>
-      </PageSection>
+      {/*
+        归族:资源列表族的卡片网格形态(§6.5.3 第 ① 族)。指标降为内联摘要 ——
+        Stat 大卡属看板族,`<md` 竖排四张大卡违反 §6.4.1 规则 2。
+        四项由一次取齐的全量工具定义算出(接口不分页,故是全量口径,§6.5.4)。
+      */}
+      <MetricStrip
+        label="工具总量摘要"
+        className="mb-5"
+        items={[
+          { label: '组件总数', value: list.length, hint: '含已停用' },
+          { label: '可用', value: stats.available, hint: '可被实验引用' },
+          { label: '学生工具', value: stats.studentTools, hint: '学生能打开' },
+          { label: '基础设施', value: stats.infra, hint: '只参与编排' },
+        ]}
+      />
 
       <PageSection
         title="工具定义"
         description="按类型筛选。不再使用的工具改成停用,不做删除 —— 历史环境仍引用着它。"
       >
         <div className="flex flex-col gap-4">
-          <FilterBar label="工具筛选">
+          {/* 数据区是一排工具卡(已是抬起片),筛选走 bare 无底形态,避免片里套片(§6.5.2) */}
+          <FilterBar label="工具筛选" bare>
             <FilterField label="工具类型" group>
               <SegmentedControl
                 aria-label="按工具类型筛选"
@@ -194,7 +218,9 @@ function ToolCard({ tool }: { tool: SandboxToolDefinition }) {
           ...base,
           {
             term: '允许的 argv',
-            description: (policy?.allowed_argv ?? []).map((argv) => JSON.stringify(argv)).join('、') || '未配置',
+            description:
+              (policy?.allowed_argv ?? []).map((argv) => JSON.stringify(argv)).join('、') ||
+              '未配置',
           },
           {
             term: '超时设置',
@@ -204,7 +230,8 @@ function ToolCard({ tool }: { tool: SandboxToolDefinition }) {
           },
           {
             term: '执行环境',
-            description: readString(asRecord(tool.resource_spec.components?.[0]), 'name') || '未配置',
+            description:
+              readString(asRecord(tool.resource_spec.components?.[0]), 'name') || '未配置',
             mono: true,
           },
         ]
@@ -231,13 +258,31 @@ function ToolCard({ tool }: { tool: SandboxToolDefinition }) {
         description={sandboxToolKindLabel(tool.kind)}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            {/* 类别与类型是两件事:类别决定它是不是学生工具入口(§7.2),类型决定怎么用 */}
+            {tool.category === SANDBOX_COMPONENT_CATEGORY.INFRA ? (
+              <Badge tone="info">基础设施</Badge>
+            ) : (
+              <Badge tone="jade">学生工具</Badge>
+            )}
             <Badge tone="neutral">{sandboxToolKindLabel(tool.kind)}</Badge>
-            <StatusIndicator tone={toolStatusTone(tool.status)} label={toolStatusLabel(tool.status)} />
+            <StatusIndicator
+              tone={toolStatusTone(tool.status)}
+              label={toolStatusLabel(tool.status)}
+            />
           </div>
         }
       />
       <CardBody className="flex flex-col gap-3">
         <p className="text-sm text-ink-sub">{KIND_HINTS[tool.kind]}</p>
+        {/*
+          停用原因由服务端目录同步写入(镜像缺证明、工作负载声明不合当前契约等),
+          原样展示 —— 前端不推断也不隐藏(对齐清单 §6.3 / §8.3)。
+        */}
+        {tool.resource_spec.disabled_reason ? (
+          <Callout tone="warning" title="这个组件当前不可部署">
+            {tool.resource_spec.disabled_reason}
+          </Callout>
+        ) : null}
         <DescriptionList dense items={items} />
       </CardBody>
     </Card>

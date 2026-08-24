@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS judge_task (
     source_owner_id BIGINT NOT NULL CHECK (source_owner_id > 0),
     source_course_id BIGINT NOT NULL CHECK (source_course_id >= 0),
     source_scope VARCHAR(32) NOT NULL CHECK (source_scope IN ('teaching', 'experiment', 'contest')),
+    submitter_tenant_id BIGINT NOT NULL,
     submitter_id BIGINT NOT NULL,
     problem_ref VARCHAR(128) NOT NULL,
     code_storage_key VARCHAR(255) NOT NULL DEFAULT '',
@@ -39,7 +40,7 @@ CREATE TABLE IF NOT EXISTS judge_task (
     lease_until TIMESTAMPTZ,
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, source_ref, problem_ref),
-    FOREIGN KEY (tenant_id, submitter_id) REFERENCES account(tenant_id, id)
+    FOREIGN KEY (submitter_tenant_id, submitter_id) REFERENCES account(tenant_id, id)
 );
 
 CREATE TABLE IF NOT EXISTS judge_result (
@@ -81,18 +82,19 @@ CREATE TABLE IF NOT EXISTS submission_fingerprint (
     tenant_id BIGINT NOT NULL REFERENCES tenant(id),
     source_ref VARCHAR(128) NOT NULL,
     problem_ref VARCHAR(128) NOT NULL,
+    submitter_tenant_id BIGINT NOT NULL,
     submitter_id BIGINT NOT NULL,
     code_hash VARCHAR(64) NOT NULL,
     sim_vector JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    FOREIGN KEY (tenant_id, submitter_id) REFERENCES account(tenant_id, id)
+    FOREIGN KEY (submitter_tenant_id, submitter_id) REFERENCES account(tenant_id, id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_judger_status ON judger(status, selftest_status);
 CREATE INDEX IF NOT EXISTS idx_judge_task_lease ON judge_task(status, lease_until) WHERE status = 2;
 CREATE INDEX IF NOT EXISTS idx_judge_event_outbox_lease ON judge_event_outbox(status, lease_until) WHERE status = 2;
 CREATE INDEX IF NOT EXISTS idx_judge_task_queue ON judge_task(tenant_id, status, priority DESC, created_at ASC);
-CREATE INDEX IF NOT EXISTS idx_judge_task_submitter ON judge_task(tenant_id, submitter_id);
+CREATE INDEX IF NOT EXISTS idx_judge_task_submitter ON judge_task(tenant_id, submitter_tenant_id, submitter_id);
 CREATE INDEX IF NOT EXISTS idx_judge_task_owner ON judge_task(tenant_id, source_owner_id, source_ref);
 CREATE INDEX IF NOT EXISTS idx_judge_result_latest ON judge_result(tenant_id, task_id, version DESC);
 CREATE INDEX IF NOT EXISTS idx_judge_event_outbox_status ON judge_event_outbox(status, next_attempt_at ASC, created_at ASC);

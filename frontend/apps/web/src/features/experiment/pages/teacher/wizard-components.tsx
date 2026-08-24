@@ -1,16 +1,21 @@
 // 实验编排向导:环境与仿真步(第 2 步)。
 //
-// 代码环境从 M2 编排目录里选运行时与工具(不让教师手填 runtime_code);
+// 代码环境按声明式组合提交:主运行时 + 镜像版本 + 学生工具 + 基础设施 + 组件参数。
+// 镜像地址、digest、启动命令、安全上下文与网络策略都由服务端编译器产出,前端不编辑也不回显为输入
+// (docs/对齐-后端待补齐清单-2026-08-23.md §6.3 / §7.5)。
+// 兼容性也不在前端算:目录不下发「哪个运行时允许哪些工具」,保存时由服务端编译器判定并回报。
+//
 // 仿真场景从 M4 已发布仿真包里选,版本按包的版本清单选。
 // 组件标识(id)由教师给一个便于识别的短名,后续阶段与检查点引用它 ——
 // 这是编排内部的引用键,故要求可读而不是自动生成的编号。
 
 import { useCallback, useMemo, useState } from 'react'
-import { Network, Plus, Server, Trash2 } from 'lucide-react'
+import { Link2, Network, Plus, Server, Trash2 } from 'lucide-react'
 import {
   PAGINATION_MAX_SIZE,
+  SANDBOX_ACCESS_PROFILE,
   SIM_PACKAGE_STATUS,
-  type EnvComponent,
+  type EnvComponentRequest,
   type SimComponent,
 } from '@chaimir/api-client'
 import {
@@ -21,6 +26,7 @@ import {
   CardBody,
   CardHeader,
   Checkbox,
+  DescriptionList,
   Empty,
   FormField,
   IconButton,
@@ -38,8 +44,13 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
-import { useOrchestrationCatalog } from '../../../sandbox/useOrchestrationCatalog'
-import { sandboxToolKindLabel } from '../../../../utils/labels/sandbox'
+import { CompositionDeclarationFields } from '../../../sandbox/components/CompositionDeclarationFields'
+import {
+  compositionDeclarationError,
+  compositionSpecFromDeclaration,
+  declarationFromSpec,
+  derivedInfraFromSpec,
+} from '../../../sandbox/composition'
 import { simCategoryLabel } from '../../../../utils/labels/sim'
 import type { ExperimentDraft } from './wizard-state'
 
@@ -139,12 +150,22 @@ export function WizardComponentsStep({ draft, errors, onChange }: WizardComponen
                   <div className="min-w-0">
                     <div className="truncate text-base text-ink">代码环境 {index + 1}</div>
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <Badge tone="neutral">{env.runtime_code}</Badge>
+                      <Badge tone="neutral">
+                        {env.primary_runtime.runtime_code} · {env.primary_runtime.image_version}
+                      </Badge>
                       {env.tools.map((tool) => (
-                        <Badge key={tool} tone="jade">
-                          {tool}
+                        <Badge key={tool.code} tone="jade">
+                          {tool.code}
                         </Badge>
                       ))}
+                      {env.infra.map((item) => (
+                        <Badge key={item.code} tone="info">
+                          {item.code}
+                        </Badge>
+                      ))}
+                      {env.links.length > 0 ? (
+                        <Badge tone="neutral">{env.links.length} 条组件连接</Badge>
+                      ) : null}
                       {env.keep_alive ? <Badge tone="info">保留环境</Badge> : null}
                     </div>
                   </div>
@@ -254,30 +275,32 @@ export function WizardComponentsStep({ draft, errors, onChange }: WizardComponen
 }
 
 interface EnvFormModalProps {
-  env?: EnvComponent
+  env?: EnvComponentRequest
   usedIds: string[]
   onClose: () => void
-  onSave: (env: EnvComponent) => void
+  onSave: (env: EnvComponentRequest) => void
 }
 
 /**
- * EnvFormModal 配置一个代码环境。
- * 运行时与工具都从 M2 已注册清单里选:手填运行时代码会在学生进入时才发现拼错。
+ * EnvFormModal 声明一个代码环境。
+ * 运行时、镜像版本、工具与基础设施都从 M2 编排目录里选:手填编码会在学生进入时才发现拼错。
+ * 连接由服务端编译器按组件声明产出,这里只读回显上次结果,不凭猜测新建。
  */
 function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
   const editing = env !== undefined
   const [id, setId] = useState(env?.id ?? '')
-  const [runtimeCode, setRuntimeCode] = useState(env?.runtime_code ?? '')
-  const [imageVersion, setImageVersion] = useState(env?.runtime_image_version ?? '')
-  const [tools, setTools] = useState<string[]>(env?.tools ?? [])
+  const [declaration, setDeclaration] = useState(() => declarationFromSpec(env))
   const [keepAlive, setKeepAlive] = useState(env?.keep_alive ?? false)
   const [keepAliveMinutes, setKeepAliveMinutes] = useState(String(env?.keep_alive_minutes ?? 30))
   const [snapshotEnabled, setSnapshotEnabled] = useState(env?.snapshot_enabled ?? false)
+  const [snapshotRetentionMinutes, setSnapshotRetentionMinutes] = useState(
+    String(env?.snapshot_retention_minutes ?? 30)
+  )
   const [formError, setFormError] = useState<string>()
 
-  const catalog = useOrchestrationCatalog()
-  const imageOptions = catalog.imageOptions(runtimeCode)
-  const compatibleTools = catalog.tools(runtimeCode)
+  const derivedInfra = useMemo(() => derivedInfraFromSpec(env), [env])
+  // 连接原样带回,故引用要稳定:否则提交回调每次渲染都重建
+  const links = useMemo(() => env?.links ?? [], [env?.links])
 
   const submit = useCallback(() => {
     const trimmedId = id.trim()
@@ -289,36 +312,56 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
       setFormError('这个名称已被其他环境使用,请换一个')
       return
     }
-    if (runtimeCode === '') {
-      setFormError('请选择运行时')
+    const declarationError = compositionDeclarationError(declaration)
+    if (declarationError !== undefined) {
+      setFormError(declarationError)
+      return
+    }
+    const keepAliveDuration = Number(keepAliveMinutes)
+    if (keepAlive && (!Number.isInteger(keepAliveDuration) || keepAliveDuration <= 0)) {
+      setFormError('保留时长必须填写大于 0 的整数分钟数')
+      return
+    }
+    const snapshotRetention = Number(snapshotRetentionMinutes)
+    if (snapshotEnabled && (!Number.isInteger(snapshotRetention) || snapshotRetention <= 0)) {
+      setFormError('快照保留时长必须填写大于 0 的整数分钟数')
       return
     }
     setFormError(undefined)
-    onSave({
+    const spec = compositionSpecFromDeclaration({
       id: trimmedId,
-      runtime_code: runtimeCode,
-      runtime_image_version: imageVersion === '' ? undefined : imageVersion,
-      tools,
-      keep_alive: keepAlive,
-      keep_alive_minutes: keepAlive ? Number(keepAliveMinutes) || undefined : undefined,
-      snapshot_enabled: snapshotEnabled,
+      declaration,
+      accessProfile: SANDBOX_ACCESS_PROFILE.EXPERIMENT,
+      derivedInfra,
+      links,
+    })
+    onSave({
+      id: spec.id,
+      primary_runtime: spec.primary_runtime,
+      infra: spec.infra ?? [],
+      tools: spec.tools ?? [],
+      links: spec.links ?? [],
+      access_profile: spec.access_profile,
       init_code_ref: env?.init_code_ref,
       init_script_ref: env?.init_script_ref,
-      snapshot_retention_minutes: env?.snapshot_retention_minutes,
+      keep_alive: keepAlive,
+      keep_alive_minutes: keepAlive ? keepAliveDuration : 0,
+      snapshot_enabled: snapshotEnabled,
+      snapshot_retention_minutes: snapshotEnabled ? snapshotRetention : 0,
     })
   }, [
+    declaration,
+    derivedInfra,
     editing,
     env?.init_code_ref,
     env?.init_script_ref,
-    env?.snapshot_retention_minutes,
     id,
-    imageVersion,
     keepAlive,
     keepAliveMinutes,
+    links,
     onSave,
-    runtimeCode,
     snapshotEnabled,
-    tools,
+    snapshotRetentionMinutes,
     usedIds,
   ])
 
@@ -346,74 +389,33 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
             />
           </FormField>
 
-          <ResourceState
-            resource={catalog.resource}
-            emptyIcon={Server}
-            emptyTitle="平台还没有可用运行时"
-            emptyDescription="请联系平台管理员在链运行时里注册并自检运行时。"
-            skeleton={<Skeleton variant="line" lines={2} />}
-          >
-            {() => (
-              <div className="flex flex-col gap-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <FormField label="运行时" htmlFor="env-runtime" required>
-                    <Select
-                      id="env-runtime"
-                      options={catalog.runtimeOptions}
-                      value={runtimeCode}
-                      placeholder="选择运行时"
-                      onValueChange={(value) => {
-                        setRuntimeCode(value)
-                        setImageVersion('')
-                        setTools([])
-                      }}
-                    />
-                  </FormField>
-                  <FormField label="镜像版本" htmlFor="env-image" helper="不选则用运行时的默认镜像">
-                    <Select
-                      id="env-image"
-                      options={imageOptions}
-                      value={imageVersion}
-                      placeholder={
-                        runtimeCode === ''
-                          ? '请先选择运行时'
-                          : imageOptions.length > 0
-                            ? '使用默认镜像'
-                            : '该运行时暂无镜像'
-                      }
-                      disabled={imageOptions.length === 0}
-                      onValueChange={setImageVersion}
-                    />
-                  </FormField>
-                </div>
+          <CompositionDeclarationFields
+            idPrefix="env"
+            value={declaration}
+            onChange={setDeclaration}
+            toolsHelper="学生在这个环境里能打开哪些工具"
+            derivedInfraCodes={derivedInfra.map((item) => item.code)}
+          />
 
-                <FormField label="可用工具" helper="学生在这个环境里能打开哪些工具">
-                  {compatibleTools.length > 0 ? (
-                    <div className="flex flex-col gap-2">
-                      {compatibleTools.map((tool) => (
-                        <Checkbox
-                          key={tool.code}
-                          checked={tools.includes(tool.code)}
-                          label={`${tool.name} · ${sandboxToolKindLabel(tool.kind)}`}
-                          onCheckedChange={(checked) =>
-                            setTools((current) =>
-                              checked === true
-                                ? [...current, tool.code]
-                                : current.filter((code) => code !== tool.code)
-                            )
-                          }
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-ink-sub">
-                      该运行时没有兼容的可用工具,可只使用运行时能力或联系平台管理员检查工具配置。
-                    </p>
-                  )}
-                </FormField>
+          {links.length > 0 ? (
+            <div className="flex flex-col gap-2 well p-4">
+              <div className="flex items-center gap-2">
+                <Link2 className="size-4 text-ink-sub" aria-hidden />
+                <h4 className="text-sm font-semibold text-ink">组件连接(只读)</h4>
               </div>
-            )}
-          </ResourceState>
+              <p className="text-sm text-ink-sub">
+                连接由平台按组件声明编译并冻结,保存时会重新校验。要改动请联系平台管理员调整组件声明。
+              </p>
+              <DescriptionList
+                dense
+                items={links.map((link) => ({
+                  term: `${link.source_component} → ${link.target_component}`,
+                  description: `${link.protocol} · ${link.target_endpoint}`,
+                  mono: true,
+                }))}
+              />
+            </div>
+          ) : null}
 
           <div className="flex flex-col gap-3 well p-4">
             <Checkbox
@@ -441,6 +443,21 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
               label="回收前保存工作区快照"
               onCheckedChange={(checked) => setSnapshotEnabled(checked === true)}
             />
+            {snapshotEnabled ? (
+              <FormField
+                label="快照保留时长(分钟)"
+                htmlFor="env-snapshot-retention"
+                helper="超过后平台会清理快照,避免长期占用学校存储空间"
+              >
+                <Input
+                  id="env-snapshot-retention"
+                  type="number"
+                  min="1"
+                  value={snapshotRetentionMinutes}
+                  onChange={(event) => setSnapshotRetentionMinutes(event.target.value)}
+                />
+              </FormField>
+            ) : null}
           </div>
 
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
@@ -457,6 +474,7 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
     </Modal>
   )
 }
+
 
 interface SimFormModalProps {
   sim?: SimComponent

@@ -32,9 +32,31 @@ spec:
         fsGroup: 101
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: runtime-config
+          image: chaimir/frontend:placeholder
+          command: ["/usr/local/bin/chaimir-runtime-config"]
+          envFrom:
+            - configMapRef:
+                name: chaimir-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 5m
+              memory: 8Mi
+            limits:
+              cpu: 50m
+              memory: 32Mi
+          volumeMounts:
+            - name: frontend-runtime-config
+              mountPath: /runtime-config
       containers:
         - name: nginx
-          image: chaimir/frontend:placeholder  # overlay images: 覆盖。
+          image: chaimir/frontend:placeholder  # 由 base 的 images 变换锁定 digest。
           ports:
             - name: http
               containerPort: 8080  # 用非特权端口(non-root nginx)。
@@ -78,9 +100,7 @@ spec:
         - name: nginx-run
           emptyDir: {}
         - name: frontend-runtime-config
-          configMap:
-            name: chaimir-frontend-runtime-config
-            defaultMode: 0444
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

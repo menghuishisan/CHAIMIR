@@ -8,6 +8,7 @@ ARG IPFS_CLUSTER_COMMIT=2182e887ef378f906455784396f1011df968822c
 
 RUN git clone --branch "${IPFS_CLUSTER_VERSION}" --depth 1 https://github.com/ipfs-cluster/ipfs-cluster.git /src/ipfs-cluster
 WORKDIR /src/ipfs-cluster
+COPY entrypoint.go /src/ipfs-cluster-entrypoint.go
 RUN test "$(git rev-parse HEAD)" = "${IPFS_CLUSTER_COMMIT}" \
     && go get \
         golang.org/x/crypto@v0.53.0 \
@@ -16,6 +17,7 @@ RUN test "$(git rev-parse HEAD)" = "${IPFS_CLUSTER_COMMIT}" \
         google.golang.org/grpc@v1.82.1 \
     && go mod tidy \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/ipfs-cluster-service ./cmd/ipfs-cluster-service \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/chaimir-ipfs-cluster-entrypoint /src/ipfs-cluster-entrypoint.go \
     && mkdir -p /tmp/chaimir-ipfs-cluster/runtime-state/ipfs-cluster /tmp/chaimir-ipfs-cluster/workspace
 
 FROM gcr.io/distroless/base-debian12:nonroot@sha256:4b5196599229a5cf312a676cfe1ee8587ecf2371dcc22620f8c7a66d77d125c8
@@ -25,12 +27,12 @@ LABEL org.opencontainers.image.description="Chaimir IPFS Cluster coordination im
 
 # 集群配置和密钥由运行期注入,镜像只准备非 root 运行目录。
 COPY --from=cluster-build /out/ipfs-cluster-service /usr/local/bin/ipfs-cluster-service
+COPY --from=cluster-build /out/chaimir-ipfs-cluster-entrypoint /usr/local/bin/chaimir-ipfs-cluster-entrypoint
 COPY --chown=1000:1000 --from=cluster-build /tmp/chaimir-ipfs-cluster/runtime-state /runtime-state
 COPY --chown=1000:1000 --from=cluster-build /tmp/chaimir-ipfs-cluster/workspace /workspace
 
 ENV IPFS_CLUSTER_PATH=/runtime-state/ipfs-cluster
 USER 1000:1000
 WORKDIR /workspace
-EXPOSE 9094 9096
-ENTRYPOINT ["/usr/local/bin/ipfs-cluster-service"]
-CMD ["daemon"]
+EXPOSE 9094 9095 9096
+ENTRYPOINT ["/usr/local/bin/chaimir-ipfs-cluster-entrypoint"]

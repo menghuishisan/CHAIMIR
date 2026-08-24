@@ -1,4 +1,4 @@
-# 本文件声明 runtime/fabric 镜像的职责、端口、安全、资源和供应链约束。
+﻿# 本文件声明 runtime/fabric 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: runtime
 name: fabric
@@ -19,22 +19,43 @@ source:
   type: thin-wrapper
 upstream:
   image: hyperledger/fabric-tools:2.5.16
+  version: 2.5.16
   digest: sha256:760022c3eed97e83dd7a2e1a04b68d04ece3675988063e9dbdc7b0b993a8d95a
   rebuild_image: base/fabric-tools
   runtime_image: ubuntu:22.04
   runtime_digest: sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982
   reuse_policy: thin-wrapper
 data_driven: true
+env_keys:
+  config:
+    - CHAIMIR_FABRIC_CHANNEL
+  secret: []
 capabilities:
-  - chain-runtime
-  - fabric-peer-orderer-ca
-  - chaincode-dev
+  provides:
+    - chain-runtime
+    - fabric-peer-orderer
+    - fabric-crypto-identity
+    - chaincode-dev
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 runtime:
   eco: fabric
-  adapter_level: 2
-  default_tool_codes:
-    - code-server
-ports: []
+  adapter_level: 1
+ports:
+  - name: peer
+    container_port: 7051
+    protocol: TCP
+    expose: proxy
+    purpose: Fabric peer gRPC
+  - name: orderer
+    container_port: 7050
+    protocol: TCP
+    expose: none
+    purpose: Fabric orderer gRPC
 local_dev:
   host_mappings: []
 security:
@@ -55,7 +76,7 @@ resources:
   cpu_request: 250m
   cpu_limit: "2"
   memory_request: 512Mi
-  memory_limit: 2Gi
+  memory_limit: 4Gi
   ephemeral_storage_limit: 4Gi
 build:
   context: images/runtime/fabric
@@ -71,5 +92,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-
-

@@ -15,7 +15,7 @@ const cancelQueuedJudgeTask = `-- name: CancelQueuedJudgeTask :one
 UPDATE judge_task
 SET status = 5, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 1
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CancelQueuedJudgeTaskParams struct {
@@ -23,9 +23,36 @@ type CancelQueuedJudgeTaskParams struct {
 	ID       int64 `json:"id"`
 }
 
-func (q *Queries) CancelQueuedJudgeTask(ctx context.Context, arg CancelQueuedJudgeTaskParams) (JudgeTask, error) {
+type CancelQueuedJudgeTaskRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+}
+
+func (q *Queries) CancelQueuedJudgeTask(ctx context.Context, arg CancelQueuedJudgeTaskParams) (CancelQueuedJudgeTaskRow, error) {
 	row := q.db.QueryRow(ctx, cancelQueuedJudgeTask, arg.TenantID, arg.ID)
-	var i JudgeTask
+	var i CancelQueuedJudgeTaskRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -35,6 +62,7 @@ func (q *Queries) CancelQueuedJudgeTask(ctx context.Context, arg CancelQueuedJud
 		&i.SourceCourseID,
 		&i.SourceScope,
 		&i.SubmitterID,
+		&i.SubmitterTenantID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
 		&i.CodeHash,
@@ -125,7 +153,7 @@ const completeJudgeTask = `-- name: CompleteJudgeTask :one
 UPDATE judge_task
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CompleteJudgeTaskParams struct {
@@ -134,9 +162,36 @@ type CompleteJudgeTaskParams struct {
 	LeaseToken string `json:"lease_token"`
 }
 
-func (q *Queries) CompleteJudgeTask(ctx context.Context, arg CompleteJudgeTaskParams) (JudgeTask, error) {
+type CompleteJudgeTaskRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+}
+
+func (q *Queries) CompleteJudgeTask(ctx context.Context, arg CompleteJudgeTaskParams) (CompleteJudgeTaskRow, error) {
 	row := q.db.QueryRow(ctx, completeJudgeTask, arg.TenantID, arg.ID, arg.LeaseToken)
-	var i JudgeTask
+	var i CompleteJudgeTaskRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -146,6 +201,7 @@ func (q *Queries) CompleteJudgeTask(ctx context.Context, arg CompleteJudgeTaskPa
 		&i.SourceCourseID,
 		&i.SourceScope,
 		&i.SubmitterID,
+		&i.SubmitterTenantID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
 		&i.CodeHash,
@@ -169,7 +225,7 @@ const completeManualJudgeTask = `-- name: CompleteManualJudgeTask :one
 UPDATE judge_task
 SET status = 3, last_error = NULL, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = '' AND lease_until IS NULL
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CompleteManualJudgeTaskParams struct {
@@ -177,9 +233,36 @@ type CompleteManualJudgeTaskParams struct {
 	ID       int64 `json:"id"`
 }
 
-func (q *Queries) CompleteManualJudgeTask(ctx context.Context, arg CompleteManualJudgeTaskParams) (JudgeTask, error) {
+type CompleteManualJudgeTaskRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+}
+
+func (q *Queries) CompleteManualJudgeTask(ctx context.Context, arg CompleteManualJudgeTaskParams) (CompleteManualJudgeTaskRow, error) {
 	row := q.db.QueryRow(ctx, completeManualJudgeTask, arg.TenantID, arg.ID)
-	var i JudgeTask
+	var i CompleteManualJudgeTaskRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -189,6 +272,7 @@ func (q *Queries) CompleteManualJudgeTask(ctx context.Context, arg CompleteManua
 		&i.SourceCourseID,
 		&i.SourceScope,
 		&i.SubmitterID,
+		&i.SubmitterTenantID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
 		&i.CodeHash,
@@ -288,67 +372,69 @@ const createJudgeTask = `-- name: CreateJudgeTask :one
 WITH inserted AS (
     INSERT INTO judge_task (
         id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope,
-        submitter_id, problem_ref, code_storage_key, code_hash,
+        submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash,
         input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error,
         created_at, updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 0, $17, NULL, now(), now())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $18, $9, $10, $11, $12, $13, $14, $15, $16, 0, $17, NULL, now(), now())
     ON CONFLICT (tenant_id, source_ref, problem_ref) DO NOTHING
-    RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+    RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 )
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM inserted
 UNION ALL
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $2 AND source_ref = $4 AND problem_ref = $9 AND NOT EXISTS (SELECT 1 FROM inserted)
 LIMIT 1
 `
 
 type CreateJudgeTaskParams struct {
-	ID               int64       `json:"id"`
-	TenantID         int64       `json:"tenant_id"`
-	JudgerID         int64       `json:"judger_id"`
-	SourceRef        string      `json:"source_ref"`
-	SourceOwnerID    int64       `json:"source_owner_id"`
-	SourceCourseID   int64       `json:"source_course_id"`
-	SourceScope      string      `json:"source_scope"`
-	SubmitterID      int64       `json:"submitter_id"`
-	ProblemRef       string      `json:"problem_ref"`
-	CodeStorageKey   string      `json:"code_storage_key"`
-	CodeHash         string      `json:"code_hash"`
-	InputSnapshot    []byte      `json:"input_snapshot"`
-	SandboxMode      int16       `json:"sandbox_mode"`
-	TargetSandboxRef pgtype.Text `json:"target_sandbox_ref"`
-	Priority         int16       `json:"priority"`
-	Status           int16       `json:"status"`
-	MaxRetries       int32       `json:"max_retries"`
+	ID                int64       `json:"id"`
+	TenantID          int64       `json:"tenant_id"`
+	JudgerID          int64       `json:"judger_id"`
+	SourceRef         string      `json:"source_ref"`
+	SourceOwnerID     int64       `json:"source_owner_id"`
+	SourceCourseID    int64       `json:"source_course_id"`
+	SourceScope       string      `json:"source_scope"`
+	SubmitterID       int64       `json:"submitter_id"`
+	ProblemRef        string      `json:"problem_ref"`
+	CodeStorageKey    string      `json:"code_storage_key"`
+	CodeHash          string      `json:"code_hash"`
+	InputSnapshot     []byte      `json:"input_snapshot"`
+	SandboxMode       int16       `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text `json:"target_sandbox_ref"`
+	Priority          int16       `json:"priority"`
+	Status            int16       `json:"status"`
+	MaxRetries        int32       `json:"max_retries"`
+	SubmitterTenantID int64       `json:"submitter_tenant_id"`
 }
 
 type CreateJudgeTaskRow struct {
-	ID               int64              `json:"id"`
-	TenantID         int64              `json:"tenant_id"`
-	JudgerID         int64              `json:"judger_id"`
-	SourceRef        string             `json:"source_ref"`
-	SourceOwnerID    int64              `json:"source_owner_id"`
-	SourceCourseID   int64              `json:"source_course_id"`
-	SourceScope      string             `json:"source_scope"`
-	SubmitterID      int64              `json:"submitter_id"`
-	ProblemRef       string             `json:"problem_ref"`
-	CodeStorageKey   string             `json:"code_storage_key"`
-	CodeHash         string             `json:"code_hash"`
-	InputSnapshot    []byte             `json:"input_snapshot"`
-	SandboxMode      int16              `json:"sandbox_mode"`
-	TargetSandboxRef pgtype.Text        `json:"target_sandbox_ref"`
-	Priority         int16              `json:"priority"`
-	Status           int16              `json:"status"`
-	RetryCount       int32              `json:"retry_count"`
-	MaxRetries       int32              `json:"max_retries"`
-	LastError        pgtype.Text        `json:"last_error"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	LeaseToken       string             `json:"lease_token"`
-	LeaseUntil       pgtype.Timestamptz `json:"lease_until"`
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
 }
 
 func (q *Queries) CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams) (CreateJudgeTaskRow, error) {
@@ -370,6 +456,7 @@ func (q *Queries) CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams
 		arg.Priority,
 		arg.Status,
 		arg.MaxRetries,
+		arg.SubmitterTenantID,
 	)
 	var i CreateJudgeTaskRow
 	err := row.Scan(
@@ -381,6 +468,7 @@ func (q *Queries) CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams
 		&i.SourceCourseID,
 		&i.SourceScope,
 		&i.SubmitterID,
+		&i.SubmitterTenantID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
 		&i.CodeHash,
@@ -401,22 +489,35 @@ func (q *Queries) CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams
 }
 
 const createSubmissionFingerprint = `-- name: CreateSubmissionFingerprint :one
-INSERT INTO submission_fingerprint (id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-RETURNING id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector, created_at
+INSERT INTO submission_fingerprint (id, tenant_id, source_ref, problem_ref, submitter_id, submitter_tenant_id, code_hash, sim_vector, created_at)
+VALUES ($1, $2, $3, $4, $5, $8, $6, $7, now())
+RETURNING id, tenant_id, source_ref, problem_ref, submitter_id, submitter_tenant_id, code_hash, sim_vector, created_at
 `
 
 type CreateSubmissionFingerprintParams struct {
-	ID          int64  `json:"id"`
-	TenantID    int64  `json:"tenant_id"`
-	SourceRef   string `json:"source_ref"`
-	ProblemRef  string `json:"problem_ref"`
-	SubmitterID int64  `json:"submitter_id"`
-	CodeHash    string `json:"code_hash"`
-	SimVector   []byte `json:"sim_vector"`
+	ID                int64  `json:"id"`
+	TenantID          int64  `json:"tenant_id"`
+	SourceRef         string `json:"source_ref"`
+	ProblemRef        string `json:"problem_ref"`
+	SubmitterID       int64  `json:"submitter_id"`
+	CodeHash          string `json:"code_hash"`
+	SimVector         []byte `json:"sim_vector"`
+	SubmitterTenantID int64  `json:"submitter_tenant_id"`
 }
 
-func (q *Queries) CreateSubmissionFingerprint(ctx context.Context, arg CreateSubmissionFingerprintParams) (SubmissionFingerprint, error) {
+type CreateSubmissionFingerprintRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	SourceRef         string             `json:"source_ref"`
+	ProblemRef        string             `json:"problem_ref"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	CodeHash          string             `json:"code_hash"`
+	SimVector         []byte             `json:"sim_vector"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) CreateSubmissionFingerprint(ctx context.Context, arg CreateSubmissionFingerprintParams) (CreateSubmissionFingerprintRow, error) {
 	row := q.db.QueryRow(ctx, createSubmissionFingerprint,
 		arg.ID,
 		arg.TenantID,
@@ -425,14 +526,16 @@ func (q *Queries) CreateSubmissionFingerprint(ctx context.Context, arg CreateSub
 		arg.SubmitterID,
 		arg.CodeHash,
 		arg.SimVector,
+		arg.SubmitterTenantID,
 	)
-	var i SubmissionFingerprint
+	var i CreateSubmissionFingerprintRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.SourceRef,
 		&i.ProblemRef,
 		&i.SubmitterID,
+		&i.SubmitterTenantID,
 		&i.CodeHash,
 		&i.SimVector,
 		&i.CreatedAt,
@@ -458,7 +561,7 @@ WHERE t.id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type DequeueJudgeTasksParams struct {
@@ -468,7 +571,34 @@ type DequeueJudgeTasksParams struct {
 	StaleBefore pgtype.Timestamptz `json:"stale_before"`
 }
 
-func (q *Queries) DequeueJudgeTasks(ctx context.Context, arg DequeueJudgeTasksParams) ([]JudgeTask, error) {
+type DequeueJudgeTasksRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+}
+
+func (q *Queries) DequeueJudgeTasks(ctx context.Context, arg DequeueJudgeTasksParams) ([]DequeueJudgeTasksRow, error) {
 	rows, err := q.db.Query(ctx, dequeueJudgeTasks,
 		arg.Limit,
 		arg.LeaseToken,
@@ -479,9 +609,9 @@ func (q *Queries) DequeueJudgeTasks(ctx context.Context, arg DequeueJudgeTasksPa
 		return nil, err
 	}
 	defer rows.Close()
-	items := []JudgeTask{}
+	items := []DequeueJudgeTasksRow{}
 	for rows.Next() {
-		var i JudgeTask
+		var i DequeueJudgeTasksRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -491,6 +621,7 @@ func (q *Queries) DequeueJudgeTasks(ctx context.Context, arg DequeueJudgeTasksPa
 			&i.SourceCourseID,
 			&i.SourceScope,
 			&i.SubmitterID,
+			&i.SubmitterTenantID,
 			&i.ProblemRef,
 			&i.CodeStorageKey,
 			&i.CodeHash,
@@ -559,7 +690,7 @@ WHERE t.id IN (
     LIMIT $2::int
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type FailExpiredJudgeTasksParams struct {
@@ -567,15 +698,42 @@ type FailExpiredJudgeTasksParams struct {
 	PageLimit   int32              `json:"page_limit"`
 }
 
-func (q *Queries) FailExpiredJudgeTasks(ctx context.Context, arg FailExpiredJudgeTasksParams) ([]JudgeTask, error) {
+type FailExpiredJudgeTasksRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+}
+
+func (q *Queries) FailExpiredJudgeTasks(ctx context.Context, arg FailExpiredJudgeTasksParams) ([]FailExpiredJudgeTasksRow, error) {
 	rows, err := q.db.Query(ctx, failExpiredJudgeTasks, arg.StaleBefore, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []JudgeTask{}
+	items := []FailExpiredJudgeTasksRow{}
 	for rows.Next() {
-		var i JudgeTask
+		var i FailExpiredJudgeTasksRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -585,6 +743,7 @@ func (q *Queries) FailExpiredJudgeTasks(ctx context.Context, arg FailExpiredJudg
 			&i.SourceCourseID,
 			&i.SourceScope,
 			&i.SubmitterID,
+			&i.SubmitterTenantID,
 			&i.ProblemRef,
 			&i.CodeStorageKey,
 			&i.CodeHash,
@@ -615,7 +774,7 @@ const failJudgeTask = `-- name: FailJudgeTask :one
 UPDATE judge_task
 SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type FailJudgeTaskParams struct {
@@ -625,14 +784,41 @@ type FailJudgeTaskParams struct {
 	LeaseToken string      `json:"lease_token"`
 }
 
-func (q *Queries) FailJudgeTask(ctx context.Context, arg FailJudgeTaskParams) (JudgeTask, error) {
+type FailJudgeTaskRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+}
+
+func (q *Queries) FailJudgeTask(ctx context.Context, arg FailJudgeTaskParams) (FailJudgeTaskRow, error) {
 	row := q.db.QueryRow(ctx, failJudgeTask,
 		arg.TenantID,
 		arg.ID,
 		arg.LastError,
 		arg.LeaseToken,
 	)
-	var i JudgeTask
+	var i FailJudgeTaskRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -642,6 +828,7 @@ func (q *Queries) FailJudgeTask(ctx context.Context, arg FailJudgeTaskParams) (J
 		&i.SourceCourseID,
 		&i.SourceScope,
 		&i.SubmitterID,
+		&i.SubmitterTenantID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
 		&i.CodeHash,
@@ -662,7 +849,7 @@ func (q *Queries) FailJudgeTask(ctx context.Context, arg FailJudgeTaskParams) (J
 }
 
 const findExactFingerprints = `-- name: FindExactFingerprints :many
-SELECT id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector, created_at
+SELECT id, tenant_id, source_ref, problem_ref, submitter_id, submitter_tenant_id, code_hash, sim_vector, created_at
 FROM submission_fingerprint
 WHERE tenant_id = $1 AND problem_ref = $2 AND code_hash = $3
 ORDER BY created_at DESC, id DESC
@@ -674,21 +861,34 @@ type FindExactFingerprintsParams struct {
 	CodeHash   string `json:"code_hash"`
 }
 
-func (q *Queries) FindExactFingerprints(ctx context.Context, arg FindExactFingerprintsParams) ([]SubmissionFingerprint, error) {
+type FindExactFingerprintsRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	SourceRef         string             `json:"source_ref"`
+	ProblemRef        string             `json:"problem_ref"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	CodeHash          string             `json:"code_hash"`
+	SimVector         []byte             `json:"sim_vector"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) FindExactFingerprints(ctx context.Context, arg FindExactFingerprintsParams) ([]FindExactFingerprintsRow, error) {
 	rows, err := q.db.Query(ctx, findExactFingerprints, arg.TenantID, arg.ProblemRef, arg.CodeHash)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []SubmissionFingerprint{}
+	items := []FindExactFingerprintsRow{}
 	for rows.Next() {
-		var i SubmissionFingerprint
+		var i FindExactFingerprintsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
 			&i.SourceRef,
 			&i.ProblemRef,
 			&i.SubmitterID,
+			&i.SubmitterTenantID,
 			&i.CodeHash,
 			&i.SimVector,
 			&i.CreatedAt,
@@ -704,7 +904,7 @@ func (q *Queries) FindExactFingerprints(ctx context.Context, arg FindExactFinger
 }
 
 const getJudgeTask = `-- name: GetJudgeTask :one
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND id = $2
 `
@@ -714,9 +914,36 @@ type GetJudgeTaskParams struct {
 	ID       int64 `json:"id"`
 }
 
-func (q *Queries) GetJudgeTask(ctx context.Context, arg GetJudgeTaskParams) (JudgeTask, error) {
+type GetJudgeTaskRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+}
+
+func (q *Queries) GetJudgeTask(ctx context.Context, arg GetJudgeTaskParams) (GetJudgeTaskRow, error) {
 	row := q.db.QueryRow(ctx, getJudgeTask, arg.TenantID, arg.ID)
-	var i JudgeTask
+	var i GetJudgeTaskRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -726,6 +953,7 @@ func (q *Queries) GetJudgeTask(ctx context.Context, arg GetJudgeTaskParams) (Jud
 		&i.SourceCourseID,
 		&i.SourceScope,
 		&i.SubmitterID,
+		&i.SubmitterTenantID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
 		&i.CodeHash,
@@ -746,7 +974,7 @@ func (q *Queries) GetJudgeTask(ctx context.Context, arg GetJudgeTaskParams) (Jud
 }
 
 const getJudgeTaskBySourceRef = `-- name: GetJudgeTaskBySourceRef :one
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND source_ref = $2 AND problem_ref = $3
 `
@@ -757,9 +985,36 @@ type GetJudgeTaskBySourceRefParams struct {
 	ProblemRef string `json:"problem_ref"`
 }
 
-func (q *Queries) GetJudgeTaskBySourceRef(ctx context.Context, arg GetJudgeTaskBySourceRefParams) (JudgeTask, error) {
+type GetJudgeTaskBySourceRefRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+}
+
+func (q *Queries) GetJudgeTaskBySourceRef(ctx context.Context, arg GetJudgeTaskBySourceRefParams) (GetJudgeTaskBySourceRefRow, error) {
 	row := q.db.QueryRow(ctx, getJudgeTaskBySourceRef, arg.TenantID, arg.SourceRef, arg.ProblemRef)
-	var i JudgeTask
+	var i GetJudgeTaskBySourceRefRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -769,6 +1024,7 @@ func (q *Queries) GetJudgeTaskBySourceRef(ctx context.Context, arg GetJudgeTaskB
 		&i.SourceCourseID,
 		&i.SourceScope,
 		&i.SubmitterID,
+		&i.SubmitterTenantID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
 		&i.CodeHash,
@@ -791,7 +1047,7 @@ func (q *Queries) GetJudgeTaskBySourceRef(ctx context.Context, arg GetJudgeTaskB
 const getJudgeTaskWithResult = `-- name: GetJudgeTaskWithResult :one
 SELECT
     t.id, t.tenant_id, t.judger_id, t.source_ref, t.source_owner_id, t.source_course_id, t.source_scope,
-    t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
+    t.submitter_id, t.submitter_tenant_id, t.problem_ref, t.code_storage_key, t.code_hash,
     t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until,
     COALESCE(r.id, 0)::bigint AS result_id,
     COALESCE(r.version, 0)::int AS result_version,
@@ -820,39 +1076,40 @@ type GetJudgeTaskWithResultParams struct {
 }
 
 type GetJudgeTaskWithResultRow struct {
-	ID               int64              `json:"id"`
-	TenantID         int64              `json:"tenant_id"`
-	JudgerID         int64              `json:"judger_id"`
-	SourceRef        string             `json:"source_ref"`
-	SourceOwnerID    int64              `json:"source_owner_id"`
-	SourceCourseID   int64              `json:"source_course_id"`
-	SourceScope      string             `json:"source_scope"`
-	SubmitterID      int64              `json:"submitter_id"`
-	ProblemRef       string             `json:"problem_ref"`
-	CodeStorageKey   string             `json:"code_storage_key"`
-	CodeHash         string             `json:"code_hash"`
-	InputSnapshot    []byte             `json:"input_snapshot"`
-	SandboxMode      int16              `json:"sandbox_mode"`
-	TargetSandboxRef pgtype.Text        `json:"target_sandbox_ref"`
-	Priority         int16              `json:"priority"`
-	Status           int16              `json:"status"`
-	RetryCount       int32              `json:"retry_count"`
-	MaxRetries       int32              `json:"max_retries"`
-	LastError        pgtype.Text        `json:"last_error"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	LeaseToken       string             `json:"lease_token"`
-	LeaseUntil       pgtype.Timestamptz `json:"lease_until"`
-	ResultID         int64              `json:"result_id"`
-	ResultVersion    int32              `json:"result_version"`
-	Passed           bool               `json:"passed"`
-	Score            int32              `json:"score"`
-	MaxScore         int32              `json:"max_score"`
-	Details          []byte             `json:"details"`
-	ReplayTrace      []byte             `json:"replay_trace"`
-	JudgeSandboxRef  string             `json:"judge_sandbox_ref"`
-	JudgedAt         pgtype.Timestamptz `json:"judged_at"`
-	IsRejudge        bool               `json:"is_rejudge"`
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+	ResultID          int64              `json:"result_id"`
+	ResultVersion     int32              `json:"result_version"`
+	Passed            bool               `json:"passed"`
+	Score             int32              `json:"score"`
+	MaxScore          int32              `json:"max_score"`
+	Details           []byte             `json:"details"`
+	ReplayTrace       []byte             `json:"replay_trace"`
+	JudgeSandboxRef   string             `json:"judge_sandbox_ref"`
+	JudgedAt          pgtype.Timestamptz `json:"judged_at"`
+	IsRejudge         bool               `json:"is_rejudge"`
 }
 
 func (q *Queries) GetJudgeTaskWithResult(ctx context.Context, arg GetJudgeTaskWithResultParams) (GetJudgeTaskWithResultRow, error) {
@@ -867,6 +1124,7 @@ func (q *Queries) GetJudgeTaskWithResult(ctx context.Context, arg GetJudgeTaskWi
 		&i.SourceCourseID,
 		&i.SourceScope,
 		&i.SubmitterID,
+		&i.SubmitterTenantID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
 		&i.CodeHash,
@@ -983,7 +1241,7 @@ func (q *Queries) ListCatalogJudgers(ctx context.Context) ([]ListCatalogJudgersR
 }
 
 const listFingerprintsForProblem = `-- name: ListFingerprintsForProblem :many
-SELECT id, tenant_id, source_ref, problem_ref, submitter_id, code_hash, sim_vector, created_at
+SELECT id, tenant_id, source_ref, problem_ref, submitter_id, submitter_tenant_id, code_hash, sim_vector, created_at
 FROM submission_fingerprint
 WHERE tenant_id = $1 AND problem_ref = $2 AND ($3::text = '' OR source_ref <> $3)
 ORDER BY created_at DESC, id DESC
@@ -995,21 +1253,34 @@ type ListFingerprintsForProblemParams struct {
 	Column3    string `json:"column_3"`
 }
 
-func (q *Queries) ListFingerprintsForProblem(ctx context.Context, arg ListFingerprintsForProblemParams) ([]SubmissionFingerprint, error) {
+type ListFingerprintsForProblemRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	SourceRef         string             `json:"source_ref"`
+	ProblemRef        string             `json:"problem_ref"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	CodeHash          string             `json:"code_hash"`
+	SimVector         []byte             `json:"sim_vector"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListFingerprintsForProblem(ctx context.Context, arg ListFingerprintsForProblemParams) ([]ListFingerprintsForProblemRow, error) {
 	rows, err := q.db.Query(ctx, listFingerprintsForProblem, arg.TenantID, arg.ProblemRef, arg.Column3)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []SubmissionFingerprint{}
+	items := []ListFingerprintsForProblemRow{}
 	for rows.Next() {
-		var i SubmissionFingerprint
+		var i ListFingerprintsForProblemRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
 			&i.SourceRef,
 			&i.ProblemRef,
 			&i.SubmitterID,
+			&i.SubmitterTenantID,
 			&i.CodeHash,
 			&i.SimVector,
 			&i.CreatedAt,
@@ -1027,7 +1298,7 @@ func (q *Queries) ListFingerprintsForProblem(ctx context.Context, arg ListFinger
 const listJudgeTasks = `-- name: ListJudgeTasks :many
 SELECT
     t.id, t.tenant_id, t.judger_id, t.source_ref, t.source_owner_id, t.source_course_id, t.source_scope,
-    t.submitter_id, t.problem_ref, t.code_storage_key, t.code_hash,
+    t.submitter_id, t.submitter_tenant_id, t.problem_ref, t.code_storage_key, t.code_hash,
     t.input_snapshot, t.sandbox_mode, t.target_sandbox_ref, t.priority, t.status, t.retry_count, t.max_retries, t.last_error, t.created_at, t.updated_at, t.lease_token, t.lease_until,
     COALESCE(r.id, 0)::bigint AS result_id,
     COALESCE(r.version, 0)::int AS result_version,
@@ -1071,39 +1342,40 @@ type ListJudgeTasksParams struct {
 }
 
 type ListJudgeTasksRow struct {
-	ID               int64              `json:"id"`
-	TenantID         int64              `json:"tenant_id"`
-	JudgerID         int64              `json:"judger_id"`
-	SourceRef        string             `json:"source_ref"`
-	SourceOwnerID    int64              `json:"source_owner_id"`
-	SourceCourseID   int64              `json:"source_course_id"`
-	SourceScope      string             `json:"source_scope"`
-	SubmitterID      int64              `json:"submitter_id"`
-	ProblemRef       string             `json:"problem_ref"`
-	CodeStorageKey   string             `json:"code_storage_key"`
-	CodeHash         string             `json:"code_hash"`
-	InputSnapshot    []byte             `json:"input_snapshot"`
-	SandboxMode      int16              `json:"sandbox_mode"`
-	TargetSandboxRef pgtype.Text        `json:"target_sandbox_ref"`
-	Priority         int16              `json:"priority"`
-	Status           int16              `json:"status"`
-	RetryCount       int32              `json:"retry_count"`
-	MaxRetries       int32              `json:"max_retries"`
-	LastError        pgtype.Text        `json:"last_error"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	LeaseToken       string             `json:"lease_token"`
-	LeaseUntil       pgtype.Timestamptz `json:"lease_until"`
-	ResultID         int64              `json:"result_id"`
-	ResultVersion    int32              `json:"result_version"`
-	Passed           bool               `json:"passed"`
-	Score            int32              `json:"score"`
-	MaxScore         int32              `json:"max_score"`
-	Details          []byte             `json:"details"`
-	ReplayTrace      []byte             `json:"replay_trace"`
-	JudgeSandboxRef  string             `json:"judge_sandbox_ref"`
-	JudgedAt         pgtype.Timestamptz `json:"judged_at"`
-	IsRejudge        bool               `json:"is_rejudge"`
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+	ResultID          int64              `json:"result_id"`
+	ResultVersion     int32              `json:"result_version"`
+	Passed            bool               `json:"passed"`
+	Score             int32              `json:"score"`
+	MaxScore          int32              `json:"max_score"`
+	Details           []byte             `json:"details"`
+	ReplayTrace       []byte             `json:"replay_trace"`
+	JudgeSandboxRef   string             `json:"judge_sandbox_ref"`
+	JudgedAt          pgtype.Timestamptz `json:"judged_at"`
+	IsRejudge         bool               `json:"is_rejudge"`
 }
 
 func (q *Queries) ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) ([]ListJudgeTasksRow, error) {
@@ -1132,6 +1404,7 @@ func (q *Queries) ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) 
 			&i.SourceCourseID,
 			&i.SourceScope,
 			&i.SubmitterID,
+			&i.SubmitterTenantID,
 			&i.ProblemRef,
 			&i.CodeStorageKey,
 			&i.CodeHash,
@@ -1169,7 +1442,7 @@ func (q *Queries) ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) 
 }
 
 const listJudgeTasksBySourceRef = `-- name: ListJudgeTasksBySourceRef :many
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
 WHERE tenant_id = $1 AND source_ref = $2
 ORDER BY created_at DESC, id DESC
@@ -1180,15 +1453,42 @@ type ListJudgeTasksBySourceRefParams struct {
 	SourceRef string `json:"source_ref"`
 }
 
-func (q *Queries) ListJudgeTasksBySourceRef(ctx context.Context, arg ListJudgeTasksBySourceRefParams) ([]JudgeTask, error) {
+type ListJudgeTasksBySourceRefRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+}
+
+func (q *Queries) ListJudgeTasksBySourceRef(ctx context.Context, arg ListJudgeTasksBySourceRefParams) ([]ListJudgeTasksBySourceRefRow, error) {
 	rows, err := q.db.Query(ctx, listJudgeTasksBySourceRef, arg.TenantID, arg.SourceRef)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []JudgeTask{}
+	items := []ListJudgeTasksBySourceRefRow{}
 	for rows.Next() {
-		var i JudgeTask
+		var i ListJudgeTasksBySourceRefRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -1198,6 +1498,7 @@ func (q *Queries) ListJudgeTasksBySourceRef(ctx context.Context, arg ListJudgeTa
 			&i.SourceCourseID,
 			&i.SourceScope,
 			&i.SubmitterID,
+			&i.SubmitterTenantID,
 			&i.ProblemRef,
 			&i.CodeStorageKey,
 			&i.CodeHash,
@@ -1264,33 +1565,62 @@ func (q *Queries) ListJudgers(ctx context.Context) ([]Judger, error) {
 }
 
 const listRecentJudgeTasksBySubmitterProblem = `-- name: ListRecentJudgeTasksBySubmitterProblem :many
-SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 FROM judge_task
-WHERE tenant_id = $1 AND submitter_id = $2 AND problem_ref = $3 AND created_at >= now() - make_interval(secs => $4::int)
+WHERE tenant_id = $1 AND submitter_tenant_id = $2 AND submitter_id = $3 AND problem_ref = $4 AND created_at >= now() - make_interval(secs => $5::int)
 ORDER BY created_at DESC, id DESC
 `
 
 type ListRecentJudgeTasksBySubmitterProblemParams struct {
-	TenantID    int64  `json:"tenant_id"`
-	SubmitterID int64  `json:"submitter_id"`
-	ProblemRef  string `json:"problem_ref"`
-	Column4     int32  `json:"column_4"`
+	TenantID          int64  `json:"tenant_id"`
+	SubmitterTenantID int64  `json:"submitter_tenant_id"`
+	SubmitterID       int64  `json:"submitter_id"`
+	ProblemRef        string `json:"problem_ref"`
+	Column5           int32  `json:"column_5"`
 }
 
-func (q *Queries) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, arg ListRecentJudgeTasksBySubmitterProblemParams) ([]JudgeTask, error) {
+type ListRecentJudgeTasksBySubmitterProblemRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+}
+
+func (q *Queries) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, arg ListRecentJudgeTasksBySubmitterProblemParams) ([]ListRecentJudgeTasksBySubmitterProblemRow, error) {
 	rows, err := q.db.Query(ctx, listRecentJudgeTasksBySubmitterProblem,
 		arg.TenantID,
+		arg.SubmitterTenantID,
 		arg.SubmitterID,
 		arg.ProblemRef,
-		arg.Column4,
+		arg.Column5,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []JudgeTask{}
+	items := []ListRecentJudgeTasksBySubmitterProblemRow{}
 	for rows.Next() {
-		var i JudgeTask
+		var i ListRecentJudgeTasksBySubmitterProblemRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -1300,6 +1630,7 @@ func (q *Queries) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, ar
 			&i.SourceCourseID,
 			&i.SourceScope,
 			&i.SubmitterID,
+			&i.SubmitterTenantID,
 			&i.ProblemRef,
 			&i.CodeStorageKey,
 			&i.CodeHash,
@@ -1442,7 +1773,7 @@ SET status = 1,
     last_error = NULL,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND status IN (3, 4)
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type ResetJudgeTaskForRejudgeParams struct {
@@ -1451,9 +1782,36 @@ type ResetJudgeTaskForRejudgeParams struct {
 	InputSnapshot []byte `json:"input_snapshot"`
 }
 
-func (q *Queries) ResetJudgeTaskForRejudge(ctx context.Context, arg ResetJudgeTaskForRejudgeParams) (JudgeTask, error) {
+type ResetJudgeTaskForRejudgeRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+}
+
+func (q *Queries) ResetJudgeTaskForRejudge(ctx context.Context, arg ResetJudgeTaskForRejudgeParams) (ResetJudgeTaskForRejudgeRow, error) {
 	row := q.db.QueryRow(ctx, resetJudgeTaskForRejudge, arg.TenantID, arg.ID, arg.InputSnapshot)
-	var i JudgeTask
+	var i ResetJudgeTaskForRejudgeRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -1463,6 +1821,7 @@ func (q *Queries) ResetJudgeTaskForRejudge(ctx context.Context, arg ResetJudgeTa
 		&i.SourceCourseID,
 		&i.SourceScope,
 		&i.SubmitterID,
+		&i.SubmitterTenantID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
 		&i.CodeHash,
@@ -1486,7 +1845,7 @@ const retryJudgeTask = `-- name: RetryJudgeTask :one
 UPDATE judge_task
 SET status = 1, retry_count = retry_count + 1, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope, submitter_id, submitter_tenant_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode, target_sandbox_ref, priority, status, retry_count, max_retries, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type RetryJudgeTaskParams struct {
@@ -1496,14 +1855,41 @@ type RetryJudgeTaskParams struct {
 	LeaseToken string      `json:"lease_token"`
 }
 
-func (q *Queries) RetryJudgeTask(ctx context.Context, arg RetryJudgeTaskParams) (JudgeTask, error) {
+type RetryJudgeTaskRow struct {
+	ID                int64              `json:"id"`
+	TenantID          int64              `json:"tenant_id"`
+	JudgerID          int64              `json:"judger_id"`
+	SourceRef         string             `json:"source_ref"`
+	SourceOwnerID     int64              `json:"source_owner_id"`
+	SourceCourseID    int64              `json:"source_course_id"`
+	SourceScope       string             `json:"source_scope"`
+	SubmitterID       int64              `json:"submitter_id"`
+	SubmitterTenantID int64              `json:"submitter_tenant_id"`
+	ProblemRef        string             `json:"problem_ref"`
+	CodeStorageKey    string             `json:"code_storage_key"`
+	CodeHash          string             `json:"code_hash"`
+	InputSnapshot     []byte             `json:"input_snapshot"`
+	SandboxMode       int16              `json:"sandbox_mode"`
+	TargetSandboxRef  pgtype.Text        `json:"target_sandbox_ref"`
+	Priority          int16              `json:"priority"`
+	Status            int16              `json:"status"`
+	RetryCount        int32              `json:"retry_count"`
+	MaxRetries        int32              `json:"max_retries"`
+	LastError         pgtype.Text        `json:"last_error"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	LeaseToken        string             `json:"lease_token"`
+	LeaseUntil        pgtype.Timestamptz `json:"lease_until"`
+}
+
+func (q *Queries) RetryJudgeTask(ctx context.Context, arg RetryJudgeTaskParams) (RetryJudgeTaskRow, error) {
 	row := q.db.QueryRow(ctx, retryJudgeTask,
 		arg.TenantID,
 		arg.ID,
 		arg.LastError,
 		arg.LeaseToken,
 	)
-	var i JudgeTask
+	var i RetryJudgeTaskRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -1513,6 +1899,7 @@ func (q *Queries) RetryJudgeTask(ctx context.Context, arg RetryJudgeTaskParams) 
 		&i.SourceCourseID,
 		&i.SourceScope,
 		&i.SubmitterID,
+		&i.SubmitterTenantID,
 		&i.ProblemRef,
 		&i.CodeStorageKey,
 		&i.CodeHash,

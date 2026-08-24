@@ -5,7 +5,7 @@
 
 import { useCallback, useId, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { BookOpen, GraduationCap, Layers, TicketCheck } from 'lucide-react'
+import { BookOpen, TicketCheck } from 'lucide-react'
 import { CourseStatus, type Course } from '@chaimir/api-client'
 import {
   Badge,
@@ -14,17 +14,17 @@ import {
   Card,
   CardBody,
   CardHeader,
+  DataPanel,
   FilterBar,
   FilterField,
   FormField,
   Input,
+  MetricStrip,
   PageBody,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
-  Stat,
   StatusIndicator,
   Table,
   toast,
@@ -133,23 +133,28 @@ export default function StudentCoursesPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '学习区' }, { label: '我的课程' }]} />}
+        kicker={<Breadcrumb items={[{ label: '学习区' }]} />}
         title="我的课程"
         description="这里是你已加入的课程。进入课程可以查看章节课时、作业和学习进度。"
         icon={BookOpen}
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat label="已加入课程" value={totalCount ?? '—'} icon={BookOpen} hint="本学期及历史全部课程" />
-          <Stat label="进行中" value={runningCount ?? '—'} icon={Layers} hint="正在上课的课程数" />
-          <Stat label="已结课" value={endedCount ?? '—'} icon={GraduationCap} hint="成绩已可查看" />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是课程列表,不是这三个数字 */}
+      <MetricStrip
+        label="课程总量摘要"
+        className="mb-5"
+        items={[
+          { label: '已加入', value: totalCount ?? '—', hint: '本学期及历史全部课程' },
+          { label: '进行中', value: runningCount ?? '—', hint: '正在上课的课程数' },
+          { label: '已结课', value: endedCount ?? '—', hint: '成绩已可查看' },
+        ]}
+      />
 
       <PageBody rail={<JoinCourseCard onJoined={courses.reload} />}>
-        <PageSection title="课程列表" description={`共 ${courses.total} 门课程`}>
-          <div className="flex flex-col gap-4">
+        {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
+        <DataPanel
+          label="课程列表"
+          filter={
             <FilterBar label="课程筛选">
               <FilterField label="课程状态" group>
                 <SegmentedControl
@@ -161,33 +166,45 @@ export default function StudentCoursesPage() {
                 />
               </FilterField>
             </FilterBar>
-
+          }
+          footer={
+            <Pagination
+              page={courses.page}
+              pageSize={courses.pageSize}
+              total={courses.total}
+              onPageChange={courses.setPage}
+            />
+          }
+        >
             <ResourceState
               resource={courses}
               emptyIcon={BookOpen}
               emptyTitle="还没有加入任何课程"
               emptyDescription="向老师索取课程邀请码,在右侧填入即可加入课程开始学习。"
-              skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+              skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
             >
               {(page) => (
-                <div className="flex flex-col gap-4">
-                  <Table
-                    columns={columns}
-                    data={page.list}
-                    rowKey={(course) => course.id}
-                    onRowClick={(course) => navigate(`/student/courses/${course.id}`)}
-                  />
-                  <Pagination
-                    page={courses.page}
-                    pageSize={courses.pageSize}
-                    total={courses.total}
-                    onPageChange={courses.setPage}
-                  />
-                </div>
+                <Table
+                  columns={columns}
+                  data={page.list}
+                  rowKey={(course) => course.id}
+                  elevated={false}
+                  onRowClick={(course) => navigate(`/student/courses/${course.id}`)}
+                  // <md 换行卡(§6.4.1 规则 3):课程名一行、学期与学分一行,状态在右
+                  mobileCard={(course) => ({
+                    title: course.name,
+                    meta: `${course.semester} · ${course.credits} 学分`,
+                    badge: (
+                      <StatusIndicator
+                        tone={courseStatusTone(course.status)}
+                        label={courseStatusLabel(course.status)}
+                      />
+                    ),
+                  })}
+                />
               )}
             </ResourceState>
-          </div>
-        </PageSection>
+        </DataPanel>
       </PageBody>
     </PageScaffold>
   )

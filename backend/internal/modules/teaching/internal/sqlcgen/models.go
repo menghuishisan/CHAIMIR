@@ -188,6 +188,7 @@ type TeachingGradeEventOutbox struct {
 	EventUpdatedAt pgtype.Timestamptz `json:"event_updated_at"`
 	Status         int16              `json:"status"`
 	RetryCount     int32              `json:"retry_count"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
 	LastError      pgtype.Text        `json:"last_error"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`

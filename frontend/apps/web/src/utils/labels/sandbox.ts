@@ -40,6 +40,7 @@ const TOOL_KIND_LABELS: Record<SandboxToolKind, string> = {
   [SandboxToolKind.TERMINAL]: '终端',
   [SandboxToolKind.WEB_EMBED]: '网页工具',
   [SandboxToolKind.COMMAND]: '命令工具',
+  [SandboxToolKind.INFRA]: '基础设施',
 }
 
 /** sandboxToolKindLabel 返回沙箱工具形态文案。 */
@@ -100,7 +101,6 @@ const DEFINITION_STATUS_LABELS: Record<ToolStatus, string> = {
 export function toolStatusLabel(status: ToolStatus): string {
   return DEFINITION_STATUS_LABELS[status]
 }
-
 
 /**
  * ecoTagsLabel 返回工具适用生态的用户向文案。

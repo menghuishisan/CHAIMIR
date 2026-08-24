@@ -1,4 +1,4 @@
-# 本文件声明 runtime/cosmos 镜像的职责、端口、安全、资源和供应链约束。
+﻿# 本文件声明 runtime/cosmos 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: runtime
 name: cosmos
@@ -24,17 +24,31 @@ upstream:
   source_sha256: 9d53edfac968af4a2444b0f0748bd95adb071e920ee320dae3c1078555a3a0fa
   builder: golang:1.26.5-bookworm@sha256:5ab8e9af080c5f58dab00dd8055ea9309ec54c47722681b5ee8d0a3602f85316
   runtime: gcr.io/distroless/cc-debian12:nonroot@sha256:b0ae8e989418b458e0f25489bc3be523718938a2b70864cc0f6a00af1ddbd985
+  source_downloader: alpine:3.23
+  source_downloader_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: source-build
 data_driven: true
 capabilities:
-  - chain-runtime
-  - cosmos-sdk-chain
-  - tendermint-dev
+  provides:
+    - chain-runtime
+    - cosmos-sdk-chain
+    - tendermint-dev
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 runtime:
   eco: cosmos
-  adapter_level: 2
-  default_tool_codes:
-    - code-server
+  adapter_level: 1
+env_keys:
+  config:
+    - CHAIMIR_COSMOS_HOME
+    - CHAIMIR_COSMOS_MIN_GAS_PRICES
+    - CHAIMIR_COSMOS_RPC_LADDR
+    - CHAIMIR_COSMOS_REST_ADDRESS
+    - CHAIMIR_COSMOS_GRPC_ADDRESS
 ports:
   - name: rpc
     container_port: 26657
@@ -86,4 +100,3 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest_in_production: true
-

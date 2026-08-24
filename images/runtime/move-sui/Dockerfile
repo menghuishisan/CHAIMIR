@@ -17,15 +17,17 @@ LABEL org.opencontainers.image.description="Chaimir Sui Move localnet runtime"
 
 COPY --from=runtime-libs /lib/x86_64-linux-gnu/ /lib/x86_64-linux-gnu/
 COPY --from=runtime-libs /lib64/ /lib64/
+COPY --from=runtime-libs /bin/sh /bin/sh
+COPY --from=runtime-libs /bin/dash /bin/dash
 COPY --from=runtime-libs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=runtime-dirs --chown=1000:1000 /workspace /workspace
 COPY --from=runtime-dirs --chown=1000:1000 /runtime-state /runtime-state
 COPY --from=sui-tools /usr/local/bin/sui /usr/local/bin/sui
 COPY --from=sui-tools /usr/local/bin/sui-faucet /usr/local/bin/sui-faucet
 COPY --from=sui-tools /usr/local/bin/sui-tool /usr/local/bin/sui-tool
+COPY --chown=1000:1000 entrypoint.sh /usr/local/bin/chaimir-sui-entrypoint
 
 USER 1000:1000
 WORKDIR /workspace
 EXPOSE 9000
-ENTRYPOINT ["/usr/local/bin/sui"]
-CMD ["start", "--with-faucet", "--force-regenesis", "--network.config", "/runtime-state/sui/network.yaml"]
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/chaimir-sui-entrypoint"]

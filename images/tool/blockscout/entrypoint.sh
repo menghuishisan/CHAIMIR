@@ -2,11 +2,19 @@
 # This entrypoint validates Blockscout runtime dependencies before starting the web service.
 set -eu
 
-: "${DATABASE_URL:?DATABASE_URL is required}"
+: "${CHAIMIR_BLOCKSCOUT_DATABASE_ADDRESS:?CHAIMIR_BLOCKSCOUT_DATABASE_ADDRESS is required}"
 : "${ETHEREUM_JSONRPC_HTTP_URL:?ETHEREUM_JSONRPC_HTTP_URL is required}"
+: "${SECRET_KEY_BASE:?SECRET_KEY_BASE is required}"
+: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
+
+database_name="${CHAIMIR_BLOCKSCOUT_DATABASE_NAME:-blockscout}"
+database_user="${CHAIMIR_BLOCKSCOUT_DATABASE_USER:-postgres}"
+case "${database_name}" in *[!A-Za-z0-9_.-]*|'') echo "CHAIMIR_BLOCKSCOUT_DATABASE_NAME is invalid" >&2; exit 2;; esac
+case "${database_user}" in *[!A-Za-z0-9_.-]*|'') echo "CHAIMIR_BLOCKSCOUT_DATABASE_USER is invalid" >&2; exit 2;; esac
+case "${POSTGRES_PASSWORD}" in *[!A-Za-z0-9_.~-]*|'') echo "POSTGRES_PASSWORD is invalid" >&2; exit 2;; esac
+export DATABASE_URL="postgresql://${database_user}:${POSTGRES_PASSWORD}@${CHAIMIR_BLOCKSCOUT_DATABASE_ADDRESS}/${database_name}"
 
 export PORT="${PORT:-4000}"
-export SECRET_KEY_BASE="${SECRET_KEY_BASE:-$(openssl rand -hex 64)}"
 export ECTO_USE_SSL="${ECTO_USE_SSL:-false}"
 export ETHEREUM_JSONRPC_VARIANT="${ETHEREUM_JSONRPC_VARIANT:-geth}"
 export ETHEREUM_JSONRPC_TRACE_URL="${ETHEREUM_JSONRPC_TRACE_URL:-$ETHEREUM_JSONRPC_HTTP_URL}"

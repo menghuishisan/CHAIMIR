@@ -70,6 +70,7 @@ type ServerConfig struct {
 	AppEnv                   string
 	HealthTimeoutSeconds     int
 	ShutdownTimeoutSeconds   int
+	EndpointDrainSeconds     int
 	ReadHeaderTimeoutSeconds int
 	ReadTimeoutSeconds       int
 	WriteTimeoutSeconds      int
@@ -90,8 +91,10 @@ type PostgresConfig struct {
 	User                             string
 	Password                         string
 	SSLMode                          string
-	MaxConns                         int
-	MinConns                         int
+	AppMaxConns                      int
+	AppMinConns                      int
+	PrivMaxConns                     int
+	PrivMinConns                     int
 	PrivUser                         string
 	PrivPassword                     string
 	StartupTimeoutSeconds            int
@@ -264,7 +267,6 @@ type TeachingConfig struct {
 	GradeEventOutboxPollMs          int
 	GradeEventOutboxStaleMs         int
 	JudgeOutboxMaxAttempts          int
-	GradeEventOutboxMaxAttempts     int
 	GradeExportBatchSize            int
 	GradeExportWorkerBatchSize      int
 	GradeExportWorkerPollMs         int
@@ -550,6 +552,7 @@ func Load() (*Config, error) {
 		AppEnv:                   req("APP_ENV"),
 		HealthTimeoutSeconds:     reqInt("HEALTH_CHECK_TIMEOUT_SECONDS"),
 		ShutdownTimeoutSeconds:   reqInt("HTTP_SHUTDOWN_TIMEOUT_SECONDS"),
+		EndpointDrainSeconds:     reqInt("HTTP_ENDPOINT_DRAIN_SECONDS"),
 		ReadHeaderTimeoutSeconds: reqInt("HTTP_READ_HEADER_TIMEOUT_SECONDS"),
 		ReadTimeoutSeconds:       reqInt("HTTP_READ_TIMEOUT_SECONDS"),
 		WriteTimeoutSeconds:      reqInt("HTTP_WRITE_TIMEOUT_SECONDS"),
@@ -568,8 +571,10 @@ func Load() (*Config, error) {
 		User:                             req("PG_USER"),
 		Password:                         req("PG_PASSWORD"),
 		SSLMode:                          req("PG_SSLMODE"),
-		MaxConns:                         reqInt("PG_MAX_CONNS"),
-		MinConns:                         reqInt("PG_MIN_CONNS"),
+		AppMaxConns:                      reqInt("PG_APP_MAX_CONNS"),
+		AppMinConns:                      reqInt("PG_APP_MIN_CONNS"),
+		PrivMaxConns:                     reqInt("PG_PRIV_MAX_CONNS"),
+		PrivMinConns:                     reqInt("PG_PRIV_MIN_CONNS"),
 		PrivUser:                         os.Getenv("PG_PRIV_USER"),
 		PrivPassword:                     os.Getenv("PG_PRIV_PASSWORD"),
 		StartupTimeoutSeconds:            reqInt("PG_STARTUP_TIMEOUT_SECONDS"),
@@ -734,7 +739,6 @@ func Load() (*Config, error) {
 		GradeEventOutboxPollMs:          reqInt("TEACHING_GRADE_EVENT_OUTBOX_POLL_INTERVAL_MS"),
 		GradeEventOutboxStaleMs:         reqInt("TEACHING_GRADE_EVENT_OUTBOX_STALE_INTERVAL_MS"),
 		JudgeOutboxMaxAttempts:          reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
-		GradeEventOutboxMaxAttempts:     reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 		GradeExportBatchSize:            reqInt("TEACHING_GRADE_EXPORT_BATCH_SIZE"),
 		GradeExportWorkerBatchSize:      reqInt("TEACHING_GRADE_EXPORT_WORKER_BATCH_SIZE"),
 		GradeExportWorkerPollMs:         reqInt("TEACHING_GRADE_EXPORT_WORKER_POLL_INTERVAL_MS"),
@@ -871,6 +875,12 @@ func Load() (*Config, error) {
 	if c.Redis.Port < 1 || c.Redis.Port > 65535 {
 		errs = append(errs, "REDIS_PORT 必须在 1 到 65535 之间")
 	}
+	if c.Postgres.AppMaxConns <= 0 || c.Postgres.AppMinConns < 0 || c.Postgres.AppMinConns > c.Postgres.AppMaxConns {
+		errs = append(errs, "PG_APP_MAX_CONNS 与 PG_APP_MIN_CONNS 配置无效")
+	}
+	if c.Postgres.PrivMaxConns <= 0 || c.Postgres.PrivMinConns < 0 || c.Postgres.PrivMinConns > c.Postgres.PrivMaxConns {
+		errs = append(errs, "PG_PRIV_MAX_CONNS 与 PG_PRIV_MIN_CONNS 配置无效")
+	}
 	deployMode := strings.ToLower(strings.TrimSpace(c.Deploy.Mode))
 	if deployMode != DeployModeSaaS && deployMode != DeployModeSchool {
 		errs = append(errs, "DEPLOY_MODE 必须为 saas 或 school")
@@ -897,6 +907,9 @@ func Load() (*Config, error) {
 	}
 	if c.Server.ShutdownTimeoutSeconds <= 0 {
 		errs = append(errs, "HTTP_SHUTDOWN_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Server.EndpointDrainSeconds <= 0 {
+		errs = append(errs, "HTTP_ENDPOINT_DRAIN_SECONDS 必须大于 0")
 	}
 	if c.Server.ReadHeaderTimeoutSeconds <= 0 {
 		errs = append(errs, "HTTP_READ_HEADER_TIMEOUT_SECONDS 必须大于 0")
@@ -1132,7 +1145,7 @@ func Load() (*Config, error) {
 	if c.Teaching.GradeEventOutboxStaleMs <= 0 {
 		errs = append(errs, "TEACHING_GRADE_EVENT_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
 	}
-	if c.Teaching.JudgeOutboxMaxAttempts <= 0 || c.Teaching.GradeEventOutboxMaxAttempts <= 0 {
+	if c.Teaching.JudgeOutboxMaxAttempts <= 0 {
 		errs = append(errs, "ASYNC_OUTBOX_MAX_ATTEMPTS 必须大于 0")
 	}
 	if c.Teaching.GradeExportBatchSize <= 0 {

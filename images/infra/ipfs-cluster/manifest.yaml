@@ -25,10 +25,24 @@ upstream:
   runtime_digest: sha256:4b5196599229a5cf312a676cfe1ee8587ecf2371dcc22620f8c7a66d77d125c8
   reuse_policy: rebuild-official-release-source
 data_driven: true
+env_keys:
+  config:
+    - CHAIMIR_IPFS_API_URL
+  secret: []
 capabilities:
-  - decentralized-storage
-  - ipfs-cluster
+  provides:
+    - decentralized-storage
+    - ipfs-cluster
+    - ipfs-http-api
+  requires:
+    - ipfs-node
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 infra:
+  runtime_config_required: true
   eco_tags:
     - evm
     - fabric
@@ -44,17 +58,29 @@ infra:
   roles:
     - storage
     - cluster
+  bindings:
+    - name: ipfs_api
+      capability: ipfs-node
+      endpoint: api
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:CHAIMIR_IPFS_API_URL
 ports:
-  - name: api
+  - name: cluster-api
     container_port: 9094
     protocol: TCP
     expose: internal
     purpose: IPFS Cluster API
-  - name: proxy
+  - name: api
+    container_port: 9095
+    protocol: TCP
+    expose: internal
+    purpose: IPFS-compatible proxy
+  - name: cluster
     container_port: 9096
     protocol: TCP
     expose: internal
-    purpose: IPFS Cluster proxy
+    purpose: IPFS Cluster peer transport
 local_dev:
   host_mappings:
     - host: 127.0.0.1

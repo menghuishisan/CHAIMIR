@@ -87,7 +87,7 @@ func (s *Service) restoreArchiveToWorkspaceDirChecked(ctx context.Context, sb Sa
 		target = path.Join(runtime.AdapterSpec.WorkspaceDir, relative)
 	}
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.UnpackTar, runtime.AdapterSpec.WorkspaceDir, target, "")
-	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, tarball, false); err != nil {
+	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, workspaceExecTarget(runtime), command, tarball, false); err != nil {
 		return sandboxExecFailure(apperr.ErrSandboxInitExecFailed, err, stderr)
 	}
 	return nil
@@ -131,12 +131,12 @@ func (s *Service) runInitScriptIfNeeded(ctx context.Context, sb Sandbox, runtime
 	}
 	scriptPath := path.Join(runtime.AdapterSpec.WorkspaceDir, ".chaimir-init-script")
 	writeCommand := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.WriteFile, runtime.AdapterSpec.WorkspaceDir, scriptPath, "")
-	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), writeCommand, data, false); err != nil {
+	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, workspaceExecTarget(runtime), writeCommand, data, false); err != nil {
 		return sandboxExecFailure(apperr.ErrSandboxInitExecFailed, err, stderr)
 	}
 	runCommand := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.RunScript, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir, scriptPath)
 	stdin := []byte(base64.StdEncoding.EncodeToString(data))
-	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), runCommand, stdin, false); err != nil {
+	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, workspaceExecTarget(runtime), runCommand, stdin, false); err != nil {
 		return sandboxExecFailure(apperr.ErrSandboxInitExecFailed, err, stderr)
 	}
 	return s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {

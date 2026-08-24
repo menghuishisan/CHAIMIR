@@ -4,6 +4,7 @@ package experiment
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"hash/fnv"
 	"log/slog"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -68,7 +70,8 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 			}
 		}
 		instanceID := s.ids.Generate()
-		inst, err = tx.CreateInstance(ctx, ExperimentInstance{ID: instanceID, TenantID: id.TenantID, ExperimentID: experimentID, OwnerAccountID: id.AccountID, GroupID: req.GroupID.Int64(), SourceRef: sourceRefForInstance(instanceID, timex.Now())})
+		sourceRef := sourceRefForInstance(instanceID, timex.Now())
+		inst, err = tx.CreateInstance(ctx, ExperimentInstance{ID: instanceID, TenantID: id.TenantID, ExperimentID: experimentID, OwnerAccountID: id.AccountID, GroupID: req.GroupID.Int64(), SourceRef: sourceRef, ScopeRef: sourceRef + ":scope"})
 		return err
 	}); err != nil {
 		return InstanceDTO{}, err
@@ -85,10 +88,18 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 		}
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := s.reconcileCreatedResourceAuthorizations(ctx, tx, inst, sandboxes, sims); err != nil {
+			return err
+		}
 		var err error
 		inst, err = tx.UpdateInstanceResources(ctx, id.TenantID, inst.ID, sandboxes, sims, targetStatus)
 		return err
 	}); err != nil {
+		if createErr == nil {
+			if cleanupErr := s.destroyCreatedStageResources(ctx, inst, sandboxes, sims); cleanupErr != nil {
+				return InstanceDTO{}, apperr.ErrExperimentRecycleFailed.WithCause(errors.Join(err, cleanupErr))
+			}
+		}
 		return InstanceDTO{}, err
 	}
 	if createErr != nil {
@@ -160,6 +171,37 @@ func (s *Service) GetInstance(ctx context.Context, instanceID int64) (InstanceDT
 	return instanceDTOFromModel(inst, checkpointDefaults(exp, checkpoints), stageDTOs(exp, inst, checkpoints)), nil
 }
 
+// ListTeacherInstances 查询教师可见的活跃实验实例。
+func (s *Service) ListTeacherInstances(ctx context.Context, status int16, page, size int) ([]InstanceDTO, int64, int, int, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return nil, 0, page, size, err
+	}
+	isSchoolAdmin, err := s.isSchoolAdmin(ctx, id.AccountID)
+	if err != nil {
+		return nil, 0, page, size, err
+	}
+	teacherID := id.AccountID
+	if isSchoolAdmin {
+		teacherID = 0
+	}
+	page, size = pagex.Normalize(page, size)
+	var items []ExperimentInstance
+	var total int64
+	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		items, total, err = tx.ListTeacherInstances(ctx, id.TenantID, teacherID, status, page, size)
+		return err
+	})
+	if err != nil {
+		return nil, 0, page, size, err
+	}
+	out := make([]InstanceDTO, 0, len(items))
+	for _, item := range items {
+		out = append(out, instanceDTOFromModel(item, nil))
+	}
+	return out, total, page, size, nil
+}
+
 // GetProgress 返回统一 M10 进度 topic 元信息。
 func (s *Service) GetProgress(ctx context.Context, instanceID int64) (ProgressDTO, error) {
 	id, err := currentIdentity(ctx)
@@ -202,6 +244,9 @@ func (s *Service) ResumeInstance(ctx context.Context, instanceID int64) (Instanc
 			if err != nil {
 				return err
 			}
+			if err := s.applySavedWorkspaceArchives(ctx, &exp, inst); err != nil {
+				return err
+			}
 			sandboxes, sims, err := s.createEngineResources(ctx, exp, inst)
 			if err != nil {
 				if recycleErr := s.compensateRecycle(ctx, inst, "resume_failed"); recycleErr != nil {
@@ -230,6 +275,30 @@ func (s *Service) ResumeInstance(ctx context.Context, instanceID int64) (Instanc
 		}
 		return nil
 	})
+}
+
+// applySavedWorkspaceArchives 把已回收沙箱最后一次保存的工作区作为重建初始化归档。
+// 归档引用只在服务端模块契约内流转,浏览器仍只看到新沙箱的能力摘要。
+func (s *Service) applySavedWorkspaceArchives(ctx context.Context, exp *Experiment, inst ExperimentInstance) error {
+	if exp == nil || s.sandbox == nil {
+		return apperr.ErrExperimentSandboxUnavailable
+	}
+	archives := make(map[string]string, len(inst.SandboxRefs))
+	for _, ref := range inst.SandboxRefs {
+		archive, err := s.sandbox.GetSandboxWorkspaceArchive(ctx, inst.TenantID, ref.SandboxID.Int64())
+		if err != nil {
+			return apperr.ErrExperimentSandboxUnavailable.WithCause(err)
+		}
+		if strings.TrimSpace(archive) != "" {
+			archives[strings.TrimSpace(ref.ComponentID)] = archive
+		}
+	}
+	for i := range exp.Components.Envs {
+		if archive := archives[strings.TrimSpace(exp.Components.Envs[i].ID)]; archive != "" {
+			exp.Components.Envs[i].InitCodeRef = archive
+		}
+	}
+	return nil
 }
 
 // FinishInstance 完成实验实例,首次固化得分并在后续重试中幂等续跑资源回收。
@@ -391,13 +460,13 @@ func (s *Service) createEngineResources(ctx context.Context, exp Experiment, ins
 	return s.createInitialEngineResources(ctx, exp, inst)
 }
 
-// recycleEngines 按实例 source_ref 回收 M2/M4 资源,契约缺失时显式失败。
+// recycleEngines 按实例 scope_ref 回收 M2/M4 资源,并以 source_ref 做稳定归属校验。
 func (s *Service) recycleEngines(ctx context.Context, inst ExperimentInstance, reason string) error {
 	if len(inst.SandboxRefs) > 0 {
 		if s.sandbox == nil {
 			return apperr.ErrExperimentRecycleFailed
 		}
-		if err := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: inst.TenantID, SourceRef: inst.SourceRef, Reason: reason}); err != nil {
+		if err := s.sandbox.RecycleByScopeRef(ctx, contracts.SandboxRecycleRequest{TenantID: inst.TenantID, ScopeRef: inst.ScopeRef, SourceRef: inst.SourceRef, Reason: reason}); err != nil {
 			return apperr.ErrExperimentRecycleFailed.WithCause(err)
 		}
 	}
@@ -405,7 +474,7 @@ func (s *Service) recycleEngines(ctx context.Context, inst ExperimentInstance, r
 		if s.sim == nil {
 			return apperr.ErrExperimentRecycleFailed
 		}
-		if err := s.sim.RecycleBySourceRef(ctx, contracts.SimRecycleRequest{TenantID: inst.TenantID, SourceRef: inst.SourceRef, Reason: reason}); err != nil {
+		if err := s.sim.RecycleByScopeRef(ctx, contracts.SimRecycleRequest{TenantID: inst.TenantID, ScopeRef: inst.ScopeRef, SourceRef: inst.SourceRef, Reason: reason}); err != nil {
 			return apperr.ErrExperimentRecycleFailed.WithCause(err)
 		}
 	}
@@ -418,12 +487,12 @@ func (s *Service) compensateRecycle(ctx context.Context, inst ExperimentInstance
 		return apperr.ErrExperimentSourceRefInvalid
 	}
 	if s.sandbox != nil {
-		if err := s.sandbox.RecycleBySourceRef(ctx, contracts.SandboxRecycleRequest{TenantID: inst.TenantID, SourceRef: inst.SourceRef, Reason: reason}); err != nil {
+		if err := s.sandbox.RecycleByScopeRef(ctx, contracts.SandboxRecycleRequest{TenantID: inst.TenantID, ScopeRef: inst.ScopeRef, SourceRef: inst.SourceRef, Reason: reason}); err != nil {
 			return apperr.ErrExperimentRecycleFailed.WithCause(err)
 		}
 	}
 	if s.sim != nil {
-		if err := s.sim.RecycleBySourceRef(ctx, contracts.SimRecycleRequest{TenantID: inst.TenantID, SourceRef: inst.SourceRef, Reason: reason}); err != nil {
+		if err := s.sim.RecycleByScopeRef(ctx, contracts.SimRecycleRequest{TenantID: inst.TenantID, ScopeRef: inst.ScopeRef, SourceRef: inst.SourceRef, Reason: reason}); err != nil {
 			return apperr.ErrExperimentRecycleFailed.WithCause(err)
 		}
 	}
@@ -645,7 +714,7 @@ func (s *Service) allInstanceSandboxesDestroyed(ctx context.Context, inst Experi
 
 // HandleCourseEnded 课程结束或归档后级联回收课内仍占用引擎资源的实验实例(M7 需求 D3)。
 //
-// 逐个实例回收而不是批量:回收要按 source_ref 通知 M2/M4,任一失败都必须显式返回让事件重投,
+// 逐个实例回收而不是批量:回收要按 scope_ref 通知 M2/M4,任一失败都必须显式返回让事件重投,
 // 而已回收成功的实例已落 recycled 态,重投时不会被再次取出(查询只看仍占资源的四态),天然幂等。
 func (s *Service) HandleCourseEnded(ctx context.Context, event contracts.TeachingCourseEndedEvent) error {
 	if event.TenantID <= 0 || event.CourseID <= 0 {

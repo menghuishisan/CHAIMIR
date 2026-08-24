@@ -81,13 +81,22 @@ jobs:
         run: |
           ./images/sync-image-metadata.ps1 -FragmentsPath ./image-digest-artifacts
 
+      - name: 校验四个环境镜像投影
+        if: steps.artifacts.outputs.available == 'true'
+        shell: pwsh
+        run: |
+          @("acceptance", "staging", "prod-saas", "prod-school") | ForEach-Object {
+            ./deploy/scripts/verify-overlay-image-lock.ps1 `
+              -OverlayPath "./deploy/overlays/$_"
+          }
+
       - id: changes
         name: 检查权威文件是否变化
         if: steps.artifacts.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          if git diff --quiet -- images/image-digests.lock deploy/overlays/acceptance/kustomization.yaml deploy/overlays/staging/kustomization.yaml deploy/overlays/prod-saas/kustomization.yaml deploy/overlays/prod-school/kustomization.yaml backend/.env.example deploy/config/chaimir.env; then
+          if git diff --quiet -- images/image-digests.lock deploy/base/kustomization.yaml deploy/components/middleware/kustomization.yaml backend/.env.example deploy/config/chaimir.env; then
             echo "present=false" >> "$GITHUB_OUTPUT"
           else
             echo "present=true" >> "$GITHUB_OUTPUT"
@@ -98,7 +107,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git add images/image-digests.lock deploy/overlays/acceptance/kustomization.yaml deploy/overlays/staging/kustomization.yaml deploy/overlays/prod-saas/kustomization.yaml deploy/overlays/prod-school/kustomization.yaml backend/.env.example deploy/config/chaimir.env
+          git add images/image-digests.lock deploy/base/kustomization.yaml deploy/components/middleware/kustomization.yaml backend/.env.example deploy/config/chaimir.env
           git diff --cached --check
           git commit -m "chore(images): promote verified image digests"
           git push --force-with-lease origin "$AUTOMATION_BRANCH"

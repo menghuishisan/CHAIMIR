@@ -1,7 +1,7 @@
 // Admin API 文件定义 M9 管理后台前端唯一调用入口。
 
 import { ApiClient, encodePathSegment } from '../client'
-import type { AdminScope, AlertStatus, BackupStatus } from '../constants/admin'
+import type { AdminScope, AlertLevel, AlertStatus, BackupStatus } from '../constants/admin'
 import type { PaginatedResponse } from '../types/common'
 import type {
   AlertEvent,
@@ -65,6 +65,15 @@ export class AdminApi {
     return this.client.get('/admin/configs', params)
   }
 
+  /**
+   * getConfig 按 key 读取单个系统配置。
+   * 返回的是脱敏值与当前 version —— 回滚要带 version(乐观锁),
+   * 故「进详情 → 读 version → 回滚」现在是一条完整链路,不必再拉全量配置列表。
+   */
+  async getConfig(key: string, params?: { scope?: AdminScope }): Promise<SystemConfig> {
+    return this.client.get(`/admin/configs/${encodePathSegment(key)}`, params)
+  }
+
   // updateConfig 按配置 key 和乐观锁版本更新系统配置。
   async updateConfig(key: string, data: ConfigUpdateRequest): Promise<SystemConfig> {
     return this.client.put(`/admin/configs/${encodePathSegment(key)}`, data)
@@ -98,8 +107,17 @@ export class AdminApi {
     return this.client.patch(`/admin/alert-rules/${encodePathSegment(ruleId)}`, data)
   }
 
-  // listAlertEvents 查询业务级告警事件。
-  async listAlertEvents(params?: { status?: AlertStatus; page?: number; size?: number }): Promise<PaginatedResponse<AlertEvent>> {
+  /**
+   * listAlertEvents 查询业务级告警事件。
+   * status 与 level 都以 0 表示不限,由服务端过滤,total 与筛选同口径 ——
+   * 按级别统计必须走这个参数,不能用当前页切片数(§6.5.4)。
+   */
+  async listAlertEvents(params?: {
+    status?: AlertStatus
+    level?: AlertLevel
+    page?: number
+    size?: number
+  }): Promise<PaginatedResponse<AlertEvent>> {
     return this.client.get('/admin/alert-events', params)
   }
 

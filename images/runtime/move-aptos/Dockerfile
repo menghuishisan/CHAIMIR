@@ -23,6 +23,8 @@ COPY --from=runtime-dirs --chown=1000:1000 /runtime-state /runtime-state
 COPY --from=aptos-tools /usr/local/bin/aptos /usr/local/bin/aptos
 COPY --from=aptos-tools /aptos /aptos
 
+ENV HOME=/workspace
+ENV TMPDIR=/workspace
 USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8080

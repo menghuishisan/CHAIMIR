@@ -187,12 +187,15 @@ export interface AuthSubmitProps {
 }
 
 /**
- * AuthSubmit 表单主落点(朱砂落印,通栏)。
+ * AuthSubmit 表单主落点(玉实底,通栏)。
  * 八页的提交按钮只有文案不同,变体与间距在这里定死。
+ *
+ * 为什么是玉而不是朱砂(§1.2):登录按钮是认证页最大的一块色块,
+ * 朱砂只留给品牌章与落印类动作,主 CTA 用朱砂会把「玉:朱砂 9:1」的克制比例反过来。
  */
 export function AuthSubmit({ children, loading }: AuthSubmitProps) {
   return (
-    <Button type="submit" variant="seal" size="lg" loading={loading} className={PRIMARY_ACTION_CLASS}>
+    <Button type="submit" variant="primary" size="lg" loading={loading} className={PRIMARY_ACTION_CLASS}>
       {children}
     </Button>
   )
@@ -204,7 +207,7 @@ export interface AuthPrimaryLinkProps {
 }
 
 /**
- * AuthPrimaryLink 落印级别的跳转落点(成功态的「前往登录」)。
+ * AuthPrimaryLink 主落点的跳转形态(成功态的「前往登录」)。
  * 与 AuthSubmit 同一视觉,但落在 <a> 上 —— 它是一次导航而不是一次提交,
  * 保留链接语义(可中键新开、可复制地址),按钮样式取自设计系统同一份变体定义。
  */
@@ -212,7 +215,7 @@ export function AuthPrimaryLink({ to, children }: AuthPrimaryLinkProps) {
   return (
     <Link
       to={to}
-      className={cn(buttonVariants({ variant: 'seal', size: 'lg' }), PRIMARY_ACTION_CLASS, 'flex')}
+      className={cn(buttonVariants({ variant: 'primary', size: 'lg' }), PRIMARY_ACTION_CLASS, 'flex')}
     >
       {children}
     </Link>

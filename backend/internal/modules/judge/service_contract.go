@@ -53,6 +53,7 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 		return contracts.JudgeTaskInfo{}, apperr.ErrJudgeSubmitInvalid.WithCause(fmt.Errorf("判题提交缺少 trace_id"))
 	}
 	snapshot.TraceID = traceID
+	snapshot.SandboxSourceRef = strings.TrimSpace(req.SandboxSourceRef)
 	requiresCode := judgerRequiresCode(j.Type, mode)
 	codeHash, vector, sanitizedCode, err := s.prepareSubmittedCode(ctx, req, requiresCode)
 	if err != nil {
@@ -62,7 +63,7 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	if err := validateSourceOwnership(ownership); err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
-	task := JudgeTask{ID: s.ids.Generate(), TenantID: req.TenantID, JudgerID: j.ID, SourceRef: req.SourceRef, SourceOwnerID: ownership.OwnerID, SourceCourseID: ownership.CourseID, SourceScope: ownership.Scope, SubmitterID: req.SubmitterID, ProblemRef: problemRef, CodeStorageKey: req.CodeStorageKey, CodeHash: codeHash, InputSnapshot: snapshot, SandboxMode: mode, TargetSandboxRef: strings.TrimSpace(req.TargetSandboxRef), Priority: normalizePriority(req.Priority), Status: JudgeTaskStatusQueued, MaxRetries: maxRetriesForJudger(j, s.cfg.DefaultMaxRetries)}
+	task := JudgeTask{ID: s.ids.Generate(), TenantID: req.TenantID, JudgerID: j.ID, SourceRef: req.SourceRef, SourceOwnerID: ownership.OwnerID, SourceCourseID: ownership.CourseID, SourceScope: ownership.Scope, SubmitterTenantID: req.SubmitterTenantID, SubmitterID: req.SubmitterID, ProblemRef: problemRef, CodeStorageKey: req.CodeStorageKey, CodeHash: codeHash, InputSnapshot: snapshot, SandboxMode: mode, TargetSandboxRef: strings.TrimSpace(req.TargetSandboxRef), Priority: normalizePriority(req.Priority), Status: JudgeTaskStatusQueued, MaxRetries: maxRetriesForJudger(j, s.cfg.DefaultMaxRetries)}
 	if j.Type == JudgerTypeManual {
 		task.Status = JudgeTaskStatusJudging
 	}
@@ -90,7 +91,7 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 			return nil
 		}
 		if requiresCode {
-			if _, err := tx.CreateFingerprint(ctx, SubmissionFingerprint{ID: s.ids.Generate(), TenantID: task.TenantID, SourceRef: task.SourceRef, ProblemRef: task.ProblemRef, SubmitterID: task.SubmitterID, CodeHash: task.CodeHash, SimVector: vector}); err != nil {
+			if _, err := tx.CreateFingerprint(ctx, SubmissionFingerprint{ID: s.ids.Generate(), TenantID: task.TenantID, SourceRef: task.SourceRef, ProblemRef: task.ProblemRef, SubmitterTenantID: task.SubmitterTenantID, SubmitterID: task.SubmitterID, CodeHash: task.CodeHash, SimVector: vector}); err != nil {
 				return apperr.ErrFingerprintSimilarityFailed.WithCause(err)
 			}
 		}

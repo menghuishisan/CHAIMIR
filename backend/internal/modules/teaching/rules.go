@@ -140,10 +140,28 @@ func validateSubmissionRequest(req SubmitAssignmentRequest) (SubmitAssignmentReq
 // validateGradeRequest 校验教师批改输入。
 func validateGradeRequest(req GradeSubmissionRequest) (GradeSubmissionRequest, error) {
 	req.Comment = strings.TrimSpace(req.Comment)
-	if req.Score < 0 {
+	if req.Score == nil || *req.Score < 0 {
 		return GradeSubmissionRequest{}, apperr.ErrTeachingSubmissionInvalid
 	}
 	return req, nil
+}
+
+// validateGradeScoreAgainstAssignment 校验批改分数不超过当前作业题目总分。
+func validateGradeScoreAgainstAssignment(score int32, items []AssignmentItem) error {
+	if score < 0 {
+		return apperr.ErrTeachingSubmissionInvalid
+	}
+	var maximum int64
+	for _, item := range items {
+		if item.Score <= 0 {
+			return apperr.ErrTeachingAssignmentInvalid
+		}
+		maximum += int64(item.Score)
+	}
+	if maximum <= 0 || int64(score) > maximum {
+		return apperr.ErrTeachingSubmissionInvalid
+	}
+	return nil
 }
 
 // validateProgressRequest 校验学习进度输入。

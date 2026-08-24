@@ -8,8 +8,10 @@ import (
 
 	"chaimir/internal/modules/sandbox/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
+	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
 
 	"github.com/jackc/pgx/v5"
@@ -35,14 +37,16 @@ type TxStore interface {
 	GetRuntimeImageByIDForUpdate(ctx context.Context, runtimeID, imageID int64) (RuntimeImage, error)
 	GetRuntimeImageByVersion(ctx context.Context, runtimeID int64, version string) (RuntimeImage, error)
 	GetRuntimeImageByVersionForShare(ctx context.Context, runtimeID int64, version string) (RuntimeImage, error)
-	GetDefaultRuntimeImage(ctx context.Context, runtimeID int64) (RuntimeImage, error)
-	GetDefaultRuntimeImageForShare(ctx context.Context, runtimeID int64) (RuntimeImage, error)
 	ListRuntimeImages(ctx context.Context, runtimeID int64) ([]RuntimeImage, error)
 	CreateRuntimeImage(ctx context.Context, id, runtimeID int64, req RuntimeImageRequest) (RuntimeImage, error)
-	StartRuntimeImagePrepull(ctx context.Context, runtimeID, imageID int64, detail []byte) (RuntimeImage, error)
-	FinishRuntimeImagePrepull(ctx context.Context, runtimeID, imageID int64, attemptID string, prepulled bool, status int16, detail []byte, at time.Time) (RuntimeImage, error)
-	InvalidateRuntimeImagesPrepull(ctx context.Context, runtimeID int64, detail []byte) error
-	DisableRuntimeImage(ctx context.Context, runtimeID, imageID int64, detail []byte) (RuntimeImage, error)
+	GetPublishedCompositionSnapshot(ctx context.Context, compositionDigest string) ([]byte, error)
+	UpsertPublishedCompositionSnapshot(ctx context.Context, compositionDigest string, runtimeID, runtimeImageID int64, snapshot []byte) error
+	GetCompositionPrepullForUpdate(ctx context.Context, runtimeImageID int64, compositionDigest string) (CompositionPrepull, error)
+	StartCompositionPrepull(ctx context.Context, id, runtimeImageID int64, compositionDigest, attemptID string, imageClosure, detail []byte) (CompositionPrepull, error)
+	FinishCompositionPrepull(ctx context.Context, runtimeImageID int64, compositionDigest, attemptID string, status int16, daemonsetName string, desiredNodes, readyNodes int32, detail []byte) (CompositionPrepull, error)
+	InvalidateCompositionPrepullByRuntime(ctx context.Context, runtimeID int64, detail []byte) error
+	DeleteCompositionPrepullByRuntimeImage(ctx context.Context, runtimeImageID int64) error
+	DisableRuntimeImage(ctx context.Context, runtimeID, imageID int64) (RuntimeImage, error)
 	GetToolByCode(ctx context.Context, code string) (Tool, error)
 	ListTools(ctx context.Context) ([]Tool, error)
 	ListCatalogRuntimes(ctx context.Context) ([]CatalogRuntime, error)
@@ -55,13 +59,17 @@ type TxStore interface {
 	CountActiveSandboxes(ctx context.Context, tenantID int64) (int64, error)
 	CreateSandbox(ctx context.Context, input CreateSandboxInput) (Sandbox, error)
 	GetSandbox(ctx context.Context, tenantID, sandboxID int64) (Sandbox, error)
+	ClaimSandboxWorkspaceRevision(ctx context.Context, tenantID, sandboxID, expectedRevision int64) (int64, error)
+	LockSandboxChain(ctx context.Context, tenantID, sandboxID int64) error
 	ListSandboxesBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]Sandbox, error)
+	ListSandboxesByScopeRef(ctx context.Context, tenantID int64, scopeRef string) ([]Sandbox, error)
 	ListRecycleCandidates(ctx context.Context, readyDeadline time.Time, limit int32) ([]Sandbox, error)
 	MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error)
 	ListSnapshotCleanupCandidates(ctx context.Context, limit int32) ([]Sandbox, error)
 	UpdateSandboxPhaseStatus(ctx context.Context, tenantID, sandboxID int64, phase, status int16) (Sandbox, error)
 	MarkSandboxActive(ctx context.Context, tenantID, sandboxID int64) (Sandbox, error)
 	UpdateSandboxCode(ctx context.Context, tenantID, sandboxID int64, key, hash string) (Sandbox, error)
+	UpdateSandboxAuthorizedAccounts(ctx context.Context, tenantID, sandboxID int64, accountIDs []int64) (Sandbox, error)
 	UpdateSandboxSnapshot(ctx context.Context, tenantID, sandboxID int64, ref string, domains []string, createdAt, expireAt time.Time) (Sandbox, error)
 	CreateSandboxTool(ctx context.Context, id int64, tenantID int64, sandboxID int64, tool Tool, endpoint string, status int16) (SandboxTool, error)
 	ListSandboxTools(ctx context.Context, tenantID, sandboxID int64) ([]SandboxTool, error)
@@ -76,27 +84,32 @@ type TxStore interface {
 
 // CreateSandboxInput 描述 repo 创建沙箱记录时需要的完整字段。
 type CreateSandboxInput struct {
-	ID                int64
-	TenantID          int64
-	RuntimeID         int64
-	ImageID           int64
-	Namespace         string
-	SourceRef         string
-	OwnerAccountID    int64
-	Phase             int16
-	Status            int16
-	KeepAlive         bool
-	SnapshotEnabled   bool
-	CodeStorageKey    string
-	CodeHash          string
-	InitCodeRef       string
-	InitScriptRef     string
-	SnapshotRef       string
-	SnapshotDomains   []string
-	SnapshotCreatedAt time.Time
-	SnapshotExpireAt  time.Time
-	KeepAliveUntil    time.Time
-	ExpireAt          time.Time
+	ID                  int64
+	TenantID            int64
+	RuntimeID           int64
+	ImageID             int64
+	Namespace           string
+	SourceRef           string
+	ScopeRef            string
+	CompositionDigest   string
+	CompositionSnapshot []byte
+	AccessProfile       string
+	OwnerAccountID      int64
+	SharedAccountIDs    []int64
+	Phase               int16
+	Status              int16
+	KeepAlive           bool
+	SnapshotEnabled     bool
+	CodeStorageKey      string
+	CodeHash            string
+	InitCodeRef         string
+	InitScriptRef       string
+	SnapshotRef         string
+	SnapshotDomains     []string
+	SnapshotCreatedAt   time.Time
+	SnapshotExpireAt    time.Time
+	KeepAliveUntil      time.Time
+	ExpireAt            time.Time
 }
 
 type store struct {
@@ -274,24 +287,6 @@ func (s *txStore) GetRuntimeImageByVersionForShare(ctx context.Context, runtimeI
 	return runtimeImageFromRow(row), nil
 }
 
-// GetDefaultRuntimeImage 查询运行时默认镜像。
-func (s *txStore) GetDefaultRuntimeImage(ctx context.Context, runtimeID int64) (RuntimeImage, error) {
-	row, err := s.q.GetDefaultRuntimeImage(ctx, runtimeID)
-	if err != nil {
-		return RuntimeImage{}, err
-	}
-	return runtimeImageFromRow(row), nil
-}
-
-// GetDefaultRuntimeImageForShare 锁定默认镜像版本,防止创建事务与预拉取失效交叉放行。
-func (s *txStore) GetDefaultRuntimeImageForShare(ctx context.Context, runtimeID int64) (RuntimeImage, error) {
-	row, err := s.q.GetDefaultRuntimeImageForShare(ctx, runtimeID)
-	if err != nil {
-		return RuntimeImage{}, err
-	}
-	return runtimeImageFromRow(row), nil
-}
-
 // ListRuntimeImages 查询运行时镜像列表。
 func (s *txStore) ListRuntimeImages(ctx context.Context, runtimeID int64) ([]RuntimeImage, error) {
 	rows, err := s.q.ListRuntimeImages(ctx, runtimeID)
@@ -307,18 +302,12 @@ func (s *txStore) ListRuntimeImages(ctx context.Context, runtimeID int64) ([]Run
 
 // CreateRuntimeImage 新增运行时镜像版本。
 func (s *txStore) CreateRuntimeImage(ctx context.Context, id, runtimeID int64, req RuntimeImageRequest) (RuntimeImage, error) {
-	if req.IsDefault {
-		if err := s.q.MarkOtherRuntimeImagesNotDefault(ctx, sqlcgen.MarkOtherRuntimeImagesNotDefaultParams{RuntimeID: runtimeID, ID: id}); err != nil {
-			return RuntimeImage{}, err
-		}
-	}
 	row, err := s.q.CreateRuntimeImage(ctx, sqlcgen.CreateRuntimeImageParams{
 		ID:           id,
 		RuntimeID:    runtimeID,
 		ImageUrl:     req.ImageURL,
 		Version:      req.Version,
 		GenesisBaked: req.GenesisBaked,
-		IsDefault:    req.IsDefault,
 	})
 	if err != nil {
 		return RuntimeImage{}, err
@@ -326,46 +315,73 @@ func (s *txStore) CreateRuntimeImage(ctx context.Context, id, runtimeID int64, r
 	return runtimeImageFromRow(row), nil
 }
 
-// StartRuntimeImagePrepull 把已在同一事务内核对的工作负载闭包标记为进行中。
-func (s *txStore) StartRuntimeImagePrepull(ctx context.Context, runtimeID, imageID int64, detail []byte) (RuntimeImage, error) {
-	row, err := s.q.StartRuntimeImagePrepull(ctx, sqlcgen.StartRuntimeImagePrepullParams{ID: imageID, RuntimeID: runtimeID, PrepullDetail: detail})
+// GetPublishedCompositionSnapshot 按摘要读取已发布且不可变的组合快照。
+func (s *txStore) GetPublishedCompositionSnapshot(ctx context.Context, compositionDigest string) ([]byte, error) {
+	row, err := s.q.GetPublishedCompositionSnapshot(ctx, compositionDigest)
 	if err != nil {
-		return RuntimeImage{}, err
+		return nil, err
 	}
-	return runtimeImageFromRow(row), nil
+	return append([]byte(nil), row.Snapshot...), nil
 }
 
-// FinishRuntimeImagePrepull 仅允许同一次预拉取尝试写回最终节点状态。
-func (s *txStore) FinishRuntimeImagePrepull(ctx context.Context, runtimeID, imageID int64, attemptID string, prepulled bool, status int16, detail []byte, at time.Time) (RuntimeImage, error) {
-	row, err := s.q.FinishRuntimeImagePrepull(ctx, sqlcgen.FinishRuntimeImagePrepullParams{
-		ID:            imageID,
-		RuntimeID:     runtimeID,
-		Prepulled:     prepulled,
-		PrepullStatus: status,
-		PrepullDetail: detail,
-		PrepulledAt:   timex.Timestamptz(at),
-		AttemptID:     attemptID,
-	})
-	if err != nil {
-		return RuntimeImage{}, err
-	}
-	return runtimeImageFromRow(row), nil
-}
-
-// InvalidateRuntimeImagesPrepull 在运行时工作负载闭包变化后撤销全部可用镜像版本的旧预拉取证明。
-func (s *txStore) InvalidateRuntimeImagesPrepull(ctx context.Context, runtimeID int64, detail []byte) error {
-	return s.q.InvalidateRuntimeImagesPrepull(ctx, sqlcgen.InvalidateRuntimeImagesPrepullParams{
-		RuntimeID:     runtimeID,
-		PrepullDetail: detail,
+// UpsertPublishedCompositionSnapshot 登记编译后的组合快照,供预拉取和启动阶段复用同一事实来源。
+func (s *txStore) UpsertPublishedCompositionSnapshot(ctx context.Context, compositionDigest string, runtimeID, runtimeImageID int64, snapshot []byte) error {
+	return s.q.UpsertPublishedCompositionSnapshot(ctx, sqlcgen.UpsertPublishedCompositionSnapshotParams{
+		CompositionDigest: compositionDigest,
+		RuntimeID:         runtimeID,
+		RuntimeImageID:    runtimeImageID,
+		Snapshot:          snapshot,
 	})
 }
 
-// DisableRuntimeImage 停用镜像版本并重置预拉取状态,避免新沙箱继续调度该镜像。
-func (s *txStore) DisableRuntimeImage(ctx context.Context, runtimeID, imageID int64, detail []byte) (RuntimeImage, error) {
+// GetCompositionPrepullForUpdate 锁定某个组合摘要的预拉取证明。
+func (s *txStore) GetCompositionPrepullForUpdate(ctx context.Context, runtimeImageID int64, compositionDigest string) (CompositionPrepull, error) {
+	row, err := s.q.GetCompositionPrepullForUpdate(ctx, sqlcgen.GetCompositionPrepullForUpdateParams{RuntimeImageID: runtimeImageID, CompositionDigest: compositionDigest})
+	if err != nil {
+		return CompositionPrepull{}, err
+	}
+	return compositionPrepullFromRow(row), nil
+}
+
+// StartCompositionPrepull 把已核对的组合闭包标记为进行中。
+func (s *txStore) StartCompositionPrepull(ctx context.Context, id, runtimeImageID int64, compositionDigest, attemptID string, imageClosure, detail []byte) (CompositionPrepull, error) {
+	row, err := s.q.StartCompositionPrepull(ctx, sqlcgen.StartCompositionPrepullParams{
+		ID: id, RuntimeImageID: runtimeImageID, CompositionDigest: compositionDigest,
+		AttemptID: attemptID, ImageClosure: imageClosure, Detail: detail,
+	})
+	if err != nil {
+		return CompositionPrepull{}, err
+	}
+	return compositionPrepullFromRow(row), nil
+}
+
+// FinishCompositionPrepull 仅允许同一次预拉取尝试写回最终节点状态。
+func (s *txStore) FinishCompositionPrepull(ctx context.Context, runtimeImageID int64, compositionDigest, attemptID string, status int16, daemonsetName string, desiredNodes, readyNodes int32, detail []byte) (CompositionPrepull, error) {
+	row, err := s.q.FinishCompositionPrepull(ctx, sqlcgen.FinishCompositionPrepullParams{
+		RuntimeImageID: runtimeImageID, CompositionDigest: compositionDigest, AttemptID: attemptID,
+		Status: status, DaemonsetName: daemonsetName, DesiredNodes: desiredNodes, ReadyNodes: readyNodes, Detail: detail,
+	})
+	if err != nil {
+		return CompositionPrepull{}, err
+	}
+	return compositionPrepullFromRow(row), nil
+}
+
+// InvalidateCompositionPrepullByRuntime 在运行时工作负载闭包变化后撤销旧组合证明。
+func (s *txStore) InvalidateCompositionPrepullByRuntime(ctx context.Context, runtimeID int64, detail []byte) error {
+	return s.q.InvalidateCompositionPrepullByRuntime(ctx, sqlcgen.InvalidateCompositionPrepullByRuntimeParams{RuntimeID: runtimeID, Detail: detail})
+}
+
+// DeleteCompositionPrepullByRuntimeImage 删除停用镜像关联的组合证明和预拉取资源记录。
+func (s *txStore) DeleteCompositionPrepullByRuntimeImage(ctx context.Context, runtimeImageID int64) error {
+	return s.q.DeleteCompositionPrepullByRuntimeImage(ctx, runtimeImageID)
+}
+
+// DisableRuntimeImage 停用镜像版本,避免新沙箱继续调度该镜像。
+func (s *txStore) DisableRuntimeImage(ctx context.Context, runtimeID, imageID int64) (RuntimeImage, error) {
 	row, err := s.q.DisableRuntimeImage(ctx, sqlcgen.DisableRuntimeImageParams{
-		ID:            imageID,
-		RuntimeID:     runtimeID,
-		PrepullDetail: detail,
+		ID:        imageID,
+		RuntimeID: runtimeID,
 	})
 	if err != nil {
 		return RuntimeImage{}, err
@@ -408,11 +424,21 @@ func (s *txStore) ListCatalogRuntimes(ctx context.Context) ([]CatalogRuntime, er
 	}
 	out := make([]CatalogRuntime, 0, len(rows))
 	for _, row := range rows {
+		var capabilities CapabilityConstraints
+		if len(row.AdapterSpec) > 0 {
+			var envelope struct {
+				Capabilities CapabilityConstraints `json:"capabilities"`
+			}
+			if err := jsonx.DecodeStrictKnownFields(row.AdapterSpec, &envelope); err != nil {
+				return nil, err
+			}
+			capabilities = envelope.Capabilities
+		}
 		if len(out) == 0 || out[len(out)-1].Code != row.RuntimeCode {
-			out = append(out, CatalogRuntime{Code: row.RuntimeCode, Name: row.RuntimeName, Eco: row.Eco, Images: []CatalogRuntimeImage{}})
+			out = append(out, CatalogRuntime{Code: row.RuntimeCode, Name: row.RuntimeName, Eco: row.Eco, Images: []CatalogRuntimeImage{}, Capabilities: capabilities})
 		}
 		current := &out[len(out)-1]
-		current.Images = append(current.Images, CatalogRuntimeImage{Version: row.ImageVersion, IsDefault: row.ImageIsDefault})
+		current.Images = append(current.Images, CatalogRuntimeImage{Version: row.ImageVersion})
 	}
 	return out, nil
 }
@@ -430,8 +456,8 @@ func (s *txStore) ListCatalogTools(ctx context.Context) ([]CatalogTool, error) {
 			return nil, err
 		}
 		out = append(out, CatalogTool{
-			Code: row.Code, Name: row.Name, Kind: row.Kind,
-			EcoTags: splitCSV(row.EcoTags), ResourceSpec: resourceSpec,
+			Category: row.Category, Code: row.Code, Name: row.Name, Kind: row.Kind,
+			EcoTags: splitCSV(row.EcoTags), ResourceSpec: resourceSpec, Capabilities: resourceSpec.Capabilities,
 		})
 	}
 	return out, nil
@@ -533,27 +559,32 @@ func (s *txStore) CreateSandbox(ctx context.Context, input CreateSandboxInput) (
 		return Sandbox{}, fmt.Errorf("编码沙箱快照域失败: %w", err)
 	}
 	row, err := s.q.CreateSandbox(ctx, sqlcgen.CreateSandboxParams{
-		ID:                input.ID,
-		TenantID:          input.TenantID,
-		RuntimeID:         input.RuntimeID,
-		ImageID:           input.ImageID,
-		Namespace:         input.Namespace,
-		SourceRef:         input.SourceRef,
-		OwnerAccountID:    input.OwnerAccountID,
-		Phase:             input.Phase,
-		Status:            input.Status,
-		KeepAlive:         input.KeepAlive,
-		SnapshotEnabled:   input.SnapshotEnabled,
-		CodeStorageKey:    input.CodeStorageKey,
-		CodeHash:          pgtypex.Text(input.CodeHash),
-		InitCodeRef:       pgtypex.Text(input.InitCodeRef),
-		InitScriptRef:     pgtypex.Text(input.InitScriptRef),
-		SnapshotRef:       pgtypex.Text(input.SnapshotRef),
-		SnapshotDomains:   snapshotDomains,
-		SnapshotCreatedAt: timex.Timestamptz(input.SnapshotCreatedAt),
-		SnapshotExpireAt:  timex.Timestamptz(input.SnapshotExpireAt),
-		KeepAliveUntil:    timex.Timestamptz(input.KeepAliveUntil),
-		ExpireAt:          timex.RequiredTimestamptz(input.ExpireAt),
+		ID:                  input.ID,
+		TenantID:            input.TenantID,
+		RuntimeID:           input.RuntimeID,
+		ImageID:             input.ImageID,
+		Namespace:           input.Namespace,
+		SourceRef:           input.SourceRef,
+		ScopeRef:            input.ScopeRef,
+		CompositionDigest:   input.CompositionDigest,
+		CompositionSnapshot: input.CompositionSnapshot,
+		AccessProfile:       input.AccessProfile,
+		OwnerAccountID:      input.OwnerAccountID,
+		SharedAccountIds:    input.SharedAccountIDs,
+		Phase:               input.Phase,
+		Status:              input.Status,
+		KeepAlive:           input.KeepAlive,
+		SnapshotEnabled:     input.SnapshotEnabled,
+		CodeStorageKey:      input.CodeStorageKey,
+		CodeHash:            pgtypex.Text(input.CodeHash),
+		InitCodeRef:         pgtypex.Text(input.InitCodeRef),
+		InitScriptRef:       pgtypex.Text(input.InitScriptRef),
+		SnapshotRef:         pgtypex.Text(input.SnapshotRef),
+		SnapshotDomains:     snapshotDomains,
+		SnapshotCreatedAt:   timex.Timestamptz(input.SnapshotCreatedAt),
+		SnapshotExpireAt:    timex.Timestamptz(input.SnapshotExpireAt),
+		KeepAliveUntil:      timex.Timestamptz(input.KeepAliveUntil),
+		ExpireAt:            timex.RequiredTimestamptz(input.ExpireAt),
 	})
 	if err != nil {
 		return Sandbox{}, err
@@ -567,7 +598,25 @@ func (s *txStore) GetSandbox(ctx context.Context, tenantID, sandboxID int64) (Sa
 	if err != nil {
 		return Sandbox{}, err
 	}
-	return sandboxFromRow(row)
+	out, err := sandboxFromRow(row)
+	if err != nil {
+		return Sandbox{}, err
+	}
+	return out, nil
+}
+
+// ClaimSandboxWorkspaceRevision 原子比较并前进工作区 revision,阻止并发学生覆盖彼此修改。
+func (s *txStore) ClaimSandboxWorkspaceRevision(ctx context.Context, tenantID, sandboxID, expectedRevision int64) (int64, error) {
+	row, err := s.q.ClaimSandboxWorkspaceRevision(ctx, sqlcgen.ClaimSandboxWorkspaceRevisionParams{TenantID: tenantID, ID: sandboxID, ExpectedRevision: expectedRevision})
+	if err != nil {
+		return 0, apperr.ErrConflict.WithCause(err)
+	}
+	return row, nil
+}
+
+// LockSandboxChain 在当前事务内持有单沙箱链操作锁,直到真实能力调用完成后事务提交。
+func (s *txStore) LockSandboxChain(ctx context.Context, tenantID, sandboxID int64) error {
+	return s.q.LockSandboxChain(ctx, sandboxID)
 }
 
 // ListSandboxesBySourceRef 查询来源下未销毁沙箱。
@@ -577,6 +626,23 @@ func (s *txStore) ListSandboxesBySourceRef(ctx context.Context, tenantID int64, 
 		return nil, err
 	}
 	return sandboxRows(rows)
+}
+
+// ListSandboxesByScopeRef 查询生命周期作用域下仍未销毁的沙箱。
+func (s *txStore) ListSandboxesByScopeRef(ctx context.Context, tenantID int64, scopeRef string) ([]Sandbox, error) {
+	rows, err := s.q.ListSandboxesByScopeRef(ctx, sqlcgen.ListSandboxesByScopeRefParams{TenantID: tenantID, ScopeRef: scopeRef})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]Sandbox, 0, len(rows))
+	for _, row := range rows {
+		item, err := sandboxFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
 }
 
 // ListRecycleCandidates 查询需要回收的沙箱候选。
@@ -632,6 +698,15 @@ func (s *txStore) UpdateSandboxCode(ctx context.Context, tenantID, sandboxID int
 	row, err := s.q.UpdateSandboxCode(ctx, sqlcgen.UpdateSandboxCodeParams{TenantID: tenantID, ID: sandboxID, CodeStorageKey: key, CodeHash: pgtypex.Text(hash)})
 	if err != nil {
 		return Sandbox{}, err
+	}
+	return sandboxFromRow(row)
+}
+
+// UpdateSandboxAuthorizedAccounts 持久化共享账号集合。
+func (s *txStore) UpdateSandboxAuthorizedAccounts(ctx context.Context, tenantID, sandboxID int64, accountIDs []int64) (Sandbox, error) {
+	row, err := s.q.UpdateSandboxAuthorizedAccounts(ctx, sqlcgen.UpdateSandboxAuthorizedAccountsParams{TenantID: tenantID, ID: sandboxID, SharedAccountIds: accountIDs})
+	if err != nil {
+		return Sandbox{}, apperr.ErrSandboxStatePersistFailed.WithCause(err)
 	}
 	return sandboxFromRow(row)
 }

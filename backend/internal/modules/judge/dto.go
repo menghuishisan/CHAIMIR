@@ -4,19 +4,22 @@ package judge
 import (
 	"encoding/json"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 )
 
 // JudgerRequest 是平台管理员创建或更新判题器配置的请求。
 type JudgerRequest struct {
-	Code              string          `json:"code"`
-	Name              string          `json:"name"`
-	Type              int16           `json:"type"`
-	ExecutorRef       string          `json:"executor_ref"`
-	RuntimeRequired   bool            `json:"runtime_required"`
-	DefaultTimeoutSec int32           `json:"default_timeout_sec"`
-	ResourceSpec      json.RawMessage `json:"resource_spec"`
-	Status            int16           `json:"status"`
+	Code              string `json:"code"`
+	Name              string `json:"name"`
+	Type              int16  `json:"type"`
+	ExecutorRef       string `json:"executor_ref"`
+	RuntimeRequired   bool   `json:"runtime_required"`
+	DefaultTimeoutSec int32  `json:"default_timeout_sec"`
+	// Composition 仅是创建或更新时的声明输入，服务端编译后不会原样持久化。
+	Composition  contracts.SandboxCompositionSpec `json:"composition"`
+	ResourceSpec json.RawMessage                  `json:"resource_spec"`
+	Status       int16                            `json:"status"`
 }
 
 // JudgerDTO 是平台管理员读取和维护判题器时使用的公开响应。
@@ -72,13 +75,14 @@ type ManualScoreRequest struct {
 
 // JudgeTaskDTO 是教师查询、重判和人工评分返回的任务摘要。
 type JudgeTaskDTO struct {
-	TaskID      ids.ID              `json:"task_id"`
-	TenantID    ids.ID              `json:"tenant_id"`
-	SourceRef   string              `json:"source_ref"`
-	SubmitterID ids.ID              `json:"submitter_id"`
-	Status      string              `json:"status"`
-	Existing    bool                `json:"existing"`
-	Result      *JudgeTaskResultDTO `json:"result,omitempty"`
+	TaskID            ids.ID              `json:"task_id"`
+	TenantID          ids.ID              `json:"tenant_id"`
+	SourceRef         string              `json:"source_ref"`
+	SubmitterID       ids.ID              `json:"submitter_id"`
+	SubmitterTenantID ids.ID              `json:"submitter_tenant_id"`
+	Status            string              `json:"status"`
+	Existing          bool                `json:"existing"`
+	Result            *JudgeTaskResultDTO `json:"result,omitempty"`
 }
 
 // JudgeTaskResultDTO 是判题任务最新版本的可公开结果。

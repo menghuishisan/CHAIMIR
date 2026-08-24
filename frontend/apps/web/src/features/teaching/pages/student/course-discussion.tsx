@@ -46,9 +46,14 @@ export function CourseDiscussion({ courseId }: CourseDiscussionProps) {
  * CourseAnnouncements 展示课程公告,置顶公告排在前面(后端已按置顶与时间排序)。
  */
 function CourseAnnouncements({ courseId }: CourseDiscussionProps) {
-	const announcements = usePagedResource<TeachingAnnouncement>((params) => api.teaching.listAnnouncements(courseId, params), [courseId])
+  const announcements = usePagedResource<TeachingAnnouncement>(
+    (params) => api.teaching.listAnnouncements(courseId, params),
+    [courseId],
+  )
 
   return (
+    // 卡片列表型页内子视图(§6.5.5 B):公告主体是整段正文,压不进一行事件条,
+    // 故按卡片列表排 —— 卡本身就是抬起片,不再套 DataPanel(那会成为片里套片)。
     <PageSection title="课程公告" description="老师发布的课程通知。">
       <ResourceState
         resource={announcements}
@@ -59,11 +64,16 @@ function CourseAnnouncements({ courseId }: CourseDiscussionProps) {
       >
         {(page) => (
           <div className="flex flex-col gap-3">
-			{page.list.map((item) => (
-				<AnnouncementItem key={item.id} announcement={item} />
-			))}
-			<Pagination page={announcements.page} pageSize={announcements.pageSize} total={announcements.total} onPageChange={announcements.setPage} />
-			</div>
+            {page.list.map((item) => (
+              <AnnouncementItem key={item.id} announcement={item} />
+            ))}
+            <Pagination
+              page={announcements.page}
+              pageSize={announcements.pageSize}
+              total={announcements.total}
+              onPageChange={announcements.setPage}
+            />
+          </div>
         )}
       </ResourceState>
     </PageSection>
@@ -105,7 +115,8 @@ function CoursePosts({ courseId }: CourseDiscussionProps) {
   )
 
   return (
-    <PageSection title="课程讨论" description={`共 ${posts.total} 条讨论`}>
+    // 同一父页下的子视图必须同构(§6.5.5 B):与公告一样按卡片列表排,不换成表格
+    <PageSection title="课程讨论" description="有疑问可以在这里提出,老师和同学都能看到。">
       <div className="flex flex-col gap-4">
         <NewPostCard courseId={courseId} onPosted={posts.reload} />
 

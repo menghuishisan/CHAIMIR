@@ -305,7 +305,7 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
                   <Checkbox
                     key={env.id}
                     checked={envIds.includes(env.id)}
-                    label={`代码环境 ${index + 1} · ${env.runtime_code}`}
+                    label={`代码环境 ${index + 1} · ${env.primary_runtime.runtime_code}`}
                     onCheckedChange={(checked) =>
                       setEnvIds((current) =>
                         checked === true ? [...current, env.id] : current.filter((id) => id !== env.id),

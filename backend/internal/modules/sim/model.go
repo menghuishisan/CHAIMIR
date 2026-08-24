@@ -60,17 +60,19 @@ type ReviewInfo struct {
 
 // Session 是一次仿真运行会话。
 type Session struct {
-	ID             int64
-	TenantID       int64
-	PackageID      int64
-	SourceRef      string
-	OwnerAccountID int64
-	Seed           int64
-	InitParams     map[string]any
-	Compute        int16
-	Status         int16
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID               int64
+	TenantID         int64
+	PackageID        int64
+	SourceRef        string
+	ScopeRef         string
+	OwnerAccountID   int64
+	SharedAccountIDs []int64
+	Seed             int64
+	InitParams       map[string]any
+	Compute          int16
+	Status           int16
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // SessionWithPackage 是回放、分享和隔离执行需要的会话加包摘要。

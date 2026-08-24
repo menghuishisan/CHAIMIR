@@ -204,10 +204,16 @@ const countGradeReviews = `-- name: CountGradeReviews :one
 SELECT count(*)::bigint
 FROM grade_review
 WHERE ($1::smallint = 0 OR status = $1::smallint)
+  AND ($2::smallint = 0 OR is_locked = ($2::smallint = 1))
 `
 
-func (q *Queries) CountGradeReviews(ctx context.Context, status int16) (int64, error) {
-	row := q.db.QueryRow(ctx, countGradeReviews, status)
+type CountGradeReviewsParams struct {
+	Status   int16 `json:"status"`
+	IsLocked int16 `json:"is_locked"`
+}
+
+func (q *Queries) CountGradeReviews(ctx context.Context, arg CountGradeReviewsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countGradeReviews, arg.Status, arg.IsLocked)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -836,18 +842,25 @@ const listGradeReviews = `-- name: ListGradeReviews :many
 SELECT id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at
 FROM grade_review
 WHERE ($1::smallint = 0 OR status = $1::smallint)
+  AND ($2::smallint = 0 OR is_locked = ($2::smallint = 1))
 ORDER BY submitted_at DESC
-LIMIT $3::int OFFSET $2::int
+LIMIT $4::int OFFSET $3::int
 `
 
 type ListGradeReviewsParams struct {
 	Status     int16 `json:"status"`
+	IsLocked   int16 `json:"is_locked"`
 	PageOffset int32 `json:"page_offset"`
 	PageLimit  int32 `json:"page_limit"`
 }
 
 func (q *Queries) ListGradeReviews(ctx context.Context, arg ListGradeReviewsParams) ([]GradeReview, error) {
-	rows, err := q.db.Query(ctx, listGradeReviews, arg.Status, arg.PageOffset, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listGradeReviews,
+		arg.Status,
+		arg.IsLocked,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1269,6 +1282,26 @@ func (q *Queries) RelockGradeReview(ctx context.Context, arg RelockGradeReviewPa
 		&i.ReviewedAt,
 	)
 	return i, err
+}
+
+const requeueExhaustedGradeLockOutbox = `-- name: RequeueExhaustedGradeLockOutbox :execrows
+UPDATE grade_lock_outbox
+SET status = 1,
+    retry_count = 0,
+    last_error = NULL,
+    updated_at = now(),
+    lease_token = '',
+    lease_until = NULL
+WHERE status = 4
+  AND updated_at <= now() - ($1::bigint * interval '1 second')
+`
+
+func (q *Queries) RequeueExhaustedGradeLockOutbox(ctx context.Context, dollar_1 int64) (int64, error) {
+	result, err := q.db.Exec(ctx, requeueExhaustedGradeLockOutbox, dollar_1)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const unlockGradeReview = `-- name: UnlockGradeReview :one

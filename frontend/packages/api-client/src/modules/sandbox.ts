@@ -35,7 +35,7 @@ export class SandboxApi {
    */
   constructor(
     private client: ApiClient,
-    private identity: IdentityApi,
+    private identity: IdentityApi
   ) {}
 
   /**
@@ -52,6 +52,16 @@ export class SandboxApi {
    */
   async listRuntimes(): Promise<SandboxRuntime[]> {
     return this.client.get('/sandbox/runtimes')
+  }
+
+  /**
+   * getRuntime 读取单条链运行时。
+   * 运行时详情页用它做深链首屏读取 —— 不再拉全量列表在浏览器里筛单条。
+   * 返回对象同时带 `status`(是否对学校开放)与 `selftest_status`(接入自检结果):
+   * 两者是独立的事,`adapter_spec.disabled_reason` 说明尚未完成适配的原因。
+   */
+  async getRuntime(runtimeId: string): Promise<SandboxRuntime> {
+    return this.client.get(`/sandbox/runtimes/${encodePathSegment(runtimeId)}`)
   }
 
   /**
@@ -85,7 +95,10 @@ export class SandboxApi {
   /**
    * 为运行时登记镜像版本。
    */
-  async registerRuntimeImage(runtimeId: string, data: SandboxRuntimeImageRequest): Promise<SandboxRuntimeImage> {
+  async registerRuntimeImage(
+    runtimeId: string,
+    data: SandboxRuntimeImageRequest
+  ): Promise<SandboxRuntimeImage> {
     return this.client.post(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/images`, data)
   }
 
@@ -100,21 +113,37 @@ export class SandboxApi {
    * 停用运行时镜像版本。
    */
   async disableRuntimeImage(runtimeId: string, imageId: string): Promise<SandboxRuntimeImage> {
-    return this.client.delete(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/images/${encodePathSegment(imageId)}`)
+    return this.client.delete(
+      `/sandbox/runtimes/${encodePathSegment(runtimeId)}/images/${encodePathSegment(imageId)}`
+    )
   }
 
   /**
    * 触发运行时镜像预拉取。
    */
-  async prepullRuntimeImage(runtimeId: string, imageId: string): Promise<SandboxPrepullStatus> {
-    return this.client.post(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/images/${encodePathSegment(imageId)}/prepull`)
+  async prepullRuntimeImage(
+    runtimeId: string,
+    imageId: string,
+    compositionDigest: string
+  ): Promise<SandboxPrepullStatus> {
+    return this.client.post(
+      `/sandbox/runtimes/${encodePathSegment(runtimeId)}/images/${encodePathSegment(imageId)}/prepull`,
+      { composition_digest: compositionDigest }
+    )
   }
 
   /**
    * 查询镜像预拉取闭环状态。
    */
-  async getRuntimeImagePrepull(runtimeId: string, imageId: string): Promise<SandboxPrepullStatus> {
-    return this.client.get(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/images/${encodePathSegment(imageId)}/prepull`)
+  async getRuntimeImagePrepull(
+    runtimeId: string,
+    imageId: string,
+    compositionDigest: string
+  ): Promise<SandboxPrepullStatus> {
+    return this.client.get(
+      `/sandbox/runtimes/${encodePathSegment(runtimeId)}/images/${encodePathSegment(imageId)}/prepull`,
+      { composition_digest: compositionDigest }
+    )
   }
 
   /**
@@ -156,7 +185,10 @@ export class SandboxApi {
    * 获取终端 WebSocket URL
    */
   getTerminalWsUrl(instanceId: string, container?: string): string {
-    return this.client.wsURL(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/terminal`, container ? { container } : undefined)
+    return this.client.wsURL(
+      `/sandbox/sandboxes/${encodePathSegment(instanceId)}/terminal`,
+      container ? { container } : undefined
+    )
   }
 
   /**
@@ -177,13 +209,19 @@ export class SandboxApi {
    * 列出工作区目录
    */
   async listFiles(instanceId: string, path = '.'): Promise<SandboxFileListResponse> {
-    return this.client.get(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/files`, { mode: 'list', path })
+    return this.client.get(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/files`, {
+      mode: 'list',
+      path,
+    })
   }
 
   /**
    * 写入工作区文件
    */
-  async writeFile(instanceId: string, data: SandboxFileWriteRequest): Promise<Record<string, never>> {
+  async writeFile(
+    instanceId: string,
+    data: SandboxFileWriteRequest
+  ): Promise<{ workspace_revision: number }> {
     return this.client.put(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/files`, data)
   }
 
@@ -197,15 +235,25 @@ export class SandboxApi {
   /**
    * 执行受控命令工具
    */
-  async runCommandTool(instanceId: string, toolCode: string, data: SandboxCommandToolRunRequest): Promise<SandboxCommandToolRunResponse> {
-    return this.client.post(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/command-tools/${encodePathSegment(toolCode)}/run`, data)
+  async runCommandTool(
+    instanceId: string,
+    toolCode: string,
+    data: SandboxCommandToolRunRequest
+  ): Promise<SandboxCommandToolRunResponse> {
+    return this.client.post(
+      `/sandbox/sandboxes/${encodePathSegment(instanceId)}/command-tools/${encodePathSegment(toolCode)}/run`,
+      data
+    )
   }
 
   /**
    * 调用运行时统一链部署能力。
    */
   async chainDeploy(instanceId: string, data: SandboxChainRequest): Promise<SandboxChainResponse> {
-    return this.client.post(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/chain/deploy`, data)
+    return this.client.post(
+      `/sandbox/sandboxes/${encodePathSegment(instanceId)}/chain/deploy`,
+      data
+    )
   }
 
   /**
@@ -219,17 +267,24 @@ export class SandboxApi {
    * 查询运行时链上状态。
    */
   async chainQuery(instanceId: string, target: string): Promise<SandboxChainResponse> {
-    return this.client.get(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/chain/query`, { target })
+    return this.client.get(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/chain/query`, {
+      target,
+    })
   }
 
   /**
    * 获取 Web 工具代理 URL
    */
-  async getToolProxyUrl(instanceId: string, toolCode: string, proxyPath = '', toolOrigin: string): Promise<string> {
+  async getToolProxyUrl(
+    instanceId: string,
+    toolCode: string,
+    proxyPath = '',
+    toolOrigin: string
+  ): Promise<string> {
     const normalizedPath = normalizeProxyPath(proxyPath)
     const encodedTool = encodePathSegment(toolCode)
     const pathPrefix = `${API_BASE_PATH}/sandbox/sandboxes/${encodePathSegment(instanceId)}/tools/${encodedTool}`
-    const path = `/sandbox/sandboxes/${encodePathSegment(instanceId)}/tools/${encodedTool}/${normalizedPath}`
+    const path = `${API_BASE_PATH}/sandbox/sandboxes/${encodePathSegment(instanceId)}/tools/${encodedTool}/${normalizedPath}`
     const { ticket } = await this.identity.issueBrowserAccessTicket(pathPrefix)
     return this.client.browserURLAtOrigin(toolOrigin, path, { ticket })
   }
@@ -241,18 +296,26 @@ function normalizeProxyPath(proxyPath: string): string {
   if (/[?#\\]/.test(normalized) || hasControlCharacter(normalized)) {
     throw new Error('工具代理路径包含不允许的字符')
   }
-  const segments = normalized.split('/').filter(Boolean).map((segment) => {
-    let decoded: string
-    try {
-      decoded = decodeURIComponent(segment)
-    } catch {
-      throw new Error('工具代理路径包含无效编码')
-    }
-    if (decoded === '.' || decoded === '..' || /[\\/?#]/.test(decoded) || hasControlCharacter(decoded)) {
-      throw new Error('工具代理路径包含不允许的路径段')
-    }
-    return encodeURIComponent(decoded)
-  })
+  const segments = normalized
+    .split('/')
+    .filter(Boolean)
+    .map((segment) => {
+      let decoded: string
+      try {
+        decoded = decodeURIComponent(segment)
+      } catch {
+        throw new Error('工具代理路径包含无效编码')
+      }
+      if (
+        decoded === '.' ||
+        decoded === '..' ||
+        /[\\/?#]/.test(decoded) ||
+        hasControlCharacter(decoded)
+      ) {
+        throw new Error('工具代理路径包含不允许的路径段')
+      }
+      return encodeURIComponent(decoded)
+    })
   if (segments.length === 0) {
     return ''
   }

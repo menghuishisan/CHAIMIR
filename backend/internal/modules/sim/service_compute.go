@@ -6,10 +6,16 @@ import (
 	"math"
 	"strings"
 
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 )
+
+// simSessionSessionScope 为每个仿真会话建立稳定的 WebSocket 撤销范围。
+func simSessionSessionScope(sessionID int64) string {
+	return "sim:" + ids.Format(sessionID)
+}
 
 // validateBackendAdapterAvailable 确保隔离执行包只能使用已装配的 M4 自有能力。
 func validateBackendAdapterAvailable(compute int16, adapterCode string, registry BackendRegistry) error {
@@ -46,12 +52,17 @@ func (s *Service) ServeBackendStream(ctx context.Context, conn *ws.Conn, tenantI
 		if err != nil {
 			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
 		}
+		if !sessionAccountAuthorized(session.Session, accountID) {
+			return apperr.ErrForbidden
+		}
 		return nil
 	}); err != nil {
 		return err
 	}
-	if session.OwnerAccountID != accountID {
-		return apperr.ErrForbidden
+	if s.wsHub != nil {
+		if err := conn.BindSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: simSessionSessionScope(sessionID)}); err != nil {
+			return apperr.ErrSimBackendComputeUnavailable.WithCause(err)
+		}
 	}
 	if session.Compute != ComputeIsolated || session.Status == SessionArchived || session.Status == SessionFailed || strings.TrimSpace(session.BackendAdapter) == "" {
 		return apperr.ErrSimBackendComputeUnavailable

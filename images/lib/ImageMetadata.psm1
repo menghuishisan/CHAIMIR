@@ -102,7 +102,6 @@ function Get-ChaimirImageCatalog {
 function Get-ChaimirInternalImageBuildArguments {
     return [ordered]@{
         GO_BUILDER_IMAGE   = "base/go-builder"
-        CHAIN_TOOLS_IMAGE  = "base/chain-tools"
         NODE_BUILDER_IMAGE = "base/node-builder"
         JUDGE_MIN_IMAGE    = "base/judge-min"
         FABRIC_TOOLS_IMAGE = "base/fabric-tools"

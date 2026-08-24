@@ -8,7 +8,36 @@ import (
 
 // experimentDTOFromModel 转换实验定义为 HTTP 输出。
 func experimentDTOFromModel(item Experiment) ExperimentDTO {
-	return ExperimentDTO{ID: ids.ID(item.ID), CourseID: ids.ID(item.CourseID), AuthorID: ids.ID(item.AuthorID), TemplateRef: item.TemplateRef, TemplateVersion: item.TemplateVersion, Name: item.Name, Description: item.Description, Components: item.Components, CollabMode: item.CollabMode, GroupConfig: item.GroupConfig, RequireReport: item.RequireReport, WizardStep: item.WizardStep, Status: item.Status, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+	return ExperimentDTO{ID: ids.ID(item.ID), CourseID: ids.ID(item.CourseID), AuthorID: ids.ID(item.AuthorID), TemplateRef: item.TemplateRef, TemplateVersion: item.TemplateVersion, Name: item.Name, Description: item.Description, Components: teacherComponentConfigDTOFromModel(item.Components), CollabMode: item.CollabMode, GroupConfig: item.GroupConfig, RequireReport: item.RequireReport, WizardStep: item.WizardStep, Status: item.Status, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+}
+
+// teacherComponentConfigDTOFromModel 只回显声明和摘要,不把完整执行快照暴露给教师页面。
+func teacherComponentConfigDTOFromModel(cfg ComponentConfig) TeacherComponentConfigDTO {
+	out := TeacherComponentConfigDTO{
+		Envs:        make([]TeacherEnvComponentDTO, 0, len(cfg.Envs)),
+		Sims:        append([]SimComponent(nil), cfg.Sims...),
+		Checkpoints: append([]CheckpointComponent(nil), cfg.Checkpoints...),
+		Stages:      append([]StageConfig(nil), cfg.Stages...),
+	}
+	for _, env := range cfg.Envs {
+		spec := env.CompositionSnapshot.Spec
+		out.Envs = append(out.Envs, TeacherEnvComponentDTO{
+			ID:                       env.ID,
+			PrimaryRuntime:           spec.PrimaryRuntime,
+			Infra:                    append([]contracts.CompositionComponentRef(nil), spec.Infra...),
+			Tools:                    append([]contracts.CompositionComponentRef(nil), spec.Tools...),
+			Links:                    append([]contracts.CompositionLink(nil), spec.Links...),
+			AccessProfile:            spec.AccessProfile,
+			CompositionDigest:        env.CompositionSnapshot.Digest,
+			InitCodeRef:              env.InitCodeRef,
+			InitScriptRef:            env.InitScriptRef,
+			KeepAlive:                env.KeepAlive,
+			SnapshotEnabled:          env.SnapshotEnabled,
+			KeepAliveMinutes:         env.KeepAliveMinutes,
+			SnapshotRetentionMinutes: env.SnapshotRetentionMinutes,
+		})
+	}
+	return out
 }
 
 // studentExperimentDTOFromModel 生成不含环境初始化与判题答案的学生实验视图。
@@ -21,7 +50,8 @@ func studentExperimentDTOFromModel(item Experiment, myGroupID int64) StudentExpe
 		Stages:      make([]StudentStageConfig, 0, len(item.Components.Stages)),
 	}
 	for _, env := range item.Components.Envs {
-		components.Envs = append(components.Envs, StudentEnvComponent{ID: env.ID, RuntimeCode: env.RuntimeCode, Tools: append([]string(nil), env.Tools...)})
+		spec := env.CompositionSnapshot.Spec
+		components.Envs = append(components.Envs, StudentEnvComponent{ID: env.ID, PrimaryRuntime: spec.PrimaryRuntime, Infra: append([]contracts.CompositionComponentRef(nil), spec.Infra...), Tools: append([]contracts.CompositionComponentRef(nil), spec.Tools...), Links: append([]contracts.CompositionLink(nil), spec.Links...), AccessProfile: spec.AccessProfile, CompositionDigest: env.CompositionSnapshot.Digest})
 	}
 	for _, sim := range item.Components.Sims {
 		components.Sims = append(components.Sims, StudentSimComponent{ID: sim.ID, PackageCode: sim.PackageCode, Version: sim.Version})

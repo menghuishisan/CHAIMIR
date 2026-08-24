@@ -63,7 +63,7 @@ func (s *Service) JudgeCheckpoint(ctx context.Context, instanceID int64, checkpo
 		extra[key] = value
 	}
 	mode := sandboxModeForCheckpoint(cp)
-	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: inst.TenantID, JudgerCode: cp.JudgerCode, ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion, CodeStorageKey: codeKey, CodeHash: codeHash, SubmitterID: id.AccountID, SourceRef: inst.SourceRef, SourceOwnerID: inst.OwnerAccountID, SourceCourseID: exp.CourseID, SourceScope: "experiment", SandboxMode: mode, TargetSandboxRef: targetSandboxRef(cp, inst, mode), ExtraInput: extra, Priority: 5})
+	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: inst.TenantID, JudgerCode: cp.JudgerCode, ItemCode: cp.ItemCode, ItemVersion: cp.ItemVersion, CodeStorageKey: codeKey, CodeHash: codeHash, SubmitterTenantID: id.TenantID, SubmitterID: id.AccountID, SourceRef: inst.SourceRef, SourceOwnerID: inst.OwnerAccountID, SourceCourseID: exp.CourseID, SourceScope: "experiment", SandboxMode: mode, TargetSandboxRef: targetSandboxRef(cp, inst, mode), ExtraInput: extra, Priority: 5})
 	if err != nil {
 		return CheckpointDTO{}, apperr.ErrExperimentJudgeUnavailable.WithCause(err)
 	}

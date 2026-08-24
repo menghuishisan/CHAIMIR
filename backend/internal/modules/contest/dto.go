@@ -4,6 +4,7 @@ package contest
 import (
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 )
 
@@ -53,16 +54,17 @@ type ProblemRequest struct {
 
 // ProblemDTO 是竞赛题目引用输出。
 type ProblemDTO struct {
-	ID           ids.ID               `json:"id"`
-	ContestID    ids.ID               `json:"contest_id"`
-	ItemCode     string               `json:"item_code"`
-	ItemVersion  string               `json:"item_version"`
-	Score        int32                `json:"score"`
-	DynamicScore *DynamicScoreConfig  `json:"dynamic_score,omitempty"`
-	BattleConfig *BattleRuntimeConfig `json:"battle_config,omitempty"`
-	BattleRule   int16                `json:"battle_rule,omitempty"`
-	Seq          int32                `json:"seq"`
-	Face         map[string]any       `json:"face,omitempty"`
+	ID                ids.ID               `json:"id"`
+	ContestID         ids.ID               `json:"contest_id"`
+	ItemCode          string               `json:"item_code"`
+	ItemVersion       string               `json:"item_version"`
+	Score             int32                `json:"score"`
+	DynamicScore      *DynamicScoreConfig  `json:"dynamic_score,omitempty"`
+	BattleConfig      *BattleRuntimeConfig `json:"battle_config,omitempty"`
+	BattleRule        int16                `json:"battle_rule,omitempty"`
+	Seq               int32                `json:"seq"`
+	CompositionDigest string               `json:"composition_digest,omitempty"`
+	Face              map[string]any       `json:"face,omitempty"`
 }
 
 // SignupRequest 是学生报名或创建队伍请求。
@@ -98,11 +100,7 @@ type TeamMemberDTO struct {
 
 // EnvRequest 是实操题环境启动请求。
 type EnvRequest struct {
-	RuntimeCode         string   `json:"runtime_code"`
-	RuntimeImageVersion string   `json:"runtime_image_version"`
-	ToolCodes           []string `json:"tool_codes"`
-	InitCodeRef         string   `json:"init_code_ref"`
-	InitScriptRef       string   `json:"init_script_ref"`
+	RequestRef string `json:"request_ref"`
 }
 
 // EnvDTO 是 M2 沙箱环境摘要。
@@ -110,6 +108,45 @@ type EnvDTO struct {
 	SandboxID ids.ID `json:"sandbox_id"`
 	SourceRef string `json:"source_ref"`
 	Status    int16  `json:"status"`
+}
+
+// ContestSandboxFileWriteRequest 是 M8 授权网关写入竞赛工作区的请求。
+type ContestSandboxFileWriteRequest struct {
+	RelativePath     string `json:"relative_path"`
+	ContentBase64    string `json:"content_base64"`
+	ExpectedRevision int64  `json:"expected_revision"`
+}
+
+// ContestSandboxFileWriteResponse 返回原子写入后新的工作区 revision。
+type ContestSandboxFileWriteResponse struct {
+	WorkspaceRevision int64 `json:"workspace_revision"`
+}
+
+// ContestSandboxToolRunRequest 是 M8 授权网关执行命令工具的请求。
+type ContestSandboxToolRunRequest struct {
+	Command     []string `json:"command"`
+	StdinBase64 string   `json:"stdin_base64"`
+	TimeoutSec  int32    `json:"timeout_sec"`
+}
+
+// ContestSandboxChainRequest 是 M8 授权网关的统一链操作请求。
+type ContestSandboxChainRequest struct {
+	Payload map[string]any `json:"payload"`
+}
+
+// ContestSandboxResponse 是 M8 网关对学生暴露的沙箱摘要，不泄露组织租户的 Namespace。
+type ContestSandboxResponse struct {
+	SandboxID           ids.ID                         `json:"sandbox_id"`
+	SourceRef           string                         `json:"source_ref"`
+	OwnerAccountID      ids.ID                         `json:"owner_account_id"`
+	RuntimeCode         string                         `json:"runtime_code"`
+	RuntimeImageVersion string                         `json:"runtime_image_version"`
+	Phase               int16                          `json:"phase"`
+	Status              int16                          `json:"status"`
+	ToolAccess          []contracts.SandboxToolAccess  `json:"tool_access"`
+	Capabilities        contracts.SandboxCapabilities  `json:"capabilities"`
+	ResourceUsage       contracts.SandboxResourceUsage `json:"resource_usage"`
+	WorkspaceRevision   int64                          `json:"workspace_revision"`
 }
 
 // SubmitRequest 是解题赛提交请求。
@@ -122,18 +159,19 @@ type SubmitRequest struct {
 
 // SubmissionDTO 是解题赛提交输出。
 type SubmissionDTO struct {
-	ID           ids.ID         `json:"id"`
-	ContestID    ids.ID         `json:"contest_id"`
-	ProblemID    ids.ID         `json:"problem_id"`
-	TeamID       ids.ID         `json:"team_id"`
-	SubmitterID  ids.ID         `json:"submitter_id"`
-	ContentRef   map[string]any `json:"content_ref"`
-	SourceRef    string         `json:"source_ref"`
-	JudgeTaskRef string         `json:"judge_task_ref,omitempty"`
-	Passed       bool           `json:"passed"`
-	Score        int32          `json:"score"`
-	SandboxRef   string         `json:"sandbox_ref,omitempty"`
-	SubmittedAt  time.Time      `json:"submitted_at"`
+	ID                ids.ID         `json:"id"`
+	ContestID         ids.ID         `json:"contest_id"`
+	ProblemID         ids.ID         `json:"problem_id"`
+	TeamID            ids.ID         `json:"team_id"`
+	SubmitterTenantID ids.ID         `json:"submitter_tenant_id"`
+	SubmitterID       ids.ID         `json:"submitter_id"`
+	ContentRef        map[string]any `json:"content_ref"`
+	SourceRef         string         `json:"source_ref"`
+	JudgeTaskRef      string         `json:"judge_task_ref,omitempty"`
+	Passed            bool           `json:"passed"`
+	Score             int32          `json:"score"`
+	SandboxRef        string         `json:"sandbox_ref,omitempty"`
+	SubmittedAt       time.Time      `json:"submitted_at"`
 }
 
 // BattleEntryRequest 是提交参战物请求。
@@ -335,11 +373,9 @@ type ImportVulnProblemRequest struct {
 
 // PrevalidateRequest 是漏洞题预验证执行请求,实际结果由后端运行正反向验证生成。
 type PrevalidateRequest struct {
-	RuntimeCode         string   `json:"runtime_code"`
-	RuntimeImageVersion string   `json:"runtime_image_version"`
-	ToolCodes           []string `json:"tool_codes"`
-	InitCodeRef         string   `json:"init_code_ref"`
-	InitScriptRef       string   `json:"init_script_ref"`
+	Composition   contracts.SandboxCompositionSpec `json:"composition"`
+	InitCodeRef   string                           `json:"init_code_ref"`
+	InitScriptRef string                           `json:"init_script_ref"`
 }
 
 // VulnProblemDTO 是漏洞题草稿输出。
@@ -353,6 +389,7 @@ type VulnProblemDTO struct {
 	DraftBody          map[string]any `json:"draft_body"`
 	PrevalidateStatus  int16          `json:"prevalidate_status"`
 	PrevalidateDetail  map[string]any `json:"prevalidate_detail"`
+	CompositionDigest  string         `json:"composition_digest,omitempty"`
 	ContentItemCode    string         `json:"content_item_code,omitempty"`
 	ContentItemVersion string         `json:"content_item_version,omitempty"`
 	Status             int16          `json:"status"`

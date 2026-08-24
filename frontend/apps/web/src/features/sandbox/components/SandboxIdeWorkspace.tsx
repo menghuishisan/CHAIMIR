@@ -29,8 +29,15 @@ import {
   SandboxStatus,
   SandboxToolKind,
   type SandboxChainOperation,
+  type SandboxChainRequest,
+  type SandboxChainResponse,
+  type SandboxCommandToolRunRequest,
+  type SandboxCommandToolRunResponse,
   type SandboxFileEntry,
+  type SandboxFileListResponse,
+  type SandboxFileReadResponse,
   type SandboxFileSaveResponse,
+  type SandboxFileWriteRequest,
   type SandboxInstance,
   type SandboxToolAccess,
 } from '@chaimir/api-client'
@@ -90,6 +97,41 @@ export interface SandboxIdeWorkspaceProps {
   sandboxId: string
   /** 保存工作区成功后回调:调用方据此提交或触发判分 */
   onSaved?: (result: SandboxFileSaveResponse) => void
+  /** 工作区能力入口。竞赛页面注入 M8 授权网关,实验页面使用 M2 租户内入口。 */
+  workspaceApi?: SandboxWorkspaceApi
+}
+
+/**
+ * SandboxWorkspaceApi 是工作台需要的最小能力面。
+ * 视图不再绑定某个业务模块,由调用方选择 M2 本地入口或 M8 竞赛授权网关。
+ */
+export interface SandboxWorkspaceApi {
+  getInstance(instanceId: string): Promise<SandboxWorkspaceInstance>
+  getTerminalWsUrl(instanceId: string, container?: string): string
+  getProgressWsUrl(instanceId: string): string
+  readFile(instanceId: string, path: string): Promise<SandboxFileReadResponse>
+  listFiles(instanceId: string, path?: string): Promise<SandboxFileListResponse>
+  writeFile(instanceId: string, data: SandboxFileWriteRequest): Promise<{ workspace_revision: number }>
+  saveFiles(instanceId: string): Promise<SandboxFileSaveResponse>
+  runCommandTool(
+    instanceId: string,
+    toolCode: string,
+    data: SandboxCommandToolRunRequest
+  ): Promise<SandboxCommandToolRunResponse>
+  chainDeploy(instanceId: string, data: SandboxChainRequest): Promise<SandboxChainResponse>
+  chainSendTx(instanceId: string, data: SandboxChainRequest): Promise<SandboxChainResponse>
+  chainQuery(instanceId: string, target: string): Promise<SandboxChainResponse>
+  getToolProxyUrl(
+    instanceId: string,
+    toolCode: string,
+    proxyPath: string,
+    toolOrigin: string
+  ): Promise<string>
+}
+
+/** 工作台只依赖公开运行时字段,租户编号由具体网关决定是否返回。 */
+export type SandboxWorkspaceInstance = Omit<SandboxInstance, 'tenant_id'> & {
+  tenant_id?: SandboxInstance['tenant_id']
 }
 
 /**
@@ -98,8 +140,9 @@ export interface SandboxIdeWorkspaceProps {
  * 上游模块(M7 实例、M8 环境)的响应里工具字段命名与 M2 不同(`code` 对 `tool_code`),
  * 更重要的是「出现什么」的权威在 M2,让调用方传等于给了绕过这层判定的口子。
  */
-export function SandboxIdeWorkspace({ sandboxId, onSaved }: SandboxIdeWorkspaceProps) {
-  const [instance, setInstance] = useState<SandboxInstance>()
+export function SandboxIdeWorkspace({ sandboxId, onSaved, workspaceApi }: SandboxIdeWorkspaceProps) {
+  const workspace = workspaceApi ?? api.sandbox
+  const [instance, setInstance] = useState<SandboxWorkspaceInstance>()
   const [loadError, setLoadError] = useState<string>()
   const [progress, setProgress] = useState<SandboxProgress>()
 
@@ -107,11 +150,11 @@ export function SandboxIdeWorkspace({ sandboxId, onSaved }: SandboxIdeWorkspaceP
   const loadInstance = useCallback(async () => {
     setLoadError(undefined)
     try {
-      setInstance(await api.sandbox.getInstance(sandboxId))
+      setInstance(await workspace.getInstance(sandboxId))
     } catch (error) {
       setLoadError(userFacingErrorMessage(error, '实验环境的状态读不到,请稍后重试。'))
     }
-  }, [sandboxId])
+  }, [sandboxId, workspace])
 
   useEffect(() => {
     void loadInstance()
@@ -121,8 +164,8 @@ export function SandboxIdeWorkspace({ sandboxId, onSaved }: SandboxIdeWorkspaceP
   // 就绪后断开 —— 后续状态变化(暂停/回收)由业务侧的动作驱动重读,不需要一直挂着连接。
   const notReady = instance !== undefined && instance.phase !== SandboxPhase.FULLY_READY
   const progressUrl = useMemo(
-    () => (notReady ? api.sandbox.getProgressWsUrl(sandboxId) : undefined),
-    [notReady, sandboxId],
+    () => (notReady ? workspace.getProgressWsUrl(sandboxId) : undefined),
+    [notReady, sandboxId, workspace],
   )
 
   const progressSocket = useTicketedWebSocket({
@@ -272,25 +315,30 @@ export function SandboxIdeWorkspace({ sandboxId, onSaved }: SandboxIdeWorkspaceP
 
       {capabilities.file_workspace ? (
         <TabsContent value="files" className="min-h-0 flex-1">
-          <FilesPanel sandboxId={sandboxId} onSaved={onSaved} />
+          <FilesPanel
+            sandboxId={sandboxId}
+            workspaceApi={workspace}
+            workspaceRevision={instance.workspace_revision}
+            onSaved={onSaved}
+          />
         </TabsContent>
       ) : null}
 
       {capabilities.terminal ? (
         <TabsContent value="terminal" className="min-h-0 flex-1">
-          <TerminalPanel sandboxId={sandboxId} />
+          <TerminalPanel sandboxId={sandboxId} workspaceApi={workspace} />
         </TabsContent>
       ) : null}
 
       {capabilities.chain_operations.length > 0 ? (
         <TabsContent value="chain" className="min-h-0 flex-1">
-          <ChainPanel sandboxId={sandboxId} operations={capabilities.chain_operations} />
+          <ChainPanel sandboxId={sandboxId} workspaceApi={workspace} operations={capabilities.chain_operations} />
         </TabsContent>
       ) : null}
 
       {capabilities.command_tools && commandTools.length > 0 ? (
         <TabsContent value="commands" className="min-h-0 flex-1">
-          <CommandPanel sandboxId={sandboxId} tools={commandTools} />
+          <CommandPanel sandboxId={sandboxId} workspaceApi={workspace} tools={commandTools} />
         </TabsContent>
       ) : null}
 
@@ -300,7 +348,7 @@ export function SandboxIdeWorkspace({ sandboxId, onSaved }: SandboxIdeWorkspaceP
           value={`web:${tool.tool_code}`}
           className="min-h-0 flex-1"
         >
-          <WebToolPanel sandboxId={sandboxId} toolCode={tool.tool_code} />
+          <WebToolPanel sandboxId={sandboxId} workspaceApi={workspace} toolCode={tool.tool_code} />
         </TabsContent>
       ))}
     </Tabs>
@@ -311,6 +359,8 @@ export function SandboxIdeWorkspace({ sandboxId, onSaved }: SandboxIdeWorkspaceP
 
 interface FilesPanelProps {
   sandboxId: string
+  workspaceApi: SandboxWorkspaceApi
+  workspaceRevision: number
   onSaved?: (result: SandboxFileSaveResponse) => void
 }
 
@@ -319,7 +369,7 @@ interface FilesPanelProps {
  * 目录逐层展开而不是一次拉全树:后端 listFiles 是按路径列一层,递归拉整棵树在
  * 大工程上会打出几十个请求,而学生真正会点开的往往只有一两层。
  */
-function FilesPanel({ sandboxId, onSaved }: FilesPanelProps) {
+function FilesPanel({ sandboxId, workspaceApi, workspaceRevision: initialWorkspaceRevision, onSaved }: FilesPanelProps) {
   const [path, setPath] = useState('.')
   const [entries, setEntries] = useState<SandboxFileEntry[]>([])
   const [openPath, setOpenPath] = useState<string>()
@@ -327,12 +377,17 @@ function FilesPanel({ sandboxId, onSaved }: FilesPanelProps) {
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const [panelError, setPanelError] = useState<string>()
+  const [workspaceRevision, setWorkspaceRevision] = useState(initialWorkspaceRevision)
 
   const editorHost = useRef<HTMLDivElement>(null)
   const editorRef = useRef<MountedEditor | undefined>(undefined)
   // 编辑内容放进 ref:Monaco 的 onChange 回调在装配时固定,不能依赖闭包里的 state
   const contentRef = useRef('')
   contentRef.current = content
+
+  useEffect(() => {
+    setWorkspaceRevision(initialWorkspaceRevision)
+  }, [initialWorkspaceRevision])
 
   const language = useMemo(() => languageFor(openPath), [openPath])
 
@@ -341,14 +396,14 @@ function FilesPanel({ sandboxId, onSaved }: FilesPanelProps) {
     async (target: string) => {
       setPanelError(undefined)
       try {
-        const result = await api.sandbox.listFiles(sandboxId, target)
+        const result = await workspaceApi.listFiles(sandboxId, target)
         setPath(result.relative_path)
         setEntries(result.entries)
       } catch (error) {
         setPanelError(userFacingErrorMessage(error, '这个目录暂时打不开,请稍后重试。'))
       }
     },
-    [sandboxId],
+    [sandboxId, workspaceApi],
   )
 
   useEffect(() => {
@@ -360,15 +415,16 @@ function FilesPanel({ sandboxId, onSaved }: FilesPanelProps) {
     async (relativePath: string) => {
       setPanelError(undefined)
       try {
-        const file = await api.sandbox.readFile(sandboxId, relativePath)
+        const file = await workspaceApi.readFile(sandboxId, relativePath)
         setOpenPath(file.relative_path)
         setContent(decodeUtf8Base64(file.content_base64))
         setDirty(false)
+        setWorkspaceRevision(file.workspace_revision)
       } catch (error) {
         setPanelError(userFacingErrorMessage(error, '这个文件暂时读不出来,请稍后重试。'))
       }
     },
-    [sandboxId],
+    [sandboxId, workspaceApi],
   )
 
   // 编辑器与「当前打开的文件」同生共死:换文件即重新装配,拿到的 language 才是对的
@@ -409,10 +465,12 @@ function FilesPanel({ sandboxId, onSaved }: FilesPanelProps) {
     setBusy(true)
     setPanelError(undefined)
     try {
-      await api.sandbox.writeFile(sandboxId, {
+      const result = await workspaceApi.writeFile(sandboxId, {
         relative_path: openPath,
         content_base64: encodeUtf8Base64(contentRef.current),
+        expected_revision: workspaceRevision,
       })
+      setWorkspaceRevision(result.workspace_revision)
       setDirty(false)
       toast.success('已写入工作区')
     } catch (error) {
@@ -420,7 +478,7 @@ function FilesPanel({ sandboxId, onSaved }: FilesPanelProps) {
     } finally {
       setBusy(false)
     }
-  }, [openPath, sandboxId])
+  }, [openPath, sandboxId, workspaceApi, workspaceRevision])
 
   /**
    * persistWorkspace 把整个工作区持久化并交出代码引用。
@@ -432,13 +490,16 @@ function FilesPanel({ sandboxId, onSaved }: FilesPanelProps) {
     setPanelError(undefined)
     try {
       if (openPath && dirty) {
-        await api.sandbox.writeFile(sandboxId, {
+        const result = await workspaceApi.writeFile(sandboxId, {
           relative_path: openPath,
           content_base64: encodeUtf8Base64(contentRef.current),
+          expected_revision: workspaceRevision,
         })
+        setWorkspaceRevision(result.workspace_revision)
         setDirty(false)
       }
-      const result = await api.sandbox.saveFiles(sandboxId)
+      const result = await workspaceApi.saveFiles(sandboxId)
+      setWorkspaceRevision(result.workspace_revision)
       toast.success('工作区已保存')
       onSaved?.(result)
     } catch (error) {
@@ -446,7 +507,7 @@ function FilesPanel({ sandboxId, onSaved }: FilesPanelProps) {
     } finally {
       setBusy(false)
     }
-  }, [dirty, onSaved, openPath, sandboxId])
+  }, [dirty, onSaved, openPath, sandboxId, workspaceApi, workspaceRevision])
 
   return (
     <div className="flex h-full min-h-0 flex-col lg:flex-row">
@@ -554,12 +615,12 @@ function FilesPanel({ sandboxId, onSaved }: FilesPanelProps) {
  * 终端是双向流:xterm 的输入直接送 WS,服务端输出写回 xterm ——
  * 中间不做行缓冲或命令解析,那会让 vim 这类交互程序不可用。
  */
-function TerminalPanel({ sandboxId }: { sandboxId: string }) {
+function TerminalPanel({ sandboxId, workspaceApi }: { sandboxId: string; workspaceApi: SandboxWorkspaceApi }) {
   const host = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<MountedTerminal | undefined>(undefined)
   const [ready, setReady] = useState(false)
 
-  const url = useMemo(() => api.sandbox.getTerminalWsUrl(sandboxId), [sandboxId])
+  const url = useMemo(() => workspaceApi.getTerminalWsUrl(sandboxId), [sandboxId, workspaceApi])
 
   const socket = useTicketedWebSocket({
     url,
@@ -630,6 +691,7 @@ function TerminalPanel({ sandboxId }: { sandboxId: string }) {
 
 interface ChainPanelProps {
   sandboxId: string
+  workspaceApi: SandboxWorkspaceApi
   operations: SandboxChainOperation[]
 }
 
@@ -639,7 +701,7 @@ interface ChainPanelProps {
  * 故用文档编辑器并在本地校验合法性),查询只要一个目标标识。响应原样呈现 ——
  * 它是链上事实,不该被前端改写。
  */
-function ChainPanel({ sandboxId, operations }: ChainPanelProps) {
+function ChainPanel({ sandboxId, workspaceApi, operations }: ChainPanelProps) {
   const [operation, setOperation] = useState<SandboxChainOperation>(operations[0])
   const [payloadText, setPayloadText] = useState('{\n  \n}')
   const [target, setTarget] = useState('')
@@ -657,7 +719,7 @@ function ChainPanel({ sandboxId, operations }: ChainPanelProps) {
           setPanelError('请填写要查询的目标,例如合约地址或状态键。')
           return
         }
-        const response = await api.sandbox.chainQuery(sandboxId, target.trim())
+        const response = await workspaceApi.chainQuery(sandboxId, target.trim())
         setResult(JSON.stringify(response, null, 2))
         return
       }
@@ -677,15 +739,15 @@ function ChainPanel({ sandboxId, operations }: ChainPanelProps) {
 
       const response =
         operation === 'deploy'
-          ? await api.sandbox.chainDeploy(sandboxId, { payload })
-          : await api.sandbox.chainSendTx(sandboxId, { payload })
+          ? await workspaceApi.chainDeploy(sandboxId, { payload })
+          : await workspaceApi.chainSendTx(sandboxId, { payload })
       setResult(JSON.stringify(response, null, 2))
     } catch (error) {
       setPanelError(userFacingErrorMessage(error, '这次链操作没有成功,请检查参数后重试。'))
     } finally {
       setBusy(false)
     }
-  }, [operation, payloadText, sandboxId, target])
+  }, [operation, payloadText, sandboxId, target, workspaceApi])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
@@ -754,6 +816,7 @@ function ChainPanel({ sandboxId, operations }: ChainPanelProps) {
 
 interface CommandPanelProps {
   sandboxId: string
+  workspaceApi: SandboxWorkspaceApi
   tools: SandboxToolAccess[]
 }
 
@@ -762,7 +825,7 @@ interface CommandPanelProps {
  * 允许哪些命令由平台在工具定义里配白名单,学生侧读不到那份清单(工具定义接口在平台组),
  * 所以这里不做本地过滤 —— 白名单在服务端强制,越界命令会被拒绝并给出用户向说明。
  */
-function CommandPanel({ sandboxId, tools }: CommandPanelProps) {
+function CommandPanel({ sandboxId, workspaceApi, tools }: CommandPanelProps) {
   const [toolCode, setToolCode] = useState(tools[0].tool_code)
   const [commandLine, setCommandLine] = useState('')
   const [output, setOutput] = useState<string>()
@@ -782,7 +845,7 @@ function CommandPanel({ sandboxId, tools }: CommandPanelProps) {
     setPanelError(undefined)
     setOutput(undefined)
     try {
-      const response = await api.sandbox.runCommandTool(sandboxId, toolCode, { command })
+      const response = await workspaceApi.runCommandTool(sandboxId, toolCode, { command })
       const stdout = decodeUtf8Base64(response.stdout_base64)
       const stderr = decodeUtf8Base64(response.stderr_base64)
       setOutput(
@@ -799,7 +862,7 @@ function CommandPanel({ sandboxId, tools }: CommandPanelProps) {
     } finally {
       setBusy(false)
     }
-  }, [commandLine, sandboxId, toolCode])
+  }, [commandLine, sandboxId, toolCode, workspaceApi])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
@@ -856,7 +919,15 @@ function CommandPanel({ sandboxId, tools }: CommandPanelProps) {
  * 地址是平台自己的代理入口(不是工具容器的直连地址),鉴权由路径受限令牌承载 ——
  * 页面不拼容器地址,也就不存在把内网地址暴露给浏览器的问题。
  */
-function WebToolPanel({ sandboxId, toolCode }: { sandboxId: string; toolCode: string }) {
+function WebToolPanel({
+  sandboxId,
+  workspaceApi,
+  toolCode,
+}: {
+  sandboxId: string
+  workspaceApi: SandboxWorkspaceApi
+  toolCode: string
+}) {
   const [src, setSrc] = useState<string>()
   const [loadError, setLoadError] = useState('')
 
@@ -864,7 +935,7 @@ function WebToolPanel({ sandboxId, toolCode }: { sandboxId: string; toolCode: st
     let active = true
     setSrc(undefined)
     setLoadError('')
-    void api.sandbox
+    void workspaceApi
       .getToolProxyUrl(sandboxId, toolCode, '', appConfig.sandboxToolOrigin)
       .then((url) => {
         if (active) setSrc(url)
@@ -875,7 +946,7 @@ function WebToolPanel({ sandboxId, toolCode }: { sandboxId: string; toolCode: st
     return () => {
       active = false
     }
-  }, [sandboxId, toolCode])
+  }, [sandboxId, toolCode, workspaceApi])
 
   if (loadError) {
     return <div className="grid h-full place-items-center px-4 text-sm text-on-dark-danger">{loadError}</div>

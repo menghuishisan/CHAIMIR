@@ -15,7 +15,11 @@ import (
 
 // CreateSessionFromHTTP 转换内部 HTTP 请求为跨模块契约调用。
 func (s *Service) CreateSessionFromHTTP(ctx context.Context, tenantID int64, req CreateSessionRequest) (SimSessionCreateResponse, error) {
-	info, err := s.CreateSession(ctx, contracts.SimCreateSessionRequest{TenantID: tenantID, PackageCode: req.PackageCode, Version: req.Version, Seed: req.Seed, InitParams: req.InitParams, OwnerAccountID: req.OwnerAccountID.Int64(), SourceRef: req.SourceRef})
+	authorizedAccountIDs := make([]int64, 0, len(req.AuthorizedAccountIDs))
+	for _, accountID := range req.AuthorizedAccountIDs {
+		authorizedAccountIDs = append(authorizedAccountIDs, accountID.Int64())
+	}
+	info, err := s.CreateSession(ctx, contracts.SimCreateSessionRequest{TenantID: tenantID, PackageCode: req.PackageCode, Version: req.Version, Seed: req.Seed, InitParams: req.InitParams, OwnerAccountID: req.OwnerAccountID.Int64(), AuthorizedAccountIDs: authorizedAccountIDs, SourceRef: req.SourceRef, ScopeRef: req.ScopeRef})
 	if err != nil {
 		return SimSessionCreateResponse{}, err
 	}
@@ -37,7 +41,7 @@ func (s *Service) ReportAction(ctx context.Context, tenantID, accountID, session
 		if err != nil {
 			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
 		}
-		if session.OwnerAccountID != accountID {
+		if !sessionAccountAuthorized(session.Session, accountID) {
 			return apperr.ErrForbidden
 		}
 		if !canMutateSession(session.Status) {
@@ -89,7 +93,7 @@ func (s *Service) GetReplayForUser(ctx context.Context, tenantID, accountID, ses
 	if err != nil {
 		return SimReplayResponse{}, err
 	}
-	if session.OwnerAccountID != accountID {
+	if !sessionAccountAuthorized(session.Session, accountID) {
 		return SimReplayResponse{}, apperr.ErrForbidden
 	}
 	return replayToResponse(session, actions), nil
@@ -121,7 +125,7 @@ func (s *Service) ShareSession(ctx context.Context, tenantID, accountID, session
 		if err != nil {
 			return lookupError(err, apperr.ErrSimSessionNotFound, apperr.ErrSimSessionQueryFailed)
 		}
-		if session.OwnerAccountID != accountID {
+		if !sessionAccountAuthorized(session, accountID) {
 			return apperr.ErrForbidden
 		}
 		if session.Status == SessionFailed || session.Status == SessionArchived {

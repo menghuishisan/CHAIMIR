@@ -16,27 +16,32 @@ import (
 // ListPackages 返回仿真包分页列表。
 // authorID > 0 时只返回该教师作者提交的包(教师维护自己的仿真场景),
 // 为 0 时返回全部符合状态过滤的包(学生与教师浏览可用场景)。
-func (s *Service) ListPackages(ctx context.Context, status int16, category, keyword string, authorID int64, page, size int) ([]SimPackageResponse, int64, int, int, error) {
+func (s *Service) ListPackages(ctx context.Context, status int16, category, keyword string, authorID int64, page, size int) ([]SimPackageResponse, int64, int, int, map[string]map[string]int64, error) {
 	page, size = pagex.Normalize(page, size)
 	limit, offset := pagex.LimitOffset(page, size)
 	var items []Package
 	var total int64
+	var byCategory map[string]int64
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
 		items, total, err = tx.ListPackages(ctx, status, strings.TrimSpace(category), strings.TrimSpace(keyword), authorID, limit, offset)
+		if err != nil {
+			return err
+		}
+		byCategory, err = tx.CountPackagesByCategory(ctx, status, strings.TrimSpace(category), strings.TrimSpace(keyword), authorID)
 		return err
 	}); err != nil {
-		return nil, 0, page, size, lookupError(err, apperr.ErrSimPackageNotFound, apperr.ErrSimPackageQueryFailed)
+		return nil, 0, page, size, nil, lookupError(err, apperr.ErrSimPackageNotFound, apperr.ErrSimPackageQueryFailed)
 	}
 	out := make([]SimPackageResponse, 0, len(items))
 	for _, item := range items {
 		mapped, err := packageToResponse(item)
 		if err != nil {
-			return nil, 0, page, size, err
+			return nil, 0, page, size, nil, err
 		}
 		out = append(out, mapped)
 	}
-	return out, total, page, size, nil
+	return out, total, page, size, map[string]map[string]int64{"category": byCategory}, nil
 }
 
 // ListPackageVersions 返回指定 code 的全部版本。

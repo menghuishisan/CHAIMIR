@@ -7,6 +7,7 @@ import type {
   JudgerType,
 } from '../constants/judge'
 import type { SnowflakeID } from './common'
+import type { SandboxCompositionSnapshot, SandboxCompositionSpec } from './composition'
 
 export interface JudgeTask {
   task_id: SnowflakeID
@@ -45,6 +46,11 @@ export interface JudgeManualScoreRequest {
   comment: string
 }
 
+/**
+ * JudgerRequest 是平台管理员创建或更新判题器的请求。
+ * 需要沙箱的判题器必须声明 judge-private 组合;镜像地址、digest 与工作负载由服务端编译,
+ * 不得把 GET 返回的 resource_spec.composition_snapshot 重新拼装后当输入(§8.3)。
+ */
 export interface JudgerRequest {
   code: string
   name: string
@@ -52,15 +58,15 @@ export interface JudgerRequest {
   executor_ref: string
   runtime_required: boolean
   default_timeout_sec: number
-  resource_spec: JudgerResourceSpec
+  /** composition 只在写入时提交,服务端编译后不原样持久化 */
+  composition: SandboxCompositionSpec
+  resource_spec: JudgerExecutionSpec
   status: JudgerStatus
 }
 
-export interface JudgerResourceSpec {
-  runtime_code?: string
-  runtime_image_version?: string
+/** JudgerExecutionSpec 是可提交的受控执行策略,不含任何组合快照或镜像字段。 */
+export interface JudgerExecutionSpec {
   genesis_ref?: string
-  tool_codes?: string[]
   init_script_ref?: string
   command?: string[]
   exec_target?: string
@@ -71,8 +77,18 @@ export interface JudgerResourceSpec {
   selftest?: Record<string, unknown>
 }
 
-export interface Judger extends JudgerRequest {
+/**
+ * JudgerResourceSpec 是数据库里唯一持久化的判题执行事实,只读。
+ * 它比可提交的执行策略多一个服务端编译冻结的组合快照 —— 详情页把它当事实展示,不回填为编辑输入。
+ */
+export interface JudgerResourceSpec extends JudgerExecutionSpec {
+  composition_snapshot?: SandboxCompositionSnapshot
+}
+
+/** Judger 是判题器的读取投影:声明字段 + 只读执行事实 + 自检状态。 */
+export interface Judger extends Omit<JudgerRequest, 'composition' | 'resource_spec'> {
   id: SnowflakeID
+  resource_spec: JudgerResourceSpec
   selftest_status: JudgerSelftestStatus
   created_at?: string
   updated_at?: string

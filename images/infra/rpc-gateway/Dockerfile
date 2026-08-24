@@ -13,8 +13,10 @@ RUN mkdir -p /workspace /etc/chaimir \
     && rm -rf /var/lib/apt/lists/* \
     && chown -R 1000:1000 /workspace /etc/chaimir
 COPY envoy.yaml /etc/chaimir/envoy.yaml
+COPY entrypoint.sh /usr/local/bin/chaimir-rpc-gateway-entrypoint
+RUN chmod 0755 /usr/local/bin/chaimir-rpc-gateway-entrypoint
 
 USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8080
-CMD ["envoy", "-c", "/etc/chaimir/envoy.yaml"]
+ENTRYPOINT ["/usr/local/bin/chaimir-rpc-gateway-entrypoint"]

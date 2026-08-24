@@ -22,31 +22,37 @@ import (
 )
 
 // PutSandboxFile 把提交代码或公开脚本写入沙箱工作区,隐藏判题资产必须走私有域接口。
-func (s *Service) putSandboxFileContract(ctx context.Context, req contracts.SandboxFileWriteRequest) error {
-	if req.TenantID <= 0 || req.SandboxID <= 0 || req.ContentBase64 == "" || !validSourceRef(req.SourceRef) {
-		return apperr.ErrSandboxFileWriteRequestInvalid
+func (s *Service) putSandboxFileContract(ctx context.Context, req contracts.SandboxFileWriteRequest) (int64, error) {
+	if req.TenantID <= 0 || req.SandboxID <= 0 || req.ContentBase64 == "" || req.ExpectedRevision <= 0 || !validSourceRef(req.SourceRef) {
+		return 0, apperr.ErrSandboxFileWriteRequestInvalid
 	}
 	relative, err := validateWorkspacePath(req.RelativePath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	content, err := base64.StdEncoding.DecodeString(req.ContentBase64)
 	if err != nil {
-		return apperr.ErrSandboxFileWriteRequestInvalid.WithCause(err)
+		return 0, apperr.ErrSandboxFileWriteRequestInvalid.WithCause(err)
 	}
 	sb, runtime, err := s.sandboxRuntimeForSource(ctx, req.TenantID, req.SandboxID, req.SourceRef)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-		return err
+		return 0, err
 	}
 	target := path.Join(runtime.AdapterSpec.WorkspaceDir, relative)
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.WriteFile, runtime.AdapterSpec.WorkspaceDir, target, "")
-	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, content, false); err != nil {
-		return sandboxExecFailure(apperr.ErrSandboxFileInvalid, err, stderr)
-	}
+	var revision int64
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		revision, err = tx.ClaimSandboxWorkspaceRevision(ctx, req.TenantID, req.SandboxID, req.ExpectedRevision)
+		if err != nil {
+			return err
+		}
+		if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, workspaceExecTarget(runtime), command, content, false); err != nil {
+			return sandboxExecFailure(apperr.ErrSandboxFileInvalid, err, stderr)
+		}
 		detail, err := jsonBytes(map[string]any{"path": relative, "mode": "write"})
 		if err != nil {
 			return apperr.ErrSandboxStatePersistFailed.WithCause(err)
@@ -56,10 +62,10 @@ func (s *Service) putSandboxFileContract(ctx context.Context, req contracts.Sand
 		}
 		return nil
 	}); err != nil {
-		return err
+		return 0, err
 	}
 	s.scheduleDebouncedSave(ctx, req.TenantID, req.SandboxID)
-	return nil
+	return revision, nil
 }
 
 // PutSandboxPrivateArchive 将隐藏测试、答案或评分脚本安全解包到私有判题域。
@@ -92,8 +98,8 @@ func (s *Service) putSandboxPrivateArchiveContract(ctx context.Context, req cont
 	if !ok || domain.StudentAccess != VolumeAccessNone || domain.SnapshotScope != VolumeSnapshotNever {
 		return apperr.ErrSandboxPrivateDomainInvalid
 	}
-	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.UnpackTar, domain.MountPath, domain.MountPath, "")
-	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, tarball, false); err != nil {
+	command := workspaceCommand(runtime.AdapterSpec.PrivateArchiveOps.UnpackTar, domain.MountPath, domain.MountPath, "")
+	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, strings.TrimSpace(runtime.AdapterSpec.PrivateArchiveOps.ExecTarget), command, tarball, false); err != nil {
 		return sandboxExecFailure(apperr.ErrSandboxPrivateArchiveInvalid, err, stderr)
 	}
 	if err := s.store.TenantTx(ctx, req.TenantID, func(ctx context.Context, tx TxStore) error {
@@ -112,17 +118,18 @@ func (s *Service) putSandboxPrivateArchiveContract(ctx context.Context, req cont
 }
 
 // PutSandboxFileForOwner 校验操作者归属后写入工作区文件。
-func (s *Service) PutSandboxFileForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, req FileWriteRequest) error {
+func (s *Service) PutSandboxFileForOwner(ctx context.Context, tenantID, accountID, sandboxID int64, req FileWriteRequest) (int64, error) {
 	sb, err := s.sandboxForOwner(ctx, tenantID, accountID, sandboxID)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	return s.PutSandboxFile(ctx, contracts.SandboxFileWriteRequest{
-		TenantID:      tenantID,
-		SandboxID:     sandboxID,
-		SourceRef:     sb.SourceRef,
-		RelativePath:  req.RelativePath,
-		ContentBase64: req.ContentBase64,
+		TenantID:         tenantID,
+		SandboxID:        sandboxID,
+		SourceRef:        sb.SourceRef,
+		RelativePath:     req.RelativePath,
+		ContentBase64:    req.ContentBase64,
+		ExpectedRevision: req.ExpectedRevision,
 	})
 }
 
@@ -141,15 +148,16 @@ func (s *Service) ReadSandboxFile(ctx context.Context, tenantID, sandboxID int64
 	}
 	target := path.Join(runtime.AdapterSpec.WorkspaceDir, relative)
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.ReadFile, runtime.AdapterSpec.WorkspaceDir, target, "")
-	stdout, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, nil, false)
+	stdout, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, workspaceExecTarget(runtime), command, nil, false)
 	if err != nil {
 		return FileReadResponse{}, sandboxExecFailure(apperr.ErrSandboxFileReadFailed, err, stderr)
 	}
 	return FileReadResponse{
-		RelativePath:  relative,
-		ContentBase64: base64.StdEncoding.EncodeToString(stdout),
-		ContentSHA256: crypto.SHA256Hex(stdout),
-		ContentSize:   int64(len(stdout)),
+		RelativePath:      relative,
+		ContentBase64:     base64.StdEncoding.EncodeToString(stdout),
+		ContentSHA256:     crypto.SHA256Hex(stdout),
+		ContentSize:       int64(len(stdout)),
+		WorkspaceRevision: sb.WorkspaceRevision,
 	}, nil
 }
 
@@ -176,7 +184,7 @@ func (s *Service) ListSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 	}
 	target := path.Join(runtime.AdapterSpec.WorkspaceDir, relative)
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.ListFiles, runtime.AdapterSpec.WorkspaceDir, target, "")
-	stdout, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, nil, false)
+	stdout, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, workspaceExecTarget(runtime), command, nil, false)
 	if err != nil {
 		return FileListResponse{}, sandboxExecFailure(apperr.ErrSandboxFileListFailed, err, stderr)
 	}
@@ -231,7 +239,7 @@ func (s *Service) saveSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 		return "", "", err
 	}
 	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.PackTar, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir, "")
-	stdout, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, runtimeExecTarget(runtime), command, nil, false)
+	stdout, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, workspaceExecTarget(runtime), command, nil, false)
 	if err != nil {
 		return "", "", sandboxExecFailure(apperr.ErrSandboxFilePersistFailed, err, stderr)
 	}
@@ -274,7 +282,11 @@ func (s *Service) SaveSandboxFilesForOwner(ctx context.Context, tenantID, accoun
 	if err != nil {
 		return FileSaveResponse{}, err
 	}
-	return FileSaveResponse{CodeStorageKey: key, CodeHash: hash}, nil
+	latest, _, err := s.sandboxRuntime(ctx, tenantID, sandboxID)
+	if err != nil {
+		return FileSaveResponse{}, err
+	}
+	return FileSaveResponse{CodeStorageKey: key, CodeHash: hash, WorkspaceRevision: latest.WorkspaceRevision}, nil
 }
 
 // ExecSandboxCommand 在沙箱内执行受限命令,供判题 worker 运行套件。
@@ -375,12 +387,12 @@ func (s *Service) sandboxForOwner(ctx context.Context, tenantID, accountID, sand
 		if err != nil {
 			return apperr.ErrSandboxNotFound.WithCause(err)
 		}
+		if !sandboxAccountAuthorized(sb, accountID) {
+			return apperr.ErrSandboxOwnershipInvalid
+		}
 		return nil
 	}); err != nil {
 		return Sandbox{}, err
-	}
-	if sb.OwnerAccountID != accountID {
-		return Sandbox{}, apperr.ErrSandboxOwnershipInvalid
 	}
 	return sb, nil
 }
@@ -441,6 +453,7 @@ func workspaceCommand(template []string, workspaceDir, targetPath, scriptPath st
 		part = strings.ReplaceAll(part, WorkspacePlaceholderRoot, workspaceDir)
 		part = strings.ReplaceAll(part, WorkspacePlaceholderPath, targetPath)
 		part = strings.ReplaceAll(part, WorkspacePlaceholderScript, scriptPath)
+		part = strings.ReplaceAll(part, WorkspacePlaceholderDomain, targetPath)
 		out = append(out, part)
 	}
 	return out

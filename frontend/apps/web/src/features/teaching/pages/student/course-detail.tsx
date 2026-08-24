@@ -6,7 +6,6 @@ import { useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import {
   BookOpen,
-  CalendarClock,
   ClipboardList,
   Layers,
   MessageSquare,
@@ -16,18 +15,16 @@ import {
   Badge,
   Breadcrumb,
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   CoverImage,
-  DescriptionList,
+  DataPanel,
   Empty,
+  MetricStrip,
+  ObjectIdentity,
   PageBody,
   PageHeader,
   PageScaffold,
-	PageSection,
-	Pagination,
-  Stat,
+  PageSection,
+  Pagination,
   StatusIndicator,
   Table,
   Tabs,
@@ -180,51 +177,62 @@ function CourseDetailContent({ courseId, outline, onNavigate }: CourseDetailCont
 
   return (
     <>
+      {/*
+        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的课程名承担,
+        故页面头只出面包屑,末节到「我的课程」为止(§6.5.0 通则 1)。
+      */}
       <PageHeader
         kicker={
           <Breadcrumb
             items={[
               { label: '学习区' },
               { label: '我的课程', href: '/student/courses' },
-              { label: course.name },
             ]}
           />
         }
-        title={course.name}
-        description={course.description}
-        icon={BookOpen}
-        actions={<StatusIndicator tone={courseStatusTone(course.status)} label={courseStatusLabel(course.status)} />}
       />
 
-      {/* 封面在详情页只占首屏一小条:课程目标与继续学习动作优先于装饰(规范 §1.3 资产不抢内容) */}
-      <PageSection>
-        <CoverImage
-          id={course.id}
-          coverSrc={coverSrc}
-          name={course.name}
-          glyph={courseTypeCover(course.type).glyph}
-          accent={courseTypeCover(course.type).accent}
-          ratio="3/2"
-          className="max-h-52 w-full"
-        />
-      </PageSection>
-
-      {/* 指标带只放可度量的学习进度;学分、课程形式、难度是静态属性,
-          在右侧「课程信息」里已逐项列出,不再占指标位(规范 §6.5)。 */}
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Stat
-            label="课时完成"
-            value={formatPercent(doneCount, rows.length)}
-            icon={Layers}
-            chain={{ done: doneCount, total: rows.length }}
-            hint={`共 ${rows.length} 个课时`}
+      {/*
+        对象身份区:课程名 + 状态 + 关键属性横排。封面挪进身份区左侧一小块 ——
+        它是识别课程的辅助,不该独占首屏一条(§1.3 资产不抢内容)。
+        学分、课程形式、难度是静态属性,横排在这里就够,不占 Stat 大卡。
+      */}
+      <ObjectIdentity
+        name={course.name}
+        status={
+          <StatusIndicator
+            tone={courseStatusTone(course.status)}
+            label={courseStatusLabel(course.status)}
           />
-          <Stat label="累计学习时长" value={formatDuration(learnedSeconds)} icon={CalendarClock} />
-        </div>
-      </PageSection>
+        }
+        subtitle={course.description}
+        properties={[
+          { label: '学期', value: course.semester },
+          { label: '学分', value: course.credits },
+          { label: '课程形式', value: courseTypeLabel(course.type) },
+          { label: '难度', value: teachingDifficultyLabel(course.difficulty) },
+          {
+            label: '开课区间',
+            value: `${formatDate(course.start_at)} — ${formatDate(course.end_at)}`,
+          },
+        ]}
+      />
 
-      <PageBody rail={<CourseInfoRail outline={outline} courseId={courseId} />}>
+      {/* 学习进度摘要:两项都由本人进度算出(outline 一次回齐全部课时与进度,故是全量口径) */}
+      <MetricStrip
+        label="学习进度摘要"
+        className="mt-4 mb-5"
+        items={[
+          {
+            label: '课时完成',
+            value: formatPercent(doneCount, rows.length),
+            hint: `已完成 ${doneCount} / ${rows.length} 个课时`,
+          },
+          { label: '累计学习时长', value: formatDuration(learnedSeconds), hint: '按课时上报累加' },
+        ]}
+      />
+
+      <PageBody rail={<CourseInfoRail coverSrc={coverSrc} outline={outline} courseId={courseId} />}>
         <Tabs defaultValue="lessons">
           <TabsList>
             <TabsTrigger value="lessons" icon={Layers}>
@@ -239,11 +247,27 @@ function CourseDetailContent({ courseId, outline, onNavigate }: CourseDetailCont
           </TabsList>
 
           <TabsContent value="lessons">
-            <PageSection title="章节课时" description={`已完成 ${doneCount} / ${rows.length} 个课时`}>
+            {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):大纲一次回齐,不分页也不筛选 */}
+            <DataPanel label="章节课时">
               <Table
                 columns={lessonColumns}
                 data={rows}
                 rowKey={(row) => row.lesson.id}
+                elevated={false}
+                onRowClick={(row) =>
+                  onNavigate(`/student/courses/${courseId}/lessons/${row.lesson.id}`)
+                }
+                // <md 换行卡(§6.4.1 规则 3):课时名一行、所属章节与形态一行,学习状态在右
+                mobileCard={(row) => ({
+                  title: row.lesson.title,
+                  meta: `${row.chapter ? row.chapter.title : '未分章'} · ${lessonContentTypeLabel(row.lesson.content_type)}`,
+                  badge: (
+                    <StatusIndicator
+                      tone={progressStatusTone(row.status)}
+                      label={progressStatusLabel(row.status)}
+                    />
+                  ),
+                })}
                 empty={
                   <Empty
                     icon={Layers}
@@ -252,7 +276,7 @@ function CourseDetailContent({ courseId, outline, onNavigate }: CourseDetailCont
                   />
                 }
               />
-            </PageSection>
+            </DataPanel>
           </TabsContent>
 
           <TabsContent value="assignments">
@@ -271,31 +295,26 @@ function CourseDetailContent({ courseId, outline, onNavigate }: CourseDetailCont
 interface CourseInfoRailProps {
   outline: CourseOutline
   courseId: string
+  coverSrc: string | undefined
 }
 
 /**
- * CourseInfoRail 是右侧信息与动作区:课程档案 + 课程评价入口。
+ * CourseInfoRail 是右侧信息与动作区:课程封面 + 课程评价入口。
+ * 课程档案(学期/学分/形式/难度/起止)已在对象身份区横排,这里不再重复列一遍(§6.5.0 通则 1)。
  */
-function CourseInfoRail({ outline, courseId }: CourseInfoRailProps) {
+function CourseInfoRail({ outline, courseId, coverSrc }: CourseInfoRailProps) {
   const course = outline.course
   return (
     <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader title="课程信息" />
-        <CardBody>
-          <DescriptionList
-            dense
-            items={[
-              { term: '学期', description: course.semester },
-              { term: '学分', description: course.credits, mono: true },
-              { term: '课程形式', description: courseTypeLabel(course.type) },
-              { term: '难度', description: teachingDifficultyLabel(course.difficulty) },
-              { term: '开课时间', description: formatDate(course.start_at), mono: true },
-              { term: '结课时间', description: formatDate(course.end_at), mono: true },
-            ]}
-          />
-        </CardBody>
-      </Card>
+      <CoverImage
+        id={course.id}
+        coverSrc={coverSrc}
+        name={course.name}
+        glyph={courseTypeCover(course.type).glyph}
+        accent={courseTypeCover(course.type).accent}
+        ratio="3/2"
+        className="w-full"
+      />
       <CourseReviewCard courseId={courseId} courseStatus={course.status} />
     </div>
   )
@@ -310,7 +329,7 @@ interface CourseAssignmentsProps {
  * CourseAssignments 列出课程作业。学生只会收到已发布作业(服务端按身份过滤)。
  */
 function CourseAssignments({ courseId, onNavigate }: CourseAssignmentsProps) {
-	const assignments = usePagedResource<Assignment>((params) => api.teaching.listCourseAssignments(courseId, params), [courseId])
+  const assignments = usePagedResource<Assignment>((params) => api.teaching.listCourseAssignments(courseId, params), [courseId])
 
   const columns: TableColumn<Assignment>[] = [
     {
@@ -371,21 +390,49 @@ function CourseAssignments({ courseId, onNavigate }: CourseAssignmentsProps) {
   ]
 
   return (
+    // 列表型页内子视图走 DataPanel 片段(§6.5.5 B):数据表与分页同处一块抬起片
     <PageSection title="课程作业" description="作业按截止时间从近到远排列。">
-      <ResourceState
-        resource={assignments}
-        emptyIcon={ClipboardList}
-        emptyTitle="暂无作业"
-        emptyDescription="老师发布作业后会显示在这里,截止时间也会一并给出。"
-        skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+      <DataPanel
+        label="课程作业"
+        footer={
+          <Pagination
+            page={assignments.page}
+            pageSize={assignments.pageSize}
+            total={assignments.total}
+            onPageChange={assignments.setPage}
+          />
+        }
       >
-		{(page) => (
-			<div className="flex flex-col gap-4">
-				<Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-				<Pagination page={assignments.page} pageSize={assignments.pageSize} total={assignments.total} onPageChange={assignments.setPage} />
-			</div>
-		)}
-      </ResourceState>
+        <ResourceState
+          resource={assignments}
+          emptyIcon={ClipboardList}
+          emptyTitle="暂无作业"
+          emptyDescription="老师发布作业后会显示在这里,截止时间也会一并给出。"
+          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+        >
+          {(page) => (
+            <Table
+              columns={columns}
+              data={page.list}
+              rowKey={(item) => item.id}
+              elevated={false}
+              onRowClick={(item) =>
+                onNavigate(`/student/courses/${courseId}/assignments/${item.id}`)
+              }
+              // <md 换行卡(§6.4.1 规则 3):作业名一行、截止时间与可提交次数一行,紧迫度在右
+              mobileCard={(item) => ({
+                title: item.title,
+                meta: `${formatDateTime(item.due_at)} 截止 · 可交 ${item.max_attempts} 次 · ${latePolicyLabel(item.late_policy)}`,
+                badge: (
+                  <Badge tone={ASSIGNMENT_DUE_TONE[formatRelativeDeadline(item.due_at).urgency]}>
+                    {formatRelativeDeadline(item.due_at).text}
+                  </Badge>
+                ),
+              })}
+            />
+          )}
+        </ResourceState>
+      </DataPanel>
     </PageSection>
   )
 }

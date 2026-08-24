@@ -325,8 +325,8 @@ func (a contentAPI) listPapers(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, total, p, s, err := a.svc.ListPapers(c.Request.Context(), page, size)
-	httpx.WritePage(c, items, total, p, s, err)
+	items, total, p, s, facets, err := a.svc.ListPapers(c.Request.Context(), page, size)
+	httpx.WritePageWithFacets(c, items, total, p, s, facets, err)
 }
 
 // createPaper 创建试卷。

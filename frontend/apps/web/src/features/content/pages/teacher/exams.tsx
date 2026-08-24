@@ -24,10 +24,12 @@ import {
   CardBody,
   CardHeader,
   Checkbox,
+  DataPanel,
   DescriptionList,
   Empty,
   FormField,
   Input,
+  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -37,7 +39,6 @@ import {
   ModalTitle,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
   Select,
@@ -49,6 +50,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { facetCount } from '../../../../utils/facets'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import { CONTENT_DIFFICULTIES, CONTENT_TYPES } from '../../options'
 import {
@@ -67,6 +69,10 @@ export default function TeacherExamsPage() {
   const [detailTarget, setDetailTarget] = useState<Paper>()
 
   const papers = usePagedResource<Paper>((params) => api.content.listPapers(params), [])
+
+  // 组卷方式分布取后端 facets.gen_mode:全量分组计数,不用当前页切片去数(§6.5.4)
+  const manualCount = facetCount(papers.data?.facets, 'gen_mode', PaperMode.MANUAL)
+  const randomCount = facetCount(papers.data?.facets, 'gen_mode', PaperMode.RANDOM)
 
   const columns: TableColumn<Paper>[] = [
     {
@@ -113,7 +119,7 @@ export default function TeacherExamsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '资源' }, { label: '试卷组卷' }]} />}
+        kicker={<Breadcrumb items={[{ label: '资源' }]} />}
         title="试卷组卷"
         description="把题库里的题目组成试卷。按条件抽题的试卷可以重新抽取,手动选定的保持不变。"
         icon={FileText}
@@ -124,9 +130,31 @@ export default function TeacherExamsPage() {
         }
       />
 
-      {/* 不做指标带:试卷份数已在下方分组说明里给出,而「手动选题/条件抽题」没有服务端聚合,
-          用当前页数出来就是错数(规范 §6.5);组卷方式在每一行的标签里可见。 */}
-      <PageSection title="试卷列表" description={`共 ${papers.total} 份试卷`}>
+      {/*
+        归族:资源列表族(§6.5.3 第 ①)。指标退为一行内联摘要:
+        组卷方式分布走后端聚合契约(facets.gen_mode),是全量口径而非当前页切片(§6.5.4)。
+        列表接口没有筛选参数,故不排筛选井。
+      */}
+      <MetricStrip
+        label="试卷总量摘要"
+        className="mb-5"
+        items={[
+          { label: '试卷份数', value: papers.total, hint: '全部试卷' },
+          { label: '手动选题', value: manualCount, hint: '题目固定不变' },
+          { label: '条件抽题', value: randomCount, hint: '可重新抽取' },
+        ]}
+      />
+      <DataPanel
+        label="试卷列表"
+        footer={
+          <Pagination
+            page={papers.page}
+            pageSize={papers.pageSize}
+            total={papers.total}
+            onPageChange={papers.setPage}
+          />
+        }
+      >
         <ResourceState
           resource={papers}
           emptyIcon={FileText}
@@ -137,21 +165,28 @@ export default function TeacherExamsPage() {
               新建试卷
             </Button>
           }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
         >
           {(page) => (
-            <div className="flex flex-col gap-4">
-              <Table columns={columns} data={page.list} rowKey={(paper) => paper.id} />
-              <Pagination
-                page={papers.page}
-                pageSize={papers.pageSize}
-                total={papers.total}
-                onPageChange={papers.setPage}
-              />
-            </div>
+            <Table
+              columns={columns}
+              data={page.list}
+              rowKey={(paper) => paper.id}
+              elevated={false}
+              onRowClick={(paper) => setDetailTarget(paper)}
+              // <md 换行卡(§6.4.1 规则 3):试卷名一行、组卷方式与更新时间一行
+              mobileCard={(paper) => ({
+                title: paper.name,
+                meta: `${paperModeLabel(paper.gen_mode)} · ${formatShortDateTime(paper.updated_at)}`,
+                badge:
+                  paper.gen_mode === PaperMode.RANDOM ? (
+                    <Badge tone="neutral">可重抽</Badge>
+                  ) : undefined,
+              })}
+            />
           )}
         </ResourceState>
-      </PageSection>
+      </DataPanel>
 
       {createOpen ? (
         <PaperFormModal

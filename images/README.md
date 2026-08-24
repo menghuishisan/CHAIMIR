@@ -10,7 +10,10 @@
 - 平台自建、薄封装和构建基座镜像的生产 digest 统一来自 CI 推送后的 `image-digests.lock` 锁文件;不得在 manifest 中维护第二套构建产物 digest 来源。`base/chain-tools` 只承载通用 CLI,`base/fabric-tools` 只承载从固定 Fabric 源码构建的专用二进制,不得合并成所有消费者共同承担的大镜像。
 - 镜像拉取必须使用不可变 digest。`images/pull-images.ps1` 会拒绝任何缺少 `upstream.digest`、组件 `digest` 或构建产物锁文件条目的镜像,不得退回 tag 拉取。
 - 镜像只负责自身进程、依赖和默认容器端口;一个或多个镜像如何组成容器组,由 M2 沙箱控制面和部署层按 manifest 编排。
-- 本目录不得维护固定组合矩阵、固定 bundle 或镜像到镜像白名单。`manifest.yaml` 只声明本镜像能力、生态标签、端口、安全域和资源约束;具体容器组由 `runtime.adapter_spec`、实验/题目配置与 M2 编排器动态校验后生成。
+- 本目录不得维护固定组合矩阵、固定 bundle 或镜像到镜像白名单。`manifest.yaml` 只声明本镜像能力、生态标签、端点、结构化 bindings、Secret、WorkloadSpec 和资源约束;一个或多个 runtime、infra、tool 如何组成容器组由实验/题目配置与 M2 编排器按能力图动态校验后生成。
+- `runtime` 不是“主链单例”:同一实验环境可以选择多个 runtime 实例。跨链镜像必须通过命名 binding 声明源链、目标链等角色和所需能力,不得在 manifest、入口脚本或后端代码中写死具体 runtime code 或固定链组合。
+- 依赖组件统一使用 `bindings` 声明角色、能力、端点、协议、启动前置和配置注入键。`bindings` 中的 `config_binding` 只允许 `env:ENV_NAME`,并且键必须在同一 manifest 的 `env_keys.config` 中声明；旧的 `required_bindings` 字段已移除，不得重新引入。
+- 镜像准入、组合准入和 runtime 原生动作准入彼此独立。L1 runtime 只表示暂未开放平台原生 `deploy/tx/query`,不代表不能作为 RPC、peer、REST 或其他能力提供者参与组合；只有安全/供应链阻断才使用 `supply_chain.deployable=false`。
 - 教师脚本、题目固化资产或链上依赖合约即可表达的轻量模拟能力,不得进入平台必需镜像清单。真实链下基础设施必须用真实镜像或官方薄封装,不得用 `*-mock` 服务冒充。
 - J2 链上断言、J3 Flag、J5 仿真检查点由 M3 后端策略统一承接,不得在 `images/judger` 下重复维护执行器镜像。镜像判题只保留需要独立工具链/沙箱命令的 J1 测试用例和 J4 静态扫描。
 - 容器内部端口优先沿用官方默认端口;生产禁止固定宿主机端口、`hostPort`、`hostNetwork`;本地开发宿主机映射必须可配置并默认绑定 `127.0.0.1`。
@@ -84,7 +87,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
 - 仅修改某个 `images/service/<name>` Dockerfile 或 manifest: 只选择对应的 `service/<name>`。
 - `base/go-builder`、`base/runtime-min`、`middleware/postgres` 变化: 根据 Dockerfile 的真实 `FROM` 依赖扩展到实际消费者,不受影响镜像不重复处理。
 
-选择性证明命令必须带 `-Images`、`-NoEnvWrite` 和 `-DigestFragmentsDir`;脚本只有在选定集合全部通过时才生成 `verified-images.lock`。再用 `images/sync-image-metadata.ps1 -FragmentsPath` 增量晋升正式锁、四个 overlay、`deploy/config/chaimir.env` 和存在时的本地 `backend/.env` 准入证明。未选镜像继续使用正式锁中的原 digest,不重复构建、拉取、扫描或签名。完成晋升后执行 `make dev-refresh`,检查只有受影响的工作负载滚动更新。
+选择性证明命令必须带 `-Images`、`-NoEnvWrite` 和 `-DigestFragmentsDir`;脚本只有在选定集合全部通过时才生成 `verified-images.lock`。再用 `images/sync-image-metadata.ps1 -FragmentsPath` 增量晋升正式锁、`deploy/base` 与资源所属 component 的镜像引用、`deploy/config/chaimir.env` 和存在时的环境 `backend/.env` 准入证明。未选镜像继续使用正式锁中的原 digest,不重复构建、拉取、扫描或签名。完成晋升后执行 `make dev-refresh`,检查只有受影响的工作负载滚动更新。
 
 `images/build-images.ps1 -Push` 成功后会自动调用 `images/cleanup-local-images.ps1 -Apply`:只清理 `e2e-*`、`candidate-*`、`refresh-*`、`local-*` 临时标签和没有正式/候选 digest、没有容器引用的悬空层。正式锁、当前候选锁、运行中或已保留容器、Harbor/Trivy/Cosign 状态不会删除。清理器会在删除后逐项执行 `docker image inspect image@digest`,任一正式或候选引用不可访问即失败。
 
@@ -94,4 +97,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
 
 `PLATFORM_IMAGE_ATTESTATIONS_JSON` 是环境相关的全平台准入证明,由 `deploy/scripts/image-attestations-generate.ps1` 在目标 registry 完成扫描、签名和验签后写入运行环境或 Secret,不能仅凭新 digest 在仓库中伪造。仓库自动同步只更新可审计的 digest 权威文件与静态引用。
 
-部署工作流不消费可变 tag:权威锁合入 `main` 后,staging 从该锁一次读取全部服务 digest;生产发布从 tag 所指提交读取同一组 digest。两者都通过 `deploy/scripts/render-locked-overlay.ps1` 生成临时 Kustomize overlay 后应用,仓库静态 overlay 与临时 overlay 必须解析到同一组 digest。
+部署工作流不消费可变 tag:权威锁合入 `main` 后,staging 校验静态 overlay 与该锁中的全部服务 digest 一致;生产发布对 tag 所指提交执行同一校验。两者都通过 `deploy/scripts/verify-overlay-image-lock.ps1` 只读验证,通过后直接在默认加载限制下应用仓库 overlay,不生成第二份临时覆盖。

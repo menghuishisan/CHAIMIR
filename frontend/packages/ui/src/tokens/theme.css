@@ -86,10 +86,13 @@
   --color-on-dark-blue: #9dbdf5;
   --color-on-dark-violet: #cbb3f5;
 
-  /* ---------- 语义令牌:光面(宣纸) ---------- */
+  /* ---------- 语义令牌:光面(宣纸) ----------
+     三档明度必须拉得开(规范 §2.1:相邻差不得小于 8/255)。差太小时「浅一档 + 落影」
+     表达不出抬起、「深一档」表达不出凹陷,矩形只能靠轮廓被认出来,与 §6.5.1
+     「容器不画边框」直接冲突。故抬起片取纯白(在暖白纸上读作「新的一张」)、凹陷井压到 #efebe0。 */
   --color-canvas: #f7f5ef;
-  --color-surface: #fdfcf9;
-  --color-surface-sunken: #f1eee6;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #efebe0;
   --color-surface-hover: #f3f0e8;
   --color-line: #e7e3d7;
   --color-line-strong: #d8d3c4;
@@ -126,15 +129,18 @@
   /* ---------- 圆角(§2.4) ---------- */
   --radius-sm: 6px;
   --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-pane: 14px; /* 光面专用 */
+  --radius-lg: 10px; /* 抬起片与光面左上角 */
+  --radius-pane: 14px; /* 大面:浮层面板、底部 sheet、品牌块 */
 
   /* ---------- 阴影 = 海拔(§2.4/§4.1) ---------- */
-  --shadow-xs: 0 1px 2px rgb(16 24 20 / 0.05);
+  /* xs 是抬起片专用:双层落影。单层 5% 比它取代的边框还弱,撑不起「纸片浮在纸上」 */
+  --shadow-xs: 0 1px 2px rgb(16 24 20 / 0.06), 0 2px 6px rgb(16 24 20 / 0.05);
   --shadow-sm: 0 1px 2px rgb(16 24 20 / 0.04), 0 2px 8px rgb(16 24 20 / 0.05);
   --shadow-md: 0 4px 14px rgb(16 24 20 / 0.08), 0 2px 6px rgb(16 24 20 / 0.04);
   --shadow-lg: 0 12px 32px rgb(16 24 20 / 0.12), 0 4px 12px rgb(16 24 20 / 0.06);
-  --shadow-pane: 0 24px 60px -18px rgb(0 0 0 / 0.65); /* 光面浮于底层 */
+  /* 光面浮于底层:**单向**投影,只从顶与左透出(规范 §1.2 缝只在导航侧)。
+     四周环绕的投影会在纸周围压出一圈暗环,把内容读作「被装进一个容器」 */
+  --shadow-pane: -3px -3px 14px -5px rgb(0 0 0 / 0.38);
 
   /* ---------- 动效曲线(§2.5,覆盖 Tailwind 默认) ---------- */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -397,8 +403,10 @@
   --topnav-h: 56px;
   --sidebar-w: 220px;
   --sidebar-w-collapsed: 64px;
-  --content-max: 1240px;
-  --pane-inset: 14px;
+  /* 光面到底层的缝:只作用于顶与左(规范 §1.2),右下由光面出血到视口边。
+     没有 --content-max —— 全局限宽会在宽屏把内容缩成居中一根柱子,
+     两侧空白复现外壳刚去掉的隔离感;唯一需要限宽的正文在「学习阅读族」自己的骨架里写。 */
+  --pane-inset: 8px;
 
   /* 沉浸态工作台栏宽(规范 §2.4 / §7.1 三区骨架):
      左辅助区 300 / 右事件流 320 / 收起后的竖向把手 40。
@@ -495,13 +503,26 @@
   }
 }
 
-/* ---------- 光面外框(§6.4 / FE-6:日常页宣纸光面浮于墨色底层) ----------
-   内距即底层曝光量;<md 归零让位于内容空间(圆角同步由 rounded-none md:rounded-pane 承担) */
+/* ---------- 光面外框(FE-6 / §1.2:日常页宣纸光面浮于墨色底层) ----------
+   缝只作用于**顶与左**(挨着顶栏与侧栏那两边),右下不留 —— 光面出血到视口边缘,
+   纸因此有落点。四周等宽的缝 + 四角圆角 + 环绕投影会把内容读作「被装进一个容器」,
+   那是隔离感而不是层次。<md 归零走全宽(圆角同步由调用处 rounded-none md:rounded-tl-pane 承担) */
 @utility pane-frame {
   padding: 0;
   @media (min-width: 48rem) {
-    padding: var(--pane-inset);
+    padding-top: var(--pane-inset);
+    padding-left: var(--pane-inset);
   }
+}
+
+/* ---------- 看板指标带(§6.5.3 第 ② 族:Stat 大卡按 auto-fit 铺开) ----------
+   为什么不用 `grid-cols-2/4` 这类定列数栅格:项数与列数不一定整除 ——
+   两项摊进四列会各自拉成半屏宽的巨卡,五项会在第二行留三个空位。
+   auto-fit + minmax 让卡宽随内容在下限以上自适应,项数变化时不产生空版面
+   (§6.5.0 通则 3:内容短就短,不补版面)。下限取 13rem:够放 Display 字号的四位数 + 标签。 */
+@utility metric-band {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
 }
 
 /* ---------- 凹陷井(§6.5.1 第 2 级:抬起片内部的字段分组/只读信息块) ----------

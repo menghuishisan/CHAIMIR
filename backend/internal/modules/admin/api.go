@@ -2,6 +2,7 @@
 package admin
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	mixed.GET("/audit", api.queryAudit)
 	mixed.GET("/audit/export", api.exportAudit)
 	mixed.GET("/configs", api.listConfigs)
+	mixed.GET("/configs/:key", api.getConfig)
 	mixed.PUT("/configs/:key", api.updateConfig)
 	mixed.GET("/configs/:key/history", api.configHistory)
 	mixed.POST("/configs/:key/rollback", api.rollbackConfig)
@@ -48,6 +50,26 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 }
 
 type adminAPI struct{ svc *Service }
+
+// getConfig 读取单条配置的脱敏投影,供详情和乐观锁操作使用。
+func (a adminAPI) getConfig(c *gin.Context) {
+	key := strings.TrimSpace(c.Param("key"))
+	if key == "" {
+		httpx.Write(c, ConfigDTO{}, apperr.ErrAdminConfigInvalid)
+		return
+	}
+	scope := int16(0)
+	if raw := strings.TrimSpace(c.Query("scope")); raw != "" {
+		parsed, err := strconv.ParseInt(raw, 10, 16)
+		if err != nil {
+			httpx.Write(c, ConfigDTO{}, apperr.ErrAdminConfigInvalid)
+			return
+		}
+		scope = int16(parsed)
+	}
+	out, err := a.svc.GetConfig(c.Request.Context(), scope, key)
+	httpx.Write(c, out, err)
+}
 
 // platformDashboard 返回平台看板。
 func (a adminAPI) platformDashboard(c *gin.Context) {
@@ -84,7 +106,7 @@ func (a adminAPI) queryAudit(c *gin.Context) {
 		return
 	}
 	result, err := a.svc.QueryAudit(c.Request.Context(), query)
-	httpx.WritePage(c, auditLogEntryDTOs(result.List), result.Total, int(result.Page), int(result.Size), err)
+	httpx.WritePageWithFacets(c, auditLogEntryDTOs(result.List), result.Total, int(result.Page), int(result.Size), result.Facets, err)
 }
 
 // exportAudit 导出审计 CSV。
@@ -189,7 +211,11 @@ func (a adminAPI) listAlertEvents(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out9, total, p, s, err := a.svc.ListAlertEvents(c.Request.Context(), status, page, size)
+	level, ok := httpx.QueryInt16(c, "level", httpx.QueryIntRule{Default: 0, Min: 0, Max: int64(AlertLevelCritical), HasMax: true})
+	if !ok {
+		return
+	}
+	out9, total, p, s, err := a.svc.ListAlertEvents(c.Request.Context(), status, level, page, size)
 	httpx.WritePage(c, out9, total, p, s, err)
 }
 

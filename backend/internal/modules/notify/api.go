@@ -117,8 +117,8 @@ func (a notifyAPI) listAnnouncements(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, total, p, s, err := a.svc.ListAnnouncements(c.Request.Context(), page, size)
-	httpx.WritePage(c, items, total, p, s, err)
+	items, total, p, s, facets, err := a.svc.ListAnnouncements(c.Request.Context(), page, size)
+	httpx.WritePageWithFacets(c, items, total, p, s, facets, err)
 }
 
 // markAnnouncementRead 标记公告已读。

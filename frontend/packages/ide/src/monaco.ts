@@ -3,12 +3,12 @@
 import type { EditorMountOptions, MountedEditor } from './types'
 
 const monacoThemeTokens = {
-  background: '--color-terminal-bg',
-  lineHighlight: '--color-editor-line-highlight',
-  lineNumber: '--color-editor-line-number',
-  indentGuide: '--color-editor-indent-guide',
-  suggestBackground: '--color-editor-suggest-bg',
-  suggestBorder: '--color-editor-suggest-border',
+  background: '--color-terminal',
+  lineHighlight: '--color-dark-surface',
+  lineNumber: '--color-on-dark-faint',
+  indentGuide: '--color-dark-line',
+  suggestBackground: '--color-dark-elevated',
+  suggestBorder: '--color-dark-line',
 } as const
 
 /**

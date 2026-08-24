@@ -4,6 +4,7 @@ import { useId, useMemo, type ReactNode } from 'react'
 import { Users } from 'lucide-react'
 import type { Class } from '@chaimir/api-client'
 import {
+  DataPanel,
   Empty,
   FilterBar,
   FilterField,
@@ -115,32 +116,43 @@ export function OrganizationClassSection({
   ]
 
   return (
+    // 页内子视图(§6.5.5 B):不自带页面头,骨架取资源列表族的片段 ——
+    // 筛选井与数据表同处一块抬起片,井不摆在光面上(§6.5.2)
     <PageSection title="班级明细" description={description(rows.length)} actions={actions}>
-      <div className="flex flex-col gap-4">
-        <FilterBar label="班级筛选">
-          <FilterField label="班级状态" group>
-            <SegmentedControl
-              aria-label="按班级状态筛选"
-              size="sm"
-              options={CLASS_STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-              value={statusFilter}
-              onValueChange={onStatusChange}
-            />
-          </FilterField>
-          <FilterField label="名称" htmlFor={keywordId}>
-            <Input
-              id={keywordId}
-              value={keyword}
-              placeholder="班级、专业或院系名"
-              onChange={(event) => onKeywordChange(event.target.value)}
-            />
-          </FilterField>
-        </FilterBar>
-
+      <DataPanel
+        label="班级明细"
+        filter={
+          <FilterBar label="班级筛选">
+            <FilterField label="班级状态" group>
+              <SegmentedControl
+                aria-label="按班级状态筛选"
+                size="sm"
+                options={CLASS_STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                value={statusFilter}
+                onValueChange={onStatusChange}
+              />
+            </FilterField>
+            <FilterField label="名称" htmlFor={keywordId}>
+              <Input
+                id={keywordId}
+                value={keyword}
+                placeholder="班级、专业或院系名"
+                onChange={(event) => onKeywordChange(event.target.value)}
+              />
+            </FilterField>
+          </FilterBar>
+        }
+      >
         <Table
           columns={columns}
           data={rows}
           rowKey={(row) => row.entity.id}
+          elevated={false}
+          // <md 换行卡(§6.4.1 规则 3):班级名一行、所属专业院系一行
+          mobileCard={(row) => ({
+            title: row.entity.name,
+            meta: `${row.departmentName} · ${row.majorName}`,
+          })}
           empty={
             <Empty
               icon={Users}
@@ -151,7 +163,7 @@ export function OrganizationClassSection({
             />
           }
         />
-      </div>
+      </DataPanel>
     </PageSection>
   )
 }

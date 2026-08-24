@@ -19,6 +19,7 @@ source:
   type: platform-built
 upstream:
   image: node:24-alpine3.23
+  version: 24-alpine3.23
   digest: sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
   reuse_policy: runtime-base
 env_keys:
@@ -37,20 +38,37 @@ secrets_required:
     runtime_value: secret-or-kms
 data_driven: true
 capabilities:
-  - event-listener
+  provides:
+    - event-listener
+  requires:
+    - evm-json-rpc
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      contract_address:
+        type: string
+        x-chaimir-env: infra/CHAIMIR_EVENT_CONTRACT_ADDRESS
+      event_topic:
+        type: string
+        x-chaimir-env: infra/CHAIMIR_EVENT_TOPIC
+      lookback_blocks:
+        type: integer
+        x-chaimir-env: infra/CHAIMIR_EVENT_LOOKBACK_BLOCKS
+  student_access: private
 infra:
   eco_tags:
     - evm
-    - fabric
-    - fisco
-    - solana
-    - aptos
-    - sui
-    - cosmos
-    - substrate
-    - near
-    - bitcoin
-    - edu
+  bindings:
+    - name: chain
+      capability: evm-json-rpc
+      endpoint: rpc
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:CHAIMIR_EVENT_RPC_URL
   roles:
     - event-listener
     - backend-integration

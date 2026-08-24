@@ -15,6 +15,7 @@ DROP INDEX IF EXISTS idx_sandbox_tenant_owner;
 DROP INDEX IF EXISTS idx_sandbox_tenant_status;
 DROP INDEX IF EXISTS idx_tool_status;
 DROP INDEX IF EXISTS idx_runtime_image_runtime_status;
+DROP INDEX IF EXISTS idx_sandbox_composition_prepull_status;
 DROP INDEX IF EXISTS idx_runtime_status;
 DROP INDEX IF EXISTS uk_runtime_image_default;
 
@@ -24,5 +25,7 @@ DROP TABLE IF EXISTS sandbox_event;
 DROP TABLE IF EXISTS sandbox_tool;
 DROP TABLE IF EXISTS sandbox;
 DROP TABLE IF EXISTS tool;
+DROP TABLE IF EXISTS sandbox_composition_prepull;
+DROP TABLE IF EXISTS sandbox_composition;
 DROP TABLE IF EXISTS runtime_image;
 DROP TABLE IF EXISTS runtime;

@@ -4,6 +4,7 @@ package experiment
 import (
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 )
 
@@ -27,7 +28,7 @@ type Experiment struct {
 	UpdatedAt       time.Time
 }
 
-// ComponentConfig 描述一个实验可自由组合的引擎组件列表。
+// ComponentConfig 保存实验定义已经编译并冻结的组件事实。
 type ComponentConfig struct {
 	Envs        []EnvComponent        `json:"envs"`
 	Sims        []SimComponent        `json:"sims"`
@@ -35,18 +36,42 @@ type ComponentConfig struct {
 	Stages      []StageConfig         `json:"stages"`
 }
 
-// EnvComponent 描述 M2 运行时和工具入口配置。
+// ComponentConfigRequest 描述教师向导提交的声明式组件配置。
+type ComponentConfigRequest struct {
+	Envs        []EnvComponentRequest `json:"envs"`
+	Sims        []SimComponent        `json:"sims"`
+	Checkpoints []CheckpointComponent `json:"checkpoints"`
+	Stages      []StageConfig         `json:"stages"`
+}
+
+// EnvComponentRequest 描述教师选择的主运行时、工具和连接,不接受服务端摘要字段。
+type EnvComponentRequest struct {
+	ID                       string                              `json:"id"`
+	PrimaryRuntime           contracts.CompositionRuntimeRef     `json:"primary_runtime"`
+	Infra                    []contracts.CompositionComponentRef `json:"infra"`
+	Tools                    []contracts.CompositionComponentRef `json:"tools"`
+	Links                    []contracts.CompositionLink         `json:"links"`
+	AccessProfile            contracts.SandboxAccessProfile      `json:"access_profile"`
+	ResourceProfile          map[string]string                   `json:"resource_profile,omitempty"`
+	NetworkProfile           map[string]any                      `json:"network_profile,omitempty"`
+	InitCodeRef              string                              `json:"init_code_ref"`
+	InitScriptRef            string                              `json:"init_script_ref"`
+	KeepAlive                bool                                `json:"keep_alive"`
+	SnapshotEnabled          bool                                `json:"snapshot_enabled"`
+	KeepAliveMinutes         int32                               `json:"keep_alive_minutes"`
+	SnapshotRetentionMinutes int32                               `json:"snapshot_retention_minutes"`
+}
+
+// EnvComponent 保存 M2 编译后的完整组合快照和实验生命周期参数。
 type EnvComponent struct {
-	ID                       string   `json:"id"`
-	RuntimeCode              string   `json:"runtime_code"`
-	RuntimeImageVersion      string   `json:"runtime_image_version"`
-	Tools                    []string `json:"tools"`
-	InitCodeRef              string   `json:"init_code_ref"`
-	InitScriptRef            string   `json:"init_script_ref"`
-	KeepAlive                bool     `json:"keep_alive"`
-	SnapshotEnabled          bool     `json:"snapshot_enabled"`
-	KeepAliveMinutes         int32    `json:"keep_alive_minutes"`
-	SnapshotRetentionMinutes int32    `json:"snapshot_retention_minutes"`
+	ID                       string                               `json:"id"`
+	CompositionSnapshot      contracts.SandboxCompositionSnapshot `json:"composition_snapshot"`
+	InitCodeRef              string                               `json:"init_code_ref"`
+	InitScriptRef            string                               `json:"init_script_ref"`
+	KeepAlive                bool                                 `json:"keep_alive"`
+	SnapshotEnabled          bool                                 `json:"snapshot_enabled"`
+	KeepAliveMinutes         int32                                `json:"keep_alive_minutes"`
+	SnapshotRetentionMinutes int32                                `json:"snapshot_retention_minutes"`
 }
 
 // SimComponent 描述 M4 仿真包锁版本和启动参数。
@@ -118,6 +143,7 @@ type ExperimentInstance struct {
 	OwnerAccountID int64
 	GroupID        int64
 	SourceRef      string
+	ScopeRef       string
 	SandboxRefs    []SandboxRef
 	SimSessionRefs []SimSessionRef
 	Status         int16

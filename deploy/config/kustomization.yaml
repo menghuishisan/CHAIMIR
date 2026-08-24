@@ -5,7 +5,7 @@
 #   · chaimir-data-config(chaimir-data):中间件 Pod 引用(PG 初始化库名/用户等)。
 # 以 Component 形式被 base 引用,从而单文件读取一次、无跨目录引用问题。
 # 密钥变量名也登记在 chaimir.env,但只能使用 "# secret-env: KEY" 注释形式,不会进入 ConfigMap;
-# 真实值由 secret.env 或 External Secrets/KMS 生成同名 Secret 键并在运行期 envFrom 注入。
+# 真实值由 External Secrets Operator 从受控 SecretStore 同步同名 Secret 键。
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 

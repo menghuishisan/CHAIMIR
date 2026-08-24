@@ -93,6 +93,7 @@ type TxStore interface {
 	ListImportBatches(ctx context.Context, tenantID int64) ([]ImportBatch, error)
 	WriteAudit(ctx context.Context, input WriteAuditInput) error
 	QueryAuditLogs(ctx context.Context, query AuditQueryInput) ([]AuditLogRow, int64, error)
+	QueryAuditActionFacets(ctx context.Context, query AuditQueryInput) ([]AuditFacetRow, error)
 	PlatformStats(ctx context.Context) (StatsRow, error)
 	TenantStats(ctx context.Context, tenantID int64) (StatsRow, error)
 	CreateDepartment(ctx context.Context, tenantID, id int64, req DepartmentRequest) (Department, error)

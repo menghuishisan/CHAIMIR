@@ -15,7 +15,7 @@ export interface FormFieldProps {
   label: string;
   /** 控件 id;不传则自动生成并注入单个子元素 */
   htmlFor?: string;
-  /** 必填标记:朱砂星号 + sr-only「必填」 */
+  /** 必填标记:冷红星号 + sr-only「必填」 */
   required?: boolean;
   /** 辅助说明(与 error 互斥,error 优先) */
   helper?: string;
@@ -68,7 +68,9 @@ export function FormField({
         {label}
         {required && (
           <>
-            <span aria-hidden="true" className="text-seal"> *</span>
+            {/* 必填星号用**冷红**不用朱砂:朱砂只给品牌章与落印动作(§2.1),
+                而必填标记出现在全平台每一个必填字段上,用朱砂会把 9:1 的克制比例直接反过来 */}
+            <span aria-hidden="true" className="text-danger"> *</span>
             <span className="sr-only">必填</span>
           </>
         )}

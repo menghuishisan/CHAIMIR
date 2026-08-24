@@ -26,6 +26,11 @@ on:
 permissions:
   contents: read
 
+env:
+  BENCHMARK_MAX_SEC_OP_REGRESSION_PERCENT: "10"
+  BENCHMARK_MAX_BYTES_OP_REGRESSION_PERCENT: "5"
+  BENCHMARK_MAX_ALLOCS_OP_REGRESSION_PERCENT: "5"
+
 jobs:
   detect-image-build:
     runs-on: ubuntu-latest
@@ -77,6 +82,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version: 1.26.6
@@ -97,6 +104,68 @@ jobs:
       - name: 后端构建与仓库内测试
         working-directory: backend
         run: go test ./... -race -count=1
+      - name: 性能基准回归门禁
+        working-directory: backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if [[ -z "$base" || "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}"; then
+            base="$(git rev-parse HEAD^)"
+          fi
+
+          benchmark_base="$RUNNER_TEMP/chaimir-benchmark-base"
+          git worktree add --detach "$benchmark_base" "$base"
+          trap 'git worktree remove --force "$benchmark_base"' EXIT
+          for source in \
+            pkg/chainassert/chainassert_benchmark_test.go \
+            pkg/crypto/hash_benchmark_test.go \
+            pkg/snowflake/snowflake_benchmark_test.go; do
+            install -D "$source" "$benchmark_base/backend/$source"
+          done
+
+          benchmark_packages=(./pkg/chainassert ./pkg/crypto ./pkg/snowflake)
+          benchmark_args=(-run '^$' -bench '^Benchmark' -benchmem -count=6 -benchtime=500ms)
+          (
+            cd "$benchmark_base/backend"
+            go test "${benchmark_packages[@]}" "${benchmark_args[@]}"
+          ) | tee benchmark-base.txt
+          go test "${benchmark_packages[@]}" "${benchmark_args[@]}" | tee benchmark-current.txt
+
+          benchstat_version='v0.0.0-20260819171926-ebcb4798430d'
+          go run "golang.org/x/perf/cmd/benchstat@$benchstat_version" benchmark-base.txt benchmark-current.txt | tee benchmark-comparison.txt
+          go run "golang.org/x/perf/cmd/benchstat@$benchstat_version" -format csv benchmark-base.txt benchmark-current.txt > benchmark-comparison.csv
+
+          awk -F, \
+            -v sec_limit="$BENCHMARK_MAX_SEC_OP_REGRESSION_PERCENT" \
+            -v bytes_limit="$BENCHMARK_MAX_BYTES_OP_REGRESSION_PERCENT" \
+            -v allocs_limit="$BENCHMARK_MAX_ALLOCS_OP_REGRESSION_PERCENT" '
+            $2 == "sec/op" || $2 == "B/op" || $2 == "allocs/op" { metric=$2; next }
+            $1 == "" || $1 == "geomean" || $6 == "~" || $6 == "" { next }
+            $6 ~ /^\+/ {
+              delta=$6
+              gsub(/[+%]/, "", delta)
+              limit=(metric == "sec/op" ? sec_limit : (metric == "B/op" ? bytes_limit : allocs_limit))
+              if ((delta + 0) > limit) {
+                printf "性能回归超限: %s %s %s (阈值 %s%%)\n", $1, metric, $6, limit > "/dev/stderr"
+                failed=1
+              }
+            }
+            END { exit failed }
+          ' benchmark-comparison.csv
+      - name: 上传性能基准结果
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backend-benchmark-${{ github.sha }}
+          path: |
+            backend/benchmark-base.txt
+            backend/benchmark-current.txt
+            backend/benchmark-comparison.txt
+            backend/benchmark-comparison.csv
       - name: 全仓源码契约审查
         run: node scripts/audit/index.mjs --source-only
 

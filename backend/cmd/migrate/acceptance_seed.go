@@ -54,6 +54,8 @@ type acceptanceSeedIDs struct {
 	JudgerOnchain        int64
 	JudgeTask            int64
 	JudgeResult          int64
+	BattleJudgeTask      int64
+	BattleJudgeResult    int64
 	ContentCat           int64
 	ContentLab           int64
 	ContentContest       int64
@@ -137,7 +139,8 @@ var acceptanceIDs = acceptanceSeedIDs{
 	StudentA: 910000000000000201, StudentB: 910000000000000202, StudentC: 910000000000000203, StudentIsolation: 910000000000000204, AuthSession: 910000000000000301,
 	Runtime: 910000000000001001, RuntimeImage: 910000000000001002,
 	Sandbox: 910000000000001021, SandboxTool: 910000000000001022, SandboxEvent: 910000000000001023,
-	Judger: 910000000000002001, JudgerOnchain: 910000000000002002, JudgeTask: 910000000000002011, JudgeResult: 910000000000002012,
+	Judger: 910000000000001201, JudgerOnchain: 910000000000001205, JudgeTask: 910000000000002011, JudgeResult: 910000000000002012,
+	BattleJudgeTask: 910000000000002013, BattleJudgeResult: 910000000000002014,
 	ContentCat: 910000000000004001, ContentLab: 910000000000004011, ContentContest: 910000000000004012, ContentBattle: 910000000000004014, ContentTheory: 910000000000004013, Paper: 910000000000004021,
 	Course: 910000000000005001, ChapterIntro: 910000000000005011, ChapterLab: 910000000000005012, LessonIntro: 910000000000005021, LessonLab: 910000000000005022,
 	Assignment: 910000000000005031, AssignmentItem: 910000000000005032, SubmissionA: 910000000000005041, DraftB: 910000000000005042, ProgressA: 910000000000005043,
@@ -314,22 +317,7 @@ func seedAcceptanceReplayObject(ctx context.Context, objects *storage.Storage, b
 	if err != nil {
 		return "", "", err
 	}
-	archive := map[string]any{
-		"version":    1,
-		"match_id":   ids.Format(acceptanceIDs.BattleMatch),
-		"task_id":    "acceptance-battle-task-001",
-		"source_ref": "contest:2026:battle:acceptance-001",
-		"initial_state": map[string]any{
-			"contest_id":  acceptanceIDs.BattleContest,
-			"problem_id":  acceptanceIDs.BattleContestProblem,
-			"battle_rule": 1,
-			"entry_a":     map[string]any{"role": 2, "version_no": 1, "artifact_hash": strings.Repeat("a", 64)},
-			"entry_b":     map[string]any{"role": 1, "version_no": 1, "artifact_hash": strings.Repeat("b", 64)},
-		},
-		"actions":     []map[string]any{{"seq": 1, "at_tick": 1, "event_type": "assertion", "payload": map[string]any{"passed": true}}},
-		"result":      map[string]any{"passed": true, "score": 1, "max_score": 1, "details": map[string]any{"winner": "entry_a"}},
-		"finished_at": timex.RFC3339OrEmpty(timex.Now()),
-	}
+	archive := acceptanceBattleReplayArchive()
 	raw, err := json.Marshal(archive)
 	if err != nil {
 		return "", "", err
@@ -338,6 +326,45 @@ func seedAcceptanceReplayObject(ctx context.Context, objects *storage.Storage, b
 		return "", "", err
 	}
 	return ref, key, nil
+}
+
+// acceptanceBattleReplayArchive 构造与 M8 正式归档协议一致的历史对局回放。
+func acceptanceBattleReplayArchive() map[string]any {
+	return map[string]any{
+		"version":    1,
+		"match_id":   ids.Format(acceptanceIDs.BattleMatch),
+		"task_id":    ids.Format(acceptanceIDs.BattleJudgeTask),
+		"source_ref": "contest:2026:battle:acceptance-001",
+		"initial_state": map[string]any{
+			"contest_id":  ids.Format(acceptanceIDs.BattleContest),
+			"problem_id":  ids.Format(acceptanceIDs.BattleContestProblem),
+			"battle_rule": 1,
+			"entry_a":     map[string]any{"role": 2, "version_no": 1, "artifact_hash": strings.Repeat("a", 64)},
+			"entry_b":     map[string]any{"role": 1, "version_no": 1, "artifact_hash": strings.Repeat("b", 64)},
+		},
+		"actions": []map[string]any{{
+			"seq": 1,
+			"op":  "deploy",
+			"payload": map[string]any{
+				"artifact": "VaultDefense",
+			},
+			"output": map[string]any{
+				"address": "0x1000000000000000000000000000000000000001",
+			},
+		}},
+		"result": map[string]any{
+			"passed":    true,
+			"score":     1,
+			"max_score": 1,
+			"details": []map[string]any{{
+				"case":           "防御合约阻止重复提款",
+				"passed":         true,
+				"expected_label": "攻击交易应被拒绝",
+				"actual":         "攻击交易已回滚",
+			}},
+		},
+		"finished_at": timex.RFC3339OrEmpty(timex.Now()),
+	}
 }
 
 // ensureAcceptanceSeedAllowed 防止验收夹具被误写入生产库。
@@ -527,7 +554,7 @@ func seedAcceptanceBusiness(ctx context.Context, database *db.DB, includeIsolati
 	}
 	if err := database.WithTenantTxID(ctx, acceptanceIDs.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		for _, fn := range []func(context.Context, pgx.Tx) error{
-			seedRuntimeRows,
+			seedAcceptanceBusinessRows,
 			seedContentRows,
 			seedTeachingRows,
 			seedExperimentRows,
@@ -555,6 +582,17 @@ func seedAcceptanceBusiness(ctx context.Context, database *db.DB, includeIsolati
 	}
 	// 隔离租户保持业务空态，但必须拥有可计算成绩的默认配置，否则学生成绩中心会进入配置错误态。
 	return database.WithTenantTxID(ctx, acceptanceIDs.TenantIsolation, seedIsolationGradeRows)
+}
+
+// seedAcceptanceBusinessRows 写入依赖平台目录的租户业务夹具,不创建或修改平台能力定义。
+func seedAcceptanceBusinessRows(ctx context.Context, tx pgx.Tx) error {
+	if err := seedTenantQuotaRow(ctx, tx); err != nil {
+		return err
+	}
+	if err := seedSandboxRows(ctx, tx); err != nil {
+		return err
+	}
+	return seedJudgeRows(ctx, tx)
 }
 
 // protectedPhone 复用生产加密与 HMAC 算法生成手机号持久化字段。

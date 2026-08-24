@@ -12,6 +12,7 @@ import (
 	"chaimir/internal/platform/eventbus"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/tenant"
+	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
 	"chaimir/pkg/snowflake"
@@ -33,6 +34,7 @@ type Service struct {
 	replayStore   replayObjectStore
 	replayBucket  string
 	bus           eventbus.Bus
+	wsHub         *ws.Hub
 	cipher        *crypto.Cipher
 }
 
@@ -52,6 +54,7 @@ type ServiceDeps struct {
 	ReplayStore   replayObjectStore
 	ReplayBucket  string
 	Bus           eventbus.Bus
+	WSHub         *ws.Hub
 	Cipher        *crypto.Cipher
 }
 
@@ -96,13 +99,16 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Bus == nil {
 		return nil, fmt.Errorf("contest service 缺少事件总线")
 	}
+	if deps.WSHub == nil {
+		return nil, fmt.Errorf("contest service 缺少 WebSocket Hub")
+	}
 	if deps.Cipher == nil {
 		return nil, fmt.Errorf("contest service 缺少配置加密器")
 	}
 	if deps.Config.VulnSourceMaxResponseBytes <= 0 || deps.Config.VulnSourceTimeoutSeconds <= 0 || deps.Config.MatchmakerPollIntervalSeconds <= 0 || deps.Config.AutoArchivePollIntervalSeconds <= 0 || deps.Config.BattleSandboxReadyTimeoutSeconds <= 0 || deps.Config.BattleSandboxReadyPollIntervalMs <= 0 || deps.Config.MatchmakerBatchSize <= 0 || deps.Config.SubmitRateLimitSeconds <= 0 || deps.Config.FailedCooldownSeconds <= 0 || deps.Config.MatchmakerLeaseDurationMs <= 0 || deps.Config.AutoArchiveLeaseDurationMs <= 0 || deps.Config.MatchmakerMaxAttempts <= 0 || deps.Config.BattleELOInitialScore <= 0 || deps.Config.BattleELOKFactor <= 0 {
 		return nil, fmt.Errorf("contest service 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, cfg: deps.Config, audit: deps.Audit, roles: deps.Roles, content: deps.Content, contentImport: deps.ContentImport, sandbox: deps.Sandbox, judge: deps.Judge, fingerprint: deps.Fingerprint, files: deps.FileService, replayStore: deps.ReplayStore, replayBucket: deps.ReplayBucket, bus: deps.Bus, cipher: deps.Cipher}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, cfg: deps.Config, audit: deps.Audit, roles: deps.Roles, content: deps.Content, contentImport: deps.ContentImport, sandbox: deps.Sandbox, judge: deps.Judge, fingerprint: deps.Fingerprint, files: deps.FileService, replayStore: deps.ReplayStore, replayBucket: deps.ReplayBucket, bus: deps.Bus, wsHub: deps.WSHub, cipher: deps.Cipher}, nil
 }
 
 // fileService 描述竞赛复用统一文件服务签发受控下载授权所需能力。
@@ -132,6 +138,83 @@ func currentServiceTenant(ctx context.Context) (int64, error) {
 		return 0, apperr.ErrServiceUnauthorized
 	}
 	return id.TenantID, nil
+}
+
+// resolvePublishedContestTenant 解析公开竞赛的组织租户,用于跨校学生入口。
+// 解析结果只用于后续 M8 租户事务,不会改变当前请求身份或把组织租户写入用户会话。
+func (s *Service) resolvePublishedContestTenant(ctx context.Context, contestID int64) (int64, error) {
+	if contestID <= 0 {
+		return 0, apperr.ErrContestNotFound
+	}
+	var organizerTenantID int64
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		organizerTenantID, err = tx.FindPublishedContestTenant(ctx, contestID)
+		return err
+	}); err != nil {
+		return 0, err
+	}
+	if organizerTenantID <= 0 {
+		return 0, apperr.ErrContestNotFound
+	}
+	return organizerTenantID, nil
+}
+
+// resolveTeamTenant 解析队伍所属组织租户,供队伍深链和锁定入口使用。
+func (s *Service) resolveTeamTenant(ctx context.Context, teamID int64) (int64, error) {
+	if teamID <= 0 {
+		return 0, apperr.ErrContestTeamNotFound
+	}
+	var organizerTenantID int64
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		organizerTenantID, err = tx.FindTeamTenant(ctx, teamID)
+		return err
+	}); err != nil {
+		return 0, err
+	}
+	if organizerTenantID <= 0 {
+		return 0, apperr.ErrContestTeamNotFound
+	}
+	return organizerTenantID, nil
+}
+
+// resolveSubmissionTenant 解析提交所属组织租户,避免学生读取跨校提交时把当前租户当作存储租户。
+func (s *Service) resolveSubmissionTenant(ctx context.Context, submissionID int64) (int64, error) {
+	if submissionID <= 0 {
+		return 0, apperr.ErrContestSubmissionNotFound
+	}
+	var organizerTenantID int64
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		organizerTenantID, err = tx.FindSolveSubmissionTenant(ctx, submissionID)
+		return err
+	}); err != nil {
+		return 0, err
+	}
+	if organizerTenantID <= 0 {
+		return 0, apperr.ErrContestSubmissionNotFound
+	}
+	return organizerTenantID, nil
+}
+
+// resolveBattleMatchTenant 解析对局所属组织租户,避免跨校成员把当前租户误当成回放存储租户。
+func (s *Service) resolveBattleMatchTenant(ctx context.Context, matchID int64) (int64, error) {
+	if matchID <= 0 {
+		return 0, apperr.ErrContestBattleMatchNotFound
+	}
+	var organizerTenantID int64
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		organizerTenantID, err = tx.FindBattleMatchTenant(ctx, matchID)
+		return err
+	}); err != nil {
+		return 0, err
+	}
+	if organizerTenantID <= 0 {
+		return 0, apperr.ErrContestBattleMatchNotFound
+	}
+	return organizerTenantID, nil
 }
 
 // isSchoolAdmin 判断当前账号是否具备学校管理员权限,并显式保留角色服务错误链。

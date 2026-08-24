@@ -1,4 +1,4 @@
-﻿# 本文件声明 infra/postgres-graph 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 infra/postgres-graph 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: infra
 name: postgres-graph
@@ -19,12 +19,30 @@ source:
   type: thin-wrapper
 upstream:
   image: postgres:16-alpine
+  version: 16-alpine
   digest: sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
   reuse_policy: thin-wrapper
 data_driven: true
+env_keys:
+  config:
+    - POSTGRES_DB
+    - POSTGRES_USER
+  secret:
+    - POSTGRES_PASSWORD
+secrets_required:
+  - env: POSTGRES_PASSWORD
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
 capabilities:
-  - graph-datastore
-  - postgres-compatible
+  provides:
+    - graph-datastore
+    - postgres-compatible
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 infra:
   eco_tags:
     - evm

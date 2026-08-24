@@ -197,6 +197,12 @@ type AuditQueryInput struct {
 	Size       int32
 }
 
+// AuditFacetRow 是审计动作分组计数结果。
+type AuditFacetRow struct {
+	Action string
+	Count  int64
+}
+
 // AuditLogRow 是审计查询领域结果。
 type AuditLogRow struct {
 	ID         int64

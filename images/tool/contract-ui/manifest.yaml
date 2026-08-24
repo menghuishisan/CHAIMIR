@@ -1,4 +1,4 @@
-# 本文件声明 tool/contract-ui 镜像的职责、端口、安全、资源和供应链约束。
+﻿# 本文件声明 tool/contract-ui 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: tool
 name: contract-ui
@@ -22,8 +22,9 @@ upstream:
   version: "2026-07-07"
   digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
   packages:
-    - python-3.13=3.13.14-r1
+    - python-3.13=3.13.14-r3
     - py3.13-pip=26.1.2-r1
+    - setuptools==80.9.0
     - eth-abi==5.2.0
     - eth-utils==5.3.1
     - eth-hash[pycryptodome]==0.8.0
@@ -35,14 +36,19 @@ env_keys:
   secret: []
 data_driven: true
 capabilities:
-  - contract-ui
-  - abi-form
+  provides:
+    - contract-ui
+    - abi-form
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: public
 tool:
   kind: web-embed
   eco_tags:
     - evm
-    - fabric
-    - fisco
   mount_workspace: true
 ports:
   - name: http

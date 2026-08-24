@@ -66,10 +66,16 @@ const (
 )
 
 var serviceSourcePattern = regexp.MustCompile(`^[a-z]+:[0-9]{4}:[a-z][a-z0-9_-]*:[0-9A-Za-z_-]+$`)
+var serviceScopePattern = regexp.MustCompile(`^[a-z]+:[0-9]{4}:[a-z][a-z0-9_-]*:[0-9A-Za-z_-]+(?::[A-Za-z0-9_-]+)*$`)
 
 // ValidSourceRef 校验 source_ref 是否符合全局四段规范。
 func ValidSourceRef(sourceRef string) bool {
 	return serviceSourcePattern.MatchString(strings.TrimSpace(sourceRef))
+}
+
+// ValidScopeRef 校验生命周期作用域引用:稳定来源四段之后允许追加层级段。
+func ValidScopeRef(scopeRef string) bool {
+	return serviceScopePattern.MatchString(strings.TrimSpace(scopeRef))
 }
 
 // ServiceSourceRefFromContext 读取已经服务端验签后的来源标识。

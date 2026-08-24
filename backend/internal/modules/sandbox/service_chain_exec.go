@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"chaimir/internal/platform/intx"
@@ -51,7 +52,7 @@ func (c execChainCapability) runJSON(ctx context.Context, sb Sandbox, runtime Ru
 	}
 	runCtx, cancel := context.WithTimeout(ctx, c.commandTimeout(spec))
 	defer cancel()
-	stdout, stderr, err := c.orchestrator.Exec(runCtx, sb.Namespace, runtimeExecTarget(runtime), spec.Command, stdin, false)
+	stdout, stderr, err := c.orchestrator.Exec(runCtx, sb.Namespace, strings.TrimSpace(spec.ExecTarget), spec.Command, stdin, false)
 	if err != nil {
 		return nil, sandboxExecFailure(apperr.ErrSandboxChainFailed, err, stderr)
 	}

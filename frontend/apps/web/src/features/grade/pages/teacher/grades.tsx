@@ -10,7 +10,7 @@
 // 申诉处理在批改中心;本页不重复放入口(对齐清单 §3.2:成绩申诉是批改/成绩内页,不进侧栏)。
 
 import { useCallback, useMemo, useState } from 'react'
-import { CircleCheck, ClipboardList, FileText, Lock, Send } from 'lucide-react'
+import { FileText, Send } from 'lucide-react'
 import {
   GradeReviewStatus,
   PAGINATION_MAX_SIZE,
@@ -25,10 +25,12 @@ import {
   Card,
   CardBody,
   CardHeader,
+  DataPanel,
   Empty,
   FilterBar,
   FilterField,
   FormField,
+  MetricStrip,
   PageBody,
   PageHeader,
   PageScaffold,
@@ -36,7 +38,6 @@ import {
   Pagination,
   SegmentedControl,
   Select,
-  Stat,
   Table,
   Textarea,
   toast,
@@ -68,10 +69,14 @@ export default function TeacherGradesPage() {
   const courses = useAsyncResource(
     () => api.teaching.getCourses({ role: 'teacher', page: 1, size: PAGINATION_MAX_SIZE }),
     [],
-    () => false,
+    () => false
   )
 
-  const semesters = useAsyncResource(() => api.grade.listSemesters(), [], () => false)
+  const semesters = useAsyncResource(
+    () => api.grade.listSemesters(),
+    [],
+    () => false
+  )
 
   const reviews = usePagedResource<GradeReview>(
     (params) =>
@@ -79,17 +84,21 @@ export default function TeacherGradesPage() {
         status: statusFilter ? (Number(statusFilter) as GradeReviewStatus) : undefined,
         ...params,
       }),
-    [statusFilter],
+    [statusFilter]
   )
 
   const courseOptions = useMemo(
-    () => (courses.data?.list ?? []).map((course: Course) => ({ value: course.id, label: course.name })),
-    [courses.data],
+    () =>
+      (courses.data?.list ?? []).map((course: Course) => ({
+        value: course.id,
+        label: course.name,
+      })),
+    [courses.data]
   )
 
   const courseNameById = useMemo(
     () => new Map((courses.data?.list ?? []).map((course: Course) => [course.id, course.name])),
-    [courses.data],
+    [courses.data]
   )
 
   // 指标带取服务端全量口径,不随下方状态筛选变化。
@@ -97,15 +106,15 @@ export default function TeacherGradesPage() {
   const totalCount = useResourceTotal((params) => api.grade.listOwnReviews(params), [])
   const pendingCount = useResourceTotal(
     (params) => api.grade.listOwnReviews({ status: GradeReviewStatus.PENDING, ...params }),
-    [],
+    []
   )
   const approvedCount = useResourceTotal(
     (params) => api.grade.listOwnReviews({ status: GradeReviewStatus.APPROVED, ...params }),
-    [],
+    []
   )
   const rejectedCount = useResourceTotal(
     (params) => api.grade.listOwnReviews({ status: GradeReviewStatus.REJECTED, ...params }),
-    [],
+    []
   )
 
   const columns: TableColumn<GradeReview>[] = [
@@ -154,20 +163,23 @@ export default function TeacherGradesPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '组织与成绩' }, { label: '成绩报送' }]} />}
+        kicker={<Breadcrumb items={[{ label: '组织与成绩' }]} />}
         title="成绩报送"
         description="确认课程成绩后报送给学校审核。审核通过的成绩会锁定,进入学生的成绩中心。"
         icon={Send}
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="我的报送记录" value={totalCount ?? '—'} icon={ClipboardList} hint="不受下方筛选影响" />
-          <Stat label="待审核" value={pendingCount ?? '—'} icon={Send} hint="等待学校处理" />
-          <Stat label="已通过" value={approvedCount ?? '—'} icon={CircleCheck} />
-          <Stat label="已驳回" value={rejectedCount ?? '—'} icon={Lock} hint="改分后可重新报送" />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是报送记录与课程成绩明细 */}
+      <MetricStrip
+        label="报送总量摘要"
+        className="mb-5"
+        items={[
+          { label: '我的报送', value: totalCount ?? '—', hint: '不受下方筛选影响' },
+          { label: '待审核', value: pendingCount ?? '—', hint: '等待学校处理' },
+          { label: '已通过', value: approvedCount ?? '—', hint: '成绩已锁定' },
+          { label: '已驳回', value: rejectedCount ?? '—', hint: '改分后可重新报送' },
+        ]}
+      />
 
       <PageBody
         rail={
@@ -180,46 +192,63 @@ export default function TeacherGradesPage() {
           />
         }
       >
-        <PageSection
-          title="报送记录"
-          description={`共 ${reviews.total} 条报送记录`}
-        >
-          <div className="flex flex-col gap-4">
+        {/*
+          归族说明:这一页**不是**审阅队列族。教师在这里是报送方而不是处理方 ——
+          记录状态由学校审核决定,本页列表是只读历史,真正的动作在右侧报送卡与下方课程成绩里。
+          按 §6.5.3 归族判据「要逐条产出处理结论吗」答否,故走资源列表族(第 ① 族)。
+        */}
+        <DataPanel
+          label="报送记录"
+          filter={
             <FilterBar label="报送记录筛选">
               <FilterField label="审核状态" group>
                 <SegmentedControl
                   aria-label="按审核状态筛选"
                   size="sm"
-                  options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                  options={STATUS_FILTERS.map((item) => ({
+                    value: item.value,
+                    label: item.label,
+                  }))}
                   value={statusFilter}
                   onValueChange={setStatusFilter}
                 />
               </FilterField>
             </FilterBar>
-
-            <ResourceState
-              resource={reviews}
-              emptyIcon={Send}
-              emptyTitle={statusFilter ? '这个状态下没有记录' : '还没有报送过成绩'}
-              emptyDescription={
-                statusFilter ? '换个状态看看。' : '在右侧选择课程并确认成绩后即可报送给学校审核。'
-              }
-              skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
-            >
-              {(page) => (
-                <div className="flex flex-col gap-4">
-                  <Table columns={columns} data={page.list} rowKey={(item) => item.id} />
-                  <Pagination
-                    page={reviews.page}
-                    pageSize={reviews.pageSize}
-                    total={reviews.total}
-                    onPageChange={reviews.setPage}
-                  />
-                </div>
-              )}
-            </ResourceState>
-          </div>
-        </PageSection>
+          }
+          footer={
+            <Pagination
+              page={reviews.page}
+              pageSize={reviews.pageSize}
+              total={reviews.total}
+              onPageChange={reviews.setPage}
+            />
+          }
+        >
+          <ResourceState
+            resource={reviews}
+            emptyIcon={Send}
+            emptyTitle={statusFilter ? '这个状态下没有记录' : '还没有报送过成绩'}
+            emptyDescription={
+              statusFilter ? '换个状态看看。' : '在右侧选择课程并确认成绩后即可报送给学校审核。'
+            }
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+          >
+            {(page) => (
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):课程名一行、报送时间一行,状态在右
+                mobileCard={(item) => ({
+                  title: courseNameById.get(item.course_id) ?? '已归档的课程',
+                  meta: `报送于 ${formatDateTime(item.submitted_at)}`,
+                  badge: <GradeReviewStatusCell review={item} />,
+                })}
+              />
+            )}
+          </ResourceState>
+        </DataPanel>
       </PageBody>
 
       {/* 课程成绩内页:选定课程后在此维护权重、计算、调分与导出 */}
@@ -291,15 +320,12 @@ function SubmitReviewCard({
         setSubmitting(false)
       }
     },
-    [comment, onSubmitted, selectedCourseId, semesterId],
+    [comment, onSubmitted, selectedCourseId, semesterId]
   )
 
   return (
     <Card>
-      <CardHeader
-        title="报送成绩"
-        description="选择课程后先确认下方成绩,再报送给学校审核。"
-      />
+      <CardHeader title="报送成绩" description="选择课程后先确认下方成绩,再报送给学校审核。" />
       <CardBody>
         <form onSubmit={submit} noValidate>
           <FormField label="课程" htmlFor="review-course" required>

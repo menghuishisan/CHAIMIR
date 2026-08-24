@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -62,6 +63,9 @@ func (o *K8sOrchestrator) CreateSandboxResources(ctx context.Context, plan Creat
 	if err := o.ensureImagePullSecrets(ctx, plan.Sandbox.Namespace); err != nil {
 		return err
 	}
+	if err := o.ensureRuntimeSecrets(ctx, plan); err != nil {
+		return err
+	}
 	if err := o.applySandboxServiceAccount(ctx, cs, plan); err != nil {
 		return err
 	}
@@ -80,14 +84,22 @@ func (o *K8sOrchestrator) CreateSandboxResources(ctx context.Context, plan Creat
 	if err := o.applyRuntimeServices(ctx, cs, plan); err != nil {
 		return err
 	}
-	for _, pod := range o.podsForPlan(plan) {
+	// 先创建所有工具 Service,让 required_at_start 依赖在消费者 Pod 启动前就拥有稳定的 DNS 入口。
+	// Service 可以先于 Pod 建立;其 Endpoints 会在目标 Pod Ready 后自动收敛。
+	for _, tool := range plan.Tools {
+		if tool.Category == "infra" || tool.Kind == SandboxToolKindWebEmbed {
+			if err := o.applyToolService(ctx, cs, plan.Sandbox, tool); err != nil {
+				return err
+			}
+		}
+	}
+	orderedPods := o.podsForPlan(plan)
+	for _, pod := range orderedPods {
 		if _, err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("创建沙箱 Pod 失败: %w", err)
 		}
-	}
-	for _, tool := range plan.Tools {
-		if tool.Kind == SandboxToolKindWebEmbed {
-			if err := o.applyToolService(ctx, cs, plan.Sandbox, tool); err != nil {
+		if len(plan.Runtime.AdapterSpec.StartupOrder) > 0 {
+			if err := o.waitPodReady(ctx, cs, plan.Sandbox.Namespace, pod.Name); err != nil {
 				return err
 			}
 		}
@@ -96,6 +108,80 @@ func (o *K8sOrchestrator) CreateSandboxResources(ctx context.Context, plan Creat
 		return err
 	}
 	return nil
+}
+
+// SandboxResourcesReady 只读检查已存在沙箱的运行时 Pod 是否全部 Ready。
+// 恢复流程先用该探针识别服务重启前已完成的编排,避免重复等待或重建资源。
+func (o *K8sOrchestrator) SandboxResourcesReady(ctx context.Context, plan CreateSandboxPlan) (bool, error) {
+	cs := o.client.Clientset()
+	for _, podName := range runtimePodNames(plan) {
+		pod, err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Get(ctx, podName, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf("查询既有沙箱 Pod 状态失败: %w", err)
+		}
+		if !sandboxPodReady(pod) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// ResetSandboxRuntime 重建承载链节点的计算 Pod,保留工作区 Pod、PVC、命名空间和工具记录。
+// 运行时账本位于 Pod 临时卷,因此 Pod 重建后由镜像入口按固定创世配置重新初始化。
+func (o *K8sOrchestrator) ResetSandboxRuntime(ctx context.Context, plan CreateSandboxPlan) error {
+	cs := o.client.Clientset()
+	for _, podName := range runtimeComputePodNames(plan) {
+		if err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Delete(ctx, podName, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("删除运行时计算 Pod 失败: %w", err)
+		}
+	}
+	for _, podName := range runtimeComputePodNames(plan) {
+		if err := waitPodDeleted(ctx, cs, plan.Sandbox.Namespace, podName, o.cfg.ReadyPollIntervalSeconds); err != nil {
+			return err
+		}
+	}
+	for _, pod := range o.podsForPlan(plan) {
+		if !containsString(runtimeComputePodNames(plan), pod.Name) {
+			continue
+		}
+		if _, err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("重建运行时计算 Pod 失败: %w", err)
+		}
+	}
+	return o.waitRuntimeComputeReady(ctx, cs, plan)
+}
+
+// waitRuntimeComputeReady 等待本次重置涉及的运行时 Pod,不把工作区或工具 Pod 的状态混入链重置结果。
+func (o *K8sOrchestrator) waitRuntimeComputeReady(ctx context.Context, cs kubernetes.Interface, plan CreateSandboxPlan) error {
+	if o.cfg.ReadyPollIntervalSeconds <= 0 {
+		return fmt.Errorf("SANDBOX_READY_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	ticker := time.NewTicker(sandboxPodReadyPollInterval(o.cfg.ReadyPollIntervalSeconds))
+	defer ticker.Stop()
+	for {
+		ready := true
+		for _, podName := range runtimeComputePodNames(plan) {
+			pod, err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Get(ctx, podName, metav1.GetOptions{})
+			if err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("查询重建运行时 Pod 状态失败: %w", err)
+			}
+			if err != nil || !sandboxPodReady(pod) {
+				ready = false
+				break
+			}
+		}
+		if ready {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("等待重建运行时 Pod Ready 超时: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 // DestroySandboxResources 删除普通沙箱资源。
@@ -224,6 +310,9 @@ func (o *K8sOrchestrator) RestoreSnapshotResources(ctx context.Context, plan Cre
 	if err := o.ensureImagePullSecrets(ctx, plan.Sandbox.Namespace); err != nil {
 		return err
 	}
+	if err := o.ensureRuntimeSecrets(ctx, plan); err != nil {
+		return err
+	}
 	if err := o.applySandboxServiceAccount(ctx, cs, plan); err != nil {
 		return err
 	}
@@ -242,16 +331,17 @@ func (o *K8sOrchestrator) RestoreSnapshotResources(ctx context.Context, plan Cre
 	if err := o.applyRuntimeServices(ctx, cs, plan); err != nil {
 		return err
 	}
-	for _, pod := range o.podsForPlan(plan) {
-		if _, err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
-			return fmt.Errorf("创建快照恢复 Pod 失败: %w", err)
-		}
-	}
+	// 快照恢复也必须先创建工具 Service,保持恢复路径与首次创建路径的依赖语义一致。
 	for _, tool := range plan.Tools {
-		if tool.Kind == SandboxToolKindWebEmbed {
+		if tool.Category == "infra" || tool.Kind == SandboxToolKindWebEmbed {
 			if err := o.applyToolService(ctx, cs, plan.Sandbox, tool); err != nil {
 				return err
 			}
+		}
+	}
+	for _, pod := range o.podsForPlan(plan) {
+		if _, err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+			return fmt.Errorf("创建快照恢复 Pod 失败: %w", err)
 		}
 	}
 	return o.waitSandboxPodReady(ctx, cs, plan)
@@ -419,9 +509,9 @@ func (o *K8sOrchestrator) ExecStream(ctx context.Context, namespace, container s
 }
 
 // PrepullImage 创建或更新预拉取 DaemonSet 并等待工作负载镜像集合在真实节点 Ready。
-func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, specs []PrepullImageSpec) (PrepullResult, error) {
+func (o *K8sOrchestrator) PrepullImage(ctx context.Context, image RuntimeImage, compositionDigest string, specs []PrepullImageSpec) (PrepullResult, error) {
 	imageURLs := prepullSpecImageURLs(specs)
-	ds := o.prepullDaemonSet(image, specs)
+	ds := o.prepullDaemonSet(image, compositionDigest, specs)
 	cs := o.client.Clientset()
 	if err := o.ensureImagePullSecrets(ctx, o.cfg.PrepullNamespace); err != nil {
 		return PrepullResult{DaemonSet: ds.Name}, err
@@ -515,13 +605,15 @@ func prepullDaemonSetReady(ds *appsv1.DaemonSet) bool {
 
 // DeletePrepullDaemonSet 删除镜像预拉取 DaemonSet,NotFound 视为幂等成功。
 func (o *K8sOrchestrator) DeletePrepullDaemonSet(ctx context.Context, image RuntimeImage) error {
-	name := "chaimir-prepull-" + ids.Format(image.ID)
-	err := o.client.Clientset().AppsV1().DaemonSets(o.cfg.PrepullNamespace).Delete(ctx, name, metav1.DeleteOptions{})
-	if apierrors.IsNotFound(err) {
-		return nil
-	}
+	client := o.client.Clientset().AppsV1().DaemonSets(o.cfg.PrepullNamespace)
+	list, err := client.List(ctx, metav1.ListOptions{LabelSelector: "runtime_image_id=" + ids.Format(image.ID)})
 	if err != nil {
-		return fmt.Errorf("删除预拉取 DaemonSet 失败: %w", err)
+		return fmt.Errorf("查询镜像预拉取 DaemonSet 失败: %w", err)
+	}
+	for _, item := range list.Items {
+		if err := client.Delete(ctx, item.Name, metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("删除预拉取 DaemonSet 失败: %w", err)
+		}
 	}
 	return nil
 }
@@ -635,6 +727,59 @@ func (o *K8sOrchestrator) waitSandboxPodReady(ctx context.Context, cs kubernetes
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("等待沙箱 Pod Ready 超时: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+// podFailureReason 抽取启动依赖 Pod 的公开失败原因,避免依赖等待超时才报告根因。
+func podFailureReason(pod *corev1.Pod) string {
+	if pod == nil {
+		return ""
+	}
+	if pod.Status.Phase == corev1.PodFailed {
+		if strings.TrimSpace(pod.Status.Reason) != "" {
+			return strings.TrimSpace(pod.Status.Reason)
+		}
+		return "pod_failed"
+	}
+	for _, status := range append(append([]corev1.ContainerStatus{}, pod.Status.InitContainerStatuses...), pod.Status.ContainerStatuses...) {
+		if status.State.Waiting != nil && strings.TrimSpace(status.State.Waiting.Reason) != "" {
+			reason := strings.TrimSpace(status.State.Waiting.Reason)
+			if reason == "ImagePullBackOff" || reason == "ErrImagePull" || reason == "CrashLoopBackOff" || reason == "CreateContainerError" {
+				return status.Name + ":" + reason
+			}
+		}
+		if status.State.Terminated != nil && status.State.Terminated.ExitCode != 0 {
+			return status.Name + ":exit_" + fmt.Sprint(status.State.Terminated.ExitCode)
+		}
+	}
+	return ""
+}
+
+// waitPodReady 在 required_at_start 顺序中等待单个 Pod,避免下游容器先于依赖服务启动。
+func (o *K8sOrchestrator) waitPodReady(ctx context.Context, cs kubernetes.Interface, namespace, podName string) error {
+	if o.cfg.ReadyPollIntervalSeconds <= 0 {
+		return fmt.Errorf("SANDBOX_READY_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	ticker := time.NewTicker(sandboxPodReadyPollInterval(o.cfg.ReadyPollIntervalSeconds))
+	defer ticker.Stop()
+	for {
+		pod, err := cs.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("查询启动依赖 Pod 状态失败: %w", err)
+		}
+		if err == nil {
+			if failed := podFailureReason(pod); failed != "" {
+				return fmt.Errorf("启动依赖 Pod %s 失败: %s", podName, failed)
+			}
+			if sandboxPodReady(pod) {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("等待启动依赖 Pod %s Ready 超时: %w", podName, ctx.Err())
 		case <-ticker.C:
 		}
 	}
@@ -864,6 +1009,57 @@ func (o *K8sOrchestrator) ensureImagePullSecrets(ctx context.Context, namespace 
 	return o.client.SyncImagePullSecrets(ctx, o.cfg.ControlNamespace, namespace, "sandbox", o.cfg.ImagePullSecretNames)
 }
 
+// ensureRuntimeSecrets 将当前组合声明的最小敏感键同步到沙箱命名空间。
+func (o *K8sOrchestrator) ensureRuntimeSecrets(ctx context.Context, plan CreateSandboxPlan) error {
+	keys := map[string]struct{}{}
+	collect := func(component workload.ComponentSpec) error {
+		for _, secret := range component.SecretEnv {
+			name := strings.TrimSpace(secret.Name)
+			secretName := strings.TrimSpace(secret.SecretName)
+			secretKey := strings.TrimSpace(secret.SecretKey)
+			if name == "" || secretName == "" || secretKey == "" {
+				return fmt.Errorf("组件 %s 的 Secret 环境声明不完整", component.Name)
+			}
+			if secretName != "chaimir-secret" || secretKey != name {
+				return fmt.Errorf("组件 %s 的 Secret 只能引用平台受控键 %s", component.Name, name)
+			}
+			keys[secretKey] = struct{}{}
+		}
+		return nil
+	}
+	if err := collect(plan.Runtime.AdapterSpec.RuntimeContainer); err != nil {
+		return err
+	}
+	for _, component := range plan.Runtime.AdapterSpec.InfraSidecars {
+		if err := collect(component); err != nil {
+			return err
+		}
+	}
+	for _, pod := range plan.Runtime.AdapterSpec.Pods {
+		for _, component := range pod.Containers {
+			if err := collect(component); err != nil {
+				return err
+			}
+		}
+	}
+	for _, tool := range plan.Tools {
+		for _, component := range tool.ResourceSpec.Components {
+			if err := collect(component); err != nil {
+				return err
+			}
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	ordered := make([]string, 0, len(keys))
+	for key := range keys {
+		ordered = append(ordered, key)
+	}
+	sort.Strings(ordered)
+	return o.client.SyncSecretKeys(ctx, o.cfg.ControlNamespace, "chaimir-secret", plan.Sandbox.Namespace, "chaimir-secret", "sandbox", ordered)
+}
+
 // sameLocalObjectReferences 比较 ServiceAccount 镜像拉取引用是否已经是期望值。
 func sameLocalObjectReferences(current, desired []corev1.LocalObjectReference) bool {
 	if len(current) != len(desired) {
@@ -995,7 +1191,7 @@ func (o *K8sOrchestrator) allowControlPlanePolicies(plan CreateSandboxPlan) []*n
 		policies = append(policies, o.controlPlaneIngressPolicy(plan.Sandbox, "sandbox-allow-control-plane-"+pod.Name, pod.Name, ports))
 	}
 	for _, tool := range plan.Tools {
-		if tool.Kind != SandboxToolKindWebEmbed {
+		if tool.Category != "infra" && tool.Kind != SandboxToolKindWebEmbed {
 			continue
 		}
 		for role, ports := range toolControlPlanePorts(tool) {
@@ -1074,7 +1270,7 @@ func sandboxPodEgressPolicy(plan CreateSandboxPlan, rule workload.NetworkRuleSpe
 func (o *K8sOrchestrator) allowToolPodLinkPolicies(plan CreateSandboxPlan) []*netv1.NetworkPolicy {
 	policies := []*netv1.NetworkPolicy{}
 	for _, tool := range plan.Tools {
-		if tool.Kind != SandboxToolKindWebEmbed {
+		if tool.Category != "infra" && tool.Kind != SandboxToolKindWebEmbed {
 			continue
 		}
 		for _, rule := range tool.ResourceSpec.NetworkRules {
@@ -1148,7 +1344,7 @@ func (o *K8sOrchestrator) applyWorkspacePVCFromSnapshot(ctx context.Context, cs 
 
 // createPersistentVolumeClaims 创建 adapter 声明的持久化卷域 PVC,可选按卷域从 VolumeSnapshot 恢复。
 func (o *K8sOrchestrator) createPersistentVolumeClaims(ctx context.Context, cs kubernetes.Interface, plan CreateSandboxPlan, sourceFn func(Sandbox, VolumeDomainSpec) *corev1.TypedLocalObjectReference) error {
-	for _, domain := range persistentVolumeDomains(plan.Runtime.AdapterSpec) {
+	for _, domain := range persistentVolumeDomains(plan) {
 		source := (*corev1.TypedLocalObjectReference)(nil)
 		if sourceFn != nil && containsString(plan.Sandbox.SnapshotDomains, domain.Name) {
 			source = sourceFn(plan.Sandbox, domain)
@@ -1208,13 +1404,50 @@ func (o *K8sOrchestrator) podsForPlan(plan CreateSandboxPlan) []*corev1.Pod {
 		out = append(out, o.podFromSpec(plan, pod))
 	}
 	for _, tool := range plan.Tools {
-		if tool.Kind == SandboxToolKindWebEmbed || tool.Kind == SandboxToolKindCommand {
+		if tool.Category == "infra" || tool.Kind == SandboxToolKindWebEmbed || tool.Kind == SandboxToolKindCommand {
 			for _, component := range tool.ResourceSpec.Components {
 				out = append(out, o.toolPodForPlan(plan, tool, component))
 			}
 		}
 	}
+	if len(plan.Runtime.AdapterSpec.StartupOrder) > 0 {
+		rank := make(map[string]int, len(plan.Runtime.AdapterSpec.StartupOrder))
+		for index, code := range plan.Runtime.AdapterSpec.StartupOrder {
+			rank[strings.TrimSpace(code)] = index
+		}
+		sort.SliceStable(out, func(i, j int) bool {
+			left := startupPodRank(plan, out[i], rank)
+			right := startupPodRank(plan, out[j], rank)
+			if left != right {
+				return left < right
+			}
+			return out[i].Name < out[j].Name
+		})
+	}
 	return out
+}
+
+// startupPodRank 将启动依赖组件映射为实际 Pod 顺序,未参与依赖的 Pod 放在末尾。
+func startupPodRank(plan CreateSandboxPlan, pod *corev1.Pod, rank map[string]int) int {
+	key := pod.Name
+	for _, component := range pod.Spec.Containers {
+		if component.Name == plan.Runtime.AdapterSpec.RuntimeContainer.Name {
+			key = "primary_runtime"
+			break
+		}
+	}
+	for _, tool := range plan.Tools {
+		for _, component := range tool.ResourceSpec.Components {
+			if toolComponentPodName(tool.Code, component.Name) == pod.Name {
+				key = tool.Code
+				break
+			}
+		}
+	}
+	if value, ok := rank[key]; ok {
+		return value
+	}
+	return len(rank) + 1
 }
 
 // podGroupForPlan 返回运行时声明的 Pod 组;未声明时按 runtime_container + infra_sidecars 生成单 Pod 拓扑。
@@ -1280,6 +1513,7 @@ func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec workload.PodS
 			NodeSelector:                 copyStringMap(o.cfg.SandboxNodeSelector),
 			Tolerations:                  sandboxTolerations(o.cfg.SandboxNodeTolerations),
 			Volumes:                      podVolumesForPlan(plan),
+			Affinity:                     affinityForSharedRuntime(plan, spec),
 		},
 	}
 }
@@ -1309,18 +1543,71 @@ func (o *K8sOrchestrator) toolPodForPlan(plan CreateSandboxPlan, tool Tool, comp
 			ServiceAccountName:           sandboxWorkloadServiceAccount,
 			RestartPolicy:                corev1.RestartPolicyNever,
 			SecurityContext:              podSecurityContext(),
-			Containers:                   []corev1.Container{o.containerFromTool(tool, component, plan.Runtime.AdapterSpec)},
+			Containers:                   []corev1.Container{o.containerFromTool(plan, tool, component)},
 			NodeSelector:                 copyStringMap(o.cfg.SandboxNodeSelector),
 			Tolerations:                  sandboxTolerations(o.cfg.SandboxNodeTolerations),
-			Volumes:                      podVolumesForTool(tool, component),
+			Volumes:                      podVolumesForTool(plan, tool, component),
+			Affinity:                     affinityForToolVolume(plan, component),
 		},
 	}
+}
+
+// affinityForSharedRuntime 让挂载共享 PVC 的运行时工作区 Pod 与主运行时落在同一节点,兼容生产常见 RWO 存储。
+func affinityForSharedRuntime(plan CreateSandboxPlan, spec workload.PodSpec) *corev1.Affinity {
+	needsSharedVolume := false
+	for _, component := range spec.Containers {
+		if shouldMountWorkspace(component) || len(component.MountDomains) > 0 {
+			needsSharedVolume = true
+			break
+		}
+	}
+	if !needsSharedVolume {
+		return nil
+	}
+	return requiredRuntimePodAffinity(plan)
+}
+
+// affinityForToolVolume 让工具的工作区或安全域 PVC 与主运行时共节点,避免 RWO 卷被跨节点挂载。
+func affinityForToolVolume(plan CreateSandboxPlan, component workload.ComponentSpec) *corev1.Affinity {
+	if !shouldMountWorkspace(component) && len(component.MountDomains) == 0 {
+		return nil
+	}
+	return requiredRuntimePodAffinity(plan)
+}
+
+// requiredRuntimePodAffinity 只依赖当前沙箱主运行时 Pod 标签,不放开跨租户或跨沙箱调度约束。
+func requiredRuntimePodAffinity(plan CreateSandboxPlan) *corev1.Affinity {
+	runtimeRole := "sandbox"
+	found := false
+	for _, pod := range podGroupForPlan(plan) {
+		for _, component := range pod.Containers {
+			if component.Name == plan.Runtime.AdapterSpec.RuntimeContainer.Name {
+				runtimeRole = pod.Name
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+	return &corev1.Affinity{PodAffinity: &corev1.PodAffinity{RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
+		LabelSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, runtimeRole)},
+		TopologyKey:   "kubernetes.io/hostname",
+	}}}}
 }
 
 // containerFromRuntime 构造运行时或 infra sidecar 容器。
 func (o *K8sOrchestrator) containerFromRuntime(spec workload.ComponentSpec, image string, adapter AdapterSpec) corev1.Container {
 	if image == "" {
 		image = spec.ImageURL
+	}
+	securityContext := containerSecurityContext(readOnlyRootFilesystem(spec.ReadOnlyRootFilesystem))
+	if spec.RunAsUser != nil {
+		securityContext.RunAsUser = spec.RunAsUser
+	}
+	if spec.RunAsGroup != nil {
+		securityContext.RunAsGroup = spec.RunAsGroup
 	}
 	return corev1.Container{
 		Name:            spec.Name,
@@ -1329,10 +1616,10 @@ func (o *K8sOrchestrator) containerFromRuntime(spec workload.ComponentSpec, imag
 		Command:         spec.Command,
 		Args:            spec.Args,
 		WorkingDir:      spec.Workdir,
-		Env:             envVars(spec.Env),
+		Env:             envVarsWithSecrets(spec.Env, spec.SecretEnv),
 		Ports:           containerPorts(spec.Ports),
 		Resources:       resources(spec.Resources, o.cfg),
-		SecurityContext: containerSecurityContext(readOnlyRootFilesystem(spec.ReadOnlyRootFilesystem)),
+		SecurityContext: securityContext,
 		VolumeMounts:    volumeMountsForContainer(adapter, spec),
 		ReadinessProbe:  probe(spec.ReadinessProbe),
 		LivenessProbe:   probe(spec.LivenessProbe),
@@ -1340,11 +1627,14 @@ func (o *K8sOrchestrator) containerFromRuntime(spec workload.ComponentSpec, imag
 }
 
 // containerFromTool 构造 web-embed 工具组件容器。
-func (o *K8sOrchestrator) containerFromTool(tool Tool, component workload.ComponentSpec, adapter AdapterSpec) corev1.Container {
+func (o *K8sOrchestrator) containerFromTool(plan CreateSandboxPlan, tool Tool, component workload.ComponentSpec) corev1.Container {
 	mounts := []corev1.VolumeMount{}
 	seenMountPaths := map[string]struct{}{}
 	if shouldMountWorkspace(component) {
-		mounts = appendUniqueVolumeMount(mounts, seenMountPaths, corev1.VolumeMount{Name: VolumeDomainWorkspace, MountPath: adapter.WorkspaceDir})
+		mounts = appendUniqueVolumeMount(mounts, seenMountPaths, corev1.VolumeMount{Name: VolumeDomainWorkspace, MountPath: plan.Runtime.AdapterSpec.WorkspaceDir})
+	}
+	for _, domain := range toolDomainVolumeMounts(plan.Runtime.AdapterSpec, component) {
+		mounts = appendUniqueVolumeMount(mounts, seenMountPaths, domain)
 	}
 	for _, mount := range toolEphemeralVolumeMounts(tool, component) {
 		mounts = appendUniqueVolumeMount(mounts, seenMountPaths, mount)
@@ -1356,7 +1646,7 @@ func (o *K8sOrchestrator) containerFromTool(tool Tool, component workload.Compon
 		Command:         component.Command,
 		Args:            component.Args,
 		WorkingDir:      component.Workdir,
-		Env:             envVars(component.Env),
+		Env:             envVarsWithSecrets(component.Env, component.SecretEnv),
 		Ports:           containerPorts(component.Ports),
 		Resources:       resources(component.Resources, o.cfg),
 		SecurityContext: containerSecurityContext(readOnlyRootFilesystem(component.ReadOnlyRootFilesystem)),
@@ -1368,7 +1658,7 @@ func (o *K8sOrchestrator) containerFromTool(tool Tool, component workload.Compon
 
 // podVolumesForPlan 汇总运行时卷域与工具临时卷,保证工具缓存不复用学生工作区或私有域。
 func podVolumesForPlan(plan CreateSandboxPlan) []corev1.Volume {
-	volumes := volumeDomains(plan.Runtime.AdapterSpec)
+	volumes := volumeDomainsForPlan(plan)
 	seen := map[string]struct{}{}
 	for _, volume := range volumes {
 		seen[volume.Name] = struct{}{}
@@ -1392,13 +1682,32 @@ func podVolumesForPlan(plan CreateSandboxPlan) []corev1.Volume {
 }
 
 // podVolumesForTool 汇总工具需要的工作区 PVC 和私有临时卷。
-func podVolumesForTool(tool Tool, component workload.ComponentSpec) []corev1.Volume {
+func podVolumesForTool(plan CreateSandboxPlan, tool Tool, component workload.ComponentSpec) []corev1.Volume {
 	volumes := []corev1.Volume{}
+	seen := map[string]struct{}{}
 	if shouldMountWorkspace(component) {
 		volumes = append(volumes, corev1.Volume{
 			Name:         VolumeDomainWorkspace,
 			VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: VolumeDomainWorkspace}},
 		})
+		seen[VolumeDomainWorkspace] = struct{}{}
+	}
+	for _, domain := range component.MountDomains {
+		name := strings.TrimSpace(domain)
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		if !volumeDomainSharedByPlan(plan, name) {
+			continue
+		}
+		volumes = append(volumes, corev1.Volume{
+			Name:         name,
+			VolumeSource: corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: name}},
+		})
+		seen[name] = struct{}{}
 	}
 	for _, mount := range component.EphemeralMounts {
 		volumes = append(volumes, corev1.Volume{
@@ -1407,6 +1716,24 @@ func podVolumesForTool(tool Tool, component workload.ComponentSpec) []corev1.Vol
 		})
 	}
 	return volumes
+}
+
+// toolDomainVolumeMounts 把组件显式声明的安全域转换成只读挂载,不允许工具自定义路径。
+func toolDomainVolumeMounts(adapter AdapterSpec, component workload.ComponentSpec) []corev1.VolumeMount {
+	domains := make(map[string]VolumeDomainSpec, len(adapter.VolumeDomains))
+	for _, domain := range adapter.VolumeDomains {
+		domains[domain.Name] = domain
+	}
+	mounts := make([]corev1.VolumeMount, 0, len(component.MountDomains))
+	for _, raw := range component.MountDomains {
+		name := strings.TrimSpace(raw)
+		domain, ok := domains[name]
+		if !ok {
+			continue
+		}
+		mounts = append(mounts, corev1.VolumeMount{Name: domain.Name, MountPath: domain.MountPath, ReadOnly: true})
+	}
+	return mounts
 }
 
 // toolEphemeralVolumeMounts 将工具声明的临时目录转换为只挂给该工具容器的 emptyDir。
@@ -1438,18 +1765,20 @@ func toolEphemeralVolumeName(toolCode, componentName, mountName string) string {
 }
 
 // volumeDomains 为 adapter 声明的安全域创建 Pod 卷,运行态默认用临时卷防止进入学生代码持久化。
-func volumeDomains(adapter AdapterSpec) []corev1.Volume {
-	volumes := make([]corev1.Volume, 0, len(adapter.VolumeDomains))
-	for _, domain := range adapter.VolumeDomains {
-		volumes = append(volumes, volumeForDomain(domain))
+func volumeDomainsForPlan(plan CreateSandboxPlan) []corev1.Volume {
+	shared := sharedVolumeDomainsForPlan(plan)
+	volumes := make([]corev1.Volume, 0, len(plan.Runtime.AdapterSpec.VolumeDomains))
+	for _, domain := range plan.Runtime.AdapterSpec.VolumeDomains {
+		_, sharedDomain := shared[domain.Name]
+		volumes = append(volumes, volumeForDomain(domain, sharedDomain))
 	}
 	return volumes
 }
 
-// volumeForDomain 按安全域持久化策略构造 Kubernetes 卷。
-func volumeForDomain(domain VolumeDomainSpec) corev1.Volume {
+// volumeForDomain 按安全域持久化策略构造 Kubernetes 卷,跨 Pod 共享域使用沙箱级临时 PVC。
+func volumeForDomain(domain VolumeDomainSpec, shared bool) corev1.Volume {
 	volume := corev1.Volume{Name: domain.Name}
-	if domain.Name == VolumeDomainWorkspace || domain.Persistence == VolumePersistenceMinioCode || domain.Persistence == VolumePersistenceSnapshot {
+	if shared || domain.Name == VolumeDomainWorkspace || domain.Persistence == VolumePersistenceMinioCode || domain.Persistence == VolumePersistenceSnapshot {
 		volume.VolumeSource = corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: domain.Name}}
 		return volume
 	}
@@ -1509,20 +1838,43 @@ func studentAccessibleContainer(spec workload.ComponentSpec) bool {
 }
 
 // persistentVolumeDomains 选出必须由 PVC 承载的卷域,确保 Pod 挂载和 PVC 创建口径一致。
-func persistentVolumeDomains(adapter AdapterSpec) []VolumeDomainSpec {
-	domains := make([]VolumeDomainSpec, 0, len(adapter.VolumeDomains))
-	for _, domain := range adapter.VolumeDomains {
-		if domain.Name == VolumeDomainWorkspace || domain.Persistence == VolumePersistenceMinioCode || domain.Persistence == VolumePersistenceSnapshot {
+func persistentVolumeDomains(plan CreateSandboxPlan) []VolumeDomainSpec {
+	shared := sharedVolumeDomainsForPlan(plan)
+	domains := make([]VolumeDomainSpec, 0, len(plan.Runtime.AdapterSpec.VolumeDomains))
+	for _, domain := range plan.Runtime.AdapterSpec.VolumeDomains {
+		if _, sharedDomain := shared[domain.Name]; sharedDomain || domain.Name == VolumeDomainWorkspace || domain.Persistence == VolumePersistenceMinioCode || domain.Persistence == VolumePersistenceSnapshot {
 			domains = append(domains, domain)
 		}
 	}
 	return domains
 }
 
+// sharedVolumeDomainsForPlan 收集需要跨运行时与独立工具 Pod 共享的安全域。
+func sharedVolumeDomainsForPlan(plan CreateSandboxPlan) map[string]struct{} {
+	shared := map[string]struct{}{}
+	for _, tool := range plan.Tools {
+		for _, component := range tool.ResourceSpec.Components {
+			for _, domain := range component.MountDomains {
+				name := strings.TrimSpace(domain)
+				if name != "" {
+					shared[name] = struct{}{}
+				}
+			}
+		}
+	}
+	return shared
+}
+
+// volumeDomainSharedByPlan 判断工具声明的安全域是否已被当前组合纳入跨 Pod 共享卷。
+func volumeDomainSharedByPlan(plan CreateSandboxPlan, name string) bool {
+	_, ok := sharedVolumeDomainsForPlan(plan)[strings.TrimSpace(name)]
+	return ok
+}
+
 // snapshotDomainsForPlan 计算本次快照真实覆盖的 PVC 卷域,排除私有判题域和临时卷。
 func snapshotDomainsForPlan(plan CreateSandboxPlan) []string {
 	out := []string{}
-	for _, domain := range persistentVolumeDomains(plan.Runtime.AdapterSpec) {
+	for _, domain := range persistentVolumeDomains(plan) {
 		if domain.Name == VolumeDomainJudgePrivate || domain.SnapshotScope == VolumeSnapshotNever {
 			continue
 		}
@@ -1743,11 +2095,57 @@ func toolComponentPodName(toolCode, componentName string) string {
 // runtimePodNames 返回阶段一必须 Ready 的运行时 Pod 列表,不把动态 Web 工具失败混作链节点失败。
 func runtimePodNames(plan CreateSandboxPlan) []string {
 	pods := podGroupForPlan(plan)
-	names := make([]string, 0, len(pods))
+	names := make([]string, 0, len(pods)+len(plan.Tools))
 	for _, pod := range pods {
 		names = append(names, pod.Name)
 	}
+	for _, tool := range plan.Tools {
+		if tool.Category != "infra" {
+			continue
+		}
+		for _, component := range tool.ResourceSpec.Components {
+			names = append(names, toolComponentPodName(tool.Code, component.Name))
+		}
+	}
 	return names
+}
+
+// runtimeComputePodNames 选择包含运行时主容器的 Pod,学生工作区独立 Pod 不参与链重置。
+func runtimeComputePodNames(plan CreateSandboxPlan) []string {
+	containerName := plan.Runtime.AdapterSpec.RuntimeContainer.Name
+	result := []string{}
+	for _, pod := range podGroupForPlan(plan) {
+		for _, container := range pod.Containers {
+			if container.Name == containerName {
+				result = append(result, pod.Name)
+				break
+			}
+		}
+	}
+	return result
+}
+
+// waitPodDeleted 等待被重置的 Pod 真正消失,避免同名对象仍处于 Terminating 时创建失败。
+func waitPodDeleted(ctx context.Context, cs kubernetes.Interface, namespace, name string, pollSeconds int) error {
+	if pollSeconds <= 0 {
+		return fmt.Errorf("SANDBOX_READY_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	ticker := time.NewTicker(sandboxPodReadyPollInterval(pollSeconds))
+	defer ticker.Stop()
+	for {
+		_, err := cs.CoreV1().Pods(namespace).Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("等待运行时 Pod 删除失败: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("等待运行时 Pod 删除超时: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 // splitExecTarget 把内部执行目标拆成 pod/container,未带 Pod 时使用单 Pod 拓扑名称。
@@ -1760,8 +2158,16 @@ func splitExecTarget(target string) (string, string) {
 }
 
 // prepullDaemonSet 构造镜像预拉取 DaemonSet。
-func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage, specs []PrepullImageSpec) *appsv1.DaemonSet {
+func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage, compositionDigest string, specs []PrepullImageSpec) *appsv1.DaemonSet {
 	labels := map[string]string{"app": "chaimir", "module": "sandbox", "runtime_image_id": ids.Format(image.ID)}
+	digestPrefix := strings.TrimPrefix(strings.TrimSpace(compositionDigest), "sha256:")
+	if len(digestPrefix) > 16 {
+		digestPrefix = digestPrefix[:16]
+	}
+	if digestPrefix == "" {
+		digestPrefix = "unknown"
+	}
+	labels["composition_digest"] = digestPrefix
 	automount := false
 	initContainers := make([]corev1.Container, 0, len(specs))
 	for idx, spec := range specs {
@@ -1795,7 +2201,7 @@ func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage, specs []PrepullIm
 		VolumeMounts:    prepullVolumeMounts(holdSpec),
 	}
 	return &appsv1.DaemonSet{
-		ObjectMeta: metav1.ObjectMeta{Name: "chaimir-prepull-" + ids.Format(image.ID), Namespace: o.cfg.PrepullNamespace, Labels: labels},
+		ObjectMeta: metav1.ObjectMeta{Name: "chaimir-prepull-" + ids.Format(image.ID) + "-" + digestPrefix, Namespace: o.cfg.PrepullNamespace, Labels: labels},
 		Spec: appsv1.DaemonSetSpec{
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 			Template: corev1.PodTemplateSpec{
@@ -2025,6 +2431,18 @@ func envVars(items []workload.EnvVarSpec) []corev1.EnvVar {
 	out := make([]corev1.EnvVar, 0, len(items))
 	for _, item := range items {
 		out = append(out, corev1.EnvVar{Name: item.Name, Value: item.Value})
+	}
+	return out
+}
+
+// envVarsWithSecrets 合并非敏感字面量和受控 SecretKeyRef 环境变量。
+func envVarsWithSecrets(items []workload.EnvVarSpec, secrets []workload.SecretEnvVarSpec) []corev1.EnvVar {
+	out := envVars(items)
+	for _, item := range secrets {
+		out = append(out, corev1.EnvVar{Name: item.Name, ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: item.SecretName},
+			Key:                  item.SecretKey,
+		}}})
 	}
 	return out
 }

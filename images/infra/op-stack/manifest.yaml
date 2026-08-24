@@ -1,4 +1,4 @@
-﻿# 本文件声明 infra/op-stack 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 infra/op-stack 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: infra
 name: op-stack
@@ -35,17 +35,68 @@ env_keys:
   config:
     - OP_NODE_L1_ETH_RPC
     - OP_NODE_L2_ENGINE_RPC
+    - OP_NODE_L1_BEACON
     - OP_NODE_ROLLUP_CONFIG
     - OP_NODE_RPC_ADDR
     - OP_NODE_RPC_PORT
-  secret: []
+  secret:
+    - CHAIMIR_OP_NODE_L2_ENGINE_JWT
+secrets_required:
+  - env: CHAIMIR_OP_NODE_L2_ENGINE_JWT
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
 data_driven: true
 capabilities:
-  - l2-stack
-  - rollup-sequencer
+  provides:
+    - l2-stack
+    - rollup-sequencer
+  requires:
+    - evm-json-rpc
+    - evm-engine-api
+    - ethereum-beacon-api
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      rollup_config:
+        type: string
+        x-chaimir-env: infra/OP_NODE_ROLLUP_CONFIG
+      l1_beacon:
+        type: string
+        x-chaimir-env: infra/OP_NODE_L1_BEACON
+      rpc_addr:
+        type: string
+        x-chaimir-env: infra/OP_NODE_RPC_ADDR
+      rpc_port:
+        type: integer
+        x-chaimir-env: infra/OP_NODE_RPC_PORT
+  student_access: private
 infra:
+  runtime_config_required: true
   eco_tags:
     - evm
+  bindings:
+    - name: l1_execution
+      capability: evm-json-rpc
+      endpoint: rpc
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:OP_NODE_L1_ETH_RPC
+    - name: l2_engine
+      capability: evm-engine-api
+      endpoint: engine
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:OP_NODE_L2_ENGINE_RPC
+    - name: l1_beacon
+      capability: ethereum-beacon-api
+      endpoint: http
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:OP_NODE_L1_BEACON
   roles:
     - l2
     - sequencer
@@ -72,6 +123,11 @@ security:
   drop_capabilities:
     - ALL
   network_policy: deny-all
+security_exceptions:
+  - field: writable_mounts
+    reason: OP Node 需要在运行期把组合注入的 JWT Secret 写入临时文件;只允许写入 runtime-state,不写入镜像或工作区。
+    writable_mounts:
+      - runtime-state
 student_access:
   enabled: false
 resources:

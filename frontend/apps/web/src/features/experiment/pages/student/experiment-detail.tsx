@@ -5,7 +5,7 @@
 // 阶段与检查点只呈现学生可见部分:分值、解锁条件、阶段内组件数量。
 // 判题器编号、题目引用、环境初始化脚本已由后端投影剔除,前端不做二次过滤(铁律 1)。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { FlaskConical, Layers, Play, Target } from 'lucide-react'
 import {
@@ -23,15 +23,20 @@ import {
   CardBody,
   CardHeader,
   ChainProgress,
+  DataPanel,
   DescriptionList,
   Empty,
+  MetricStrip,
+  ObjectIdentity,
   PageBody,
   PageHeader,
   PageScaffold,
-  PageSection,
-  Stat,
   StatusIndicator,
   Table,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -168,95 +173,119 @@ function ExperimentDetailContent({ experiment }: { experiment: StudentExperiment
 
   return (
     <>
+      {/*
+        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的实验名承担,
+        故页面头只出面包屑,面包屑末节到「实验实训」为止(§6.5.0 通则 1)。
+      */}
       <PageHeader
-        kicker={
-          <Breadcrumb
-            items={[
-              { label: '实验实训', href: '/student/experiments' },
-              { label: experiment.name },
-            ]}
-          />
-        }
-        title={experiment.name}
-        description={experiment.description}
-        icon={FlaskConical}
-        actions={
+        kicker={<Breadcrumb items={[{ label: '实验实训', href: '/student/experiments' }]} />}
+      />
+
+      {/*
+        对象身份区:实验名 + 状态 + 关键属性横排 + 主操作(进入实验)。
+        「完成方式/实验报告/小组规模」是实验属性,横排在这里就够,不再占 Stat 大卡;
+        检查点与阶段这两个可度量数字降为内联摘要,与下方的阶段表、检查点表对照着看。
+      */}
+      <ObjectIdentity
+        name={experiment.name}
+        status={
           <StatusIndicator
             tone={experimentStatusTone(experiment.status)}
             label={experimentStatusLabel(experiment.status)}
           />
         }
+        subtitle={experiment.description}
+        actions={
+          <Button
+            variant="primary"
+            leftIcon={Play}
+            loading={entering}
+            disabled={needsGroup}
+            onClick={() => void enterExperiment()}
+          >
+            进入实验
+          </Button>
+        }
+        properties={[
+          { label: '完成方式', value: isGroup ? `小组 ${experiment.group_config.size} 人` : '独立完成' },
+          { label: '实验报告', value: experiment.require_report ? '需要提交' : '不需要' },
+          { label: '代码环境', value: `${experiment.components.envs.length} 个` },
+          { label: '仿真场景', value: `${experiment.components.sims.length} 个` },
+        ]}
       />
 
-      {/* 指标带只放可度量的检查点与阶段数;完成方式与是否交报告是实验属性,
-          在右侧「实验要求」里已逐项列出,不占指标位(规范 §6.5) */}
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <Stat
-            label="检查点"
-            value={experiment.components.checkpoints.length}
-            icon={Target}
-            chain={{ done: 0, total: experiment.components.checkpoints.length }}
-            hint="进入实验后按顺序判分"
-          />
-          <Stat label="检查点总分" value={checkpointTotal} icon={Target} />
-          <Stat label="实验阶段" value={stages.length} icon={Layers} />
-        </div>
-      </PageSection>
+      {actionError ? (
+        <Callout tone="danger" className="mt-4">
+          {actionError}
+        </Callout>
+      ) : null}
+      {needsGroup ? (
+        <Callout tone="warning" title="等待老师分组" className="mt-4">
+          这是小组实验,老师把你分到小组后才能进入。进入后会为你准备独立的实验环境;
+          中途退出再进入会接着上次继续。
+        </Callout>
+      ) : null}
+
+      <MetricStrip
+        label="实验构成摘要"
+        className="mt-4 mb-5"
+        items={[
+          {
+            label: '检查点',
+            value: experiment.components.checkpoints.length,
+            hint: '进入实验后按顺序判分',
+          },
+          { label: '检查点总分', value: checkpointTotal, hint: '与报告分相加即实验得分' },
+          { label: '实验阶段', value: stages.length, hint: '逐阶段解锁' },
+        ]}
+      />
 
       <PageBody
         rail={
-          <div className="flex flex-col gap-4">
-            <Card>
-              <CardHeader
-                title="进入实验"
-                description="进入后会为你准备独立的实验环境;中途退出再进入会接着上次继续。"
-              />
-              <CardBody className="flex flex-col gap-3">
-                {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-                {needsGroup ? (
-                  <Callout tone="warning" title="等待老师分组">
-                    这是小组实验,老师把你分到小组后才能进入。
-                  </Callout>
-                ) : null}
-                <Button
-                  variant="primary"
-                  leftIcon={Play}
-                  loading={entering}
-                  disabled={needsGroup}
-                  onClick={() => void enterExperiment()}
-                >
-                  进入实验
-                </Button>
-              </CardBody>
-            </Card>
-
-            {isGroup && experiment.my_group_id ? (
-              <ExperimentGroupCard groupId={experiment.my_group_id} />
-            ) : null}
-
-            <ExperimentRequirementCard experiment={experiment} />
-          </div>
+          isGroup && experiment.my_group_id ? (
+            <ExperimentGroupCard groupId={experiment.my_group_id} />
+          ) : undefined
         }
       >
-        <PageSection title="实验阶段" description="按阶段推进,前一阶段的检查点通过后解锁下一阶段。">
-          <Table
-            columns={stageColumns}
-            data={stages}
-            rowKey={(stage) => String(stage.stage)}
-            empty={
-              <Empty
-                icon={Layers}
-                title="这个实验没有分阶段"
-                description="进入后在同一个环境内完成全部检查点。"
-              />
-            }
-          />
-        </PageSection>
+        {/* 子域用 Tabs 而不是长条纵向堆叠(§6.5.3 第 ④):阶段与检查点是同一实验的两个视角 */}
+        <Tabs defaultValue="stages">
+          <TabsList aria-label="实验构成">
+            <TabsTrigger value="stages" icon={Layers}>
+              实验阶段
+            </TabsTrigger>
+            <TabsTrigger value="checkpoints" icon={Target}>
+              检查点
+            </TabsTrigger>
+          </TabsList>
 
-        <PageSection title="检查点" description="每个检查点单独判分,通过后计入实验成绩。">
-          <CheckpointList experiment={experiment} />
-        </PageSection>
+          <TabsContent value="stages">
+            {/* 列表型子视图走 DataPanel 片段(§6.5.5 B):阶段清单不分页也不筛选,只用片本身 */}
+            <DataPanel label="实验阶段">
+              <Table
+                columns={stageColumns}
+                data={stages}
+                rowKey={(stage) => String(stage.stage)}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):阶段名一行、包含内容与进入条件一行
+                mobileCard={(stage) => ({
+                  title: `第 ${stage.stage} 阶段 · ${stage.title}`,
+                  meta: stage.description || '按阶段推进,前一阶段的检查点通过后解锁下一阶段。',
+                })}
+                empty={
+                  <Empty
+                    icon={Layers}
+                    title="这个实验没有分阶段"
+                    description="进入后在同一个环境内完成全部检查点。"
+                  />
+                }
+              />
+            </DataPanel>
+          </TabsContent>
+
+          <TabsContent value="checkpoints">
+            <CheckpointList experiment={experiment} />
+          </TabsContent>
+        </Tabs>
       </PageBody>
     </>
   )
@@ -265,6 +294,7 @@ function ExperimentDetailContent({ experiment }: { experiment: StudentExperiment
 /**
  * CheckpointList 列出检查点分值。
  * 判题器与题目引用属答案链路,后端投影已剔除,这里只呈现序号与分值。
+ * 这是页内子视图(§6.5.5 B)的只读属性型形态,故用 DescriptionList 而不是再排一张表。
  */
 function CheckpointList({ experiment }: { experiment: StudentExperiment }) {
   const checkpoints = experiment.components.checkpoints
@@ -281,6 +311,7 @@ function CheckpointList({ experiment }: { experiment: StudentExperiment }) {
 
   return (
     <Card>
+      <CardHeader title="检查点" description="每个检查点单独判分,通过后计入实验成绩。" />
       <CardBody className="flex flex-col gap-3">
         <ChainProgress
           total={checkpoints.length}
@@ -296,36 +327,6 @@ function CheckpointList({ experiment }: { experiment: StudentExperiment }) {
             mono: true,
           }))}
         />
-      </CardBody>
-    </Card>
-  )
-}
-
-/**
- * ExperimentRequirementCard 说明实验要求:环境、仿真场景与报告。
- */
-function ExperimentRequirementCard({ experiment }: { experiment: StudentExperiment }) {
-  const items = useMemo(
-    () => [
-      { term: '代码环境', description: `${experiment.components.envs.length} 个` },
-      { term: '仿真场景', description: `${experiment.components.sims.length} 个` },
-      { term: '实验报告', description: experiment.require_report ? '需要提交' : '不需要' },
-      {
-        term: '小组规模',
-        description:
-          experiment.collab_mode === ExperimentCollabMode.GROUP
-            ? `${experiment.group_config.size} 人`
-            : '独立完成',
-      },
-    ],
-    [experiment],
-  )
-
-  return (
-    <Card>
-      <CardHeader title="实验要求" />
-      <CardBody>
-        <DescriptionList dense items={items} />
       </CardBody>
     </Card>
   )

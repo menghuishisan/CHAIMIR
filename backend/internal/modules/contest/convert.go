@@ -14,7 +14,7 @@ func contestDTOFromModel(item Contest) ContestDTO {
 
 // problemDTOFromModel 转换竞赛题引用为 HTTP 输出。
 func problemDTOFromModel(item ContestProblem) ProblemDTO {
-	return ProblemDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: item.DynamicScore, BattleConfig: item.BattleConfig, BattleRule: item.BattleRule, Seq: item.Seq}
+	return ProblemDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, DynamicScore: item.DynamicScore, BattleConfig: item.BattleConfig, BattleRule: item.BattleRule, Seq: item.Seq, CompositionDigest: item.CompositionDigest}
 }
 
 // teamDTOFromModel 转换队伍及成员为 HTTP 输出。
@@ -29,7 +29,24 @@ func teamDTOFromModel(item Team) TeamDTO {
 
 // submissionDTOFromModel 转换解题提交为 HTTP 输出。
 func submissionDTOFromModel(item SolveSubmission) SubmissionDTO {
-	return SubmissionDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ProblemID: ids.ID(item.ProblemID), TeamID: ids.ID(item.TeamID), SubmitterID: ids.ID(item.SubmitterID), ContentRef: item.ContentRef, SourceRef: item.SourceRef, JudgeTaskRef: item.JudgeTaskRef, Passed: item.Passed, Score: item.Score, SandboxRef: item.SandboxRef, SubmittedAt: item.SubmittedAt}
+	return SubmissionDTO{ID: ids.ID(item.ID), ContestID: ids.ID(item.ContestID), ProblemID: ids.ID(item.ProblemID), TeamID: ids.ID(item.TeamID), SubmitterTenantID: ids.ID(item.SubmitterTenantID), SubmitterID: ids.ID(item.SubmitterID), ContentRef: item.ContentRef, SourceRef: item.SourceRef, JudgeTaskRef: item.JudgeTaskRef, Passed: item.Passed, Score: item.Score, SandboxRef: item.SandboxRef, SubmittedAt: item.SubmittedAt}
+}
+
+// contestSandboxResponseFromInfo 投影 M2 摘要到 M8 学生网关响应，禁止把组织方 Namespace 透传给浏览器。
+func contestSandboxResponseFromInfo(info contracts.SandboxInfo) ContestSandboxResponse {
+	return ContestSandboxResponse{
+		SandboxID:           ids.ID(info.SandboxID),
+		SourceRef:           info.SourceRef,
+		OwnerAccountID:      ids.ID(info.OwnerAccountID),
+		RuntimeCode:         info.RuntimeCode,
+		RuntimeImageVersion: info.RuntimeImageVersion,
+		Phase:               info.Phase,
+		Status:              info.Status,
+		ToolAccess:          append([]contracts.SandboxToolAccess(nil), info.ToolAccess...),
+		Capabilities:        info.Capabilities,
+		ResourceUsage:       info.ResourceUsage,
+		WorkspaceRevision:   info.WorkspaceRevision,
+	}
 }
 
 // battleEntryDTOFromModel 转换对抗参战物为 HTTP 输出。
@@ -89,7 +106,7 @@ func vulnSourceDTOFromModel(item VulnSource) VulnSourceDTO {
 
 // vulnProblemDTOFromModel 转换漏洞题草稿为 HTTP 输出。
 func vulnProblemDTOFromModel(item VulnProblem) VulnProblemDTO {
-	return VulnProblemDTO{ID: ids.ID(item.ID), SourceID: ids.ID(item.SourceID), ExternalRef: item.ExternalRef, Title: item.Title, Level: item.Level, RuntimeMode: item.RuntimeMode, DraftBody: item.DraftBody, PrevalidateStatus: item.PrevalidateStatus, PrevalidateDetail: item.PrevalidateDetail, ContentItemCode: item.ContentItemCode, ContentItemVersion: item.ContentItemVersion, Status: item.Status}
+	return VulnProblemDTO{ID: ids.ID(item.ID), SourceID: ids.ID(item.SourceID), ExternalRef: item.ExternalRef, Title: item.Title, Level: item.Level, RuntimeMode: item.RuntimeMode, DraftBody: item.DraftBody, PrevalidateStatus: item.PrevalidateStatus, PrevalidateDetail: item.PrevalidateDetail, CompositionDigest: item.CompositionDigest, ContentItemCode: item.ContentItemCode, ContentItemVersion: item.ContentItemVersion, Status: item.Status}
 }
 
 // contestAchievementFromRecord 转换个人战绩为跨模块竞赛成就契约。

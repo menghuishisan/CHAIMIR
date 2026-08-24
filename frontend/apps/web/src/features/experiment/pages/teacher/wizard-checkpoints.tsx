@@ -156,6 +156,34 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
               columns={columns}
               data={draft.components.checkpoints}
               rowKey={(checkpoint) => checkpoint.id}
+              elevated={false}
+              // <md 换行卡(§6.4.1 规则 3):检查点序号一行、判题方式与题目一行,分值在右
+              mobileCard={(checkpoint) => {
+                const index = draft.components.checkpoints.indexOf(checkpoint)
+                return {
+                  title: `检查点 ${index + 1}`,
+                  meta: `${checkpoint.judger} · ${checkpoint.item_code} · ${checkpoint.item_version}`,
+                  badge: <Badge tone="neutral">{checkpoint.score} 分</Badge>,
+                  action: (
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => setModal({ index })}>
+                        编辑
+                      </Button>
+                      <IconButton
+                        variant="ghost"
+                        size="sm"
+                        icon={Trash2}
+                        aria-label={`删除检查点 ${checkpoint.id}`}
+                        onClick={() =>
+                          writeCheckpoints(
+                            draft.components.checkpoints.filter((_, i) => i !== index),
+                          )
+                        }
+                      />
+                    </div>
+                  ),
+                }
+              }}
             />
           )}
         </CardBody>

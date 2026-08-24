@@ -19,6 +19,7 @@ source:
   type: thin-wrapper
 upstream:
   image: ghcr.io/foundry-rs/foundry:v1.7.1
+  version: v1.7.1
   digest: sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
   reuse_policy: thin-wrapper
 env_keys:
@@ -34,18 +35,30 @@ secrets_required:
     runtime_value: secret-or-payload
 data_driven: true
 capabilities:
-  - chain-runtime
-  - evm-json-rpc
-  - foundry-toolchain
-  - fork-capable
-  - workspace-helper
-  - chain-capability-helper
+  provides:
+    - chain-runtime
+    - evm-json-rpc
+    - foundry-toolchain
+    - fork-capable
+    - chain-capability-helper
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 runtime:
   eco: evm
   adapter_level: 2
-  default_tool_codes:
-    - code-server
-    - remix
+  native:
+    helper: /usr/local/bin/chaimir-foundry-adapter
+    profile: evm-contract
+    exec_target: sandbox/runtime
+    reset_strategy: recreate_runtime
+    actions:
+      deploy: [/usr/local/bin/chaimir-foundry-adapter, deploy]
+      tx: [/usr/local/bin/chaimir-foundry-adapter, tx]
+      query: [/usr/local/bin/chaimir-foundry-adapter, query]
 ports:
   - name: rpc
     container_port: 8545
@@ -87,7 +100,12 @@ selftest:
       command:
         - sh
         - -lc
-        - "forge --version && anvil --version && cast --version && chaimir-workspace selftest && chaimir-chain selftest"
+        - "forge --version && anvil --version && cast --version"
+capability_selftest:
+  deploy_payload:
+    bytecode: "0x6005600c60003960056000f3600060005500"
+    from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+  query_target: chainId
 supply_chain:
   sbom: true
   trivy_required: true

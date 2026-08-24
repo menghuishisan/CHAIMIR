@@ -108,7 +108,7 @@ function NewExperimentBootstrap() {
       <PageHeader
         kicker={
           <Breadcrumb
-            items={[{ label: '实验编排', href: '/teacher/experiments' }, { label: '新建实验' }]}
+            items={[{ label: '实验编排', href: '/teacher/experiments' }]}
           />
         }
         title="新建实验"
@@ -132,20 +132,17 @@ function NewExperimentBootstrap() {
 
 /**
  * WizardLoader 读取服务端草稿后进入向导。
- * 实验定义与课程清单一起读:基础信息步要选所属课程。
- * 教师侧没有单个实验的读取接口,故从 teacher 组的列表里定位(该列表返回完整定义)。
+ * 实验定义走单读、课程清单一次取齐(基础信息步要选所属课程),两者并行。
  */
 function WizardLoader({ experimentId }: { experimentId: string }) {
   const view = useAsyncResource(
     () =>
       Promise.all([
-        api.experiment
-          .getExperiments({ page: 1, size: PAGINATION_MAX_SIZE })
-          .then((page) => page.list.find((item) => item.id === experimentId)),
+        api.experiment.getExperiment(experimentId),
         api.teaching.getCourses({ role: 'teacher', page: 1, size: PAGINATION_MAX_SIZE }),
       ]).then(([experiment, courses]) => ({ experiment, courses: courses.list })),
     [experimentId],
-    (value) => value.experiment === undefined
+    () => false
   )
 
   return (
@@ -156,15 +153,7 @@ function WizardLoader({ experimentId }: { experimentId: string }) {
         emptyTitle="实验不存在"
         emptyDescription="这个实验可能已被删除,请回到实验编排查看。"
       >
-        {(data) =>
-          data.experiment ? (
-            <WizardContent
-              experiment={data.experiment}
-              courses={data.courses}
-              onSaved={view.reload}
-            />
-          ) : null
-        }
+        {(data) => <WizardContent experiment={data.experiment} courses={data.courses} />}
       </ResourceState>
     </PageScaffold>
   )
@@ -173,13 +162,12 @@ function WizardLoader({ experimentId }: { experimentId: string }) {
 interface WizardContentProps {
   experiment: Experiment
   courses: Course[]
-  onSaved: () => void
 }
 
 /**
  * WizardContent 渲染步骤指示、当前步表单与步进动作。
  */
-function WizardContent({ experiment, courses, onSaved }: WizardContentProps) {
+function WizardContent({ experiment, courses }: WizardContentProps) {
   const navigate = useNavigate()
   const [draft, setDraft] = useState<ExperimentDraft>(() => draftFromExperiment(experiment))
   const [errors, setErrors] = useState<Record<string, string | null>>({})
@@ -187,7 +175,7 @@ function WizardContent({ experiment, courses, onSaved }: WizardContentProps) {
   const [publishing, setPublishing] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
-  const persistence = useWizardPersistence(experiment.id, experiment.wizard_step, onSaved)
+  const persistence = useWizardPersistence(experiment.id, experiment.wizard_step)
 
   const patchDraft = useCallback((patch: Partial<ExperimentDraft>) => {
     setDraft((current) => ({ ...current, ...patch }))
@@ -297,7 +285,6 @@ function WizardContent({ experiment, courses, onSaved }: WizardContentProps) {
             items={[
               { label: '实践' },
               { label: '实验编排', href: '/teacher/experiments' },
-              { label: draft.name || '未命名实验' },
             ]}
           />
         }

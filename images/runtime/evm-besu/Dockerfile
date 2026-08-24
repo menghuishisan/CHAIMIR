@@ -15,6 +15,7 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     done
 
 COPY --from=upstream /opt/besu /opt/besu
+COPY patch-artifacts.sha256 /usr/local/share/chaimir/patch-artifacts.sha256
 
 # 官方 26.6.1 尚未发布高危依赖修复版;仅替换同一主线的 Netty/Jackson 安全补丁 jar,保留 Besu 应用本体。
 RUN set -eux; \
@@ -24,22 +25,34 @@ RUN set -eux; \
         rest="${old#${artifact}-4.2.10.Final}"; \
         rest="${rest%.jar}"; \
         new="${artifact}-${NETTY_VERSION}${rest}.jar"; \
+        expected="$(awk -v name="${new}" '$2 == name { print $1; exit }' /usr/local/share/chaimir/patch-artifacts.sha256)"; \
+        test -n "${expected}"; \
         curl -fL --retry 10 --retry-all-errors --connect-timeout 20 --retry-delay 3 \
             "https://repo.maven.apache.org/maven2/io/netty/${artifact}/${NETTY_VERSION}/${new}" \
             -o "${old}.patched"; \
+        echo "${expected}  ${old}.patched" | sha256sum -c -; \
         mv "${old}.patched" "${old}"; \
     done; \
+    expected="$(awk '$2 == "jackson-core-2.21.4.jar" { print $1; exit }' /usr/local/share/chaimir/patch-artifacts.sha256)"; \
+    test -n "${expected}"; \
     curl -fL --retry 10 --retry-all-errors --connect-timeout 20 --retry-delay 3 \
         "https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-core/${JACKSON_VERSION}/jackson-core-${JACKSON_VERSION}.jar" \
         -o "jackson-core-2.21.1.jar.patched"; \
+    echo "${expected}  jackson-core-2.21.1.jar.patched" | sha256sum -c -; \
     mv "jackson-core-2.21.1.jar.patched" "jackson-core-2.21.1.jar"; \
+    expected="$(awk '$2 == "jackson-databind-2.21.4.jar" { print $1; exit }' /usr/local/share/chaimir/patch-artifacts.sha256)"; \
+    test -n "${expected}"; \
     curl -fL --retry 10 --retry-all-errors --connect-timeout 20 --retry-delay 3 \
         "https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-databind/${JACKSON_VERSION}/jackson-databind-${JACKSON_VERSION}.jar" \
         -o "jackson-databind-2.21.1.jar.patched"; \
+    echo "${expected}  jackson-databind-2.21.1.jar.patched" | sha256sum -c -; \
     mv "jackson-databind-2.21.1.jar.patched" "jackson-databind-2.21.1.jar"; \
+    expected="$(awk '$2 == "jackson-datatype-jdk8-2.21.4.jar" { print $1; exit }' /usr/local/share/chaimir/patch-artifacts.sha256)"; \
+    test -n "${expected}"; \
     curl -fL --retry 10 --retry-all-errors --connect-timeout 20 --retry-delay 3 \
         "https://repo.maven.apache.org/maven2/com/fasterxml/jackson/datatype/jackson-datatype-jdk8/${JACKSON_VERSION}/jackson-datatype-jdk8-${JACKSON_VERSION}.jar" \
         -o "jackson-datatype-jdk8-2.21.1.jar.patched"; \
+    echo "${expected}  jackson-datatype-jdk8-2.21.1.jar.patched" | sha256sum -c -; \
     mv "jackson-datatype-jdk8-2.21.1.jar.patched" "jackson-datatype-jdk8-2.21.1.jar"
 
 FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
@@ -48,7 +61,7 @@ LABEL org.opencontainers.image.title="runtime/evm-besu"
 LABEL org.opencontainers.image.description="Chaimir Hyperledger Besu enterprise EVM runtime"
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    packages='bash=5.3-r12 ca-certificates=20260413-r0 openjdk-25-jre=25.0.3-r5 libstdc++=16.1.0-r4' \
+    packages='bash=5.3-r12 ca-certificates=20260413-r0 curl=8.21.0-r1 jq=1.8.1-r0 openjdk-25-jre=25.0.3-r5 libstdc++=16.1.0-r4' \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \

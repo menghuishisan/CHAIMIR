@@ -1,14 +1,13 @@
 # Chaimir 完整集群部署与验收编排。
 # 依据 docs/总-部署架构设计.md:所有运行环境执行统一生产安全基线。
-# 用法:make dev-up(首次 bootstrap);make dev-refresh(已 bootstrap 后刷新应用/迁移)。
+# 用法:make dev-up(首次 bootstrap);make dev-start(恢复现有环境);make dev-refresh(刷新应用/迁移);make dev-stop(保留数据停止)。
 #
 # 前置:docker、kubectl(内置 kustomize)。Harbor/Trivy/Cosign/Helm 统一走容器化工具入口。
 # 注:本仓库用 kubectl 内置 kustomize(kubectl kustomize / kubectl apply -k)。
 
 SHELL := /bin/bash
 OVERLAY := overlays/acceptance
-SECRET_FILE := config/secret.env
-SECRET_EXAMPLE := config/secret.env.example
+SECRET_SOURCE_FILE := config/secret.env
 SUPPLY_CHAIN_CONFIG := config/chaimir.env
 SUPPLY_CHAIN_SECRET_FILE := config/supply-chain.secret.env
 SUPPLY_CHAIN_SECRET_EXAMPLE := config/supply-chain.secret.env.example
@@ -23,6 +22,12 @@ TLS_DIR := config/chaimir-tls
 TLS_SECRET := chaimir-tls
 METRICS_SERVER_VERSION := v0.8.1
 POLICY_CONTROLLER_VERSION := 0.10.6
+EXTERNAL_SECRETS_MANIFEST := ../images/infra/external-secrets/manifest.yaml
+EXTERNAL_SECRETS_REGISTRY := $(shell powershell -NoProfile -Command "((Select-String -Path '$(EXTERNAL_SECRETS_MANIFEST)' -Pattern '^  registry: ').Line -split '\\s+')[2]")
+EXTERNAL_SECRETS_UPSTREAM_IMAGE := $(shell powershell -NoProfile -Command "((Select-String -Path '$(EXTERNAL_SECRETS_MANIFEST)' -Pattern '^  image: ').Line -split '\\s+')[2]")
+EXTERNAL_SECRETS_VERSION := $(shell powershell -NoProfile -Command "(((Select-String -Path '$(EXTERNAL_SECRETS_MANIFEST)' -Pattern '^  version: ').Line -split '\\s+')[2]).TrimStart('v')")
+EXTERNAL_SECRETS_DIGEST := $(shell powershell -NoProfile -Command "((Select-String -Path '$(EXTERNAL_SECRETS_MANIFEST)' -Pattern '^  digest: sha256:').Line -split '\\s+')[2]")
+EXTERNAL_SECRETS_IMAGE := $(EXTERNAL_SECRETS_REGISTRY)/$(EXTERNAL_SECRETS_UPSTREAM_IMAGE)@$(EXTERNAL_SECRETS_DIGEST)
 # 多镜像预拉取 DaemonSet 会在一次准入请求中校验完整镜像集合,保持 fail-closed 并给签名层拉取保留足够时间。
 POLICY_CONTROLLER_WEBHOOK_TIMEOUT_SECONDS := 30
 POLICY_CONTROLLER_WEBHOOK_REPLICAS := 2
@@ -37,7 +42,7 @@ GVISOR_RUNSC_SHA512 := 84936438d583ec976800f464e75a83e1515f0890b451b9b4db219c447
 GVISOR_SHIM_URL := https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/containerd-shim-runsc-v1?generation=1787184195226077
 GVISOR_SHIM_SHA512 := b60d1c418b841ab046951cc7a91f490a221198fbe81ec55dc364432578fddd44e97063793ce6651be397af2f64ec47170dff77a45db277819c3fb08fec9f3ced
 
-.NOTPARALLEL: dev-up dev-refresh
+.NOTPARALLEL: dev-up dev-start dev-refresh dev-stop
 
 .PHONY: help
 help: ## 显示可用目标
@@ -48,6 +53,10 @@ help: ## 显示可用目标
 .PHONY: cilium-cluster-up
 cilium-cluster-up: ## 创建或修复无默认 CNI 集群,安装并验收生产基线 Cilium
 	powershell -NoProfile -ExecutionPolicy Bypass -File $(CILIUM_CLUSTER_SCRIPT) -Action Up
+
+.PHONY: cilium-cluster-start
+cilium-cluster-start: ## 恢复现有 Cilium 集群与外部 HTTPS 入口,不重复安装或数据面验收
+	powershell -NoProfile -ExecutionPolicy Bypass -File $(CILIUM_CLUSTER_SCRIPT) -Action Start
 
 .PHONY: cilium-cluster-check
 cilium-cluster-check: ## 校验 Cilium 独占状态、正式镜像和真实 NetworkPolicy 数据面
@@ -61,25 +70,94 @@ cilium-edge-up: ## 将外部 canonical HTTPS 入口连接到 Cilium 集群
 cilium-cluster-down: ## 删除项目 Kind 集群,不删除外部 Harbor
 	powershell -NoProfile -ExecutionPolicy Bypass -File $(CILIUM_CLUSTER_SCRIPT) -Action Down
 
+.PHONY: cilium-cluster-stop
+cilium-cluster-stop: ## 暂停项目 Kind 节点,保留数据库进程、volume 与镜像缓存
+	powershell -NoProfile -ExecutionPolicy Bypass -File $(CILIUM_CLUSTER_SCRIPT) -Action Stop
+
 .PHONY: dev-up
-dev-up: cilium-cluster-up context-check gvisor-up gvisor-check ingress-up metrics-up policy-controller-up gen-secret tls apply-acceptance registry-pull-secret-sync middleware-wait acceptance-seed application-wait generated-config-gc cilium-edge-up ## 按统一生产安全基线拉起完整平台和验收夹具
+dev-up: cilium-cluster-up context-check gvisor-up gvisor-check ingress-up metrics-up policy-controller-up external-secrets-up tls secret-source-up apply-acceptance registry-pull-secret-sync middleware-wait acceptance-seed application-wait generated-config-gc cilium-edge-up ## 按统一生产安全基线拉起完整平台和验收夹具
 	@echo "环境就绪。前端: https://www.chaimir.io (需将 www.chaimir.io 指向 127.0.0.1 并信任 config/chaimir-tls/tls.crt)"
 
+.PHONY: dev-start
+dev-start: cilium-cluster-start context-check existing-workloads-wait ## 快速恢复已完成引导的环境,不重复安装、迁移或 seed
+	@echo "环境已启动。前端: https://www.chaimir.io"
+
 .PHONY: dev-refresh
-dev-refresh: cilium-cluster-up context-check gvisor-check gen-secret tls apply-acceptance registry-pull-secret-sync middleware-wait acceptance-seed application-wait generated-config-gc cilium-edge-up ## 重新验证集群基线后刷新应用、迁移和验收夹具
+dev-refresh: cilium-cluster-start context-check external-secrets-check tls secret-source-up apply-acceptance middleware-wait acceptance-seed application-wait generated-config-gc ## 在现有生产安全基线上刷新应用、迁移和验收夹具
 	@echo "环境已刷新。前端: https://www.chaimir.io"
+
+.PHONY: dev-stop
+dev-stop: cilium-cluster-stop ## 暂停项目环境但保留数据库进程、volume 与镜像缓存
+	@echo "环境已停止。下次执行 make dev-start 恢复。"
 
 .PHONY: dev-down
 dev-down: context-check ## 删除 Cilium 集群中的 Chaimir 业务资源(不删除集群)
-	kubectl kustomize --load-restrictor=LoadRestrictionsNone $(OVERLAY) | kubectl delete -f - --ignore-not-found=true
+	kubectl kustomize $(OVERLAY) | kubectl delete -f - --ignore-not-found=true
 
 .PHONY: context-check
 context-check: ## 显示并校验当前 Kubernetes context
 	@test "$$(kubectl config current-context)" = "kind-chaimir-cilium" || { echo "当前 context 必须是 kind-chaimir-cilium"; exit 1; }
 	kubectl get nodes
 
+.PHONY: existing-workloads-wait
+existing-workloads-wait: ## 等待已部署的生产安全组件与平台工作负载恢复,不修改资源
+	@kubectl -n chaimir-system get deployment/chaimir-backend deployment/chaimir-frontend deployment/chaimir-sandbox-rbac-provisioner >/dev/null 2>&1 || { echo "平台工作负载尚未完成首次部署;请执行 make dev-up"; exit 1; }
+	kubectl -n cosign-system rollout status deployment/policy-controller-webhook --timeout=180s
+	kubectl wait --for=condition=Ready clusterimagepolicy/chaimir-require-signed-images --timeout=120s
+	$(MAKE) external-secrets-check
+	kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
+	kubectl -n kube-system rollout status deployment/metrics-server --timeout=180s
+	kubectl get runtimeclass gvisor
+	kubectl -n chaimir-data rollout status statefulset/postgres --timeout=180s
+	kubectl -n chaimir-data rollout status statefulset/redis --timeout=120s
+	kubectl -n chaimir-data rollout status statefulset/nats --timeout=120s
+	kubectl -n chaimir-data rollout status statefulset/minio --timeout=120s
+	kubectl -n chaimir-data rollout status statefulset/clamav --timeout=300s
+	kubectl -n chaimir-system rollout status deployment/chaimir-backend --timeout=180s
+	kubectl -n chaimir-system rollout status deployment/chaimir-frontend --timeout=180s
+	kubectl -n chaimir-system rollout status deployment/chaimir-sandbox-rbac-provisioner --timeout=180s
+	@for daemonset in $$(kubectl -n chaimir-prepull get daemonset -o name); do kubectl -n chaimir-prepull rollout status $$daemonset --timeout=900s || exit 1; done
+	@curl.exe --fail --silent --show-error https://www.chaimir.io/healthz >/dev/null
+
+# ---- External Secrets Operator ----
+.PHONY: external-secrets-up
+external-secrets-up: supply-chain-tools-pull ## 安装固定版本 External Secrets Operator 及其 CRD
+	@test -n "$(EXTERNAL_SECRETS_DIGEST)" || { echo "External Secrets Operator digest 未配置"; exit 1; }
+	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm \
+		-e EXTERNAL_SECRETS_RELEASE_IMAGE="$(EXTERNAL_SECRETS_IMAGE)" --entrypoint sh helm -lc 'set -eu; \
+		helm repo add external-secrets https://charts.external-secrets.io --force-update; \
+		helm repo update; \
+		helm upgrade --install external-secrets external-secrets/external-secrets --version "$(EXTERNAL_SECRETS_VERSION)" \
+			--namespace external-secrets --create-namespace --rollback-on-failure --timeout 10m \
+			--set installCRDs=true --set replicaCount=2 --set podDisruptionBudget.enabled=true \
+			--set webhook.replicaCount=2 --set webhook.podDisruptionBudget.enabled=true \
+			--set certController.replicaCount=2 --set certController.podDisruptionBudget.enabled=true \
+			--post-renderer /bin/sh --post-renderer-args /workspace/deploy/scripts/external-secrets-post-renderer.sh --wait'
+	$(MAKE) external-secrets-check
+
+.PHONY: external-secrets-check
+external-secrets-check: ## 校验 External Secrets Operator、Webhook 和 CRD 已就绪
+	kubectl -n external-secrets rollout status deployment/external-secrets --timeout=300s
+	kubectl -n external-secrets rollout status deployment/external-secrets-webhook --timeout=300s
+	kubectl -n external-secrets rollout status deployment/external-secrets-cert-controller --timeout=300s
+	kubectl get crd externalsecrets.external-secrets.io secretstores.external-secrets.io
+
+.PHONY: secret-source-up
+secret-source-up: external-secrets-check ## 更新受控密钥源并等待同步链路可用
+	@test -f "$(SECRET_SOURCE_FILE)" || { echo "缺少受控密钥输入 $(SECRET_SOURCE_FILE)"; exit 1; }
+	kubectl apply -f base/namespaces/namespaces.yaml
+	kubectl apply -k config/kubernetes-secret-store
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/configure-secret-source.ps1 -SecretEnvPath "$(SECRET_SOURCE_FILE)"
+	kubectl -n chaimir-system wait --for=condition=Ready secretstore/chaimir-external-secret-store --timeout=120s
+	kubectl -n chaimir-data wait --for=condition=Ready secretstore/chaimir-external-secret-store --timeout=120s
+	kubectl apply -k config/external-secret
+	kubectl apply -k config/external-secret-middleware
+	kubectl -n chaimir-system wait --for=condition=Ready externalsecret/chaimir-secret --timeout=120s
+	kubectl -n chaimir-data wait --for=condition=Ready externalsecret/chaimir-data-secret --timeout=120s
+	kubectl -n chaimir-data wait --for=condition=Ready externalsecret/postgres-tls --timeout=120s
+
 .PHONY: registry-runtime-dns
-registry-runtime-dns: cilium-cluster-up context-check ## 确认 Cilium 节点已配置 canonical Harbor split-DNS 与 CA
+registry-runtime-dns: context-check ## 确认 Cilium 节点已配置 canonical Harbor split-DNS 与 CA
 	@echo "Cilium 节点 canonical Harbor 配置已由集群入口校验"
 
 .PHONY: registry-pull-secret-bootstrap
@@ -233,14 +311,6 @@ policy-controller-up: supply-chain-tools-pull tls ## 安装 Sigstore policy-cont
 	kubectl apply -f base/admission/image-signature-policy.yaml
 	kubectl wait --for=condition=Ready clusterimagepolicy/chaimir-require-signed-images --timeout=120s
 
-# ---- 密钥(dev 随机生成)----
-.PHONY: gen-secret
-gen-secret: ## 校验 config/secret.env 已由运维/开发者按模板填好
-	@if [ ! -f $(SECRET_FILE) ]; then \
-		echo "缺少 $(SECRET_FILE)。请复制 $(SECRET_EXAMPLE) 为 $(SECRET_FILE),按模板命令生成并填入真实值。"; \
-		exit 1; \
-	else echo "$(SECRET_FILE) 已存在"; fi
-
 .PHONY: supply-chain-secret-check
 supply-chain-secret-check: ## 校验供应链专用密钥文件存在,不注入应用 Pod
 	@if [ ! -f $(SUPPLY_CHAIN_SECRET_FILE) ]; then \
@@ -250,9 +320,13 @@ supply-chain-secret-check: ## 校验供应链专用密钥文件存在,不注入�
 
 # ---- 应用部署 ----
 .PHONY: apply-acceptance
-apply-acceptance: gen-secret tls registry-pull-secret-bootstrap ## 应用 acceptance overlay(命名空间/中间件/应用)
+apply-acceptance: registry-pull-secret-bootstrap capacity-check ## 应用 acceptance overlay(命名空间/中间件/应用)
 	kubectl -n chaimir-system delete job chaimir-migrate --ignore-not-found
-	kubectl kustomize --load-restrictor=LoadRestrictionsNone $(OVERLAY) | kubectl apply -f -
+	kubectl kustomize $(OVERLAY) | kubectl apply -f -
+
+.PHONY: capacity-check
+capacity-check: ## 校验 HPA 副本上限与 PostgreSQL 连接预算
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/check-pg-capacity.ps1
 
 .PHONY: tls
 tls: ## 使用持久化 HTTPS 证书并写入当前集群的 TLS Secret
@@ -343,12 +417,12 @@ image-attestations-generate: supply-chain-secret-check ## 扫描/签名/验签�
 render: ## 渲染 overlay(检查 kustomize 构建)
 	@for env in acceptance staging prod-saas prod-school; do \
 		echo "=== overlays/$$env ==="; \
-		kubectl kustomize --load-restrictor=LoadRestrictionsNone overlays/$$env > /dev/null && echo "OK" || exit 1; \
+		kubectl kustomize overlays/$$env > /dev/null && echo "OK" || exit 1; \
 	done
 
 .PHONY: validate
 validate: render ## 用 kubeconform 校验渲染产物(需安装 kubeconform)
 	@for env in acceptance staging prod-saas prod-school; do \
 		echo "=== validate overlays/$$env ==="; \
-		kubectl kustomize --load-restrictor=LoadRestrictionsNone overlays/$$env | kubeconform -strict -ignore-missing-schemas -summary; \
+		kubectl kustomize overlays/$$env | kubeconform -strict -ignore-missing-schemas -summary; \
 	done

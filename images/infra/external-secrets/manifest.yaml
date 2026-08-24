@@ -1,0 +1,86 @@
+# 本文件声明 External Secrets Operator 固定上游镜像及其集群密钥同步权限边界。
+schema_version: 1
+category: infra
+name: external-secrets
+image: infra/external-secrets
+labels:
+  app.kubernetes.io/name: external-secrets
+  app.kubernetes.io/component: secrets-operator
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: infra
+  chaimir.io/image: infra/external-secrets
+  chaimir.io/data-driven: "false"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: secrets-control-plane
+  chaimir.io/scope: cluster
+  chaimir.io/source: upstream-pinned
+description: External Secrets Operator 密钥同步控制器。
+source:
+  type: upstream-pinned
+upstream:
+  registry: ghcr.io
+  image: external-secrets/external-secrets
+  version: v2.9.0
+  digest: sha256:44eb290f1c7f5d8f4eec2168cea4a6cfbc72a955c6781eb835e1c40700475dbd
+  reuse_policy: upstream-pinned
+  license: Apache-2.0
+private_delivery:
+  offline_bundle: true
+  import_project: infra
+data_driven: false
+capabilities:
+  provides:
+    - external-secret-reconciliation
+    - secret-store-integration
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: cluster
+  config_schema: {}
+  student_access: private
+env_keys:
+  config: []
+  secret: []
+secrets_required: []
+ports: []
+local_dev:
+  host_mappings: []
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: true
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: true
+  drop_capabilities:
+    - ALL
+  network_policy: deny-all
+security_exceptions:
+  - field: automount_service_account_token
+    reason: 控制器必须通过专用 RBAC 读取 ExternalSecret、SecretStore 并写入目标 Secret。
+student_access:
+  enabled: false
+data_volumes: []
+backup:
+  required: false
+  mode: declarative-config-only
+network:
+  expose: internal
+  default_deny: true
+resources:
+  cpu_request: 50m
+  cpu_limit: 500m
+  memory_request: 64Mi
+  memory_limit: 256Mi
+  ephemeral_storage_limit: 128Mi
+selftest:
+  commands:
+    - name: help
+      command:
+        - /bin/external-secrets
+        - --help
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest_in_production: true

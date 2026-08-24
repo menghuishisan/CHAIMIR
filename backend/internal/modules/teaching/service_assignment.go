@@ -366,6 +366,7 @@ func (s *Service) GradeSubmission(ctx context.Context, submissionID int64, req G
 	if err != nil {
 		return SubmissionDTO{}, err
 	}
+	score := *req.Score
 	var sub Submission
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetSubmission(ctx, id.TenantID, submissionID)
@@ -376,6 +377,13 @@ func (s *Service) GradeSubmission(ctx context.Context, submissionID int64, req G
 		if err != nil {
 			return err
 		}
+		items, err := tx.ListAssignmentItems(ctx, id.TenantID, assignment.ID)
+		if err != nil {
+			return err
+		}
+		if err := validateGradeScoreAgainstAssignment(score, items); err != nil {
+			return err
+		}
 		course, err := tx.GetCourse(ctx, id.TenantID, assignment.CourseID)
 		if err != nil {
 			return err
@@ -383,11 +391,11 @@ func (s *Service) GradeSubmission(ctx context.Context, submissionID int64, req G
 		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
 			return err
 		}
-		final, err := applyLatePenalty(assignment, req.Score, current.IsLate)
+		final, err := applyLatePenalty(assignment, score, current.IsLate)
 		if err != nil {
 			return err
 		}
-		sub, err = tx.UpdateSubmissionManualGrade(ctx, id.TenantID, submissionID, req.Score, final, req.Comment)
+		sub, err = tx.UpdateSubmissionManualGrade(ctx, id.TenantID, submissionID, score, final, req.Comment)
 		return err
 	}); err != nil {
 		return SubmissionDTO{}, mapAssignmentError(err)
@@ -399,7 +407,7 @@ func (s *Service) GradeSubmission(ctx context.Context, submissionID int64, req G
 // 授课教师看到该作业全部学生提交(批改视角);课程内学生只看到本人的历次提交
 // (自读视角 —— 学生提交后刷新页面需据此取回 submission_id 再看反馈)。
 // 学生编号取自服务端会话,不接受客户端传参;status 传 0 表示不按批改状态过滤。
-func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, status int16, page, size int) ([]SubmissionDTO, int64, int, int, error) {
+func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, status, isLate int16, page, size int) ([]SubmissionDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return nil, 0, 0, 0, err
@@ -425,6 +433,7 @@ func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, statu
 			AssignmentID: assignmentID,
 			StudentID:    studentFilter,
 			Status:       status,
+			IsLate:       isLate,
 			Page:         page,
 			Size:         size,
 		})
@@ -525,7 +534,7 @@ func (s *Service) RunJudgeOutboxOnce(ctx context.Context, tenantID int64) error 
 		return apperr.ErrTeachingJudgeOutboxInvalid.WithCause(err)
 	}
 	for _, item := range outboxes {
-		info, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: item.TenantID, JudgerCode: item.JudgerCode, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, CodeStorageKey: item.CodeStorageKey, CodeHash: item.CodeHash, SubmitterID: item.StudentID, SourceRef: item.SourceRef, SourceOwnerID: item.SourceOwnerID, SourceCourseID: item.SourceCourseID, SourceScope: item.SourceScope, SandboxMode: contracts.JudgeSandboxModeFresh, ExtraInput: item.ExtraInput, Priority: 5})
+		info, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: item.TenantID, JudgerCode: item.JudgerCode, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, CodeStorageKey: item.CodeStorageKey, CodeHash: item.CodeHash, SubmitterTenantID: item.TenantID, SubmitterID: item.StudentID, SourceRef: item.SourceRef, SourceOwnerID: item.SourceOwnerID, SourceCourseID: item.SourceCourseID, SourceScope: item.SourceScope, SandboxMode: contracts.JudgeSandboxModeFresh, ExtraInput: item.ExtraInput, Priority: 5})
 		if err != nil {
 			if retryErr := s.store.TenantTx(ctx, item.TenantID, func(ctx context.Context, tx TxStore) error {
 				_, retryErr := tx.RetryJudgeOutbox(ctx, item.TenantID, item.ID, maxAttempts, safeStoredError(ctx, err), item.LeaseToken)

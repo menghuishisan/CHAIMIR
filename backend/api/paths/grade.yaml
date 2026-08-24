@@ -50,6 +50,7 @@
     security: [{ bearerAuth: [] }]
     parameters:
       - { $ref: "#/components/parameters/StatusQuery" }
+      - { name: is_locked, in: query, schema: { type: integer, minimum: 0, maximum: 2 } }
       - { $ref: "#/components/parameters/PageQuery" }
       - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

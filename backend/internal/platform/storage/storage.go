@@ -222,9 +222,18 @@ func (s *Storage) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, 
 	if !safeObjectRefBucket(srcBucket) || !safeObjectRefBucket(dstBucket) || !safeObjectRefKey(srcKey) || !safeObjectRefKey(dstKey) {
 		return 0, ErrObjectRefInvalid
 	}
-	info, err := s.client.CopyObject(ctx, minio.CopyDestOptions{Bucket: dstBucket, Object: dstKey}, minio.CopySrcOptions{Bucket: srcBucket, Object: srcKey})
+	_, err := s.client.CopyObject(ctx, minio.CopyDestOptions{Bucket: dstBucket, Object: dstKey}, minio.CopySrcOptions{Bucket: srcBucket, Object: srcKey})
 	if err != nil {
 		return 0, fmt.Errorf("复制对象 %s/%s 到 %s/%s 失败: %w", srcBucket, srcKey, dstBucket, dstKey, err)
+	}
+	// MinIO 服务端复制成功时返回的 CopyObjectInfo.Size 在部分版本中为 0。
+	// 备份清单必须记录目标对象的真实大小,因此复制完成后统一读取目标对象元数据。
+	info, err := s.client.StatObject(ctx, dstBucket, dstKey, minio.StatObjectOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("读取复制对象 %s/%s 元数据失败: %w", dstBucket, dstKey, err)
+	}
+	if info.Size < 0 {
+		return 0, fmt.Errorf("复制对象 %s/%s 大小非法: %d", dstBucket, dstKey, info.Size)
 	}
 	return info.Size, nil
 }

@@ -87,6 +87,8 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
   const fieldId = useId()
 
   const [title, setTitle] = useState('')
+  const [judgerCode, setJudgerCode] = useState('')
+  const [maxScore, setMaxScore] = useState('100')
   const [sourceId, setSourceId] = useState<string>('')
   const [externalRef, setExternalRef] = useState('')
   const [level, setLevel] = useState(String(VulnLevel.A))
@@ -108,6 +110,8 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
   const validate = useCallback((): boolean => {
     const next: Record<string, string | null> = {
       title: title.trim() === '' ? '请输入漏洞题标题' : title.trim().length > 255 ? '标题不能超过 255 个字' : null,
+      judgerCode: judgerCode.trim() === '' ? '请输入平台已注册的判题器编码' : null,
+      maxScore: !Number.isInteger(Number(maxScore)) || Number(maxScore) <= 0 ? '满分必须是正整数' : null,
       description: description.trim() === '' ? '请写下漏洞说明,学生要知道这道题在考什么' : null,
       forkBlock:
         isForked && (forkBlock.trim() === '' || !Number.isFinite(Number(forkBlock)))
@@ -122,7 +126,7 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
     }
     setErrors(next)
     return Object.values(next).every((value) => value === null)
-  }, [assertions, description, forkBlock, initSteps, isForked, positiveSteps, title])
+	}, [assertions, description, forkBlock, initSteps, isForked, judgerCode, maxScore, positiveSteps, title])
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -145,6 +149,11 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
           [VULN_DRAFT_BODY_FIELDS.initSteps]: initSteps.map(stepToPayload),
           [VULN_DRAFT_BODY_FIELDS.positiveSteps]: positiveSteps.map(stepToPayload),
           [VULN_DRAFT_BODY_FIELDS.assertions]: assertions.map(assertionToPayload),
+          judge_config: {
+            judger_code: judgerCode.trim(),
+            max_score: Number(maxScore),
+            expectation: {},
+          },
         },
       }
 
@@ -168,6 +177,8 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
       forkBlock,
       initSteps,
       isForked,
+      judgerCode,
+      maxScore,
       level,
       onSaved,
       positiveSteps,
@@ -197,6 +208,15 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
                 onChange={(event) => setTitle(event.target.value)}
               />
             </FormField>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormField label="判题器编码" htmlFor={`${fieldId}-judger`} required error={errors.judgerCode} helper="填写平台已注册的判题器编码">
+                <Input id={`${fieldId}-judger`} value={judgerCode} invalid={Boolean(errors.judgerCode)} onChange={(event) => setJudgerCode(event.target.value)} />
+              </FormField>
+              <FormField label="题目满分" htmlFor={`${fieldId}-max-score`} required error={errors.maxScore}>
+                <Input id={`${fieldId}-max-score`} type="number" min={1} step={1} value={maxScore} invalid={Boolean(errors.maxScore)} onChange={(event) => setMaxScore(event.target.value)} />
+              </FormField>
+            </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField label="归属来源" htmlFor={`${fieldId}-source`} helper="手工录入可以不选">

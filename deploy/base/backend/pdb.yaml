@@ -1,0 +1,15 @@
+# 后端 PodDisruptionBudget,保证主动维护时至少保留一个可服务副本。
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: chaimir-backend
+  namespace: chaimir-system
+  labels:
+    app.kubernetes.io/name: chaimir-backend
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of: chaimir
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: chaimir-backend

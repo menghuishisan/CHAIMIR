@@ -13,75 +13,131 @@ import (
 	pkgcrypto "chaimir/pkg/crypto"
 )
 
-// JudgerResourceSpec 描述判题器固定执行环境、自检样例和命令策略。
-type JudgerResourceSpec struct {
-	RuntimeCode         string                   `json:"runtime_code,omitempty"`
-	RuntimeImageVersion string                   `json:"runtime_image_version,omitempty"`
-	GenesisRef          string                   `json:"genesis_ref,omitempty"`
-	ToolCodes           []string                 `json:"tool_codes,omitempty"`
-	InitScriptRef       string                   `json:"init_script_ref,omitempty"`
-	Command             []string                 `json:"command,omitempty"`
-	ExecTarget          string                   `json:"exec_target,omitempty"`
-	ExecutionSidecars   []workload.ComponentSpec `json:"execution_sidecars,omitempty"`
-	TimeoutSec          int32                    `json:"timeout_sec,omitempty"`
-	MaxRetries          int32                    `json:"max_retries,omitempty"`
-	SuiteArchiveName    string                   `json:"suite_archive_name,omitempty"`
-	Selftest            map[string]any           `json:"selftest,omitempty"`
+// JudgerExecutionSpec 描述平台管理员提交的受控执行策略，不包含持久化组合快照。
+type JudgerExecutionSpec struct {
+	GenesisRef        string                   `json:"genesis_ref,omitempty"`
+	InitScriptRef     string                   `json:"init_script_ref,omitempty"`
+	Command           []string                 `json:"command,omitempty"`
+	ExecTarget        string                   `json:"exec_target,omitempty"`
+	ExecutionSidecars []workload.ComponentSpec `json:"execution_sidecars,omitempty"`
+	TimeoutSec        int32                    `json:"timeout_sec,omitempty"`
+	MaxRetries        int32                    `json:"max_retries,omitempty"`
+	SuiteArchiveName  string                   `json:"suite_archive_name,omitempty"`
+	Selftest          map[string]any           `json:"selftest,omitempty"`
 }
 
-// parseJudgerResourceSpec 解析并校验平台级判题器资源声明。
-func parseJudgerResourceSpec(raw []byte, typ int16, runtimeRequired bool) (JudgerResourceSpec, error) {
-	spec := JudgerResourceSpec{}
+// JudgerResourceSpec 描述数据库中唯一持久化的判题执行事实。
+type JudgerResourceSpec struct {
+	CompositionSnapshot contracts.SandboxCompositionSnapshot `json:"composition_snapshot,omitempty"`
+	GenesisRef          string                               `json:"genesis_ref,omitempty"`
+	InitScriptRef       string                               `json:"init_script_ref,omitempty"`
+	Command             []string                             `json:"command,omitempty"`
+	ExecTarget          string                               `json:"exec_target,omitempty"`
+	ExecutionSidecars   []workload.ComponentSpec             `json:"execution_sidecars,omitempty"`
+	TimeoutSec          int32                                `json:"timeout_sec,omitempty"`
+	MaxRetries          int32                                `json:"max_retries,omitempty"`
+	SuiteArchiveName    string                               `json:"suite_archive_name,omitempty"`
+	Selftest            map[string]any                       `json:"selftest,omitempty"`
+}
+
+// parseJudgerExecutionSpec 解析并校验平台管理员提交的执行策略。
+func parseJudgerExecutionSpec(raw []byte, typ int16, runtimeRequired bool) (JudgerExecutionSpec, error) {
+	spec := JudgerExecutionSpec{}
 	if len(raw) > 0 {
 		if err := jsonx.DecodeStrictKnownFields(raw, &spec); err != nil {
-			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
+			return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
 		}
 	}
 	if spec.TimeoutSec < 0 || spec.MaxRetries < 0 {
-		return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+		return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
 	}
 	if runtimeRequired || typ == JudgerTypeTestcase || typ == JudgerTypeOnchainAssert || typ == JudgerTypeStaticScan {
-		if strings.TrimSpace(spec.RuntimeCode) == "" || strings.TrimSpace(spec.RuntimeImageVersion) == "" || strings.TrimSpace(spec.GenesisRef) == "" {
-			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+		if strings.TrimSpace(spec.GenesisRef) == "" {
+			return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
 		}
 	}
 	if typ == JudgerTypeTestcase || typ == JudgerTypeStaticScan {
 		if !workload.ValidNonShellCommand(spec.Command) {
-			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+			return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
 		}
 		if strings.TrimSpace(spec.ExecTarget) == "" || len(spec.ExecutionSidecars) == 0 {
-			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+			return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
 		}
 		if !safeExecTarget(spec.ExecTarget) {
-			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+			return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
 		}
 	}
 	if typ == JudgerTypeManual && len(spec.Command) > 0 {
-		return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+		return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
 	}
 	return spec, nil
 }
 
-// validateJudgerRequest 校验判题器注册请求,并返回已解析的资源配置。
-func validateJudgerRequest(req JudgerRequest) (JudgerResourceSpec, error) {
-	if !codePattern.MatchString(strings.TrimSpace(req.Code)) || strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.ExecutorRef) == "" {
+// parseJudgerResourceSpec 解析数据库中的判题执行事实，并拒绝旧声明或摘要字段。
+func parseJudgerResourceSpec(raw []byte, typ int16, runtimeRequired bool) (JudgerResourceSpec, error) {
+	spec := JudgerResourceSpec{}
+	if len(raw) == 0 {
+		return spec, nil
+	}
+	if err := jsonx.DecodeStrictKnownFields(raw, &spec); err != nil {
+		return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
+	}
+	if spec.TimeoutSec < 0 || spec.MaxRetries < 0 {
 		return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+	}
+	if !judgerNeedsSandbox(typ, runtimeRequired) {
+		if typ == JudgerTypeManual && (len(spec.Command) > 0 || len(spec.ExecutionSidecars) > 0 || spec.CompositionSnapshot.Digest != "") {
+			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+		}
+		return spec, nil
+	}
+	if strings.TrimSpace(spec.CompositionSnapshot.Digest) == "" {
+		return spec, nil
+	}
+	digest, err := contracts.CanonicalSnapshotDigest(spec.CompositionSnapshot)
+	if err != nil || digest != spec.CompositionSnapshot.Digest || spec.CompositionSnapshot.Spec.AccessProfile != contracts.SandboxAccessJudgePrivate || strings.TrimSpace(spec.GenesisRef) == "" {
+		return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+	}
+	if typ == JudgerTypeTestcase || typ == JudgerTypeStaticScan {
+		if !workload.ValidNonShellCommand(spec.Command) || !safeExecTarget(spec.ExecTarget) || len(spec.ExecutionSidecars) == 0 {
+			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+		}
+	}
+	return spec, nil
+}
+
+// validateJudgerRequest 校验判题器注册请求，并返回已解析的执行策略。
+func validateJudgerRequest(req JudgerRequest) (JudgerExecutionSpec, error) {
+	if !codePattern.MatchString(strings.TrimSpace(req.Code)) || strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.ExecutorRef) == "" {
+		return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
 	}
 	if req.Type < JudgerTypeTestcase || req.Type > JudgerTypeManual {
-		return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+		return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
 	}
 	if req.DefaultTimeoutSec <= 0 {
-		return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+		return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
 	}
 	if req.Status != JudgerStatusAvailable && req.Status != JudgerStatusDisabled {
-		return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid
+		return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
 	}
-	return parseJudgerResourceSpec(req.ResourceSpec, req.Type, req.RuntimeRequired)
+	if judgerNeedsSandbox(req.Type, req.RuntimeRequired) {
+		if strings.TrimSpace(req.Composition.ID) == "" || strings.TrimSpace(req.Composition.PrimaryRuntime.Code) == "" || strings.TrimSpace(req.Composition.PrimaryRuntime.ImageVersion) == "" || req.Composition.AccessProfile != contracts.SandboxAccessJudgePrivate {
+			return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
+		}
+	} else if strings.TrimSpace(req.Composition.ID) != "" || strings.TrimSpace(req.Composition.PrimaryRuntime.Code) != "" || strings.TrimSpace(req.Composition.PrimaryRuntime.ImageVersion) != "" {
+		return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
+	}
+	return parseJudgerExecutionSpec(req.ResourceSpec, req.Type, req.RuntimeRequired)
+}
+
+// judgerNeedsSandbox 统一判定判题器是否必须冻结 M2 judge-private 环境快照。
+func judgerNeedsSandbox(typ int16, runtimeRequired bool) bool {
+	return runtimeRequired || typ == JudgerTypeTestcase || typ == JudgerTypeOnchainAssert || typ == JudgerTypeStaticScan
 }
 
 // validateSubmitRequest 校验内部判题提交契约。
 func validateSubmitRequest(req contracts.JudgeSubmitRequest) error {
-	if req.TenantID <= 0 || req.SubmitterID <= 0 ||
+	if req.TenantID <= 0 || req.SubmitterTenantID <= 0 || req.SubmitterID <= 0 ||
 		strings.TrimSpace(req.ItemCode) == "" || strings.TrimSpace(req.ItemVersion) == "" ||
 		!auth.ValidSourceRef(req.SourceRef) {
 		return apperr.ErrJudgeSubmitInvalid
@@ -96,7 +152,13 @@ func validateSubmitRequest(req contracts.JudgeSubmitRequest) error {
 	if mode == JudgeSandboxModeReuse && strings.TrimSpace(req.TargetSandboxRef) == "" {
 		return apperr.ErrJudgeSubmitInvalid
 	}
+	if mode == JudgeSandboxModeReuse && strings.TrimSpace(req.SandboxSourceRef) == "" {
+		return apperr.ErrJudgeSubmitInvalid
+	}
 	if mode == JudgeSandboxModeFresh && strings.TrimSpace(req.TargetSandboxRef) != "" {
+		return apperr.ErrJudgeSubmitInvalid
+	}
+	if mode == JudgeSandboxModeFresh && strings.TrimSpace(req.SandboxSourceRef) != "" {
 		return apperr.ErrJudgeSubmitInvalid
 	}
 	return nil

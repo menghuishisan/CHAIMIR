@@ -29,8 +29,16 @@ upstream:
   reuse_policy: official-image-binary
 data_driven: true
 capabilities:
-  - decentralized-storage
-  - ipfs-node
+  provides:
+    - decentralized-storage
+    - ipfs-node
+    - ipfs-http-api
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: private
 infra:
   eco_tags:
     - evm

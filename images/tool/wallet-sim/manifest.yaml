@@ -1,4 +1,4 @@
-# 本文件声明 tool/wallet-sim 镜像的职责、端口、安全、资源和供应链约束。
+﻿# 本文件声明 tool/wallet-sim 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: tool
 name: wallet-sim
@@ -22,7 +22,9 @@ upstream:
   version: "2026-07-07"
   digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
   packages:
-    - python-3.13
+    - python-3.13=3.13.14-r3
+    - py3.13-pip=26.1.2-r1
+    - setuptools==80.9.0
     - eth-account==0.13.7
   reuse_policy: self-developed-tool
 env_keys:
@@ -32,14 +34,19 @@ env_keys:
   secret: []
 data_driven: true
 capabilities:
-  - wallet-simulator
-  - transaction-signing
+  provides:
+    - wallet-simulator
+    - transaction-signing
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema: {}
+  student_access: public
 tool:
   kind: web-embed
   eco_tags:
     - evm
-    - fabric
-    - fisco
   mount_workspace: true
   readiness_path: /healthz
 ports:

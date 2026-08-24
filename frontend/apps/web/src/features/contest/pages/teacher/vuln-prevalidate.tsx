@@ -3,21 +3,24 @@
 // 预验证在隔离沙箱里跑两遍:正向执行 PoC 应让全部断言成立,反向不执行 PoC 应让全部断言不成立。
 // 双向通过才算这道题「可解可判」,才能固化进题库。
 //
-// 运行时与镜像版本从 M2 编排目录里选(后端 validatePrevalidateRequest 两者必填),
-// 不让教师手填 —— 拼错要等验证跑完才发现。
+// 验证环境按声明式组合提交(后端要求主运行时与镜像版本必填),从 M2 编排目录里选,
+// 不让教师手填 —— 拼错要等验证跑完才发现。访问边界固定为漏洞预验证,由后端二次确认。
 //
 // 验证结果里的 actual 是后端已脱敏的短文本(chainassert.ShortJSON),
 // 页面原样呈现即可,不再二次解析。
 
 import { useCallback, useState } from 'react'
-import { CircleCheck, CircleX, FlaskConical, Server } from 'lucide-react'
-import { VulnPrevalidateStatus, type VulnProblem } from '@chaimir/api-client'
+import { CircleCheck, CircleX, FlaskConical } from 'lucide-react'
+import {
+  SANDBOX_ACCESS_PROFILE,
+  VulnPrevalidateStatus,
+  type VulnProblem,
+} from '@chaimir/api-client'
 import {
   Badge,
   Button,
   Callout,
   DescriptionList,
-  FormField,
   Modal,
   ModalBody,
   ModalContent,
@@ -25,15 +28,16 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
-  Select,
-  Skeleton,
   StatusIndicator,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
-import { SandboxToolChecklist } from '../../../sandbox/components/SandboxToolChecklist'
-import { useOrchestrationCatalog } from '../../../sandbox/useOrchestrationCatalog'
+import { CompositionDeclarationFields } from '../../../sandbox/components/CompositionDeclarationFields'
+import {
+  compositionDeclarationError,
+  compositionSpecFromDeclaration,
+  emptyCompositionDeclaration,
+} from '../../../sandbox/composition'
 import {
   vulnLevelLabel,
   vulnPrevalidateStatusLabel,
@@ -68,29 +72,27 @@ export interface VulnPrevalidateModalProps {
  * VulnPrevalidateModal 触发预验证并呈现双向验证结果。
  */
 export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalidateModalProps) {
-  const [runtimeCode, setRuntimeCode] = useState('')
-  const [imageVersion, setImageVersion] = useState('')
-  const [toolCodes, setToolCodes] = useState<string[]>([])
+  const [declaration, setDeclaration] = useState(emptyCompositionDeclaration)
   const [result, setResult] = useState<VulnProblem>(problem)
   const [formError, setFormError] = useState<string>()
   const [running, setRunning] = useState(false)
 
-  const catalog = useOrchestrationCatalog()
-  const imageOptions = catalog.imageOptions(runtimeCode)
-  const compatibleTools = catalog.tools(runtimeCode)
-
   const run = useCallback(async () => {
-    if (runtimeCode === '' || imageVersion === '') {
-      setFormError('请选择验证要用的运行时与镜像版本')
+    const declarationError = compositionDeclarationError(declaration)
+    if (declarationError !== undefined) {
+      setFormError(declarationError)
       return
     }
     setFormError(undefined)
     setRunning(true)
     try {
       const updated = await api.contest.prevalidateVulnProblem(problem.id, {
-        runtime_code: runtimeCode,
-        runtime_image_version: imageVersion,
-        tool_codes: toolCodes,
+        // 组合标识按漏洞题固定,验证环境用后即毁,不需要教师另起名字
+        composition: compositionSpecFromDeclaration({
+          id: `vuln-${problem.id}`,
+          declaration,
+          accessProfile: SANDBOX_ACCESS_PROFILE.VULNERABILITY_PREVALIDATE,
+        }),
       })
       setResult(updated)
       if (updated.prevalidate_status === VulnPrevalidateStatus.PASSED) {
@@ -102,7 +104,7 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
     } finally {
       setRunning(false)
     }
-  }, [imageVersion, onDone, problem.id, runtimeCode, toolCodes])
+  }, [declaration, onDone, problem.id])
 
   const positive = readSection(result.prevalidate_detail, DETAIL_POSITIVE)
   const negative = readSection(result.prevalidate_detail, DETAIL_NEGATIVE)
@@ -132,59 +134,12 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
             ]}
           />
 
-          <ResourceState
-            resource={catalog.resource}
-            emptyIcon={Server}
-            emptyTitle="平台还没有可用运行时"
-            emptyDescription="请联系平台管理员在链运行时里注册并自检运行时。"
-            skeleton={<Skeleton variant="line" lines={2} />}
-          >
-            {() => (
-              <div className="flex flex-col gap-4">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <FormField label="运行时" htmlFor="prevalidate-runtime" required>
-                    <Select
-                      id="prevalidate-runtime"
-                      options={catalog.runtimeOptions}
-                      value={runtimeCode}
-                      placeholder="选择运行时"
-                      onValueChange={(value) => {
-                        setRuntimeCode(value)
-                        setImageVersion('')
-                        setToolCodes([])
-                      }}
-                    />
-                  </FormField>
-                  <FormField label="镜像版本" htmlFor="prevalidate-image" required>
-                    <Select
-                      id="prevalidate-image"
-                      options={imageOptions}
-                      value={imageVersion}
-                      placeholder={
-                        runtimeCode === ''
-                          ? '请先选择运行时'
-                          : imageOptions.length > 0
-                            ? '选择镜像版本'
-                            : '该运行时暂无镜像'
-                      }
-                      disabled={imageOptions.length === 0}
-                      onValueChange={setImageVersion}
-                    />
-                  </FormField>
-                </div>
-
-                {compatibleTools.length > 0 ? (
-                  <FormField label="验证时可用工具" helper="按攻击步骤的需要勾选;不确定就不勾">
-                    <SandboxToolChecklist
-                      tools={compatibleTools}
-                      selectedCodes={toolCodes}
-                      onChange={setToolCodes}
-                    />
-                  </FormField>
-                ) : null}
-              </div>
-            )}
-          </ResourceState>
+          <CompositionDeclarationFields
+            idPrefix="prevalidate"
+            value={declaration}
+            onChange={setDeclaration}
+            toolsHelper="按攻击步骤的需要勾选;不确定就不勾"
+          />
 
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
 

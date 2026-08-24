@@ -78,7 +78,9 @@ export function StatisticsTrendSection({ load, idPrefix, description }: Statisti
   return (
     <PageSection title="运营统计" description={description}>
       <div className="flex flex-col gap-4">
+        {/* 数据区是一组 ChartContainer(各自已是抬起片),筛选走 bare 无底形态,避免片里套片(§6.5.2) */}
         <FilterBar
+          bare
           label="统计区间筛选"
           onSubmit={() => setRange({ from, to })}
           submitLabel="查询"

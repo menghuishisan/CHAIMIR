@@ -6,22 +6,21 @@
 // 保存文件名取自响应头,页面不拼接对象存储地址、不自造文件名。
 
 import { useCallback, useState } from 'react'
-import { Download, FileDown, ListChecks, RefreshCw } from 'lucide-react'
+import { Download, ListChecks, RefreshCw } from 'lucide-react'
 import { TRANSFER_STATUS, type TransferChannel, type TransferTask } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
+  DataPanel,
   FilterBar,
   FilterField,
   IconButton,
+  MetricStrip,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
-  Stat,
   StatusIndicator,
   Table,
   toast,
@@ -211,7 +210,6 @@ export default function TransferTasksPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '任务与下载' }]} />}
         title="任务与下载"
         description="你发起的导入和导出都在这里。处理完成后可以下载结果文件。"
         icon={ListChecks}
@@ -225,25 +223,34 @@ export default function TransferTasksPage() {
         }
       />
 
-      <PageSection>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <Stat label="任务总数" value={totalCount ?? '—'} icon={ListChecks} hint="不受下方筛选影响" />
-          <Stat
-            label="进行中"
-            value={activeCount ?? '—'}
-            icon={RefreshCw}
-            hint={activeCount !== undefined && activeCount > 0 ? '处理完成后可刷新查看' : undefined}
-          />
-          <Stat label="已完成" value={succeededCount ?? '—'} icon={FileDown} />
-          <Stat label="处理失败" value={failedCount ?? '—'} icon={ListChecks} />
-        </div>
-      </PageSection>
+      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是任务记录 */}
+      <MetricStrip
+        label="任务总量摘要"
+        className="mb-5"
+        items={[
+          { label: '任务总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
+          {
+            label: '进行中',
+            value: activeCount ?? '—',
+            hint:
+              activeCount !== undefined && activeCount > 0 ? '处理完成后可刷新查看' : '暂无排队任务',
+          },
+          { label: '已完成', value: succeededCount ?? '—', hint: '结果文件可下载' },
+          { label: '处理失败', value: failedCount ?? '—', hint: '可查看失败原因' },
+        ]}
+      />
 
-      <PageSection
-        title="任务记录"
-        description="按更新时间从新到旧排列。"
-      >
-        <div className="flex flex-col gap-4">
+      {/* 动作失败就近内联(§6.7 C) */}
+      {actionError ? (
+        <Callout tone="danger" className="mb-4">
+          {actionError}
+        </Callout>
+      ) : null}
+
+      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
+      <DataPanel
+        label="任务记录"
+        filter={
           <FilterBar label="任务筛选">
             <FilterField label="任务类型" group>
               <SegmentedControl
@@ -255,30 +262,44 @@ export default function TransferTasksPage() {
               />
             </FilterField>
           </FilterBar>
-
-          {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
+        }
+        footer={
+          <Pagination
+            page={tasks.page}
+            pageSize={tasks.pageSize}
+            total={tasks.total}
+            onPageChange={tasks.setPage}
+          />
+        }
+      >
           <ResourceState
             resource={tasks}
             emptyIcon={ListChecks}
             emptyTitle="暂无任务"
             emptyDescription="发起导入或导出后,任务进度和结果文件会显示在这里。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (
-              <>
-                <Table columns={columns} data={page.list} rowKey={(task) => task.task_id} />
-                <Pagination
-                  page={tasks.page}
-                  pageSize={tasks.pageSize}
-                  total={tasks.total}
-                  onPageChange={tasks.setPage}
-                />
-              </>
+              <Table
+                columns={columns}
+                data={page.list}
+                rowKey={(task) => task.task_id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):任务名一行、类型与更新时间一行,状态在右
+                mobileCard={(task) => ({
+                  title: transferChannelLabel(task.channel),
+                  meta: `${formatShortDateTime(task.updated_at)}`,
+                  badge: (
+                    <StatusIndicator
+                      tone={transferTaskStatusTone(task.status)}
+                      label={transferTaskStatusLabel(task.status)}
+                    />
+                  ),
+                })}
+              />
             )}
           </ResourceState>
-        </div>
-      </PageSection>
+      </DataPanel>
     </PageScaffold>
   )
 }

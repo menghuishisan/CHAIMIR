@@ -144,9 +144,9 @@ func (t *txStore) CreateGradeReview(ctx context.Context, id, tenantID, submitter
 }
 
 // ListGradeReviews 查询成绩审核分页列表和总数。
-func (t *txStore) ListGradeReviews(ctx context.Context, status int16, page, size int) ([]ReviewDTO, int64, error) {
+func (t *txStore) ListGradeReviews(ctx context.Context, status, isLocked int16, page, size int) ([]ReviewDTO, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := t.q.ListGradeReviews(ctx, sqlcgen.ListGradeReviewsParams{Status: status, PageOffset: offset, PageLimit: limit})
+	rows, err := t.q.ListGradeReviews(ctx, sqlcgen.ListGradeReviewsParams{Status: status, IsLocked: isLocked, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -154,7 +154,7 @@ func (t *txStore) ListGradeReviews(ctx context.Context, status int16, page, size
 	for _, row := range rows {
 		out = append(out, reviewDTO(row))
 	}
-	total, err := t.q.CountGradeReviews(ctx, status)
+	total, err := t.q.CountGradeReviews(ctx, sqlcgen.CountGradeReviewsParams{Status: status, IsLocked: isLocked})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -263,6 +263,11 @@ func (t *txStore) ClaimPendingGradeLockOutbox(ctx context.Context, limit, maxAtt
 		out = append(out, gradeLockOutbox(row))
 	}
 	return out, nil
+}
+
+// RequeueExhaustedGradeLockOutbox 把冷却期后的失败事件重新放回队列,用于依赖恢复后的自动回放。
+func (t *txStore) RequeueExhaustedGradeLockOutbox(ctx context.Context, delaySeconds int32) (int64, error) {
+	return t.q.RequeueExhaustedGradeLockOutbox(ctx, int64(delaySeconds))
 }
 
 // MarkGradeLockOutboxPublished 标记锁定事件发布成功。

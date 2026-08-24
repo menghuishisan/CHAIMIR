@@ -1,6 +1,6 @@
 # 本文件负责创建无默认 CNI 的 Kind 集群、安装正式 Cilium、执行网络数据面验收并维护外部 HTTPS 入口。
 param(
-    [ValidateSet("Up", "Check", "Edge", "Down")]
+    [ValidateSet("Up", "Start", "Check", "Edge", "Stop", "Down")]
     [string]$Action = "Up",
     [string]$ClusterName = "chaimir-cilium",
     [string]$DependencyContext = "docker-desktop"
@@ -149,24 +149,36 @@ function Resume-ClusterNodes {
 
     foreach ($node in $nodes) {
         Invoke-Native -FilePath "docker" -Arguments @("update", "--restart", "unless-stopped", $node)
-        $running = [string](& docker inspect --format "{{.State.Running}}" $node)
+        $stateRaw = [string](& docker inspect --format "{{json .State}}" $node)
         if ($LASTEXITCODE -ne 0) {
             throw "读取 Kind 节点 $node 状态失败"
         }
-        if ($running.Trim() -ne "true") {
+        try {
+            $state = $stateRaw | ConvertFrom-Json
+        } catch {
+            throw "解析 Kind 节点 $node 状态失败: $($_.Exception.Message)"
+        }
+        if ($state.Paused) {
+            Invoke-Native -FilePath "docker" -Arguments @("unpause", $node)
+        } elseif (-not $state.Running) {
             Invoke-Native -FilePath "docker" -Arguments @("start", $node)
         }
     }
 }
 
-# Ensure-Cluster 创建唯一的无默认 CNI 集群;已有集群只复用,绝不静默重建并丢失数据。
+# Ensure-Cluster 创建或恢复唯一的无默认 CNI 集群;快速启动只接受已完成引导的现有集群。
 function Ensure-Cluster {
+    param([switch]$RequireExisting)
+
     $kind = Get-Kind
     $clusters = @(& $kind get clusters)
     if ($LASTEXITCODE -ne 0) {
         throw "读取 Kind 集群失败"
     }
     if ($clusters -notcontains $ClusterName) {
+        if ($RequireExisting) {
+            throw "Kind 集群 $ClusterName 不存在;请先执行 make dev-up 完成首次引导"
+        }
         Invoke-Native -FilePath $kind -Arguments @("create", "cluster", "--name", $ClusterName, "--config", $kindConfigPath, "--image", $nodeImage)
     }
     Resume-ClusterNodes
@@ -179,8 +191,12 @@ function Ensure-Cluster {
 function Wait-KubernetesApi {
     $deadline = (Get-Date).AddSeconds(120)
     do {
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
         & kubectl --context $runtimeContext get --raw=/readyz 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        $readyExitCode = $LASTEXITCODE
+        $ErrorActionPreference = $previousErrorActionPreference
+        if ($readyExitCode -eq 0) {
             return
         }
         Start-Sleep -Seconds 2
@@ -395,8 +411,12 @@ cat "$temporary_hosts" >/etc/hosts
 
     Wait-KubernetesApi
     foreach ($namespace in @("kube-system", "ingress-nginx", "cosign-system")) {
-        & kubectl --context $runtimeContext get namespace $namespace 2>$null | Out-Null
+        # 使用 kubectl 原生忽略 NotFound,按资源输出判断是否需要创建,避免 Windows PowerShell 的原生 stderr/退出码差异。
+        $namespaceResource = @(& kubectl --context $runtimeContext get namespace $namespace --ignore-not-found=true -o name)
         if ($LASTEXITCODE -ne 0) {
+            throw "探测 namespace $namespace 失败"
+        }
+        if ($namespaceResource.Count -eq 0) {
             Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "create", "namespace", $namespace)
         }
         $pullSecretYaml = & kubectl --context $runtimeContext -n $namespace create secret generic $imagePullSecret --from-file=".dockerconfigjson=$dockerConfigPath" --type=kubernetes.io/dockerconfigjson --dry-run=client -o yaml
@@ -406,6 +426,56 @@ cat "$temporary_hosts" >/etc/hosts
         $secretPath = Join-Path $tmpRoot "${namespace}-pull-secret.yaml"
         Write-Utf8NoBom -Path $secretPath -Content ($pullSecretYaml -join "`n")
         Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "apply", "-f", $secretPath)
+    }
+}
+
+# Restore-RegistryOnNodes 恢复节点重启后动态 hosts 映射,不改配置也不重启 containerd。
+function Restore-RegistryOnNodes {
+    $kind = Get-Kind
+    $nodes = @(& $kind get nodes --name $ClusterName)
+    if ($LASTEXITCODE -ne 0 -or $nodes.Count -eq 0) {
+        throw "未找到可恢复的 Kind 节点"
+    }
+
+    foreach ($node in $nodes) {
+        foreach ($requiredPath in @(
+            "/etc/containerd/certs.d/$registryHost/ca.crt",
+            "/etc/containerd/certs.d/$registryHost/hosts.toml",
+            "/usr/local/sbin/chaimir-registry-hosts",
+            "/etc/systemd/system/containerd.service.d/chaimir-registry.conf"
+        )) {
+            & docker exec $node test -s $requiredPath 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                throw "$node 缺少已引导的 registry 配置 $requiredPath;请执行 make dev-up 修复集群基线"
+            }
+        }
+
+        Invoke-Native -FilePath "docker" -Arguments @("exec", $node, "/usr/local/sbin/chaimir-registry-hosts")
+        & docker exec $node systemctl is-active --quiet containerd
+        if ($LASTEXITCODE -ne 0) {
+            throw "$node 的 containerd 未运行"
+        }
+
+        $gatewayLines = @(& docker exec $node getent ahostsv4 host.docker.internal)
+        $gatewayExitCode = $LASTEXITCODE
+        $resolvedLines = @(& docker exec $node getent ahostsv4 $registryHost)
+        $resolvedExitCode = $LASTEXITCODE
+        if ($gatewayExitCode -ne 0 -or $resolvedExitCode -ne 0 -or $gatewayLines.Count -eq 0 -or $resolvedLines.Count -eq 0) {
+            throw "$node 无法解析 canonical Harbor 或宿主机网关"
+        }
+        $gateway = (($gatewayLines[0] -split '\s+')[0]).Trim()
+        $resolved = (($resolvedLines[0] -split '\s+')[0]).Trim()
+        if ($gateway -notmatch '^([0-9]{1,3}\.){3}[0-9]{1,3}$' -or $resolved -ne $gateway) {
+            throw "$node 的 $registryHost 未解析到当前宿主机网关"
+        }
+
+        $serviceEnvironment = @(& docker exec $node systemctl show containerd --property=Environment)
+        if ($LASTEXITCODE -ne 0 -or ($serviceEnvironment -join "`n") -notmatch [Regex]::Escape($registryHost)) {
+            throw "$node 的 containerd 未保留 Harbor 代理旁路"
+        }
+        if (($serviceEnvironment -join "`n") -match '(?i)(?:HTTP|HTTPS)_PROXY=https?://(?:127\.0\.0\.1|localhost|\[?::1\]?):') {
+            throw "$node 的 containerd 仍引用节点回环代理"
+        }
     }
 }
 
@@ -519,6 +589,16 @@ function Sync-ContainerKubeconfigs {
     Write-ContainerKubeconfig -Context $DependencyContext -Path $dependencyKubeconfigPath
 }
 
+# Wait-CiliumComponents 等待现有 Cilium 控制面与全部节点恢复,不触发安装或滚动更新。
+function Wait-CiliumComponents {
+    param([int]$TimeoutSeconds = 600)
+
+    Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "-n", "kube-system", "rollout", "status", "daemonset/cilium", "--timeout=${TimeoutSeconds}s")
+    Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "-n", "kube-system", "rollout", "status", "daemonset/cilium-envoy", "--timeout=${TimeoutSeconds}s")
+    Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "-n", "kube-system", "rollout", "status", "deployment/cilium-operator", "--timeout=${TimeoutSeconds}s")
+    Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "wait", "--for=condition=Ready", "nodes", "--all", "--timeout=${TimeoutSeconds}s")
+}
+
 # Install-Cilium 使用固定 OCI Chart digest 和权威镜像锁安装 Cilium,随后等待数据面就绪。
 function Install-Cilium {
     $agentDigest = Get-LockedDigest -LogicalImage "network/cilium"
@@ -548,10 +628,7 @@ function Install-Cilium {
         [Environment]::SetEnvironmentVariable("SUPPLY_CHAIN_KUBECONFIG_HOST_PATH", $oldKubeconfig, "Process")
     }
 
-    Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "-n", "kube-system", "rollout", "status", "daemonset/cilium", "--timeout=600s")
-    Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "-n", "kube-system", "rollout", "status", "daemonset/cilium-envoy", "--timeout=600s")
-    Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "-n", "kube-system", "rollout", "status", "deployment/cilium-operator", "--timeout=600s")
-    Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "wait", "--for=condition=Ready", "nodes", "--all", "--timeout=600s")
+    Wait-CiliumComponents -TimeoutSeconds 600
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "apply", "-f", $healthPolicyPath)
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "apply", "-f", $trustedPolicyPath)
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "apply", "-f", $ingressPolicyPath)
@@ -654,26 +731,86 @@ function Remove-DisallowedNodeImages {
     }
 }
 
-# Wait-CiliumHealth 等待所有节点的 Cilium 健康端点互通,避免只依据 Pod Ready 误判数据面可用。
+# Get-CiliumHealthTargets 从当前 CiliumNode 读取每个节点的主机地址与健康端点地址。
+function Get-CiliumHealthTargets {
+    param([string[]]$Nodes)
+
+    $ciliumNodesRaw = (& kubectl --context $runtimeContext get ciliumnodes -o json) -join "`n"
+    if ($LASTEXITCODE -ne 0) {
+        throw "读取 CiliumNode 列表失败"
+    }
+    try {
+        $ciliumNodes = ($ciliumNodesRaw | ConvertFrom-Json).items
+    } catch {
+        throw "解析 CiliumNode 列表失败: $($_.Exception.Message)"
+    }
+
+    $ciliumNodeByName = @{}
+    foreach ($ciliumNode in $ciliumNodes) {
+        $ciliumNodeByName[[string]$ciliumNode.metadata.name] = $ciliumNode
+    }
+
+    $targets = @()
+    foreach ($node in $Nodes) {
+        $ciliumNode = $ciliumNodeByName[$node]
+        if (-not $ciliumNode) {
+            throw "CiliumNode 尚未覆盖节点 $node"
+        }
+        $hostAddresses = @($ciliumNode.spec.addresses | Where-Object { $_.type -eq "InternalIP" } | ForEach-Object { [string]$_.ip })
+        $healthAddress = [string]$ciliumNode.spec.health.ipv4
+        if ($hostAddresses.Count -ne 1 -or $hostAddresses[0] -notmatch '^([0-9]{1,3}\.){3}[0-9]{1,3}$') {
+            throw "$node 的 Cilium 主机地址无效: $($hostAddresses -join ',')"
+        }
+        if ($healthAddress -notmatch '^([0-9]{1,3}\.){3}[0-9]{1,3}$') {
+            throw "$node 的 Cilium 健康端点地址无效: $healthAddress"
+        }
+        $targets += $hostAddresses[0]
+        $targets += $healthAddress
+    }
+
+    $uniqueTargets = @($targets | Sort-Object -Unique)
+    if ($uniqueTargets.Count -ne ($Nodes.Count * 2)) {
+        throw "Cilium 主机地址与健康端点地址不完整或重复: $($uniqueTargets -join ',')"
+    }
+    return $uniqueTargets
+}
+
+# Wait-CiliumHealth 从每个 Kind 节点主动探测全部当前 Cilium 端点,避免使用重启前的后台缓存误判数据面。
 function Wait-CiliumHealth {
     param([string[]]$Nodes)
 
     $deadline = (Get-Date).AddSeconds(180)
-    $expected = "Cluster health:\s+$($Nodes.Count)/$($Nodes.Count) reachable"
+    $lastFailures = @("尚未执行探测")
     do {
-        $previousErrorActionPreference = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
-        $healthResult = @(& kubectl --context $runtimeContext -n kube-system exec daemonset/cilium -c cilium-agent -- cilium-health status --verbose 2>&1)
-        $healthExitCode = $LASTEXITCODE
-        $ErrorActionPreference = $previousErrorActionPreference
-        $healthText = $healthResult -join "`n"
-        if ($healthExitCode -eq 0 -and $healthText -match $expected) {
+        try {
+            $targets = @(Get-CiliumHealthTargets -Nodes $Nodes)
+            $lastFailures = @()
+            foreach ($source in $Nodes) {
+                foreach ($target in $targets) {
+                    $previousErrorActionPreference = $ErrorActionPreference
+                    try {
+                        $ErrorActionPreference = "Continue"
+                        & docker exec $source curl --connect-timeout 2 --max-time 3 -fsS "http://${target}:4240/hello" 1>$null 2>$null
+                        $probeExitCode = $LASTEXITCODE
+                    } finally {
+                        $ErrorActionPreference = $previousErrorActionPreference
+                    }
+                    if ($probeExitCode -ne 0) {
+                        $lastFailures += "$source -> $target"
+                    }
+                }
+            }
+        } catch {
+            $lastFailures = @($_.Exception.Message)
+        }
+        if ($lastFailures.Count -eq 0) {
+            Write-Output "Cilium 当前主机与健康端点主动探测通过: sources=$($Nodes.Count) targets=$($targets.Count)"
             return
         }
         if ((Get-Date) -ge $deadline) {
-            throw "Cilium 节点健康探测未全部通过: $healthText"
+            throw "Cilium 节点健康探测未全部通过: $($lastFailures -join ',')"
         }
-        Start-Sleep -Seconds 10
+        Start-Sleep -Seconds 2
     } while ($true)
 }
 
@@ -1107,8 +1244,39 @@ function Remove-Cluster {
     Invoke-Native -FilePath $kind -Arguments @("delete", "cluster", "--name", $ClusterName)
 }
 
+# Stop-ClusterNodes 暂停项目 Kind 节点,保留数据库进程、volume 和 containerd 镜像缓存。
+function Stop-ClusterNodes {
+    $nodes = @(& docker ps -a --filter "label=io.x-k8s.kind.cluster=$ClusterName" --format "{{.Names}}")
+    if ($LASTEXITCODE -ne 0 -or $nodes.Count -eq 0) {
+        throw "无法读取 Kind 集群 $ClusterName 的节点容器"
+    }
+
+    $runningNodes = @()
+    foreach ($node in $nodes) {
+        $stateRaw = [string](& docker inspect --format "{{json .State}}" $node)
+        if ($LASTEXITCODE -ne 0) {
+            throw "读取 Kind 节点 $node 状态失败"
+        }
+        try {
+            $state = $stateRaw | ConvertFrom-Json
+        } catch {
+            throw "解析 Kind 节点 $node 状态失败: $($_.Exception.Message)"
+        }
+        if ($state.Running -and -not $state.Paused) {
+            $runningNodes += $node
+        }
+    }
+    if ($runningNodes.Count -gt 0) {
+        Invoke-Native -FilePath "docker" -Arguments (@("pause") + $runningNodes)
+    }
+}
+
 if ($Action -eq "Down") {
     Remove-Cluster
+    return
+}
+if ($Action -eq "Stop") {
+    Stop-ClusterNodes
     return
 }
 
@@ -1127,6 +1295,18 @@ switch ($Action) {
         Remove-DisallowedNodeImages
         Assert-CiliumState
         Invoke-NetworkPolicySmoke
+    }
+    "Start" {
+        Assert-DependencyRegistry
+        Ensure-Cluster -RequireExisting
+        Sync-ContainerKubeconfigs
+        Restore-RegistryOnNodes
+        Approve-KubeletServingCertificates
+        Wait-CiliumComponents -TimeoutSeconds 300
+        Repair-StaleCiliumEndpoints
+        Configure-RegistryPodDns
+        Assert-CiliumState
+        Configure-ExternalEdge
     }
     "Check" {
         Sync-ContainerKubeconfigs

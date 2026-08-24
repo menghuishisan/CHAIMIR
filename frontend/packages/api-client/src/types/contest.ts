@@ -1,6 +1,8 @@
 // ===== M8 Contest 模块 =====
 
 import type { SnowflakeID } from './common'
+import type { SandboxCompositionSpec } from './composition'
+import type { SandboxAccessProfile } from '../constants/composition'
 import type {
   BattleMatchStatus,
   BattleResult,
@@ -19,7 +21,42 @@ import type {
   VulnRuntimeMode,
   VulnSourceType,
 } from '../constants/contest'
-import type { SandboxStatus } from '../constants/sandbox'
+import type { SandboxPhase, SandboxStatus } from '../constants/sandbox'
+import type {
+  SandboxCommandToolRunRequest,
+  SandboxCommandToolRunResponse,
+  SandboxFileListResponse,
+  SandboxFileReadResponse,
+  SandboxFileSaveResponse,
+  SandboxFileWriteRequest,
+  SandboxChainRequest,
+  SandboxChainResponse,
+} from './sandbox'
+
+/** M8 竞赛沙箱网关复用 M2 工作区数据形状,但不向学生暴露 tenant_id。 */
+export type ContestSandboxResponse = {
+  sandbox_id: SnowflakeID
+  source_ref: string
+  owner_account_id: SnowflakeID
+  runtime_code: string
+  runtime_image_version: string
+  phase: SandboxPhase
+  status: SandboxStatus
+  tool_access: import('./sandbox').SandboxToolAccess[]
+  capabilities: import('./sandbox').SandboxCapabilities
+  resource_usage: import('./sandbox').SandboxResourceUsage
+  workspace_revision: number
+}
+
+export type ContestSandboxFileReadResponse = SandboxFileReadResponse
+export type ContestSandboxFileListResponse = SandboxFileListResponse
+export type ContestSandboxFileWriteRequest = SandboxFileWriteRequest
+export type ContestSandboxFileWriteResponse = { workspace_revision: number }
+export type ContestSandboxFileSaveResponse = SandboxFileSaveResponse
+export type ContestSandboxCommandToolRunRequest = SandboxCommandToolRunRequest
+export type ContestSandboxCommandToolRunResponse = SandboxCommandToolRunResponse
+export type ContestSandboxChainRequest = SandboxChainRequest
+export type ContestSandboxChainResponse = SandboxChainResponse
 
 export interface Contest {
   id: SnowflakeID
@@ -62,6 +99,7 @@ export interface ContestProblem {
   battle_config?: ContestBattleRuntimeConfig
   battle_rule?: BattleRule
   seq: number
+  composition_digest?: string
   face?: Record<string, unknown>
 }
 
@@ -81,11 +119,16 @@ export interface ContestDynamicScoreConfig {
   decay_per_solve: number
 }
 
-/** ContestBattleRuntimeConfig 是对抗题启动沙箱所需的固定运行时参数。 */
+/**
+ * ContestBattleRuntimeConfig 是对抗题的赛制参数。
+ * 环境组合不在这里 —— 对抗环境由题目版本(M5)提供的已发布组合快照决定,
+ * 竞赛侧只保存「怎么打」:执行边界、入场角色与复盘参数。
+ */
 export interface ContestBattleRuntimeConfig {
-  runtime_code: string
-  runtime_image_version: string
-  tool_codes?: string[]
+  /** execution_profile 固定为对抗赛访问边界,由后端校验闭集 */
+  execution_profile: SandboxAccessProfile
+  entry_roles: BattleRole[]
+  replay_profile: Record<string, unknown>
 }
 
 export interface ContestTeam {
@@ -137,12 +180,13 @@ export interface ContestSubmitRequest {
   sandbox_ref?: string
 }
 
+/**
+ * EnvRequest 是实操题环境启动请求。
+ * 环境内容取自题目已发布的组合快照,故这里只带一个幂等引用 ——
+ * 学生端不声明运行时或工具,也就无法绕过赛题冻结的执行内容。
+ */
 export interface EnvRequest {
-  runtime_code: string
-  runtime_image_version: string
-  tool_codes: string[]
-  init_code_ref?: string
-  init_script_ref?: string
+  request_ref: string
 }
 
 export interface EnvSummary {
@@ -388,10 +432,12 @@ export interface VulnProblemImportRequest {
   draft_body: Record<string, unknown>
 }
 
+/**
+ * VulnPrevalidateRequest 是漏洞题预验证请求:教师声明用什么组合跑正反向验证。
+ * 只提交声明,编译与执行都在服务端;结果写回 prevalidate_status / prevalidate_detail。
+ */
 export interface VulnPrevalidateRequest {
-  runtime_code: string
-  runtime_image_version: string
-  tool_codes: string[]
+  composition: SandboxCompositionSpec
   init_code_ref?: string
   init_script_ref?: string
 }
@@ -406,6 +452,7 @@ export interface VulnProblem {
   draft_body: Record<string, unknown>
   prevalidate_status: VulnPrevalidateStatus
   prevalidate_detail: Record<string, unknown>
+  composition_digest?: string
   content_item_code?: string
   content_item_version?: string
   status: VulnProblemStatus

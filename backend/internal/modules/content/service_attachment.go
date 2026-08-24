@@ -82,12 +82,13 @@ func (s *Service) IssueAttachmentDownloadGrant(ctx context.Context, itemID int64
 		return AttachmentDownloadGrantDTO{}, apperr.ErrContentAttachmentInvalid.WithCause(err)
 	}
 	token, grant, err := s.files.IssueDownloadGrant(storage.IssueDownloadGrantRequest{
-		TenantID:     id.TenantID,
-		AccountID:    id.AccountID,
-		ObjectRef:    objectRef,
-		Module:       contentModuleName,
-		ResourceType: contentAttachmentResourceType,
-		ResourceID:   objectResourceID,
+		TenantID:         id.TenantID,
+		ResourceTenantID: id.TenantID,
+		AccountID:        id.AccountID,
+		ObjectRef:        objectRef,
+		Module:           contentModuleName,
+		ResourceType:     contentAttachmentResourceType,
+		ResourceID:       objectResourceID,
 	})
 	if err != nil {
 		return AttachmentDownloadGrantDTO{}, apperr.ErrContentAttachmentInvalid.WithCause(err)

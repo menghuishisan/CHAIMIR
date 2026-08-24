@@ -9,13 +9,15 @@ import (
 // SimCreateSessionRequest 是业务模块创建仿真会话时提交的稳定请求。
 // SourceRef 必须使用全局四段规范,实验实例必须传 experiment:<year>:instance:<id>,不得使用 exp 等短前缀别名。
 type SimCreateSessionRequest struct {
-	TenantID       int64          `json:"tenant_id"`
-	PackageCode    string         `json:"package_code"`
-	Version        string         `json:"version"`
-	Seed           int64          `json:"seed"`
-	InitParams     map[string]any `json:"init_params"`
-	OwnerAccountID int64          `json:"owner_account_id"`
-	SourceRef      string         `json:"source_ref"`
+	TenantID             int64          `json:"tenant_id"`
+	PackageCode          string         `json:"package_code"`
+	Version              string         `json:"version"`
+	Seed                 int64          `json:"seed"`
+	InitParams           map[string]any `json:"init_params"`
+	OwnerAccountID       int64          `json:"owner_account_id"`
+	AuthorizedAccountIDs []int64        `json:"authorized_account_ids,omitempty"`
+	SourceRef            string         `json:"source_ref"`
+	ScopeRef             string         `json:"scope_ref"`
 }
 
 // SimSessionInfo 是跨模块传递的仿真会话摘要。
@@ -30,6 +32,7 @@ type SimSessionInfo struct {
 	Version     string `json:"version"`
 	Compute     string `json:"compute"`
 	SourceRef   string `json:"source_ref"`
+	ScopeRef    string `json:"scope_ref"`
 }
 
 // SimActionInfo 是回放剧本中的单条用户操作。
@@ -66,10 +69,20 @@ type SimDestroySessionRequest struct {
 	SourceRef string `json:"source_ref"`
 }
 
-// SimRecycleRequest 是按来源回收仿真会话的内部请求。
+// SimAuthorizedAccountsRequest 原子替换仿真会话的共享账号集合。
+// 会话所有权由 SourceRef 绑定,成员变更时由 M7 先收回再授予,避免旧成员继续使用已存在的流。
+type SimAuthorizedAccountsRequest struct {
+	TenantID             int64   `json:"tenant_id"`
+	SessionID            int64   `json:"session_id"`
+	SourceRef            string  `json:"source_ref"`
+	AuthorizedAccountIDs []int64 `json:"authorized_account_ids,omitempty"`
+}
+
+// SimRecycleRequest 是按生命周期作用域回收仿真会话的内部请求。
 type SimRecycleRequest struct {
 	TenantID  int64  `json:"tenant_id"`
 	SourceRef string `json:"source_ref"`
+	ScopeRef  string `json:"scope_ref"`
 	Reason    string `json:"reason"`
 }
 
@@ -83,6 +96,8 @@ type SimService interface {
 	ReportCheckpoint(ctx context.Context, req SimCheckpointRequest) error
 	// DestroySession 回收单个仿真会话,供来源模块显式关闭实例时释放资源。
 	DestroySession(ctx context.Context, req SimDestroySessionRequest) error
-	// RecycleBySourceRef 按来源标识归档仿真会话并释放后端计算资源。
-	RecycleBySourceRef(ctx context.Context, req SimRecycleRequest) error
+	// UpdateSessionAuthorizedAccounts 原子替换共享仿真会话的授权账号集合,并关闭被撤销账号的在线流。
+	UpdateSessionAuthorizedAccounts(ctx context.Context, req SimAuthorizedAccountsRequest) error
+	// RecycleByScopeRef 按生命周期作用域归档仿真会话并释放后端计算资源。
+	RecycleByScopeRef(ctx context.Context, req SimRecycleRequest) error
 }

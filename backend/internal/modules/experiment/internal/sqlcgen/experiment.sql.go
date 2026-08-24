@@ -98,7 +98,7 @@ WHERE id IN (
     LIMIT $3
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 `
 
 type ClaimRecyclableInstancesAcrossTenantsParams struct {
@@ -114,6 +114,7 @@ type ClaimRecyclableInstancesAcrossTenantsRow struct {
 	OwnerAccountID int64              `json:"owner_account_id"`
 	GroupID        pgtype.Int8        `json:"group_id"`
 	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
 	SandboxRefs    []byte             `json:"sandbox_refs"`
 	SimSessionRefs []byte             `json:"sim_session_refs"`
 	Status         int16              `json:"status"`
@@ -139,6 +140,7 @@ func (q *Queries) ClaimRecyclableInstancesAcrossTenants(ctx context.Context, arg
 			&i.OwnerAccountID,
 			&i.GroupID,
 			&i.SourceRef,
+			&i.ScopeRef,
 			&i.SandboxRefs,
 			&i.SimSessionRefs,
 			&i.Status,
@@ -195,6 +197,71 @@ type CountExperimentsParams struct {
 
 func (q *Queries) CountExperiments(ctx context.Context, arg CountExperimentsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countExperiments, arg.TenantID, arg.Column2, arg.Column3)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countPublishedExperimentsByShape = `-- name: CountPublishedExperimentsByShape :many
+SELECT collab_mode, require_report, COUNT(*)::bigint AS count
+FROM experiment
+WHERE tenant_id = $1
+  AND deleted_at IS NULL
+  AND status = 3
+  AND ($2::bigint = 0 OR course_id = $2)
+GROUP BY collab_mode, require_report
+ORDER BY collab_mode, require_report
+`
+
+type CountPublishedExperimentsByShapeParams struct {
+	TenantID int64 `json:"tenant_id"`
+	Column2  int64 `json:"column_2"`
+}
+
+type CountPublishedExperimentsByShapeRow struct {
+	CollabMode    int16 `json:"collab_mode"`
+	RequireReport bool  `json:"require_report"`
+	Count         int64 `json:"count"`
+}
+
+func (q *Queries) CountPublishedExperimentsByShape(ctx context.Context, arg CountPublishedExperimentsByShapeParams) ([]CountPublishedExperimentsByShapeRow, error) {
+	rows, err := q.db.Query(ctx, countPublishedExperimentsByShape, arg.TenantID, arg.Column2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountPublishedExperimentsByShapeRow{}
+	for rows.Next() {
+		var i CountPublishedExperimentsByShapeRow
+		if err := rows.Scan(&i.CollabMode, &i.RequireReport, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countTeacherInstances = `-- name: CountTeacherInstances :one
+SELECT COUNT(*)::bigint
+FROM experiment_instance i
+JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
+WHERE i.tenant_id = $1::bigint
+  AND ($2::bigint = 0 OR e.author_id = $2::bigint)
+  AND ($3::smallint = 0 OR i.status = $3::smallint)
+  AND i.status IN (1, 2, 3, 7)
+`
+
+type CountTeacherInstancesParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	TeacherID int64 `json:"teacher_id"`
+	Status    int16 `json:"status"`
+}
+
+func (q *Queries) CountTeacherInstances(ctx context.Context, arg CountTeacherInstancesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countTeacherInstances, arg.TenantID, arg.TeacherID, arg.Status)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -294,9 +361,9 @@ func (q *Queries) CreateExperimentGroup(ctx context.Context, arg CreateExperimen
 }
 
 const createExperimentInstance = `-- name: CreateExperimentInstance :one
-INSERT INTO experiment_instance (id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, score, started_at, finished_at, last_active_at)
-VALUES ($1, $2, $3, $4, $5, $6, '[]'::jsonb, '[]'::jsonb, 1, NULL, now(), NULL, now())
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+INSERT INTO experiment_instance (id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, score, started_at, finished_at, last_active_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, '[]'::jsonb, '[]'::jsonb, 1, NULL, now(), NULL, now())
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 `
 
 type CreateExperimentInstanceParams struct {
@@ -306,6 +373,7 @@ type CreateExperimentInstanceParams struct {
 	OwnerAccountID int64       `json:"owner_account_id"`
 	GroupID        pgtype.Int8 `json:"group_id"`
 	SourceRef      string      `json:"source_ref"`
+	ScopeRef       string      `json:"scope_ref"`
 }
 
 type CreateExperimentInstanceRow struct {
@@ -315,6 +383,7 @@ type CreateExperimentInstanceRow struct {
 	OwnerAccountID int64              `json:"owner_account_id"`
 	GroupID        pgtype.Int8        `json:"group_id"`
 	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
 	SandboxRefs    []byte             `json:"sandbox_refs"`
 	SimSessionRefs []byte             `json:"sim_session_refs"`
 	Status         int16              `json:"status"`
@@ -332,6 +401,7 @@ func (q *Queries) CreateExperimentInstance(ctx context.Context, arg CreateExperi
 		arg.OwnerAccountID,
 		arg.GroupID,
 		arg.SourceRef,
+		arg.ScopeRef,
 	)
 	var i CreateExperimentInstanceRow
 	err := row.Scan(
@@ -341,6 +411,7 @@ func (q *Queries) CreateExperimentInstance(ctx context.Context, arg CreateExperi
 		&i.OwnerAccountID,
 		&i.GroupID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRefs,
 		&i.SimSessionRefs,
 		&i.Status,
@@ -408,6 +479,22 @@ func (q *Queries) CreateExperimentScoreOutbox(ctx context.Context, arg CreateExp
 	return i, err
 }
 
+const deleteGroupMember = `-- name: DeleteGroupMember :exec
+DELETE FROM group_member
+WHERE tenant_id = $1 AND group_id = $2 AND student_id = $3
+`
+
+type DeleteGroupMemberParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	GroupID   int64 `json:"group_id"`
+	StudentID int64 `json:"student_id"`
+}
+
+func (q *Queries) DeleteGroupMember(ctx context.Context, arg DeleteGroupMemberParams) error {
+	_, err := q.db.Exec(ctx, deleteGroupMember, arg.TenantID, arg.GroupID, arg.StudentID)
+	return err
+}
+
 const experimentStats = `-- name: ExperimentStats :one
 SELECT
     COUNT(*)::bigint AS experiment_count,
@@ -440,7 +527,7 @@ SET status = 4,
     finished_at = now(),
     last_active_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 `
 
 type FinishExperimentInstanceParams struct {
@@ -456,6 +543,7 @@ type FinishExperimentInstanceRow struct {
 	OwnerAccountID int64              `json:"owner_account_id"`
 	GroupID        pgtype.Int8        `json:"group_id"`
 	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
 	SandboxRefs    []byte             `json:"sandbox_refs"`
 	SimSessionRefs []byte             `json:"sim_session_refs"`
 	Status         int16              `json:"status"`
@@ -475,6 +563,7 @@ func (q *Queries) FinishExperimentInstance(ctx context.Context, arg FinishExperi
 		&i.OwnerAccountID,
 		&i.GroupID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRefs,
 		&i.SimSessionRefs,
 		&i.Status,
@@ -487,7 +576,7 @@ func (q *Queries) FinishExperimentInstance(ctx context.Context, arg FinishExperi
 }
 
 const getActiveGroupInstance = `-- name: GetActiveGroupInstance :one
-SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 FROM experiment_instance
 WHERE tenant_id = $1 AND experiment_id = $2 AND group_id = $3 AND status IN (1, 2, 3, 7)
 ORDER BY started_at DESC, id DESC
@@ -508,6 +597,7 @@ type GetActiveGroupInstanceRow struct {
 	OwnerAccountID int64              `json:"owner_account_id"`
 	GroupID        pgtype.Int8        `json:"group_id"`
 	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
 	SandboxRefs    []byte             `json:"sandbox_refs"`
 	SimSessionRefs []byte             `json:"sim_session_refs"`
 	Status         int16              `json:"status"`
@@ -527,6 +617,7 @@ func (q *Queries) GetActiveGroupInstance(ctx context.Context, arg GetActiveGroup
 		&i.OwnerAccountID,
 		&i.GroupID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRefs,
 		&i.SimSessionRefs,
 		&i.Status,
@@ -539,7 +630,7 @@ func (q *Queries) GetActiveGroupInstance(ctx context.Context, arg GetActiveGroup
 }
 
 const getActiveOwnerInstance = `-- name: GetActiveOwnerInstance :one
-SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 FROM experiment_instance
 WHERE tenant_id = $1 AND experiment_id = $2 AND owner_account_id = $3 AND group_id IS NULL AND status IN (1, 2, 3, 7)
 ORDER BY started_at DESC, id DESC
@@ -560,6 +651,7 @@ type GetActiveOwnerInstanceRow struct {
 	OwnerAccountID int64              `json:"owner_account_id"`
 	GroupID        pgtype.Int8        `json:"group_id"`
 	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
 	SandboxRefs    []byte             `json:"sandbox_refs"`
 	SimSessionRefs []byte             `json:"sim_session_refs"`
 	Status         int16              `json:"status"`
@@ -579,6 +671,7 @@ func (q *Queries) GetActiveOwnerInstance(ctx context.Context, arg GetActiveOwner
 		&i.OwnerAccountID,
 		&i.GroupID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRefs,
 		&i.SimSessionRefs,
 		&i.Status,
@@ -735,8 +828,33 @@ func (q *Queries) GetExperimentGroup(ctx context.Context, arg GetExperimentGroup
 	return i, err
 }
 
+const getExperimentGroupForUpdate = `-- name: GetExperimentGroupForUpdate :one
+SELECT id, tenant_id, experiment_id, name, created_at
+FROM experiment_group
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type GetExperimentGroupForUpdateParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) GetExperimentGroupForUpdate(ctx context.Context, arg GetExperimentGroupForUpdateParams) (ExperimentGroup, error) {
+	row := q.db.QueryRow(ctx, getExperimentGroupForUpdate, arg.TenantID, arg.ID)
+	var i ExperimentGroup
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ExperimentID,
+		&i.Name,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getExperimentInstance = `-- name: GetExperimentInstance :one
-SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 FROM experiment_instance
 WHERE tenant_id = $1 AND id = $2
 `
@@ -753,6 +871,7 @@ type GetExperimentInstanceRow struct {
 	OwnerAccountID int64              `json:"owner_account_id"`
 	GroupID        pgtype.Int8        `json:"group_id"`
 	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
 	SandboxRefs    []byte             `json:"sandbox_refs"`
 	SimSessionRefs []byte             `json:"sim_session_refs"`
 	Status         int16              `json:"status"`
@@ -772,6 +891,7 @@ func (q *Queries) GetExperimentInstance(ctx context.Context, arg GetExperimentIn
 		&i.OwnerAccountID,
 		&i.GroupID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRefs,
 		&i.SimSessionRefs,
 		&i.Status,
@@ -784,7 +904,7 @@ func (q *Queries) GetExperimentInstance(ctx context.Context, arg GetExperimentIn
 }
 
 const getExperimentInstanceBySourceRef = `-- name: GetExperimentInstanceBySourceRef :one
-SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 FROM experiment_instance
 WHERE tenant_id = $1 AND source_ref = $2
 `
@@ -801,6 +921,7 @@ type GetExperimentInstanceBySourceRefRow struct {
 	OwnerAccountID int64              `json:"owner_account_id"`
 	GroupID        pgtype.Int8        `json:"group_id"`
 	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
 	SandboxRefs    []byte             `json:"sandbox_refs"`
 	SimSessionRefs []byte             `json:"sim_session_refs"`
 	Status         int16              `json:"status"`
@@ -820,6 +941,7 @@ func (q *Queries) GetExperimentInstanceBySourceRef(ctx context.Context, arg GetE
 		&i.OwnerAccountID,
 		&i.GroupID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRefs,
 		&i.SimSessionRefs,
 		&i.Status,
@@ -832,7 +954,7 @@ func (q *Queries) GetExperimentInstanceBySourceRef(ctx context.Context, arg GetE
 }
 
 const getExperimentInstanceForUpdate = `-- name: GetExperimentInstanceForUpdate :one
-SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+SELECT id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 FROM experiment_instance
 WHERE tenant_id = $1 AND id = $2
 FOR UPDATE
@@ -850,6 +972,7 @@ type GetExperimentInstanceForUpdateRow struct {
 	OwnerAccountID int64              `json:"owner_account_id"`
 	GroupID        pgtype.Int8        `json:"group_id"`
 	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
 	SandboxRefs    []byte             `json:"sandbox_refs"`
 	SimSessionRefs []byte             `json:"sim_session_refs"`
 	Status         int16              `json:"status"`
@@ -869,6 +992,7 @@ func (q *Queries) GetExperimentInstanceForUpdate(ctx context.Context, arg GetExp
 		&i.OwnerAccountID,
 		&i.GroupID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRefs,
 		&i.SimSessionRefs,
 		&i.Status,
@@ -1344,7 +1468,7 @@ func (q *Queries) ListGroupMembersByExperiment(ctx context.Context, arg ListGrou
 
 const listLiveInstancesByCourse = `-- name: ListLiveInstancesByCourse :many
 SELECT i.id, i.tenant_id, i.experiment_id, i.owner_account_id, i.group_id, i.source_ref, i.sandbox_refs, i.sim_session_refs, i.status,
-       COALESCE(i.score::float8, 0)::float8 AS score, i.started_at, i.finished_at, i.last_active_at
+       i.scope_ref, COALESCE(i.score::float8, 0)::float8 AS score, i.started_at, i.finished_at, i.last_active_at
 FROM experiment_instance i
 JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
 WHERE i.tenant_id = $1 AND e.course_id = $2 AND i.status IN (1, 2, 3, 7)
@@ -1366,6 +1490,7 @@ type ListLiveInstancesByCourseRow struct {
 	SandboxRefs    []byte             `json:"sandbox_refs"`
 	SimSessionRefs []byte             `json:"sim_session_refs"`
 	Status         int16              `json:"status"`
+	ScopeRef       string             `json:"scope_ref"`
 	Score          float64            `json:"score"`
 	StartedAt      pgtype.Timestamptz `json:"started_at"`
 	FinishedAt     pgtype.Timestamptz `json:"finished_at"`
@@ -1393,6 +1518,7 @@ func (q *Queries) ListLiveInstancesByCourse(ctx context.Context, arg ListLiveIns
 			&i.SandboxRefs,
 			&i.SimSessionRefs,
 			&i.Status,
+			&i.ScopeRef,
 			&i.Score,
 			&i.StartedAt,
 			&i.FinishedAt,
@@ -1437,6 +1563,87 @@ func (q *Queries) ListStudentGroupsForExperiments(ctx context.Context, arg ListS
 	for rows.Next() {
 		var i ListStudentGroupsForExperimentsRow
 		if err := rows.Scan(&i.ExperimentID, &i.GroupID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeacherInstances = `-- name: ListTeacherInstances :many
+SELECT i.id, i.tenant_id, i.experiment_id, i.owner_account_id, i.group_id, i.source_ref, i.scope_ref,
+       i.sandbox_refs, i.sim_session_refs, i.status, COALESCE(i.score::float8, 0)::float8 AS score,
+       i.started_at, i.finished_at, i.last_active_at
+FROM experiment_instance i
+JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
+WHERE i.tenant_id = $1::bigint
+  AND ($2::bigint = 0 OR e.author_id = $2::bigint)
+  AND ($3::smallint = 0 OR i.status = $3::smallint)
+  AND i.status IN (1, 2, 3, 7)
+ORDER BY i.last_active_at DESC, i.id DESC
+LIMIT $5::int OFFSET $4::int
+`
+
+type ListTeacherInstancesParams struct {
+	TenantID   int64 `json:"tenant_id"`
+	TeacherID  int64 `json:"teacher_id"`
+	Status     int16 `json:"status"`
+	PageOffset int32 `json:"page_offset"`
+	PageLimit  int32 `json:"page_limit"`
+}
+
+type ListTeacherInstancesRow struct {
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	ExperimentID   int64              `json:"experiment_id"`
+	OwnerAccountID int64              `json:"owner_account_id"`
+	GroupID        pgtype.Int8        `json:"group_id"`
+	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
+	SandboxRefs    []byte             `json:"sandbox_refs"`
+	SimSessionRefs []byte             `json:"sim_session_refs"`
+	Status         int16              `json:"status"`
+	Score          float64            `json:"score"`
+	StartedAt      pgtype.Timestamptz `json:"started_at"`
+	FinishedAt     pgtype.Timestamptz `json:"finished_at"`
+	LastActiveAt   pgtype.Timestamptz `json:"last_active_at"`
+}
+
+// 教师只看本人实验实例,学校管理员由服务层传 teacher_id=0 查看本租户全部活跃实例。
+func (q *Queries) ListTeacherInstances(ctx context.Context, arg ListTeacherInstancesParams) ([]ListTeacherInstancesRow, error) {
+	rows, err := q.db.Query(ctx, listTeacherInstances,
+		arg.TenantID,
+		arg.TeacherID,
+		arg.Status,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeacherInstancesRow{}
+	for rows.Next() {
+		var i ListTeacherInstancesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ExperimentID,
+			&i.OwnerAccountID,
+			&i.GroupID,
+			&i.SourceRef,
+			&i.ScopeRef,
+			&i.SandboxRefs,
+			&i.SimSessionRefs,
+			&i.Status,
+			&i.Score,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.LastActiveAt,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1579,7 +1786,7 @@ UPDATE experiment_instance
 SET status = $3,
     last_active_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 `
 
 type SetInstanceStatusParams struct {
@@ -1595,6 +1802,7 @@ type SetInstanceStatusRow struct {
 	OwnerAccountID int64              `json:"owner_account_id"`
 	GroupID        pgtype.Int8        `json:"group_id"`
 	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
 	SandboxRefs    []byte             `json:"sandbox_refs"`
 	SimSessionRefs []byte             `json:"sim_session_refs"`
 	Status         int16              `json:"status"`
@@ -1614,6 +1822,7 @@ func (q *Queries) SetInstanceStatus(ctx context.Context, arg SetInstanceStatusPa
 		&i.OwnerAccountID,
 		&i.GroupID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRefs,
 		&i.SimSessionRefs,
 		&i.Status,
@@ -1665,7 +1874,7 @@ const touchExperimentInstance = `-- name: TouchExperimentInstance :one
 UPDATE experiment_instance
 SET last_active_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 `
 
 type TouchExperimentInstanceParams struct {
@@ -1680,6 +1889,7 @@ type TouchExperimentInstanceRow struct {
 	OwnerAccountID int64              `json:"owner_account_id"`
 	GroupID        pgtype.Int8        `json:"group_id"`
 	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
 	SandboxRefs    []byte             `json:"sandbox_refs"`
 	SimSessionRefs []byte             `json:"sim_session_refs"`
 	Status         int16              `json:"status"`
@@ -1699,6 +1909,7 @@ func (q *Queries) TouchExperimentInstance(ctx context.Context, arg TouchExperime
 		&i.OwnerAccountID,
 		&i.GroupID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRefs,
 		&i.SimSessionRefs,
 		&i.Status,
@@ -1787,7 +1998,7 @@ SET score = $3::text::numeric,
 WHERE tenant_id = $1
   AND id = $2
   AND score IS DISTINCT FROM $3::text::numeric
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 `
 
 type UpdateExperimentInstanceScoreIfChangedParams struct {
@@ -1803,6 +2014,7 @@ type UpdateExperimentInstanceScoreIfChangedRow struct {
 	OwnerAccountID int64              `json:"owner_account_id"`
 	GroupID        pgtype.Int8        `json:"group_id"`
 	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
 	SandboxRefs    []byte             `json:"sandbox_refs"`
 	SimSessionRefs []byte             `json:"sim_session_refs"`
 	Status         int16              `json:"status"`
@@ -1823,6 +2035,7 @@ func (q *Queries) UpdateExperimentInstanceScoreIfChanged(ctx context.Context, ar
 		&i.OwnerAccountID,
 		&i.GroupID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRefs,
 		&i.SimSessionRefs,
 		&i.Status,
@@ -1841,7 +2054,7 @@ SET sandbox_refs = $3,
     status = $5,
     last_active_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
+RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at
 `
 
 type UpdateInstanceResourcesParams struct {
@@ -1859,6 +2072,7 @@ type UpdateInstanceResourcesRow struct {
 	OwnerAccountID int64              `json:"owner_account_id"`
 	GroupID        pgtype.Int8        `json:"group_id"`
 	SourceRef      string             `json:"source_ref"`
+	ScopeRef       string             `json:"scope_ref"`
 	SandboxRefs    []byte             `json:"sandbox_refs"`
 	SimSessionRefs []byte             `json:"sim_session_refs"`
 	Status         int16              `json:"status"`
@@ -1884,6 +2098,7 @@ func (q *Queries) UpdateInstanceResources(ctx context.Context, arg UpdateInstanc
 		&i.OwnerAccountID,
 		&i.GroupID,
 		&i.SourceRef,
+		&i.ScopeRef,
 		&i.SandboxRefs,
 		&i.SimSessionRefs,
 		&i.Status,

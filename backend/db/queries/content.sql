@@ -202,6 +202,13 @@ LIMIT $2 OFFSET $3;
 -- name: CountPapers :one
 SELECT COUNT(*)::bigint FROM paper WHERE tenant_id = $1 AND deleted_at IS NULL;
 
+-- name: CountPapersByGenMode :many
+SELECT gen_mode, COUNT(*)::bigint AS count
+FROM paper
+WHERE tenant_id = $1 AND deleted_at IS NULL
+GROUP BY gen_mode
+ORDER BY gen_mode;
+
 -- name: ListPaperItems :many
 SELECT id, tenant_id, paper_id, item_code, item_version, score, seq, created_at
 FROM paper_item

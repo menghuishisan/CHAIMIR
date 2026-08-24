@@ -8,13 +8,12 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
-	"sort"
 	"strings"
-	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
-	"chaimir/internal/platform/timex"
+	"chaimir/internal/platform/prepull"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
@@ -158,6 +157,25 @@ func (s *Service) ListRuntimes(ctx context.Context) ([]Runtime, error) {
 	return out, nil
 }
 
+// GetRuntime 按 ID 查询单个运行时,供平台详情页深链和刷新使用。
+func (s *Service) GetRuntime(ctx context.Context, runtimeID int64) (Runtime, error) {
+	if runtimeID <= 0 {
+		return Runtime{}, apperr.ErrSandboxRuntimeNotFound
+	}
+	var out Runtime
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		out, err = tx.GetRuntimeByID(ctx, runtimeID)
+		if err != nil {
+			return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
+		}
+		return nil
+	}); err != nil {
+		return Runtime{}, err
+	}
+	return out, nil
+}
+
 // RegisterRuntimeImage 登记运行时镜像版本并校验受控证明清单。
 func (s *Service) RegisterRuntimeImage(ctx context.Context, runtimeID int64, req RuntimeImageRequest) (RuntimeImage, error) {
 	if runtimeID <= 0 || strings.TrimSpace(req.ImageURL) == "" || strings.TrimSpace(req.Version) == "" || !imageAttested(s.cfg, req.ImageURL, req.Digest) {
@@ -196,15 +214,14 @@ func (s *Service) DisableRuntimeImage(ctx context.Context, runtimeID, imageID in
 	if err := s.orchestrator.DeletePrepullDaemonSet(ctx, image); err != nil {
 		return RuntimeImage{}, apperr.ErrSandboxImageDisableFailed.WithCause(err)
 	}
-	detail, err := jsonBytes(map[string]any{"stage": "disabled"})
-	if err != nil {
-		return RuntimeImage{}, apperr.ErrSandboxImageDisableFailed.WithCause(err)
-	}
 	var disabled RuntimeImage
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		disabled, err = tx.DisableRuntimeImage(ctx, runtimeID, imageID, detail)
+		disabled, err = tx.DisableRuntimeImage(ctx, runtimeID, imageID)
 		if err != nil {
+			return apperr.ErrSandboxImageDisableFailed.WithCause(err)
+		}
+		if err := tx.DeleteCompositionPrepullByRuntimeImage(ctx, imageID); err != nil {
 			return apperr.ErrSandboxImageDisableFailed.WithCause(err)
 		}
 		return nil
@@ -257,11 +274,13 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 		if !canRunRuntimeSelftest(runtime.Status) {
 			return apperr.ErrSandboxRuntimeUnavailable
 		}
-		image, txErr = tx.GetDefaultRuntimeImageForShare(ctx, runtimeID)
-		if txErr != nil {
-			return apperr.ErrSandboxRuntimeImageNotFound.WithCause(txErr)
+		images, listErr := tx.ListRuntimeImages(ctx, runtimeID)
+		if listErr != nil {
+			return apperr.ErrSandboxRuntimeImageNotFound.WithCause(listErr)
 		}
-		if !image.Prepulled || image.PrepullStatus != ImagePrepullSucceeded || !image.GenesisBaked {
+		var selected bool
+		image, selected = selectRuntimeSelftestImage(images)
+		if !selected {
 			return apperr.ErrSandboxRuntimeUnavailable
 		}
 		_, txErr = tx.StartRuntimeSelftest(ctx, runtimeID, startingDetail)
@@ -287,10 +306,10 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	}
 	err = s.orchestrator.CreateSandboxResources(operationCtx, CreateSandboxPlan{Sandbox: sb, Runtime: runtime, Image: image})
 	if err == nil {
-		_, _, err = s.orchestrator.Exec(operationCtx, sb.Namespace, runtimeExecTarget(runtime), runtime.AdapterSpec.WorkspaceOps.Selftest, nil, false)
+		_, _, err = s.orchestrator.Exec(operationCtx, sb.Namespace, workspaceExecTarget(runtime), runtime.AdapterSpec.WorkspaceOps.Selftest, nil, false)
 	}
 	if err == nil {
-		err = s.runRuntimeCapabilitySelftest(operationCtx, sb, runtime)
+		err = s.runRuntimeCapabilitySelftest(operationCtx, CreateSandboxPlan{Sandbox: sb, Runtime: runtime, Image: image})
 	}
 	cleanupBase := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
 	cleanupCtx, cleanupCancel := context.WithTimeout(cleanupBase, timeDurationSeconds(s.cfg.SelftestRecycleTimeoutSeconds))
@@ -298,15 +317,23 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	if cleanupErr := s.orchestrator.DestroySandboxResources(cleanupCtx, sb); cleanupErr != nil {
 		logging.ErrorContext(operationCtx, "sandbox selftest cleanup failed", cleanupErr.Error(), slog.Int64("tenant_id", 0), slog.Int64("runtime_id", runtimeID), slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace))
 	}
-	status := RuntimeSelftestPassed
-	runtimeStatus := RuntimeStatusAvailable
+	status, runtimeStatus := runtimeSelftestStatuses(runtime, err)
 	detail, encodeErr := jsonBytes(map[string]any{"result": "passed", "attempt_id": attemptID})
 	if encodeErr != nil {
 		return RuntimeSelftestResponse{}, apperr.ErrSandboxSelftestFailed.WithCause(encodeErr)
 	}
+	if err == nil && runtimeStatus == RuntimeStatusOnboarding {
+		detail, encodeErr = jsonBytes(map[string]any{
+			"result":     "passed",
+			"stage":      "node-selftest",
+			"reason":     "运行时节点可启动,但尚未声明平台标准链能力",
+			"attempt_id": attemptID,
+		})
+		if encodeErr != nil {
+			return RuntimeSelftestResponse{}, apperr.ErrSandboxSelftestFailed.WithCause(encodeErr)
+		}
+	}
 	if err != nil {
-		status = RuntimeSelftestFailed
-		runtimeStatus = RuntimeStatusOnboarding
 		logging.ErrorContext(operationCtx, "sandbox runtime selftest failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", 0), slog.Int64("runtime_id", runtimeID), slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace))
 		detail, encodeErr = jsonBytes(map[string]any{"result": "failed", "stage": "selftest", "trace_id": traceIDFromLogContext(operationCtx), "attempt_id": attemptID})
 		if encodeErr != nil {
@@ -340,6 +367,26 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	return resp, nil
 }
 
+// runtimeSelftestStatuses 只根据基础工作负载自检结果决定运行时是否可部署；原生链动作由 adapter_level 单独控制。
+func runtimeSelftestStatuses(runtime Runtime, selftestErr error) (int16, int16) {
+	if selftestErr != nil {
+		return RuntimeSelftestFailed, RuntimeStatusOnboarding
+	}
+	return RuntimeSelftestPassed, RuntimeStatusAvailable
+}
+
+// selectRuntimeSelftestImage 只选择已启用且已烘焙创世数据的版本;组合预拉取属于具体组合,不阻塞运行时接入自检。
+func selectRuntimeSelftestImage(images []RuntimeImage) (RuntimeImage, bool) {
+	for _, image := range images {
+		if image.Status != RuntimeImageStatusAvailable ||
+			!image.GenesisBaked {
+			continue
+		}
+		return image, true
+	}
+	return RuntimeImage{}, false
+}
+
 // canRunRuntimeSelftest 只允许接入中或已可用运行时执行自检,停用状态不能被旧自检重新启用。
 func canRunRuntimeSelftest(status int16) bool {
 	return status == RuntimeStatusOnboarding || status == RuntimeStatusAvailable
@@ -355,18 +402,33 @@ func traceIDFromLogContext(ctx context.Context) string {
 	return ""
 }
 
-// runtimeSelftestPublicDetail 只向平台界面输出稳定的自检状态和报障编号。
-// 持久化明细可能包含历史编排信息，因此不能作为 HTTP JSON 原样透传。
+// runtimeSelftestStoredDetail 描述服务端持久化的自检明细,并发写回字段不能下发给平台界面。
+type runtimeSelftestStoredDetail struct {
+	Result    string `json:"result,omitempty"`
+	Stage     string `json:"stage,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	TraceID   string `json:"trace_id,omitempty"`
+	AttemptID string `json:"attempt_id,omitempty"`
+}
+
+// runtimeSelftestPublicDetail 严格解析服务端明细后只输出稳定的自检状态、原因和报障编号。
+// attempt_id 只用于同一批次的并发写回校验,不得进入 HTTP 响应。
 func runtimeSelftestPublicDetail(raw json.RawMessage) (RuntimeSelftestDetail, error) {
-	var stored RuntimeSelftestDetail
-	if err := jsonx.DecodeStrict(raw, &stored); err != nil {
+	var stored runtimeSelftestStoredDetail
+	if err := jsonx.DecodeStrictKnownFields(raw, &stored); err != nil {
 		return RuntimeSelftestDetail{}, err
 	}
-	return stored, nil
+	return RuntimeSelftestDetail{
+		Result:  stored.Result,
+		Stage:   stored.Stage,
+		Reason:  stored.Reason,
+		TraceID: stored.TraceID,
+	}, nil
 }
 
 // runRuntimeCapabilitySelftest 用标准 L2 能力执行 reset/deploy/query/reset 自检闭环。
-func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, sb Sandbox, runtime Runtime) error {
+func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, plan CreateSandboxPlan) error {
+	sb, runtime := plan.Sandbox, plan.Runtime
 	if runtime.AdapterLevel < RuntimeAdapterLevelStandard && strings.TrimSpace(runtime.CapabilityImpl) == "" && strings.TrimSpace(runtime.PluginRef) == "" {
 		return nil
 	}
@@ -374,7 +436,7 @@ func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, sb Sandbox, 
 	if err != nil {
 		return err
 	}
-	if err := cap.Reset(ctx, sb, runtime); err != nil {
+	if err := s.resetRuntimeForPlan(ctx, plan, cap); err != nil {
 		return err
 	}
 	payload, ok := runtime.AdapterSpec.Selftest["deploy_payload"].(map[string]any)
@@ -396,7 +458,15 @@ func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, sb Sandbox, 
 	if _, err := cap.Query(ctx, sb, runtime, strings.TrimSpace(target)); err != nil {
 		return err
 	}
-	return cap.Reset(ctx, sb, runtime)
+	return s.resetRuntimeForPlan(ctx, plan, cap)
+}
+
+// resetRuntimeForPlan 根据运行时契约选择控制面重建或生态原生 reset 命令。
+func (s *Service) resetRuntimeForPlan(ctx context.Context, plan CreateSandboxPlan, cap ChainCapability) error {
+	if strings.TrimSpace(plan.Runtime.AdapterSpec.CapabilityCommands.ResetStrategy) == "recreate_runtime" {
+		return s.orchestrator.ResetSandboxRuntime(ctx, plan)
+	}
+	return cap.Reset(ctx, plan.Sandbox, plan.Runtime)
 }
 
 // GetRuntimeSelftest 查询运行时接入即测结果。
@@ -422,20 +492,20 @@ func (s *Service) GetRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	return RuntimeSelftestResponse{RuntimeID: ids.ID(runtime.ID), SelftestStatus: runtime.SelftestStatus, RuntimeStatus: runtime.Status, Detail: publicDetail}, nil
 }
 
-// PrepullRuntimeImage 触发 DaemonSet 全节点预拉取并以真实节点状态更新数据库。
-func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID int64) (PrepullResponse, error) {
-	if runtimeID <= 0 || imageID <= 0 {
+// PrepullRuntimeImage 按已发布组合摘要触发闭包预拉取并以真实节点状态更新数据库。
+func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID int64, compositionDigest string) (PrepullResponse, error) {
+	compositionDigest = strings.TrimSpace(compositionDigest)
+	if runtimeID <= 0 || imageID <= 0 || compositionDigest == "" {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullParamInvalid
 	}
 	attemptID := ids.Format(s.ids.Generate())
 	var runtime Runtime
 	var image RuntimeImage
+	var snapshot contracts.SandboxCompositionSnapshot
 	var prepullSpecs []PrepullImageSpec
 	var imageURLs []string
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
-		// 先锁证明行,再读取闭包。并发运行时/工具变更若先完成,本次读取新定义;
-		// 若后发生,其失效更新会在本事务提交后覆盖 running,旧尝试无法写回成功。
 		image, err = tx.GetRuntimeImageByIDForUpdate(ctx, runtimeID, imageID)
 		if err != nil {
 			return apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
@@ -444,14 +514,24 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		if err != nil {
 			return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
 		}
-		tools, err := tx.ListTools(ctx)
+		rawSnapshot, err := tx.GetPublishedCompositionSnapshot(ctx, compositionDigest)
 		if err != nil {
-			return apperr.ErrSandboxToolNotFound.WithCause(err)
+			return apperr.ErrSandboxImagePrepullParamInvalid.WithCause(err)
+		}
+		if err := jsonx.DecodeStrictKnownFields(rawSnapshot, &snapshot); err != nil || snapshot.Digest != compositionDigest {
+			return apperr.ErrSandboxImagePrepullParamInvalid.WithCause(err)
+		}
+		canonicalDigest, err := contracts.CanonicalSnapshotDigest(snapshot)
+		if err != nil || canonicalDigest != compositionDigest {
+			return apperr.ErrSandboxImagePrepullParamInvalid
+		}
+		if snapshot.Runtime.RuntimeID != runtimeID || snapshot.Runtime.ImageID != imageID || snapshot.Runtime.ImageURL != image.ImageURL || snapshot.Runtime.ImageVersion != image.Version {
+			return apperr.ErrSandboxRuntimeImageNotFound
 		}
 		if !canPrepullRuntime(runtime.Status) || image.Status != RuntimeImageStatusAvailable {
 			return apperr.ErrSandboxRuntimeUnavailable
 		}
-		prepullSpecs, err = prepullImageSpecsForRuntime(runtime, image, tools)
+		prepullSpecs, err = prepullImageSpecsForSnapshot(snapshot)
 		if err != nil {
 			return apperr.ErrSandboxImageAttestationInvalid.WithCause(err)
 		}
@@ -471,7 +551,11 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		if err != nil {
 			return apperr.ErrSandboxImagePrepullFailed.WithCause(err)
 		}
-		_, err = tx.StartRuntimeImagePrepull(ctx, runtimeID, imageID, startingDetail)
+		closure, err := json.Marshal(snapshot.ImageClosure)
+		if err != nil {
+			return apperr.ErrSandboxImagePrepullFailed.WithCause(err)
+		}
+		_, err = tx.StartCompositionPrepull(ctx, s.ids.Generate(), imageID, compositionDigest, attemptID, closure, startingDetail)
 		return err
 	}); err != nil {
 		return PrepullResponse{}, err
@@ -482,14 +566,10 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		timeDurationSeconds(s.cfg.PrepullTimeoutSeconds+s.cfg.ReadyTimeoutSeconds),
 	)
 	defer cancel()
-	result, err := s.orchestrator.PrepullImage(operationCtx, image, prepullSpecs)
+	result, err := s.orchestrator.PrepullImage(operationCtx, image, compositionDigest, prepullSpecs)
 	status := ImagePrepullSucceeded
-	prepulled := true
-	at := timex.Now()
 	if err != nil {
 		status = ImagePrepullFailed
-		prepulled = false
-		at = time.Time{}
 		logging.ErrorContext(operationCtx, "sandbox image prepull failed", logging.SanitizeError(err.Error()), slog.Int64("tenant_id", 0), slog.Int64("runtime_id", runtimeID), slog.Int64("image_id", imageID), slog.String("daemonset", result.DaemonSet), slog.String("attempt_id", attemptID))
 	}
 	stage := "succeeded"
@@ -501,7 +581,7 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(encodeErr)
 	}
 	if updateErr := s.store.PlatformTx(operationCtx, func(ctx context.Context, tx TxStore) error {
-		_, updateErr := tx.FinishRuntimeImagePrepull(ctx, runtimeID, imageID, attemptID, prepulled, status, detail, at)
+		_, updateErr := tx.FinishCompositionPrepull(ctx, imageID, compositionDigest, attemptID, status, result.DaemonSet, result.DesiredNodes, result.ReadyNodes, detail)
 		return updateErr
 	}); updateErr != nil {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(updateErr)
@@ -512,7 +592,7 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 	if err != nil {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(err)
 	}
-	return PrepullResponse{ImageID: ids.ID(imageID), PrepullStatus: status, DesiredNodes: result.DesiredNodes, ReadyNodes: result.ReadyNodes, ImageCount: len(imageURLs)}, nil
+	return PrepullResponse{ImageID: ids.ID(imageID), CompositionDigest: compositionDigest, PrepullStatus: status, DesiredNodes: result.DesiredNodes, ReadyNodes: result.ReadyNodes, ImageCount: len(imageURLs)}, nil
 }
 
 // prepullAttemptDetail 统一记录一次预拉取尝试的闭包、节点状态与脱敏失败原因。
@@ -574,144 +654,99 @@ func (c *prepullSpecCollector) add(imageURL string, command []string, hold bool,
 	return nil
 }
 
-// prepullImageSpecsForRuntime 汇总运行时默认工作负载会用到的不可变镜像和最小自检命令。
-func prepullImageSpecsForRuntime(runtime Runtime, image RuntimeImage, tools []Tool) ([]PrepullImageSpec, error) {
-	collector := newPrepullSpecCollector(1 + len(runtime.AdapterSpec.InfraSidecars) + len(tools))
-	if err := collector.add(image.ImageURL, runtime.AdapterSpec.WorkspaceOps.Selftest, false, nil); err != nil {
+// prepullImageSpecsForSnapshot 从不可变组合快照重建预拉取闭包,不读取当前工具目录,避免发布后目录变化污染运行环境。
+func prepullImageSpecsForSnapshot(snapshot contracts.SandboxCompositionSnapshot) ([]PrepullImageSpec, error) {
+	var adapter AdapterSpec
+	if err := jsonx.DecodeStrictKnownFields(snapshot.Runtime.AdapterSpec, &adapter); err != nil {
+		return nil, fmt.Errorf("运行时适配器快照无效: %w", err)
+	}
+	runtime := Runtime{Code: snapshot.Runtime.Code, Eco: snapshot.Runtime.Eco, AdapterSpec: adapter}
+	image := RuntimeImage{ID: snapshot.Runtime.ImageID, RuntimeID: snapshot.Runtime.RuntimeID, ImageURL: snapshot.Runtime.ImageURL, Version: snapshot.Runtime.ImageVersion, Status: RuntimeImageStatusAvailable, GenesisBaked: true}
+	collector := newPrepullSpecCollector(1 + len(adapter.InfraSidecars) + len(snapshot.Components))
+	runtimeSpecs, err := prepull.RuntimeImageSpecs(image.ImageURL, runtimePrepullDefinition(runtime))
+	if err != nil {
 		return nil, err
 	}
-	if err := addRuntimeAuxiliaryPrepullSpecs(collector, runtime.AdapterSpec); err != nil {
-		return nil, err
-	}
-	for _, tool := range tools {
-		if err := addToolPrepullSpecs(collector, runtime.Eco, tool); err != nil {
+	for _, spec := range runtimeSpecs {
+		if err := collector.add(spec.ImageURL, spec.Command, spec.Hold, spec.EphemeralMounts); err != nil {
 			return nil, err
 		}
 	}
+	for _, component := range snapshot.Components {
+		var resourceSpec ToolResourceSpec
+		if err := jsonx.DecodeStrictKnownFields(component.ResourceSpec, &resourceSpec); err != nil {
+			return nil, fmt.Errorf("组件 %s 工作负载快照无效: %w", component.Code, err)
+		}
+		for _, workloadComponent := range resourceSpec.Components {
+			command := workloadComponent.PrepullCommand
+			if len(command) == 0 {
+				command = resourceSpec.PrepullCommand
+			}
+			if err := collector.add(workloadComponent.ImageURL, command, workloadComponent.PrepullHold, workloadComponent.EphemeralMounts); err != nil {
+				return nil, err
+			}
+		}
+	}
+	expectedSpecs := make([]PrepullImageSpec, 0, len(snapshot.ImageClosure))
+	closureURLs := make(map[string]struct{}, len(snapshot.ImageClosure))
+	for _, item := range snapshot.ImageClosure {
+		url := strings.TrimSpace(item.ImageURL)
+		if url == "" {
+			return nil, fmt.Errorf("组合闭包包含空镜像地址")
+		}
+		if len(compactCommand(item.PrepullCommand)) == 0 {
+			return nil, fmt.Errorf("组合闭包镜像 %s 缺少预拉取命令", url)
+		}
+		closureURLs[url] = struct{}{}
+		mounts := make([]workload.EphemeralMountSpec, 0, len(item.EphemeralMounts))
+		for _, mount := range item.EphemeralMounts {
+			mounts = append(mounts, workload.EphemeralMountSpec{Name: mount.Name, MountPath: mount.MountPath})
+		}
+		expectedSpecs = append(expectedSpecs, PrepullImageSpec{ImageURL: url, Command: item.PrepullCommand, Hold: item.PrepullHold, EphemeralMounts: mounts})
+	}
+	if !equivalentPrepullSpecs(collector.specs, expectedSpecs) {
+		return nil, fmt.Errorf("组合闭包中的预拉取命令、保持用途或临时挂载与工作负载不一致")
+	}
+	actualURLs := prepullImageURLs(collector.specs)
+	if len(closureURLs) != len(actualURLs) {
+		return nil, fmt.Errorf("组合镜像闭包与适配器工作负载不一致")
+	}
+	for _, url := range actualURLs {
+		if _, ok := closureURLs[url]; !ok {
+			return nil, fmt.Errorf("组合闭包缺少工作负载镜像 %s", url)
+		}
+	}
 	holdCount := 0
-	for i := range collector.specs {
-		if collector.specs[i].Hold {
+	for _, spec := range collector.specs {
+		if spec.Hold {
 			holdCount++
 		}
 	}
 	if holdCount != 1 {
-		return nil, fmt.Errorf("运行时 %s 的预拉取闭包必须且只能包含一个保持容器,实际为 %d 个", runtime.Code, holdCount)
+		return nil, fmt.Errorf("组合预拉取闭包必须且只能包含一个保持容器,实际为 %d 个", holdCount)
 	}
 	return collector.specs, nil
 }
 
-// addRuntimeAuxiliaryPrepullSpecs 加入运行时声明的 infra 与独立 Pod 非主容器镜像。
-func addRuntimeAuxiliaryPrepullSpecs(collector *prepullSpecCollector, spec AdapterSpec) error {
-	for _, component := range spec.InfraSidecars {
-		if err := collector.add(component.ImageURL, component.PrepullCommand, component.PrepullHold, component.EphemeralMounts); err != nil {
-			return err
-		}
-	}
-	for _, pod := range spec.Pods {
-		for _, component := range pod.Containers {
-			if strings.TrimSpace(component.Name) == strings.TrimSpace(spec.RuntimeContainer.Name) {
-				continue
-			}
-			if err := collector.add(component.ImageURL, component.PrepullCommand, component.PrepullHold, component.EphemeralMounts); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// addToolPrepullSpecs 按状态与生态加入一个工具对指定运行时的预拉取贡献。
-func addToolPrepullSpecs(collector *prepullSpecCollector, eco string, tool Tool) error {
-	if tool.Status != ToolStatusAvailable || !toolCompatible(eco, tool.EcoTags) {
-		return nil
-	}
-	for _, component := range tool.ResourceSpec.Components {
-		command := component.PrepullCommand
-		if len(command) == 0 {
-			command = tool.ResourceSpec.PrepullCommand
-		}
-		if err := collector.add(component.ImageURL, command, component.PrepullHold, component.EphemeralMounts); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // runtimePrepullContractChanged 只比较会改变预拉取镜像、自检命令、常驻用途或临时目录的声明。
 func runtimePrepullContractChanged(previous, current Runtime) bool {
-	if !strings.EqualFold(strings.TrimSpace(previous.Eco), strings.TrimSpace(current.Eco)) {
-		return true
-	}
-	previousCollector := newPrepullSpecCollector(1 + len(previous.AdapterSpec.InfraSidecars))
-	currentCollector := newPrepullSpecCollector(1 + len(current.AdapterSpec.InfraSidecars))
-	if err := previousCollector.add("runtime-image", previous.AdapterSpec.WorkspaceOps.Selftest, false, nil); err != nil {
-		return true
-	}
-	if err := currentCollector.add("runtime-image", current.AdapterSpec.WorkspaceOps.Selftest, false, nil); err != nil {
-		return true
-	}
-	if err := addRuntimeAuxiliaryPrepullSpecs(previousCollector, previous.AdapterSpec); err != nil {
-		return true
-	}
-	if err := addRuntimeAuxiliaryPrepullSpecs(currentCollector, current.AdapterSpec); err != nil {
-		return true
-	}
-	return !equivalentPrepullSpecs(previousCollector.specs, currentCollector.specs)
+	changed, err := prepull.RuntimeDefinitionsChanged(runtimePrepullDefinition(previous), runtimePrepullDefinition(current))
+	return err != nil || changed
 }
 
-// RuntimePrepullDefinitionChanged 供部署期 seed 复用运行时预拉取闭包比较,禁止维护第二套失效口径。
-func RuntimePrepullDefinitionChanged(previousEco string, previousSpec AdapterSpec, currentEco string, currentSpec AdapterSpec) bool {
-	return runtimePrepullContractChanged(
-		Runtime{Eco: previousEco, AdapterSpec: previousSpec},
-		Runtime{Eco: currentEco, AdapterSpec: currentSpec},
-	)
-}
-
-// ToolPrepullDefinitionsChangedForEco 供部署期 seed 比较某生态全部工具的实际预拉取贡献。
-func ToolPrepullDefinitionsChangedForEco(previous, current []Tool, eco string) (bool, error) {
-	previousCollector := newPrepullSpecCollector(len(previous))
-	for _, tool := range previous {
-		if err := addToolPrepullSpecs(previousCollector, eco, tool); err != nil {
-			return false, err
-		}
+// runtimePrepullDefinition 把沙箱运行时投影为共享预拉取比较所需的最小声明。
+func runtimePrepullDefinition(runtime Runtime) prepull.RuntimeDefinition {
+	return prepull.RuntimeDefinition{
+		RuntimeContainerName:  runtime.AdapterSpec.RuntimeContainer.Name,
+		RuntimePrepullCommand: runtime.AdapterSpec.RuntimeContainer.PrepullCommand,
+		InfraSidecars:         runtime.AdapterSpec.InfraSidecars,
+		Pods:                  runtime.AdapterSpec.Pods,
 	}
-	currentCollector := newPrepullSpecCollector(len(current))
-	for _, tool := range current {
-		if err := addToolPrepullSpecs(currentCollector, eco, tool); err != nil {
-			return false, err
-		}
-	}
-	return !equivalentPrepullSpecs(previousCollector.specs, currentCollector.specs), nil
 }
 
 // equivalentPrepullSpecs 忽略声明顺序比较闭包;镜像、命令、常驻用途和挂载内容仍必须完全一致。
 func equivalentPrepullSpecs(left, right []PrepullImageSpec) bool {
-	return reflect.DeepEqual(canonicalPrepullSpecs(left), canonicalPrepullSpecs(right))
-}
-
-// canonicalPrepullSpecs 复制并排序预拉取声明,避免仅调整组件或临时目录顺序触发无意义重拉。
-func canonicalPrepullSpecs(specs []PrepullImageSpec) []PrepullImageSpec {
-	out := make([]PrepullImageSpec, 0, len(specs))
-	for _, spec := range specs {
-		item := PrepullImageSpec{
-			ImageURL: strings.TrimSpace(spec.ImageURL),
-			Command:  append([]string(nil), compactCommand(spec.Command)...),
-			Hold:     spec.Hold,
-		}
-		item.EphemeralMounts = mergePrepullEphemeralMounts(nil, spec.EphemeralMounts)
-		sort.Slice(item.EphemeralMounts, func(i, j int) bool {
-			leftKey := item.EphemeralMounts[i].Name + "\x00" + item.EphemeralMounts[i].MountPath
-			rightKey := item.EphemeralMounts[j].Name + "\x00" + item.EphemeralMounts[j].MountPath
-			return leftKey < rightKey
-		})
-		out = append(out, item)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		leftKey := prepullImageSpecKey(out[i].ImageURL, out[i].Command, out[i].Hold)
-		rightKey := prepullImageSpecKey(out[j].ImageURL, out[j].Command, out[j].Hold)
-		return leftKey < rightKey
-	})
-	return out
+	return prepull.Equivalent(left, right)
 }
 
 // prepullImageSpecKey 保持同镜像在不同自检命令和常驻用途下独立去重。
@@ -777,47 +812,31 @@ func compactCommand(command []string) []string {
 	return out
 }
 
-// GetRuntimeImagePrepull 查询镜像预拉取状态,只返回文档允许的进度字段。
-func (s *Service) GetRuntimeImagePrepull(ctx context.Context, runtimeID, imageID int64) (PrepullResponse, error) {
-	if runtimeID <= 0 || imageID <= 0 {
+// GetRuntimeImagePrepull 查询指定组合摘要的镜像预拉取状态。
+func (s *Service) GetRuntimeImagePrepull(ctx context.Context, runtimeID, imageID int64, compositionDigest string) (PrepullResponse, error) {
+	compositionDigest = strings.TrimSpace(compositionDigest)
+	if runtimeID <= 0 || imageID <= 0 || compositionDigest == "" {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullParamInvalid
 	}
-	var image RuntimeImage
+	var prepull CompositionPrepull
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		var err error
-		image, err = tx.GetRuntimeImageByID(ctx, runtimeID, imageID)
+		image, err := tx.GetRuntimeImageByID(ctx, runtimeID, imageID)
 		if err != nil {
 			return apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
+		}
+		prepull, err = tx.GetCompositionPrepullForUpdate(ctx, image.ID, compositionDigest)
+		if err != nil {
+			return apperr.ErrSandboxImagePrepullFailed.WithCause(err)
 		}
 		return nil
 	}); err != nil {
 		return PrepullResponse{}, err
 	}
-	resp := PrepullResponse{ImageID: ids.ID(image.ID), PrepullStatus: image.PrepullStatus}
-	if len(image.PrepullDetail) == 0 {
-		return resp, nil
-	}
-	var detail struct {
-		Stage        string   `json:"stage"`
-		AttemptID    string   `json:"attempt_id"`
-		DesiredNodes int32    `json:"desired_nodes"`
-		ReadyNodes   int32    `json:"ready_nodes"`
-		DaemonSet    string   `json:"daemonset"`
-		ImageCount   int      `json:"image_count"`
-		Images       []string `json:"images"`
-		Error        string   `json:"error"`
-		Reason       string   `json:"reason"`
-		Subject      string   `json:"subject"`
-		Source       string   `json:"source"`
-		Prepulled    bool     `json:"prepulled"`
-	}
-	if err := jsonx.DecodeStrictKnownFields(image.PrepullDetail, &detail); err != nil {
+	var closure []contracts.ImageClosureItem
+	if err := jsonx.DecodeStrictKnownFields(prepull.ImageClosure, &closure); err != nil {
 		return PrepullResponse{}, apperr.ErrSandboxImagePrepullFailed.WithCause(err)
 	}
-	resp.DesiredNodes = detail.DesiredNodes
-	resp.ReadyNodes = detail.ReadyNodes
-	resp.ImageCount = detail.ImageCount
-	return resp, nil
+	return PrepullResponse{ImageID: ids.ID(imageID), CompositionDigest: compositionDigest, PrepullStatus: prepull.Status, DesiredNodes: prepull.DesiredNodes, ReadyNodes: prepull.ReadyNodes, ImageCount: len(closure)}, nil
 }
 
 // RegisterTool 注册或更新工具定义。
@@ -851,39 +870,34 @@ func (s *Service) RegisterTool(ctx context.Context, req ToolRequest) (Tool, erro
 	return tool, s.writeAuditFromContext(ctx, 0, "sandbox.tool.upsert", "tool", tool.ID, map[string]any{"code": tool.Code})
 }
 
-// invalidateToolAffectedRuntimePrepull 只撤销工具对某个运行时生态的实际预拉取贡献发生变化的证明。
+// invalidateToolAffectedRuntimePrepull 工具执行契约变化会影响所有引用它的已发布组合,统一撤销各运行时的组合证明。
 func invalidateToolAffectedRuntimePrepull(ctx context.Context, tx TxStore, previous Tool, hasPrevious bool, current Tool) error {
-	currentTools, err := tx.ListTools(ctx)
-	if err != nil {
-		return err
+	if !toolHasPrepullWorkload(previous) && !toolHasPrepullWorkload(current) {
+		return nil
 	}
-	previousTools := make([]Tool, 0, len(currentTools))
-	for _, tool := range currentTools {
-		if tool.Code == current.Code {
-			if hasPrevious {
-				previousTools = append(previousTools, previous)
-			}
-			continue
-		}
-		previousTools = append(previousTools, tool)
+	if hasPrevious && previous.Kind == current.Kind && previous.Status == current.Status && reflect.DeepEqual(previous.ResourceSpec, current.ResourceSpec) {
+		return nil
 	}
 	runtimes, err := tx.ListRuntimes(ctx)
 	if err != nil {
 		return err
 	}
 	for _, runtime := range runtimes {
-		changed, compareErr := ToolPrepullDefinitionsChangedForEco(previousTools, currentTools, runtime.Eco)
-		if compareErr != nil {
-			return compareErr
-		}
-		if !changed {
-			continue
-		}
-		if err := invalidateRuntimePrepull(ctx, tx, runtime.ID, "tool_prepull_contract_changed", current.Code); err != nil {
+		if err := invalidateRuntimePrepull(ctx, tx, runtime.ID, "tool_execution_contract_changed", current.Code); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// toolHasPrepullWorkload 判断工具是否真正贡献镜像闭包;纯平台内建能力变化不应撤销镜像证明。
+func toolHasPrepullWorkload(tool Tool) bool {
+	for _, component := range tool.ResourceSpec.Components {
+		if strings.TrimSpace(component.ImageURL) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // invalidateRuntimePrepull 写入可审计的失效原因并统一把运行时镜像版本重置为待预拉取。
@@ -896,7 +910,7 @@ func invalidateRuntimePrepull(ctx context.Context, tx TxStore, runtimeID int64, 
 	if err != nil {
 		return err
 	}
-	return tx.InvalidateRuntimeImagesPrepull(ctx, runtimeID, detail)
+	return tx.InvalidateCompositionPrepullByRuntime(ctx, runtimeID, detail)
 }
 
 // ListTools 查询平台已登记工具列表。
@@ -920,15 +934,10 @@ func (s *Service) ListTools(ctx context.Context) ([]Tool, error) {
 // 由 §2 的管理接口承载,不经本目录外泄(见 docs/02-沙箱引擎/04-接口设计.md §2.1)。
 func (s *Service) ListOrchestrationCatalog(ctx context.Context) ([]CatalogRuntime, []CatalogTool, error) {
 	var runtimes []CatalogRuntime
-	var runtimeDefinitions []Runtime
 	var tools []CatalogTool
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
 		runtimes, err = tx.ListCatalogRuntimes(ctx)
-		if err != nil {
-			return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
-		}
-		runtimeDefinitions, err = tx.ListRuntimes(ctx)
 		if err != nil {
 			return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
 		}
@@ -939,26 +948,6 @@ func (s *Service) ListOrchestrationCatalog(ctx context.Context) ([]CatalogRuntim
 		return nil
 	}); err != nil {
 		return nil, nil, err
-	}
-	definitionsByCode := make(map[string]Runtime, len(runtimeDefinitions))
-	for _, runtime := range runtimeDefinitions {
-		definitionsByCode[runtime.Code] = runtime
-	}
-	for i := range runtimes {
-		runtime, exists := definitionsByCode[runtimes[i].Code]
-		if !exists {
-			return nil, nil, apperr.ErrSandboxRuntimeNotFound
-		}
-		runtimes[i].ToolCodes = make([]string, 0, len(tools))
-		for _, tool := range tools {
-			definition := Tool{
-				Code: tool.Code, Name: tool.Name, Kind: tool.Kind, EcoTags: tool.EcoTags,
-				ResourceSpec: tool.ResourceSpec, Status: ToolStatusAvailable,
-			}
-			if validateToolForRuntime(definition, runtime) == nil {
-				runtimes[i].ToolCodes = append(runtimes[i].ToolCodes, tool.Code)
-			}
-		}
 	}
 	return runtimes, tools, nil
 }
