@@ -144,7 +144,7 @@ func (s Service) PlanUpload(ctx context.Context, req PlanUploadRequest) (UploadP
 		return UploadPlan{}, err
 	}
 
-	pathParts := make([]string, 0, len(req.NestedResourceIDs)+2)
+	var pathParts []string
 	pathParts = append(pathParts, req.ResourceID)
 	pathParts = append(pathParts, req.NestedResourceIDs...)
 	pathParts = append(pathParts, fileName)

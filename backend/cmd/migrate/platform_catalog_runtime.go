@@ -11,7 +11,8 @@ import (
 )
 
 // genericRuntimeAdapterSpec 从 runtime manifest 生成统一的可执行适配器。
-// 运行时镜像自己提供链能力 helper;平台只注入学生工作区能力容器,不再把 central chain-tools 伪装成链适配器。
+// 运行时镜像自己提供链能力 helper;平台只声明平台私有工作区 sidecar,
+// 不把教师可选工具或 base/chain-tools 伪装成链适配器。
 func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL, workspaceImageURL string) (map[string]any, error) {
 	if strings.TrimSpace(runtimeImageURL) == "" || strings.TrimSpace(workspaceImageURL) == "" {
 		return nil, fmt.Errorf("运行时和工作区镜像地址不能为空")

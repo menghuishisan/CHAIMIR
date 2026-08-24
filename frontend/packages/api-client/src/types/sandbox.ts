@@ -22,6 +22,7 @@ export interface SandboxInstance {
   owner_account_id: SnowflakeID
   runtime_code: string
   runtime_image_version: string
+  runtime_instances: string[]
   source_ref: string
   phase: SandboxPhase
   status: SandboxStatus
@@ -100,6 +101,7 @@ export interface SandboxFileSaveResponse {
 }
 
 export interface SandboxChainRequest {
+  runtime_instance: string
   payload: Record<string, unknown>
 }
 
@@ -169,9 +171,18 @@ export interface SandboxToolResourceSpec {
     max_timeout_seconds: number
   }
   prepull_command?: string[]
-  /** required_bindings 列出必须由组合连接提供的配置绑定,未满足时组件不可部署 */
-  required_bindings?: string[]
+  bindings?: SandboxComponentBinding[]
   capabilities?: SandboxComponentCapabilities
+}
+
+/** SandboxComponentBinding 描述组件按能力和端点声明的连接角色。 */
+export interface SandboxComponentBinding {
+  name: string
+  capability: string
+  endpoint: string
+  protocol: 'TCP' | 'HTTP' | 'HTTPS' | 'WS' | 'WSS' | 'GRPC'
+  required_at_start: boolean
+  config_binding: `env:${string}`
 }
 
 /** SandboxComponentCapabilities 是组件能力声明,供服务端编译器校验组合;前端只读展示。 */

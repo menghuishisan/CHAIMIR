@@ -88,17 +88,15 @@ WHERE id = $1 AND runtime_id = $2
 FOR UPDATE;
 
 -- name: GetPublishedCompositionSnapshot :one
-SELECT composition_digest, runtime_id, runtime_image_id, snapshot, status, created_at, updated_at
+SELECT composition_digest, snapshot, status, created_at, updated_at
 FROM sandbox_composition
 WHERE composition_digest = $1 AND status = 1;
 
 -- name: UpsertPublishedCompositionSnapshot :exec
-INSERT INTO sandbox_composition (composition_digest, runtime_id, runtime_image_id, snapshot, status, created_at, updated_at)
-VALUES ($1, $2, $3, $4, 1, now(), now())
+INSERT INTO sandbox_composition (composition_digest, snapshot, status, created_at, updated_at)
+VALUES ($1, $2, 1, now(), now())
 ON CONFLICT (composition_digest) DO UPDATE
-SET runtime_id = EXCLUDED.runtime_id,
-    runtime_image_id = EXCLUDED.runtime_image_id,
-    snapshot = EXCLUDED.snapshot,
+SET snapshot = EXCLUDED.snapshot,
     status = 1,
     updated_at = now();
 
@@ -234,19 +232,19 @@ WHERE tenant_id = $1 AND status IN (1, 2, 3, 4, 7, 8);
 
 -- name: CreateSandbox :one
 INSERT INTO sandbox (
-    id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status,
+    id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status,
     keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains,
     snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
 )
 VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-    $22, $23, $24, $25, now(), $26, now(), now()
+    $22, $23, now(), $24, now(), now()
 )
-RETURNING id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at;
+RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at;
 
 -- name: GetSandbox :one
-SELECT id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
 FROM sandbox
 WHERE tenant_id = $1 AND id = $2;
 
@@ -264,19 +262,19 @@ RETURNING workspace_revision;
 SELECT pg_advisory_xact_lock($1::bigint);
 
 -- name: ListSandboxesBySourceRef :many
-SELECT id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
 FROM sandbox
 WHERE tenant_id = $1 AND source_ref = $2 AND status <> 5
 ORDER BY created_at DESC, id DESC;
 
 -- name: ListSandboxesByScopeRef :many
-SELECT id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
 FROM sandbox
 WHERE tenant_id = $1 AND scope_ref = $2 AND status <> 5
 ORDER BY created_at DESC, id DESC;
 
 -- name: ListRecycleCandidates :many
-SELECT s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
 FROM sandbox s
 JOIN tenant_quota tq ON tq.tenant_id = s.tenant_id
 WHERE s.status IN (4, 6)
@@ -296,10 +294,10 @@ WHERE tq.tenant_id = s.tenant_id
   AND s.status = 2
   AND s.keep_alive = false
   AND s.last_active_at <= now() - make_interval(mins => tq.idle_timeout_min)
-RETURNING s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at;
+RETURNING s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at;
 
 -- name: ListSnapshotCleanupCandidates :many
-SELECT id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
 FROM sandbox
 WHERE status = 5 AND snapshot_expire_at IS NOT NULL AND snapshot_expire_at <= now()
 ORDER BY snapshot_expire_at ASC, id ASC
@@ -309,7 +307,7 @@ LIMIT $1;
 UPDATE sandbox
 SET phase = $3, status = $4, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at;
+RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at;
 
 -- name: MarkSandboxActive :one
 UPDATE sandbox
@@ -318,14 +316,14 @@ SET last_active_at = now(),
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
   AND status IN (2, 7, 8)
-RETURNING id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at;
+RETURNING id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at;
 
 -- name: UpdateSandboxCode :one
 WITH updated AS (
     UPDATE sandbox SET code_storage_key = $3, code_hash = $4, updated_at = now()
     WHERE sandbox.tenant_id = $1 AND sandbox.id = $2 RETURNING sandbox.id
 )
-SELECT s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
 FROM sandbox s JOIN updated u ON u.id = s.id;
 
 -- name: UpdateSandboxAuthorizedAccounts :one
@@ -333,7 +331,7 @@ WITH updated AS (
     UPDATE sandbox SET shared_account_ids = $3, updated_at = now()
     WHERE sandbox.tenant_id = $1 AND sandbox.id = $2 RETURNING sandbox.id
 )
-SELECT s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
 FROM sandbox s JOIN updated u ON u.id = s.id;
 
 -- name: UpdateSandboxSnapshot :one
@@ -341,7 +339,7 @@ WITH updated AS (
     UPDATE sandbox SET snapshot_ref = $3, snapshot_domains = $4, snapshot_created_at = $5, snapshot_expire_at = $6, updated_at = now()
     WHERE sandbox.tenant_id = $1 AND sandbox.id = $2 RETURNING sandbox.id
 )
-SELECT s.id, s.tenant_id, s.runtime_id, s.image_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
+SELECT s.id, s.tenant_id, s.namespace, s.source_ref, s.scope_ref, s.composition_digest, s.composition_snapshot, s.access_profile, s.owner_account_id, s.shared_account_ids, s.phase, s.status, s.keep_alive, s.snapshot_enabled, s.code_storage_key, s.code_hash, s.workspace_revision, s.init_code_ref, s.init_script_ref, s.snapshot_ref, s.snapshot_domains, s.snapshot_created_at, s.snapshot_expire_at, s.keep_alive_until, s.last_active_at, s.expire_at, s.created_at, s.updated_at
 FROM sandbox s JOIN updated u ON u.id = s.id;
 
 -- name: CreateSandboxTool :one

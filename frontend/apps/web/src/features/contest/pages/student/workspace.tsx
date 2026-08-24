@@ -54,7 +54,7 @@ const FACE_KEYS = {
   title: 'title',
   /** 实操题的环境声明:题库按 M2 组合契约写入,竞赛按它起环境 */
   composition: 'composition',
-  primaryRuntime: 'primary_runtime',
+  runtimes: 'runtimes',
   runtimeCode: 'runtime_code',
   submitKey: 'submit_key',
 } as const
@@ -75,7 +75,7 @@ const contestWorkspaceApi: SandboxWorkspaceApi = {
     api.contest.runSandboxCommandTool(sandboxId, toolCode, data),
   chainDeploy: (sandboxId, data) => api.contest.sandboxChainDeploy(sandboxId, data),
   chainSendTx: (sandboxId, data) => api.contest.sandboxChainSendTx(sandboxId, data),
-  chainQuery: (sandboxId, target) => api.contest.sandboxChainQuery(sandboxId, target),
+  chainQuery: (sandboxId, runtimeInstance, target) => api.contest.sandboxChainQuery(sandboxId, runtimeInstance, target),
   getToolProxyUrl: (sandboxId, toolCode, proxyPath, toolOrigin) =>
     api.contest.getSandboxToolProxyUrl(sandboxId, toolCode, proxyPath, toolOrigin),
 }
@@ -460,13 +460,17 @@ function problemSpec(problem: ContestProblem): ProblemSpec {
   }
 }
 
-/** readCompositionRuntime 从题面的组合声明里读出主运行时编码;没有声明即回空串。 */
+/** readCompositionRuntime 从题面的组合声明里读出运行时摘要;没有声明即回空串。 */
 function readCompositionRuntime(face: Record<string, unknown>): string {
   const composition = face[FACE_KEYS.composition]
   if (typeof composition !== 'object' || composition === null) return ''
-  const primary = (composition as Record<string, unknown>)[FACE_KEYS.primaryRuntime]
-  if (typeof primary !== 'object' || primary === null) return ''
-  return readString(primary as Record<string, unknown>, FACE_KEYS.runtimeCode)
+  const runtimes = (composition as Record<string, unknown>)[FACE_KEYS.runtimes]
+  if (!Array.isArray(runtimes)) return ''
+  return runtimes
+    .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    .map((item) => readString(item, FACE_KEYS.runtimeCode))
+    .filter(Boolean)
+    .join(' / ')
 }
 
 interface ProblemBriefProps {

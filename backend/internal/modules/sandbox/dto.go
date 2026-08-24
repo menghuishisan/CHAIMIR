@@ -137,8 +137,9 @@ type FileWriteRequest struct {
 
 // ChainRequest 是链部署或交易的统一请求体。
 type ChainRequest struct {
-	TenantID ids.ID         `json:"tenant_id"`
-	Payload  map[string]any `json:"payload"`
+	TenantID        ids.ID         `json:"tenant_id"`
+	RuntimeInstance string         `json:"runtime_instance"`
+	Payload         map[string]any `json:"payload"`
 }
 
 // ToolRunRequest 是用户触发命令类工具的一次受控执行请求。
@@ -206,6 +207,7 @@ type SandboxResponse struct {
 	OwnerAccountID      ids.ID                         `json:"owner_account_id"`
 	RuntimeCode         string                         `json:"runtime_code"`
 	RuntimeImageVersion string                         `json:"runtime_image_version"`
+	RuntimeInstances    []string                       `json:"runtime_instances"`
 	Phase               int16                          `json:"phase"`
 	Status              int16                          `json:"status"`
 	ToolAccess          []contracts.SandboxToolAccess  `json:"tool_access"`

@@ -150,6 +150,7 @@ type SandboxInfo struct {
 	OwnerAccountID      int64                `json:"owner_account_id"`
 	RuntimeCode         string               `json:"runtime_code"`
 	RuntimeImageVersion string               `json:"runtime_image_version"`
+	RuntimeInstances    []string             `json:"runtime_instances"`
 	Phase               int16                `json:"phase"`
 	Status              int16                `json:"status"`
 	ToolAccess          []SandboxToolAccess  `json:"tool_access"`
@@ -333,33 +334,37 @@ type SandboxAuthorizedAccountsRequest struct {
 
 // SandboxChainDeployRequest 是统一链部署能力的内部请求。
 type SandboxChainDeployRequest struct {
-	TenantID  int64          `json:"tenant_id"`
-	SandboxID int64          `json:"sandbox_id"`
-	SourceRef string         `json:"source_ref"`
-	Payload   map[string]any `json:"payload"`
+	TenantID        int64          `json:"tenant_id"`
+	SandboxID       int64          `json:"sandbox_id"`
+	SourceRef       string         `json:"source_ref"`
+	RuntimeInstance string         `json:"runtime_instance"`
+	Payload         map[string]any `json:"payload"`
 }
 
 // SandboxChainTxRequest 是统一链交易能力的内部请求。
 type SandboxChainTxRequest struct {
-	TenantID  int64          `json:"tenant_id"`
-	SandboxID int64          `json:"sandbox_id"`
-	SourceRef string         `json:"source_ref"`
-	Payload   map[string]any `json:"payload"`
+	TenantID        int64          `json:"tenant_id"`
+	SandboxID       int64          `json:"sandbox_id"`
+	SourceRef       string         `json:"source_ref"`
+	RuntimeInstance string         `json:"runtime_instance"`
+	Payload         map[string]any `json:"payload"`
 }
 
 // SandboxChainQueryRequest 是统一链查询能力的内部请求。
 type SandboxChainQueryRequest struct {
-	TenantID  int64  `json:"tenant_id"`
-	SandboxID int64  `json:"sandbox_id"`
-	SourceRef string `json:"source_ref"`
-	Target    string `json:"target"`
+	TenantID        int64  `json:"tenant_id"`
+	SandboxID       int64  `json:"sandbox_id"`
+	SourceRef       string `json:"source_ref"`
+	RuntimeInstance string `json:"runtime_instance"`
+	Target          string `json:"target"`
 }
 
 // SandboxChainResetRequest 是统一链重置能力的内部请求。
 type SandboxChainResetRequest struct {
-	TenantID  int64  `json:"tenant_id"`
-	SandboxID int64  `json:"sandbox_id"`
-	SourceRef string `json:"source_ref"`
+	TenantID        int64  `json:"tenant_id"`
+	SandboxID       int64  `json:"sandbox_id"`
+	SourceRef       string `json:"source_ref"`
+	RuntimeInstance string `json:"runtime_instance"`
 }
 
 // SandboxQuotaStats 是 M2 提供给 M9 学校看板的资源统计摘要。
@@ -406,9 +411,9 @@ type SandboxService interface {
 	ProgressSubscriptionForPrincipal(ctx context.Context, access SandboxPrincipalRequest) (string, SandboxProgressMessage, error)
 	ToolProxyTargetForPrincipal(ctx context.Context, access SandboxPrincipalRequest, toolCode string) (SandboxToolProxyTarget, error)
 	ObserveSandboxToolAccess(ctx context.Context, access SandboxPrincipalRequest) error
-	ChainDeployForPrincipal(ctx context.Context, access SandboxPrincipalRequest, payload map[string]any) (map[string]any, error)
-	ChainSendTxForPrincipal(ctx context.Context, access SandboxPrincipalRequest, payload map[string]any) (map[string]any, error)
-	ChainQueryForPrincipal(ctx context.Context, access SandboxPrincipalRequest, target string) (map[string]any, error)
+	ChainDeployForPrincipal(ctx context.Context, access SandboxPrincipalRequest, runtimeInstance string, payload map[string]any) (map[string]any, error)
+	ChainSendTxForPrincipal(ctx context.Context, access SandboxPrincipalRequest, runtimeInstance string, payload map[string]any) (map[string]any, error)
+	ChainQueryForPrincipal(ctx context.Context, access SandboxPrincipalRequest, runtimeInstance, target string) (map[string]any, error)
 	// UpdateSandboxAuthorizedAccounts 原子替换共享账号集合,供实验编组变更同步权限。
 	UpdateSandboxAuthorizedAccounts(ctx context.Context, req SandboxAuthorizedAccountsRequest) error
 	// GetSandboxWorkspaceArchive 查询已保存工作区的服务端对象引用,供实例重建时恢复。

@@ -40,7 +40,7 @@ type TxStore interface {
 	ListRuntimeImages(ctx context.Context, runtimeID int64) ([]RuntimeImage, error)
 	CreateRuntimeImage(ctx context.Context, id, runtimeID int64, req RuntimeImageRequest) (RuntimeImage, error)
 	GetPublishedCompositionSnapshot(ctx context.Context, compositionDigest string) ([]byte, error)
-	UpsertPublishedCompositionSnapshot(ctx context.Context, compositionDigest string, runtimeID, runtimeImageID int64, snapshot []byte) error
+	UpsertPublishedCompositionSnapshot(ctx context.Context, compositionDigest string, snapshot []byte) error
 	GetCompositionPrepullForUpdate(ctx context.Context, runtimeImageID int64, compositionDigest string) (CompositionPrepull, error)
 	StartCompositionPrepull(ctx context.Context, id, runtimeImageID int64, compositionDigest, attemptID string, imageClosure, detail []byte) (CompositionPrepull, error)
 	FinishCompositionPrepull(ctx context.Context, runtimeImageID int64, compositionDigest, attemptID string, status int16, daemonsetName string, desiredNodes, readyNodes int32, detail []byte) (CompositionPrepull, error)
@@ -86,8 +86,6 @@ type TxStore interface {
 type CreateSandboxInput struct {
 	ID                  int64
 	TenantID            int64
-	RuntimeID           int64
-	ImageID             int64
 	Namespace           string
 	SourceRef           string
 	ScopeRef            string
@@ -325,11 +323,9 @@ func (s *txStore) GetPublishedCompositionSnapshot(ctx context.Context, compositi
 }
 
 // UpsertPublishedCompositionSnapshot 登记编译后的组合快照,供预拉取和启动阶段复用同一事实来源。
-func (s *txStore) UpsertPublishedCompositionSnapshot(ctx context.Context, compositionDigest string, runtimeID, runtimeImageID int64, snapshot []byte) error {
+func (s *txStore) UpsertPublishedCompositionSnapshot(ctx context.Context, compositionDigest string, snapshot []byte) error {
 	return s.q.UpsertPublishedCompositionSnapshot(ctx, sqlcgen.UpsertPublishedCompositionSnapshotParams{
 		CompositionDigest: compositionDigest,
-		RuntimeID:         runtimeID,
-		RuntimeImageID:    runtimeImageID,
 		Snapshot:          snapshot,
 	})
 }
@@ -561,8 +557,6 @@ func (s *txStore) CreateSandbox(ctx context.Context, input CreateSandboxInput) (
 	row, err := s.q.CreateSandbox(ctx, sqlcgen.CreateSandboxParams{
 		ID:                  input.ID,
 		TenantID:            input.TenantID,
-		RuntimeID:           input.RuntimeID,
-		ImageID:             input.ImageID,
 		Namespace:           input.Namespace,
 		SourceRef:           input.SourceRef,
 		ScopeRef:            input.ScopeRef,

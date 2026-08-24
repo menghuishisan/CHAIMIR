@@ -297,19 +297,18 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 	sb := Sandbox{
 		ID:             selftestID,
 		TenantID:       0,
-		RuntimeID:      runtime.ID,
-		ImageID:        image.ID,
 		Namespace:      namespaceFor("sbx-selftest", selftestID),
 		Phase:          SandboxPhaseAllocating,
 		Status:         SandboxStatusCreating,
 		OwnerAccountID: 0,
 	}
-	err = s.orchestrator.CreateSandboxResources(operationCtx, CreateSandboxPlan{Sandbox: sb, Runtime: runtime, Image: image})
+	plan := CreateSandboxPlan{Sandbox: sb, WorkspaceRuntimeInstance: runtime.Code, Runtimes: []RuntimePlan{{InstanceCode: runtime.Code, Runtime: runtime, Image: image}}}
+	err = s.orchestrator.CreateSandboxResources(operationCtx, plan)
 	if err == nil {
 		_, _, err = s.orchestrator.Exec(operationCtx, sb.Namespace, workspaceExecTarget(runtime), runtime.AdapterSpec.WorkspaceOps.Selftest, nil, false)
 	}
 	if err == nil {
-		err = s.runRuntimeCapabilitySelftest(operationCtx, CreateSandboxPlan{Sandbox: sb, Runtime: runtime, Image: image})
+		err = s.runRuntimeCapabilitySelftest(operationCtx, plan)
 	}
 	cleanupBase := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
 	cleanupCtx, cleanupCancel := context.WithTimeout(cleanupBase, timeDurationSeconds(s.cfg.SelftestRecycleTimeoutSeconds))
@@ -428,7 +427,7 @@ func runtimeSelftestPublicDetail(raw json.RawMessage) (RuntimeSelftestDetail, er
 
 // runRuntimeCapabilitySelftest 用标准 L2 能力执行 reset/deploy/query/reset 自检闭环。
 func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, plan CreateSandboxPlan) error {
-	sb, runtime := plan.Sandbox, plan.Runtime
+	sb, runtime := plan.Sandbox, workspaceRuntimeForPlan(plan)
 	if runtime.AdapterLevel < RuntimeAdapterLevelStandard && strings.TrimSpace(runtime.CapabilityImpl) == "" && strings.TrimSpace(runtime.PluginRef) == "" {
 		return nil
 	}
@@ -463,10 +462,11 @@ func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, plan CreateS
 
 // resetRuntimeForPlan 根据运行时契约选择控制面重建或生态原生 reset 命令。
 func (s *Service) resetRuntimeForPlan(ctx context.Context, plan CreateSandboxPlan, cap ChainCapability) error {
-	if strings.TrimSpace(plan.Runtime.AdapterSpec.CapabilityCommands.ResetStrategy) == "recreate_runtime" {
+	runtime := workspaceRuntimeForPlan(plan)
+	if strings.TrimSpace(runtime.AdapterSpec.CapabilityCommands.ResetStrategy) == "recreate_runtime" {
 		return s.orchestrator.ResetSandboxRuntime(ctx, plan)
 	}
-	return cap.Reset(ctx, plan.Sandbox, plan.Runtime)
+	return cap.Reset(ctx, plan.Sandbox, runtime)
 }
 
 // GetRuntimeSelftest 查询运行时接入即测结果。
@@ -525,7 +525,14 @@ func (s *Service) PrepullRuntimeImage(ctx context.Context, runtimeID, imageID in
 		if err != nil || canonicalDigest != compositionDigest {
 			return apperr.ErrSandboxImagePrepullParamInvalid
 		}
-		if snapshot.Runtime.RuntimeID != runtimeID || snapshot.Runtime.ImageID != imageID || snapshot.Runtime.ImageURL != image.ImageURL || snapshot.Runtime.ImageVersion != image.Version {
+		matched := false
+		for _, frozen := range snapshot.Runtimes {
+			if frozen.RuntimeID == runtimeID && frozen.ImageID == imageID && frozen.ImageURL == image.ImageURL && frozen.ImageVersion == image.Version {
+				matched = true
+				break
+			}
+		}
+		if !matched {
 			return apperr.ErrSandboxRuntimeImageNotFound
 		}
 		if !canPrepullRuntime(runtime.Status) || image.Status != RuntimeImageStatusAvailable {
@@ -656,20 +663,22 @@ func (c *prepullSpecCollector) add(imageURL string, command []string, hold bool,
 
 // prepullImageSpecsForSnapshot 从不可变组合快照重建预拉取闭包,不读取当前工具目录,避免发布后目录变化污染运行环境。
 func prepullImageSpecsForSnapshot(snapshot contracts.SandboxCompositionSnapshot) ([]PrepullImageSpec, error) {
-	var adapter AdapterSpec
-	if err := jsonx.DecodeStrictKnownFields(snapshot.Runtime.AdapterSpec, &adapter); err != nil {
-		return nil, fmt.Errorf("运行时适配器快照无效: %w", err)
-	}
-	runtime := Runtime{Code: snapshot.Runtime.Code, Eco: snapshot.Runtime.Eco, AdapterSpec: adapter}
-	image := RuntimeImage{ID: snapshot.Runtime.ImageID, RuntimeID: snapshot.Runtime.RuntimeID, ImageURL: snapshot.Runtime.ImageURL, Version: snapshot.Runtime.ImageVersion, Status: RuntimeImageStatusAvailable, GenesisBaked: true}
-	collector := newPrepullSpecCollector(1 + len(adapter.InfraSidecars) + len(snapshot.Components))
-	runtimeSpecs, err := prepull.RuntimeImageSpecs(image.ImageURL, runtimePrepullDefinition(runtime))
-	if err != nil {
-		return nil, err
-	}
-	for _, spec := range runtimeSpecs {
-		if err := collector.add(spec.ImageURL, spec.Command, spec.Hold, spec.EphemeralMounts); err != nil {
+	collector := newPrepullSpecCollector(len(snapshot.Runtimes) + len(snapshot.Components))
+	for _, frozen := range snapshot.Runtimes {
+		var adapter AdapterSpec
+		if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &adapter); err != nil {
+			return nil, fmt.Errorf("运行时 %s 适配器快照无效: %w", frozen.InstanceCode, err)
+		}
+		runtime := Runtime{Code: frozen.Code, Eco: frozen.Eco, AdapterSpec: adapter}
+		image := RuntimeImage{ID: frozen.ImageID, RuntimeID: frozen.RuntimeID, ImageURL: frozen.ImageURL, Version: frozen.ImageVersion, Status: RuntimeImageStatusAvailable, GenesisBaked: true}
+		runtimeSpecs, err := prepull.RuntimeImageSpecs(image.ImageURL, runtimePrepullDefinition(runtime))
+		if err != nil {
 			return nil, err
+		}
+		for _, spec := range runtimeSpecs {
+			if err := collector.add(spec.ImageURL, spec.Command, spec.Hold, spec.EphemeralMounts); err != nil {
+				return nil, err
+			}
 		}
 	}
 	for _, component := range snapshot.Components {
@@ -759,7 +768,7 @@ func mergePrepullEphemeralMounts(base, extra []workload.EphemeralMountSpec) []wo
 	if len(base) == 0 && len(extra) == 0 {
 		return nil
 	}
-	out := make([]workload.EphemeralMountSpec, 0, len(base)+len(extra))
+	var out []workload.EphemeralMountSpec
 	seen := map[string]struct{}{}
 	add := func(mount workload.EphemeralMountSpec) {
 		name := strings.TrimSpace(mount.Name)

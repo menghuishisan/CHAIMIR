@@ -14,6 +14,18 @@ import (
 
 // sandboxInfoFromModel 把内部沙箱快照转换为跨模块摘要。
 func sandboxInfoFromModel(sb Sandbox, runtime Runtime, image RuntimeImage, tools []SandboxTool) contracts.SandboxInfo {
+	instances := []string{}
+	var snapshot contracts.SandboxCompositionSnapshot
+	if len(sb.CompositionSnapshot) > 0 && json.Unmarshal(sb.CompositionSnapshot, &snapshot) == nil {
+		for _, item := range snapshot.Runtimes {
+			if value := strings.TrimSpace(item.InstanceCode); value != "" {
+				instances = append(instances, value)
+			}
+		}
+	}
+	if len(instances) == 0 {
+		instances = []string{runtime.Code}
+	}
 	return contracts.SandboxInfo{
 		SandboxID:           sb.ID,
 		TenantID:            sb.TenantID,
@@ -24,6 +36,7 @@ func sandboxInfoFromModel(sb Sandbox, runtime Runtime, image RuntimeImage, tools
 		OwnerAccountID:      sb.OwnerAccountID,
 		RuntimeCode:         runtime.Code,
 		RuntimeImageVersion: image.Version,
+		RuntimeInstances:    instances,
 		Phase:               sb.Phase,
 		Status:              sb.Status,
 		ToolAccess:          sandboxToolAccessFromModel(tools),
@@ -54,6 +67,7 @@ func sandboxResponseFromInfo(info contracts.SandboxInfo) SandboxResponse {
 		OwnerAccountID:      ids.ID(info.OwnerAccountID),
 		RuntimeCode:         info.RuntimeCode,
 		RuntimeImageVersion: info.RuntimeImageVersion,
+		RuntimeInstances:    append([]string(nil), info.RuntimeInstances...),
 		Phase:               info.Phase,
 		Status:              info.Status,
 		ToolAccess:          info.ToolAccess,
@@ -92,6 +106,39 @@ func sandboxCapabilitiesFromModel(runtime Runtime, tools []SandboxTool, register
 	}
 	if runtime.AdapterLevel == RuntimeAdapterLevelPlugin || len(runtime.AdapterSpec.CapabilityCommands.Query.Command) > 0 {
 		out.ChainOperations = append(out.ChainOperations, ChainOperationQuery)
+	}
+	return out
+}
+
+// sandboxCapabilitiesFromSnapshot 合并组合内所有运行时实例的工作区与链能力,避免工作台只看到首个实例。
+func sandboxCapabilitiesFromSnapshot(sb Sandbox, fallback Runtime, tools []SandboxTool, registered map[string]ChainCapability) contracts.SandboxCapabilities {
+	var snapshot contracts.SandboxCompositionSnapshot
+	if len(sb.CompositionSnapshot) == 0 || json.Unmarshal(sb.CompositionSnapshot, &snapshot) != nil || len(snapshot.Runtimes) == 0 {
+		return sandboxCapabilitiesFromModel(fallback, tools, registered)
+	}
+	out := contracts.SandboxCapabilities{ChainOperations: []string{}}
+	seenOps := map[string]struct{}{}
+	for _, frozen := range snapshot.Runtimes {
+		runtime := fallback
+		runtime.Code = frozen.Code
+		runtime.AdapterLevel = frozen.AdapterLevel
+		runtime.CapabilityImpl = frozen.CapabilityImpl
+		if len(frozen.AdapterSpec) > 0 {
+			if err := json.Unmarshal(frozen.AdapterSpec, &runtime.AdapterSpec); err != nil {
+				return sandboxCapabilitiesFromModel(fallback, tools, registered)
+			}
+		}
+		item := sandboxCapabilitiesFromModel(runtime, tools, registered)
+		out.FileWorkspace = out.FileWorkspace || item.FileWorkspace
+		out.Terminal = out.Terminal || item.Terminal
+		out.CommandTools = out.CommandTools || item.CommandTools
+		for _, operation := range item.ChainOperations {
+			if _, exists := seenOps[operation]; exists {
+				continue
+			}
+			seenOps[operation] = struct{}{}
+			out.ChainOperations = append(out.ChainOperations, operation)
+		}
 	}
 	return out
 }

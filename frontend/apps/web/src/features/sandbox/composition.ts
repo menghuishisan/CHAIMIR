@@ -1,6 +1,6 @@
 // features/sandbox/composition 提供组合声明的读写换算,实验、竞赛、题库与判题器共用一套。
 //
-// 「教师声明什么」与「服务端编译出什么」是两组字段:声明只有主运行时、组件与连接,
+// 「教师声明什么」与「服务端编译出什么」是两组字段:声明只有命名运行时实例、组件与连接,
 // 编译结果里的镜像地址、digest、启动命令与安全上下文由服务端产出,前端只读
 // (docs/对齐-后端待补齐清单-2026-08-23.md §6.3 / §7.5)。
 
@@ -19,15 +19,22 @@ import {
  * 不让每个页面各写一遍。
  */
 export interface CompositionDeclaration {
-  runtimeCode: string
-  imageVersion: string
-  toolCodes: string[]
-  infraCodes: string[]
+	runtimes: RuntimeDeclaration[]
+	workspaceRuntimeInstance: string
+	toolCodes: string[]
+	infraCodes: string[]
+}
+
+/** RuntimeDeclaration 是一个可被连接图引用的运行时实例,别名在组合内必须唯一。 */
+export interface RuntimeDeclaration {
+	instanceCode: string
+	runtimeCode: string
+	imageVersion: string
 }
 
 /** emptyCompositionDeclaration 给出新建时的空声明。 */
 export function emptyCompositionDeclaration(): CompositionDeclaration {
-  return { runtimeCode: '', imageVersion: '', toolCodes: [], infraCodes: [] }
+	return { runtimes: [{ instanceCode: 'chain-1', runtimeCode: '', imageVersion: '' }], workspaceRuntimeInstance: 'chain-1', toolCodes: [], infraCodes: [] }
 }
 
 /** isExplicitComponent 判断组件引用是否为教师显式声明(而非编译器按依赖补齐)。 */
@@ -45,12 +52,16 @@ export function explicitComponentRef(code: string): CompositionComponentRef {
  * 编译器自动补齐的基础设施不进勾选框 —— 它不是教师的选择,重新保存时会再算一遍。
  */
 export function declarationFromSpec(
-  spec: Pick<SandboxCompositionSpec, 'primary_runtime' | 'tools' | 'infra'> | undefined,
+	spec: Pick<SandboxCompositionSpec, 'runtimes' | 'workspace_runtime_instance' | 'tools' | 'infra'> | undefined,
 ): CompositionDeclaration {
-  if (spec === undefined) return emptyCompositionDeclaration()
-  return {
-    runtimeCode: spec.primary_runtime.runtime_code,
-    imageVersion: spec.primary_runtime.image_version,
+	if (spec === undefined) return emptyCompositionDeclaration()
+	return {
+		runtimes: (spec.runtimes ?? []).map((item) => ({
+		instanceCode: item.instance_code,
+		runtimeCode: item.runtime_code,
+		imageVersion: item.image_version,
+	})),
+		workspaceRuntimeInstance: spec.workspace_runtime_instance,
     toolCodes: (spec.tools ?? []).filter(isExplicitComponent).map((item) => item.code),
     infraCodes: (spec.infra ?? []).filter(isExplicitComponent).map((item) => item.code),
   }
@@ -89,12 +100,14 @@ export function compositionSpecFromDeclaration({
   initCodeRef,
   initScriptRef,
 }: CompositionSpecInput): SandboxCompositionSpec {
-  return {
-    id,
-    primary_runtime: {
-      runtime_code: declaration.runtimeCode,
-      image_version: declaration.imageVersion,
-    },
+	return {
+		id,
+		runtimes: declaration.runtimes.map((item) => ({
+			instance_code: item.instanceCode,
+			runtime_code: item.runtimeCode,
+			image_version: item.imageVersion,
+		})),
+		workspace_runtime_instance: declaration.workspaceRuntimeInstance,
     infra: [...declaration.infraCodes.map(explicitComponentRef), ...derivedInfra],
     tools: declaration.toolCodes.map(explicitComponentRef),
     links,
@@ -108,14 +121,26 @@ export function compositionSpecFromDeclaration({
 
 /**
  * compositionDeclarationError 校验声明的必填项,返回用户向文案;通过时返回 undefined。
- * 主运行时与镜像版本都是后端硬要求:缺一个都编译不出可调度的环境。
+ * 每个 runtime 实例的别名、运行时和镜像版本都是后端硬要求:缺一个都编译不出可调度的环境。
  */
 export function compositionDeclarationError(
   declaration: CompositionDeclaration,
 ): string | undefined {
-  if (declaration.runtimeCode === '') return '请选择运行时'
-  if (declaration.imageVersion === '') return '请选择镜像版本,发布后按这个版本固定下来'
-  return undefined
+	if (declaration.runtimes.length === 0) return '请至少添加一个运行时实例'
+	if (declaration.workspaceRuntimeInstance.trim() === '') return '请选择工作区运行时实例'
+	const aliases = new Set<string>()
+	let workspaceRuntimeDeclared = false
+	for (const runtime of declaration.runtimes) {
+		if (runtime.instanceCode.trim() === '') return '请填写运行时实例名称'
+		const instanceCode = runtime.instanceCode.trim()
+		if (aliases.has(instanceCode)) return '运行时实例名称不能重复'
+		aliases.add(instanceCode)
+		if (instanceCode === declaration.workspaceRuntimeInstance.trim()) workspaceRuntimeDeclared = true
+		if (runtime.runtimeCode === '') return '请选择运行时'
+		if (runtime.imageVersion === '') return '请选择镜像版本,发布后按这个版本固定下来'
+	}
+	if (!workspaceRuntimeDeclared) return '工作区运行时实例必须来自已声明的运行时'
+	return undefined
 }
 
 /**
@@ -128,12 +153,14 @@ export function scenarioNeutralSpecFromDeclaration(
   derivedInfra: CompositionComponentRef[] = [],
   links: CompositionLink[] = [],
 ): ScenarioNeutralCompositionSpec {
-  return {
-    id,
-    primary_runtime: {
-      runtime_code: declaration.runtimeCode,
-      image_version: declaration.imageVersion,
-    },
+	return {
+		id,
+		runtimes: declaration.runtimes.map((item) => ({
+			instance_code: item.instanceCode,
+			runtime_code: item.runtimeCode,
+			image_version: item.imageVersion,
+		})),
+		workspace_runtime_instance: declaration.workspaceRuntimeInstance,
     infra: [...declaration.infraCodes.map(explicitComponentRef), ...derivedInfra],
     tools: declaration.toolCodes.map(explicitComponentRef),
     links,
@@ -148,9 +175,15 @@ export function readScenarioNeutralSpec(
   const raw = body[key]
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return undefined
   const record = raw as Record<string, unknown>
-  const primary = record.primary_runtime
-  if (typeof primary !== 'object' || primary === null) return undefined
-  const runtimeCode = (primary as Record<string, unknown>).runtime_code
-  if (typeof runtimeCode !== 'string' || runtimeCode === '') return undefined
+	const runtimes = record.runtimes
+	if (!Array.isArray(runtimes) || runtimes.length === 0) return undefined
+	if (typeof record.workspace_runtime_instance !== 'string' || record.workspace_runtime_instance === '') return undefined
+	for (const item of runtimes) {
+		if (typeof item !== 'object' || item === null) return undefined
+		const runtime = item as Record<string, unknown>
+		if (typeof runtime.instance_code !== 'string' || runtime.instance_code === '') return undefined
+		if (typeof runtime.runtime_code !== 'string' || runtime.runtime_code === '') return undefined
+		if (typeof runtime.image_version !== 'string' || runtime.image_version === '') return undefined
+	}
   return record as unknown as ScenarioNeutralCompositionSpec
 }

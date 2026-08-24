@@ -14,7 +14,7 @@ import (
 	"chaimir/pkg/apperr"
 )
 
-// CompileSandboxComposition 校验声明并锁定主运行时、工具和基础设施的镜像闭包。
+// CompileSandboxComposition 校验声明并锁定全部 runtime 实例、工具和基础设施的镜像闭包。
 func (s *Service) CompileSandboxComposition(ctx context.Context, tenantID int64, spec contracts.SandboxCompositionSpec) (contracts.SandboxCompositionSnapshot, error) {
 	if tenantID <= 0 {
 		return contracts.SandboxCompositionSnapshot{}, apperr.ErrSandboxCreateRequestInvalid
@@ -36,22 +36,41 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 	if strings.TrimSpace(spec.ID) == "" || !spec.AccessProfile.Valid() {
 		return contracts.SandboxCompositionSnapshot{}, apperr.ErrSandboxCreateRequestInvalid
 	}
+	if _, err := contracts.CanonicalDigest(spec); err != nil {
+		return contracts.SandboxCompositionSnapshot{}, apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
+	}
 	var snapshot contracts.SandboxCompositionSnapshot
 	err := store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		runtime, err := tx.GetRuntimeByCode(ctx, strings.TrimSpace(spec.PrimaryRuntime.Code))
-		if err != nil {
-			return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
+		runtimePlans := make([]RuntimePlan, 0, len(spec.Runtimes))
+		runtimeAdapters := make(map[string]AdapterSpec, len(spec.Runtimes))
+		runtimeCapabilities := make([]CapabilityConstraints, 0, len(spec.Runtimes))
+		for _, ref := range spec.Runtimes {
+			instance := strings.TrimSpace(ref.InstanceCode)
+			runtime, err := tx.GetRuntimeByCode(ctx, strings.TrimSpace(ref.Code))
+			if err != nil {
+				return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
+			}
+			if runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
+				return fmt.Errorf("运行时 %s 尚未通过平台自检", runtime.Code)
+			}
+			if err := validateComponentParams(ref.Params, runtime.AdapterSpec.Capabilities.ConfigSchema); err != nil {
+				return fmt.Errorf("运行时 %s 参数无效: %w", runtime.Code, err)
+			}
+			image, err := tx.GetRuntimeImageByVersionForShare(ctx, runtime.ID, strings.TrimSpace(ref.ImageVersion))
+			if err != nil {
+				return apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
+			}
+			runtimePlans = append(runtimePlans, RuntimePlan{InstanceCode: instance, Runtime: runtime, Image: image})
+			runtimeAdapters[instance] = runtime.AdapterSpec
+			runtimeCapabilities = append(runtimeCapabilities, runtime.AdapterSpec.Capabilities)
 		}
-		if runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
-			return fmt.Errorf("运行时 %s 尚未通过平台自检", runtime.Code)
+		if len(runtimePlans) == 0 {
+			return fmt.Errorf("组合至少声明一个 runtime 实例")
 		}
-		if err := validateComponentParams(spec.PrimaryRuntime.Params, runtime.AdapterSpec.Capabilities.ConfigSchema); err != nil {
-			return fmt.Errorf("运行时 %s 参数无效: %w", runtime.Code, err)
+		if err := validateRuntimeVolumeDomains(runtimePlans); err != nil {
+			return err
 		}
-		image, err := tx.GetRuntimeImageByVersionForShare(ctx, runtime.ID, strings.TrimSpace(spec.PrimaryRuntime.ImageVersion))
-		if err != nil {
-			return apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
-		}
+		aggregatedCapabilities := aggregateRuntimeCapabilities(runtimeCapabilities)
 		tools, err := tx.ListTools(ctx)
 		if err != nil {
 			return err
@@ -60,7 +79,7 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 		for _, item := range tools {
 			toolByCode[item.Code] = item
 		}
-		selected := make([]contracts.CompositionComponentRef, 0, len(spec.Infra)+len(spec.Tools))
+		var selected []contracts.CompositionComponentRef
 		selected = append(selected, spec.Infra...)
 		selected = append(selected, spec.Tools...)
 		explicitInfraCount := len(spec.Infra)
@@ -99,7 +118,7 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 			if strings.TrimSpace(tool.ResourceSpec.Capabilities.Placement) != "sandbox" {
 				return fmt.Errorf("组件 %s 不能部署到沙箱", code)
 			}
-			if err := validateToolForRuntime(tool, runtime); err != nil {
+			if err := validateToolForRuntime(tool, runtimePlans); err != nil {
 				return fmt.Errorf("组件 %s 与运行时不兼容: %w", code, err)
 			}
 			if err := validateCompositionAccess(spec.AccessProfile, tool.Category, tool.ResourceSpec.Capabilities.StudentAccess); err != nil {
@@ -109,7 +128,7 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 				return fmt.Errorf("组件 %s 参数无效: %w", code, err)
 			}
 			for _, required := range tool.ResourceSpec.Capabilities.Requires {
-				if capabilityProvided(runtime.AdapterSpec.Capabilities, selected, toolByCode, required) {
+				if capabilityProvided(aggregatedCapabilities, selected, toolByCode, required) {
 					continue
 				}
 				provider, providerErr := findCapabilityProvider(toolByCode, required, "infra")
@@ -132,38 +151,38 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 		if err := validateCompositionLinks(spec, selected, toolByCode); err != nil {
 			return err
 		}
-		if err := validateCompositionConflicts(runtime.AdapterSpec.Capabilities, selected, toolByCode); err != nil {
+		if err := validateCompositionBindings(spec, runtimeCapabilitiesByInstance(runtimePlans), selected, toolByCode); err != nil {
 			return err
 		}
-		if err := validateCapabilityCardinality(runtime.AdapterSpec.Capabilities, selected, toolByCode); err != nil {
+		if err := validateCompositionConflicts(aggregatedCapabilities, selected, toolByCode); err != nil {
 			return err
 		}
-		compiledRuntime, compiledTools, err := compileCompositionLinks(spec, runtime.AdapterSpec, selected, toolByCode)
+		if err := validateCapabilityCardinality(aggregatedCapabilities, selected, toolByCode); err != nil {
+			return err
+		}
+		compiledRuntimes, compiledTools, err := compileCompositionLinks(spec, runtimeAdapters, runtimePlans, selected, toolByCode)
 		if err != nil {
 			return err
 		}
-		if err := validateNetworkRules(&compiledRuntime); err != nil {
-			return fmt.Errorf("运行时连接拓扑无效: %w", err)
+		for instance, compiledRuntime := range compiledRuntimes {
+			if err := validateNetworkRules(&compiledRuntime); err != nil {
+				return fmt.Errorf("运行时 %s 连接拓扑无效: %w", instance, err)
+			}
+			compiledRuntimes[instance] = compiledRuntime
 		}
 		for _, ref := range selected {
 			tool := compiledTools[ref.Code]
-			if err := validateToolMountDomainsForComposition(tool, compiledRuntime); err != nil {
+			if err := validateToolMountDomainsForComposition(tool, aggregateRuntimeAdapterSpecsByMap(compiledRuntimes)); err != nil {
 				return fmt.Errorf("组件 %s 安全域挂载无效: %w", ref.Code, err)
-			}
-			if err := validateRequiredBindingsForComposition(spec, ref.Code, tool.ResourceSpec.RequiredBindings); err != nil {
-				return fmt.Errorf("组件 %s 连接配置不完整: %w", ref.Code, err)
-			}
-			if err := validateRequiredComponentBindings(tool); err != nil {
-				return fmt.Errorf("组件 %s 连接配置不完整: %w", ref.Code, err)
 			}
 			if err := validateToolNetworkRules(&tool.ResourceSpec); err != nil {
 				return fmt.Errorf("组件 %s 连接拓扑无效: %w", ref.Code, err)
 			}
-			if err := validateToolNetworkRulesForComposition(tool, compiledRuntime, compiledTools); err != nil {
+			if err := validateToolNetworkRulesForComposition(tool, compiledRuntimes, compiledTools); err != nil {
 				return fmt.Errorf("组件 %s 连接目标无效: %w", ref.Code, err)
 			}
 		}
-		closure := make([]contracts.ImageClosureItem, 0, 1+len(runtime.AdapterSpec.InfraSidecars)+len(runtime.AdapterSpec.Pods)+len(selected))
+		var closure []contracts.ImageClosureItem
 		closureSeen := map[string]struct{}{}
 		appendClosure := func(category, code string, component workload.ComponentSpec, imageURL, version string, fallbackCommand []string) {
 			url := strings.TrimSpace(imageURL)
@@ -196,13 +215,16 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 			}
 			closure = append(closure, item)
 		}
-		appendClosure("runtime", runtime.Code, runtime.AdapterSpec.RuntimeContainer, image.ImageURL, image.Version, nil)
-		for _, component := range runtime.AdapterSpec.InfraSidecars {
-			appendClosure("runtime", component.Name, component, "", "", nil)
-		}
-		for _, pod := range runtime.AdapterSpec.Pods {
-			for _, component := range pod.Containers {
-				appendClosure("runtime", pod.Name+"/"+component.Name, component, "", "", nil)
+		for _, runtimePlan := range runtimePlans {
+			compiledRuntime := compiledRuntimes[runtimePlan.InstanceCode]
+			appendClosure("runtime", runtimePlan.InstanceCode+"/"+runtimePlan.Runtime.Code, compiledRuntime.RuntimeContainer, runtimePlan.Image.ImageURL, runtimePlan.Image.Version, nil)
+			for _, component := range compiledRuntime.InfraSidecars {
+				appendClosure("runtime", runtimePlan.InstanceCode+"/"+component.Name, component, "", "", nil)
+			}
+			for _, pod := range compiledRuntime.Pods {
+				for _, component := range pod.Containers {
+					appendClosure("runtime", runtimePlan.InstanceCode+"/"+pod.Name+"/"+component.Name, component, "", "", nil)
+				}
 			}
 		}
 		components := make([]contracts.CompiledComponentSnapshot, 0, len(selected))
@@ -224,23 +246,17 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 				appendClosure(category, ref.Code, component, "", "", tool.ResourceSpec.PrepullCommand)
 			}
 		}
-		adapterSpec, err := json.Marshal(compiledRuntime)
-		if err != nil {
-			return fmt.Errorf("编码运行时 %s 适配器失败: %w", runtime.Code, err)
+		compiledSnapshots := make([]contracts.CompiledRuntimeSnapshot, 0, len(runtimePlans))
+		for _, runtimePlan := range runtimePlans {
+			adapterSpec, err := json.Marshal(compiledRuntimes[runtimePlan.InstanceCode])
+			if err != nil {
+				return fmt.Errorf("编码运行时 %s 适配器失败: %w", runtimePlan.Runtime.Code, err)
+			}
+			compiledSnapshots = append(compiledSnapshots, contracts.CompiledRuntimeSnapshot{InstanceCode: runtimePlan.InstanceCode, RuntimeID: runtimePlan.Runtime.ID, ImageID: runtimePlan.Image.ID, Code: runtimePlan.Runtime.Code, Eco: runtimePlan.Runtime.Eco, AdapterLevel: runtimePlan.Runtime.AdapterLevel, CapabilityImpl: runtimePlan.Runtime.CapabilityImpl, AdapterSpec: adapterSpec, ImageURL: runtimePlan.Image.ImageURL, ImageVersion: runtimePlan.Image.Version})
 		}
 		snapshot = contracts.SandboxCompositionSnapshot{
-			Spec: spec,
-			Runtime: contracts.CompiledRuntimeSnapshot{
-				RuntimeID:      runtime.ID,
-				ImageID:        image.ID,
-				Code:           runtime.Code,
-				Eco:            runtime.Eco,
-				AdapterLevel:   runtime.AdapterLevel,
-				CapabilityImpl: runtime.CapabilityImpl,
-				AdapterSpec:    adapterSpec,
-				ImageURL:       image.ImageURL,
-				ImageVersion:   image.Version,
-			},
+			Spec:         spec,
+			Runtimes:     compiledSnapshots,
 			Components:   components,
 			ImageClosure: closure,
 		}
@@ -253,7 +269,7 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 		if err != nil {
 			return fmt.Errorf("编码组合快照失败: %w", err)
 		}
-		if err := tx.UpsertPublishedCompositionSnapshot(ctx, digest, runtime.ID, image.ID, rawSnapshot); err != nil {
+		if err := tx.UpsertPublishedCompositionSnapshot(ctx, digest, rawSnapshot); err != nil {
 			return fmt.Errorf("登记组合快照失败: %w", err)
 		}
 		return nil
@@ -262,6 +278,24 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 		return contracts.SandboxCompositionSnapshot{}, err
 	}
 	return snapshot, nil
+}
+
+// validateRuntimeVolumeDomains 拒绝同名安全域在不同 runtime 中使用不同契约,避免工具挂载和 PVC 语义依赖数组顺序。
+func validateRuntimeVolumeDomains(plans []RuntimePlan) error {
+	seen := map[string]VolumeDomainSpec{}
+	for _, plan := range plans {
+		for _, domain := range plan.Runtime.AdapterSpec.VolumeDomains {
+			name := strings.TrimSpace(domain.Name)
+			if name == "" {
+				continue
+			}
+			if existing, ok := seen[name]; ok && existing != domain {
+				return fmt.Errorf("运行时实例 %s 的安全域 %s 与其他运行时契约冲突", plan.InstanceCode, name)
+			}
+			seen[name] = domain
+		}
+	}
+	return nil
 }
 
 // immutableImageVersion derives a stable display version from the locked digest, never from a mutable tag.
@@ -280,6 +314,50 @@ func immutableImageVersion(imageURL string) string {
 		return "unverified"
 	}
 	return "sha256-" + digest
+}
+
+// runtimeCapabilitiesByInstance indexes capability declarations by the stable runtime instance alias.
+func runtimeCapabilitiesByInstance(plans []RuntimePlan) map[string]CapabilityConstraints {
+	out := make(map[string]CapabilityConstraints, len(plans))
+	for _, plan := range plans {
+		out[plan.InstanceCode] = plan.Runtime.AdapterSpec.Capabilities
+	}
+	return out
+}
+
+// aggregateRuntimeCapabilities exposes only the union of runtime capabilities to dependency checks.
+func aggregateRuntimeCapabilities(items []CapabilityConstraints) CapabilityConstraints {
+	out := CapabilityConstraints{}
+	seenProvides := map[string]struct{}{}
+	seenRequires := map[string]struct{}{}
+	seenConflicts := map[string]struct{}{}
+	for _, item := range items {
+		for _, value := range item.Provides {
+			if value = strings.TrimSpace(value); value != "" {
+				if _, ok := seenProvides[value]; !ok {
+					out.Provides = append(out.Provides, value)
+					seenProvides[value] = struct{}{}
+				}
+			}
+		}
+		for _, value := range item.Requires {
+			if value = strings.TrimSpace(value); value != "" {
+				if _, ok := seenRequires[value]; !ok {
+					out.Requires = append(out.Requires, value)
+					seenRequires[value] = struct{}{}
+				}
+			}
+		}
+		for _, value := range item.Conflicts {
+			if value = strings.TrimSpace(value); value != "" {
+				if _, ok := seenConflicts[value]; !ok {
+					out.Conflicts = append(out.Conflicts, value)
+					seenConflicts[value] = struct{}{}
+				}
+			}
+		}
+	}
+	return out
 }
 
 // validateToolMountDomainsForComposition 只允许工具挂载当前运行时已声明且与能力匹配的安全域。
@@ -310,51 +388,96 @@ func validateToolMountDomainsForComposition(tool Tool, runtime AdapterSpec) erro
 	return nil
 }
 
-// validateRequiredComponentBindings 确认所有运行时连接变量都已由固定清单或组合 links 写入唯一组件。
-func validateRequiredComponentBindings(tool Tool) error {
-	if len(tool.ResourceSpec.RequiredBindings) == 0 {
-		return nil
-	}
-	for _, required := range tool.ResourceSpec.RequiredBindings {
-		name := strings.TrimSpace(required)
-		matches := 0
-		for _, component := range tool.ResourceSpec.Components {
-			for _, env := range component.Env {
-				if strings.TrimSpace(env.Name) == name && strings.TrimSpace(env.Value) != "" {
-					matches++
-				}
+// validateCompositionBindings 将 manifest 声明的角色绑定与组合 links 一一核对。
+// 组件只能通过声明的能力、端点、协议和环境变量接收连接,禁止运行时注入未声明字段。
+func validateCompositionBindings(spec contracts.SandboxCompositionSpec, runtimes map[string]CapabilityConstraints, refs []contracts.CompositionComponentRef, tools map[string]Tool) error {
+	declared := map[string]map[string]ComponentBinding{}
+	for _, ref := range refs {
+		tool, ok := tools[ref.Code]
+		if !ok {
+			return fmt.Errorf("组件 %s 未注册", ref.Code)
+		}
+		byEnv := map[string]ComponentBinding{}
+		for _, binding := range tool.ResourceSpec.Bindings {
+			parsed, err := parseCompositionBinding(binding.ConfigBinding)
+			if err != nil {
+				return fmt.Errorf("组件 %s 绑定 %s 无效: %w", ref.Code, binding.Name, err)
 			}
+			byEnv[parsed.Name] = binding
 		}
-		if matches != 1 {
-			return fmt.Errorf("必须通过组合连接提供环境变量 %s", name)
-		}
+		declared[ref.Code] = byEnv
 	}
-	return nil
-}
-
-// validateRequiredBindingsForComposition 要求连接配置必须来自当前组合 links,不接受 manifest 固定地址冒充动态绑定。
-func validateRequiredBindingsForComposition(spec contracts.SandboxCompositionSpec, componentCode string, required []string) error {
-	if len(required) == 0 {
-		return nil
-	}
-	bound := map[string]struct{}{}
+	bound := map[string]map[string]struct{}{}
 	for _, link := range spec.Links {
-		if strings.TrimSpace(link.SourceComponent) != componentCode {
+		sourceCode := strings.TrimSpace(link.SourceComponent)
+		if _, isRuntime := runtimes[sourceCode]; isRuntime {
 			continue
+		}
+		byEnv, ok := declared[sourceCode]
+		if !ok {
+			return fmt.Errorf("连接源组件 %s 未注册", sourceCode)
 		}
 		binding, err := parseCompositionBinding(link.ConfigBinding)
 		if err != nil {
 			return err
 		}
-		bound[binding.Name] = struct{}{}
+		declaredBinding, ok := byEnv[binding.Name]
+		if !ok {
+			return fmt.Errorf("组件 %s 未声明连接环境变量 %s", sourceCode, binding.Name)
+		}
+		if strings.TrimSpace(link.SourceEndpoint) != strings.TrimSpace(declaredBinding.Endpoint) {
+			return fmt.Errorf("组件 %s 绑定 %s 的源端点不匹配", sourceCode, declaredBinding.Name)
+		}
+		if strings.TrimSpace(link.Protocol) != strings.TrimSpace(declaredBinding.Protocol) {
+			return fmt.Errorf("组件 %s 绑定 %s 的协议不匹配", sourceCode, declaredBinding.Name)
+		}
+		if link.RequiredAtStart != declaredBinding.RequiredAtStart {
+			return fmt.Errorf("组件 %s 绑定 %s 的启动前置不匹配", sourceCode, declaredBinding.Name)
+		}
+		if !compositionTargetProvides(link.TargetComponent, declaredBinding.Capability, runtimes, tools) {
+			return fmt.Errorf("组件 %s 绑定 %s 的目标未提供能力 %s", sourceCode, declaredBinding.Name, declaredBinding.Capability)
+		}
+		if bound[sourceCode] == nil {
+			bound[sourceCode] = map[string]struct{}{}
+		}
+		if _, exists := bound[sourceCode][binding.Name]; exists {
+			return fmt.Errorf("组件 %s 绑定 %s 重复连接", sourceCode, declaredBinding.Name)
+		}
+		bound[sourceCode][binding.Name] = struct{}{}
 	}
-	for _, raw := range required {
-		name := strings.TrimSpace(raw)
-		if _, ok := bound[name]; !ok {
-			return fmt.Errorf("环境变量 %s 必须由组合 links 提供", name)
+	for componentCode, byEnv := range declared {
+		for envName, binding := range byEnv {
+			if _, ok := bound[componentCode][envName]; !ok {
+				return fmt.Errorf("组件 %s 的绑定 %s 未在组合 links 中连接", componentCode, binding.Name)
+			}
 		}
 	}
 	return nil
+}
+
+// compositionTargetProvides 确认连接目标的 manifest 能力声明覆盖源组件要求的能力。
+// 组合图只允许连接到已声明 runtime 实例或已选组件,不通过组件编码维护硬编码配对表。
+func compositionTargetProvides(target, capability string, runtimes map[string]CapabilityConstraints, tools map[string]Tool) bool {
+	target = strings.TrimSpace(target)
+	capability = strings.TrimSpace(capability)
+	if runtime, ok := runtimes[target]; ok {
+		for _, provided := range runtime.Provides {
+			if strings.TrimSpace(provided) == capability {
+				return true
+			}
+		}
+		return false
+	}
+	tool, ok := tools[target]
+	if !ok {
+		return false
+	}
+	for _, provided := range tool.ResourceSpec.Capabilities.Provides {
+		if strings.TrimSpace(provided) == capability {
+			return true
+		}
+	}
+	return false
 }
 
 // validateComponentParams 按 manifest 声明的最小 JSON Schema 子集校验组件参数。
@@ -610,7 +733,10 @@ func capabilityProvided(runtime CapabilityConstraints, refs []contracts.Composit
 }
 
 func validateCompositionLinks(spec contracts.SandboxCompositionSpec, refs []contracts.CompositionComponentRef, tools map[string]Tool) error {
-	known := map[string]struct{}{"primary_runtime": {}}
+	known := map[string]struct{}{}
+	for _, runtime := range spec.Runtimes {
+		known[strings.TrimSpace(runtime.InstanceCode)] = struct{}{}
+	}
 	for _, ref := range refs {
 		known[ref.Code] = struct{}{}
 	}
@@ -624,7 +750,7 @@ func validateCompositionLinks(spec contracts.SandboxCompositionSpec, refs []cont
 		if strings.TrimSpace(link.Protocol) == "" || strings.TrimSpace(link.SourceEndpoint) == "" || strings.TrimSpace(link.TargetEndpoint) == "" || strings.TrimSpace(link.AccessScope) == "" || strings.TrimSpace(link.ConfigBinding) == "" {
 			return fmt.Errorf("连接声明不完整")
 		}
-		if link.SourceComponent != "primary_runtime" && tools[link.SourceComponent].Code == "" {
+		if _, isRuntime := known[strings.TrimSpace(link.SourceComponent)]; !isRuntime && tools[link.SourceComponent].Code == "" {
 			return fmt.Errorf("连接源组件 %s 未注册", link.SourceComponent)
 		}
 	}
@@ -633,55 +759,71 @@ func validateCompositionLinks(spec contracts.SandboxCompositionSpec, refs []cont
 
 // compileCompositionLinks 把声明式连接编译成源组件环境变量和最小网络规则。
 // 连接只允许注入同一沙箱内已声明 Service 的地址,不接受任意 URL、Secret 或外网出口。
-func compileCompositionLinks(spec contracts.SandboxCompositionSpec, runtime AdapterSpec, refs []contracts.CompositionComponentRef, tools map[string]Tool) (AdapterSpec, map[string]Tool, error) {
-	compiledRuntime, err := cloneAdapterSpec(runtime)
-	if err != nil {
-		return AdapterSpec{}, nil, err
+func compileCompositionLinks(spec contracts.SandboxCompositionSpec, runtimes map[string]AdapterSpec, runtimePlans []RuntimePlan, refs []contracts.CompositionComponentRef, tools map[string]Tool) (map[string]AdapterSpec, map[string]Tool, error) {
+	compiledRuntimes := make(map[string]AdapterSpec, len(runtimes))
+	for instance, runtime := range runtimes {
+		cloned, err := cloneAdapterSpec(runtime)
+		if err != nil {
+			return nil, nil, err
+		}
+		compiledRuntimes[instance] = cloned
 	}
 	compiledTools := make(map[string]Tool, len(refs))
 	for _, ref := range refs {
 		tool, ok := tools[ref.Code]
 		if !ok {
-			return AdapterSpec{}, nil, fmt.Errorf("连接组件 %s 未注册", ref.Code)
+			return nil, nil, fmt.Errorf("连接组件 %s 未注册", ref.Code)
 		}
 		cloned, cloneErr := cloneTool(tool)
 		if cloneErr != nil {
-			return AdapterSpec{}, nil, cloneErr
+			return nil, nil, cloneErr
 		}
 		compiledTools[ref.Code] = cloned
 	}
-	runtimeComponents := []workload.ComponentSpec{compiledRuntime.RuntimeContainer}
-	runtimeComponents = append(runtimeComponents, compiledRuntime.InfraSidecars...)
-	for _, pod := range compiledRuntime.Pods {
-		runtimeComponents = append(runtimeComponents, pod.Containers...)
-	}
-	if err := applyCompositionParams(spec.PrimaryRuntime.Params, compiledRuntime.Capabilities.ConfigSchema, &runtimeComponents); err != nil {
-		return AdapterSpec{}, nil, fmt.Errorf("运行时参数编译失败: %w", err)
-	}
-	componentIndex := 0
-	compiledRuntime.RuntimeContainer = runtimeComponents[componentIndex]
-	componentIndex++
-	for index := range compiledRuntime.InfraSidecars {
-		compiledRuntime.InfraSidecars[index] = runtimeComponents[componentIndex]
+	for _, runtimePlan := range runtimePlans {
+		compiledRuntime := compiledRuntimes[runtimePlan.InstanceCode]
+		runtimeComponents := []workload.ComponentSpec{compiledRuntime.RuntimeContainer}
+		runtimeComponents = append(runtimeComponents, compiledRuntime.InfraSidecars...)
+		for _, pod := range compiledRuntime.Pods {
+			runtimeComponents = append(runtimeComponents, pod.Containers...)
+		}
+		for _, ref := range spec.Runtimes {
+			if ref.InstanceCode != runtimePlan.InstanceCode {
+				continue
+			}
+			if err := applyCompositionParams(ref.Params, compiledRuntime.Capabilities.ConfigSchema, &runtimeComponents); err != nil {
+				return nil, nil, fmt.Errorf("运行时 %s 参数编译失败: %w", runtimePlan.InstanceCode, err)
+			}
+		}
+		componentIndex := 0
+		compiledRuntime.RuntimeContainer = runtimeComponents[componentIndex]
 		componentIndex++
-	}
-	for podIndex := range compiledRuntime.Pods {
-		for containerIndex := range compiledRuntime.Pods[podIndex].Containers {
-			compiledRuntime.Pods[podIndex].Containers[containerIndex] = runtimeComponents[componentIndex]
+		for index := range compiledRuntime.InfraSidecars {
+			compiledRuntime.InfraSidecars[index] = runtimeComponents[componentIndex]
 			componentIndex++
 		}
+		for podIndex := range compiledRuntime.Pods {
+			for containerIndex := range compiledRuntime.Pods[podIndex].Containers {
+				compiledRuntime.Pods[podIndex].Containers[containerIndex] = runtimeComponents[componentIndex]
+				componentIndex++
+			}
+		}
+		compiledRuntimes[runtimePlan.InstanceCode] = compiledRuntime
+		compiledRuntimes[runtimePlan.InstanceCode] = materializeRuntimeTopology(runtimePlan.InstanceCode, compiledRuntime)
 	}
 	for _, ref := range refs {
 		tool := compiledTools[ref.Code]
 		if err := applyCompositionParams(ref.Params, tool.ResourceSpec.Capabilities.ConfigSchema, &tool.ResourceSpec.Components); err != nil {
-			return AdapterSpec{}, nil, fmt.Errorf("组件 %s 参数编译失败: %w", ref.Code, err)
+			return nil, nil, fmt.Errorf("组件 %s 参数编译失败: %w", ref.Code, err)
 		}
 		compiledTools[ref.Code] = tool
 	}
 	seenBindings := map[string]string{}
 	seenRules := map[string]struct{}{}
-	for _, rule := range compiledRuntime.NetworkRules {
-		seenRules[strings.TrimSpace(rule.Name)] = struct{}{}
+	for _, compiledRuntime := range compiledRuntimes {
+		for _, rule := range compiledRuntime.NetworkRules {
+			seenRules[strings.TrimSpace(rule.Name)] = struct{}{}
+		}
 	}
 	for _, tool := range compiledTools {
 		for _, rule := range tool.ResourceSpec.NetworkRules {
@@ -691,31 +833,31 @@ func compileCompositionLinks(spec contracts.SandboxCompositionSpec, runtime Adap
 	for _, link := range spec.Links {
 		binding, err := parseCompositionBinding(link.ConfigBinding)
 		if err != nil {
-			return AdapterSpec{}, nil, err
+			return nil, nil, err
 		}
-		source, err := resolveCompositionEndpoint(link.SourceComponent, link.SourceEndpoint, true, compiledRuntime, compiledTools)
+		source, err := resolveCompositionEndpoint(link.SourceComponent, link.SourceEndpoint, true, compiledRuntimes, compiledTools)
 		if err != nil {
-			return AdapterSpec{}, nil, err
+			return nil, nil, err
 		}
-		target, err := resolveCompositionEndpoint(link.TargetComponent, link.TargetEndpoint, false, compiledRuntime, compiledTools)
+		target, err := resolveCompositionEndpoint(link.TargetComponent, link.TargetEndpoint, false, compiledRuntimes, compiledTools)
 		if err != nil {
-			return AdapterSpec{}, nil, err
+			return nil, nil, err
 		}
 		if err := validateCompositionProtocol(link.Protocol, target.Protocol); err != nil {
-			return AdapterSpec{}, nil, err
+			return nil, nil, err
 		}
 		if binding.Kind == "env" {
 			key := source.ComponentCode + "\x00" + source.ComponentName + "\x00" + binding.Name
 			value := compositionBindingValue(link.Protocol, target)
 			if previous, exists := seenBindings[key]; exists {
 				if previous != value {
-					return AdapterSpec{}, nil, fmt.Errorf("组件 %s 的环境变量 %s 存在冲突连接", source.ComponentCode, binding.Name)
+					return nil, nil, fmt.Errorf("组件 %s 的环境变量 %s 存在冲突连接", source.ComponentCode, binding.Name)
 				}
-				return AdapterSpec{}, nil, fmt.Errorf("组件 %s 的环境变量 %s 存在重复连接", source.ComponentCode, binding.Name)
+				return nil, nil, fmt.Errorf("组件 %s 的环境变量 %s 存在重复连接", source.ComponentCode, binding.Name)
 			}
 			seenBindings[key] = value
-			if err := setComponentEnv(source.ComponentCode, source.ComponentName, binding.Name, value, &compiledRuntime, compiledTools); err != nil {
-				return AdapterSpec{}, nil, err
+			if err := setComponentEnv(source.ComponentCode, source.ComponentName, binding.Name, value, compiledRuntimes, compiledTools); err != nil {
+				return nil, nil, err
 			}
 		}
 		rule := workload.NetworkRuleSpec{
@@ -724,33 +866,45 @@ func compileCompositionLinks(spec contracts.SandboxCompositionSpec, runtime Adap
 			To:    target.Role,
 			Ports: []workload.NetworkPortRef{{Name: target.EndpointName, Port: target.Port}},
 		}
-		if source.ComponentCode != "primary_runtime" {
+		if _, isRuntime := compiledRuntimes[source.ComponentCode]; !isRuntime {
 			// 工具自身的规则以组件名表达来源,编排层再转换为该组件 Pod 角色。
 			rule.From = source.ComponentName
 		}
 		if _, exists := seenRules[rule.Name]; exists {
-			return AdapterSpec{}, nil, fmt.Errorf("连接网络规则重复: %s", rule.Name)
+			return nil, nil, fmt.Errorf("连接网络规则重复: %s", rule.Name)
 		}
 		seenRules[rule.Name] = struct{}{}
-		if source.ComponentCode == "primary_runtime" {
+		if compiledRuntime, isRuntime := compiledRuntimes[source.ComponentCode]; isRuntime {
 			compiledRuntime.NetworkRules = append(compiledRuntime.NetworkRules, rule)
+			compiledRuntimes[source.ComponentCode] = compiledRuntime
 		} else {
 			tool := compiledTools[source.ComponentCode]
 			tool.ResourceSpec.NetworkRules = append(tool.ResourceSpec.NetworkRules, rule)
 			compiledTools[source.ComponentCode] = tool
 		}
 	}
-	compiledRuntime.StartupOrder, err = compileStartupOrder(spec, refs)
+	startupOrder, err := compileStartupOrder(spec, refs)
 	if err != nil {
-		return AdapterSpec{}, nil, err
+		return nil, nil, err
 	}
-	return compiledRuntime, compiledTools, nil
+	for instance, compiledRuntime := range compiledRuntimes {
+		compiledRuntime.StartupOrder = startupOrder
+		compiledRuntimes[instance] = compiledRuntime
+	}
+	return compiledRuntimes, compiledTools, nil
 }
 
 // compileStartupOrder 将 required_at_start 连接转换成确定性的组件启动顺序,并拒绝循环依赖。
 func compileStartupOrder(spec contracts.SandboxCompositionSpec, refs []contracts.CompositionComponentRef) ([]string, error) {
-	nodes := []string{"primary_runtime"}
-	seen := map[string]struct{}{"primary_runtime": {}}
+	nodes := make([]string, 0, len(spec.Runtimes)+len(refs))
+	seen := map[string]struct{}{}
+	for _, runtime := range spec.Runtimes {
+		instance := strings.TrimSpace(runtime.InstanceCode)
+		if instance != "" {
+			nodes = append(nodes, instance)
+			seen[instance] = struct{}{}
+		}
+	}
 	for _, ref := range refs {
 		code := strings.TrimSpace(ref.Code)
 		if code == "" {
@@ -829,9 +983,15 @@ func compositionBindingValue(protocol string, endpoint compositionEndpoint) stri
 }
 
 // validateToolNetworkRulesForComposition 校验编译后工具规则的来源和目标都属于本次冻结组合。
-func validateToolNetworkRulesForComposition(tool Tool, runtime AdapterSpec, tools map[string]Tool) error {
+func validateToolNetworkRulesForComposition(tool Tool, runtimes map[string]AdapterSpec, tools map[string]Tool) error {
 	componentPorts := componentPortMap(tool.ResourceSpec.Components)
-	runtimePorts := podPortMap(podTopologyForAdapter(runtime))
+	runtimePorts := map[string]map[string]int32{}
+	for instance, runtime := range runtimes {
+		for role, ports := range podPortMap(podTopologyForAdapter(runtime)) {
+			runtimePorts[instance+"/"+role] = ports
+			runtimePorts[role] = ports
+		}
+	}
 	for _, rule := range tool.ResourceSpec.NetworkRules {
 		if _, ok := componentPorts[rule.From]; !ok {
 			return fmt.Errorf("来源组件 %s 未声明", rule.From)
@@ -896,10 +1056,10 @@ func parseCompositionBinding(raw string) (compositionBinding, error) {
 }
 
 // resolveCompositionEndpoint 从运行时 Service 或工具 Service 解析稳定的内网地址。
-func resolveCompositionEndpoint(componentCode, endpoint string, source bool, runtime AdapterSpec, tools map[string]Tool) (compositionEndpoint, error) {
+func resolveCompositionEndpoint(componentCode, endpoint string, source bool, runtimes map[string]AdapterSpec, tools map[string]Tool) (compositionEndpoint, error) {
 	componentCode = strings.TrimSpace(componentCode)
 	endpoint = strings.TrimSpace(endpoint)
-	if componentCode == "primary_runtime" {
+	if runtime, ok := runtimes[componentCode]; ok {
 		for _, pod := range podTopologyForAdapter(runtime) {
 			for _, component := range pod.Containers {
 				for _, port := range component.Ports {
@@ -992,11 +1152,20 @@ func validateCompositionProtocol(declared, target string) error {
 }
 
 // setComponentEnv 把编译后的地址写入源组件,拒绝覆盖 manifest 中不同的固定值。
-func setComponentEnv(componentCode, componentName, name, value string, runtime *AdapterSpec, tools map[string]Tool) error {
-	if componentCode == "primary_runtime" {
+func setComponentEnv(componentCode, componentName, name, value string, runtimes map[string]AdapterSpec, tools map[string]Tool) error {
+	if runtime, ok := runtimes[componentCode]; ok {
 		component := &runtime.RuntimeContainer
 		if component.Name != componentName {
 			component = nil
+			for index := range runtime.InfraSidecars {
+				candidate := &runtime.InfraSidecars[index]
+				if candidate.Name == componentName {
+					component = candidate
+					break
+				}
+			}
+		}
+		if component == nil {
 			for podIndex := range runtime.Pods {
 				for containerIndex := range runtime.Pods[podIndex].Containers {
 					candidate := &runtime.Pods[podIndex].Containers[containerIndex]
@@ -1011,23 +1180,25 @@ func setComponentEnv(componentCode, componentName, name, value string, runtime *
 			}
 		}
 		if component == nil {
-			return fmt.Errorf("主运行时源容器 %s 不存在", componentName)
+			return fmt.Errorf("runtime %s 源容器 %s 不存在", componentCode, componentName)
 		}
 		for _, secret := range component.SecretEnv {
 			if strings.TrimSpace(secret.Name) == name {
-				return fmt.Errorf("连接不得写入主运行时敏感环境变量 %s", name)
+				return fmt.Errorf("连接不得写入 runtime %s 敏感环境变量 %s", componentCode, name)
 			}
 		}
 		for index := range component.Env {
 			if component.Env[index].Name == name {
 				if component.Env[index].Value != "" && component.Env[index].Value != value {
-					return fmt.Errorf("主运行时的环境变量 %s 已声明不同值", name)
+					return fmt.Errorf("runtime %s 的环境变量 %s 已声明不同值", componentCode, name)
 				}
 				component.Env[index].Value = value
+				runtimes[componentCode] = runtime
 				return nil
 			}
 		}
 		component.Env = append(component.Env, workload.EnvVarSpec{Name: name, Value: value})
+		runtimes[componentCode] = runtime
 		return nil
 	}
 	tool := tools[componentCode]
@@ -1056,6 +1227,64 @@ func setComponentEnv(componentCode, componentName, name, value string, runtime *
 		return nil
 	}
 	return fmt.Errorf("组件 %s 的源容器 %s 不存在", componentCode, componentName)
+}
+
+// materializeRuntimeTopology 为每个运行时实例生成唯一 Pod 角色,保证多链组合中的同名拓扑不会碰撞。
+func materializeRuntimeTopology(instance string, adapter AdapterSpec) AdapterSpec {
+	instance = strings.TrimSpace(instance)
+	if instance == "" {
+		return adapter
+	}
+	podNames := make(map[string]string)
+	if len(adapter.Pods) == 0 {
+		containers := []workload.ComponentSpec{adapter.RuntimeContainer}
+		containers = append(containers, adapter.InfraSidecars...)
+		adapter.Pods = []workload.PodSpec{{Name: instance + "-sandbox", Containers: containers}}
+		podNames["sandbox"] = instance + "-sandbox"
+	} else {
+		for index := range adapter.Pods {
+			original := strings.TrimSpace(adapter.Pods[index].Name)
+			if original == "" {
+				original = fmt.Sprintf("pod-%d", index+1)
+			}
+			prefixed := instance + "-" + original
+			adapter.Pods[index].Name = prefixed
+			podNames[original] = prefixed
+		}
+	}
+	for index := range adapter.NetworkRules {
+		if replacement, ok := podNames[strings.TrimSpace(adapter.NetworkRules[index].From)]; ok {
+			adapter.NetworkRules[index].From = replacement
+		}
+		if replacement, ok := podNames[strings.TrimSpace(adapter.NetworkRules[index].To)]; ok {
+			adapter.NetworkRules[index].To = replacement
+		}
+	}
+	for index, item := range adapter.StartupOrder {
+		if replacement, ok := podNames[strings.TrimSpace(item)]; ok {
+			adapter.StartupOrder[index] = replacement
+		}
+	}
+	adapter.WorkspaceOps.ExecTarget = rewriteRuntimeExecTarget(adapter.WorkspaceOps.ExecTarget, podNames)
+	adapter.PrivateArchiveOps.ExecTarget = rewriteRuntimeExecTarget(adapter.PrivateArchiveOps.ExecTarget, podNames)
+	adapter.CapabilityCommands.Deploy.ExecTarget = rewriteRuntimeExecTarget(adapter.CapabilityCommands.Deploy.ExecTarget, podNames)
+	adapter.CapabilityCommands.Tx.ExecTarget = rewriteRuntimeExecTarget(adapter.CapabilityCommands.Tx.ExecTarget, podNames)
+	adapter.CapabilityCommands.Query.ExecTarget = rewriteRuntimeExecTarget(adapter.CapabilityCommands.Query.ExecTarget, podNames)
+	adapter.CapabilityCommands.Reset.ExecTarget = rewriteRuntimeExecTarget(adapter.CapabilityCommands.Reset.ExecTarget, podNames)
+	return adapter
+}
+
+// rewriteRuntimeExecTarget prefixes the Pod portion of a declared pod/container target.
+// Container names remain unchanged; an unknown Pod is left intact so later topology validation reports it.
+func rewriteRuntimeExecTarget(target string, podNames map[string]string) string {
+	parts := strings.SplitN(strings.TrimSpace(target), "/", 2)
+	if len(parts) != 2 {
+		return target
+	}
+	if replacement, ok := podNames[strings.TrimSpace(parts[0])]; ok {
+		return replacement + "/" + strings.TrimSpace(parts[1])
+	}
+	return target
 }
 
 // compositionRuleName 为连接生成稳定且可审计的网络策略名称。

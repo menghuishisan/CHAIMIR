@@ -184,7 +184,7 @@ func mergeMounts(base, extra []workload.EphemeralMountSpec) []workload.Ephemeral
 	if len(base) == 0 && len(extra) == 0 {
 		return nil
 	}
-	out := make([]workload.EphemeralMountSpec, 0, len(base)+len(extra))
+	var out []workload.EphemeralMountSpec
 	seen := map[string]struct{}{}
 	for _, mount := range append(append([]workload.EphemeralMountSpec(nil), base...), extra...) {
 		name, mountPath := strings.TrimSpace(mount.Name), strings.TrimSpace(mount.MountPath)

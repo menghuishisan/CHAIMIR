@@ -91,20 +91,20 @@ const (
 
 // SolveSubmission 是一次解题赛提交。
 type SolveSubmission struct {
-	ID           int64
-	TenantID     int64
-	ContestID    int64
-	ProblemID    int64
-	TeamID       int64
+	ID                int64
+	TenantID          int64
+	ContestID         int64
+	ProblemID         int64
+	TeamID            int64
 	SubmitterTenantID int64
-	SubmitterID  int64
-	ContentRef   map[string]any
-	SourceRef    string
-	JudgeTaskRef string
-	Passed       bool
-	Score        int32
-	SandboxRef   string
-	SubmittedAt  time.Time
+	SubmitterID       int64
+	ContentRef        map[string]any
+	SourceRef         string
+	JudgeTaskRef      string
+	Passed            bool
+	Score             int32
+	SandboxRef        string
+	SubmittedAt       time.Time
 }
 
 // BattleEntry 是对抗赛参战物。

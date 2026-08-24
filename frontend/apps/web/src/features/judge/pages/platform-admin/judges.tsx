@@ -235,7 +235,7 @@ function JudgerCard({ judger, onEdit, onSelftested, onError }: JudgerCardProps) 
       base.push({
         term: '判题环境',
         description: snapshot
-          ? `${snapshot.runtime.code} · ${snapshot.runtime.image_version}`
+          ? snapshot.runtimes.map((runtime) => `${runtime.instance_code}: ${runtime.code} · ${runtime.image_version}`).join(' / ')
           : '需要判题环境但还没有冻结出可执行快照',
         mono: true,
       })

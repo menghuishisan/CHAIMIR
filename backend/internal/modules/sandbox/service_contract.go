@@ -48,7 +48,7 @@ func (s *Service) UpdateSandboxAuthorizedAccounts(ctx context.Context, req contr
 		if err != nil {
 			return err
 		}
-		previous := make(map[int64]struct{}, len(sb.SharedAccountIDs)+1)
+		previous := make(map[int64]struct{})
 		previous[sb.OwnerAccountID] = struct{}{}
 		for _, accountID := range sb.SharedAccountIDs {
 			previous[accountID] = struct{}{}

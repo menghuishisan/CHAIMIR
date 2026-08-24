@@ -113,7 +113,6 @@ type acceptanceImageUnitManifest struct {
 	DataDriven         bool                  `json:"data_driven"`
 	Infra              map[string]any        `json:"infra"`
 	Ports              []toolManifestPort    `json:"ports"`
-	LocalDev           map[string]any        `json:"local_dev"`
 	Security           toolManifestSecurity  `json:"security"`
 	SecurityExceptions []map[string]any      `json:"security_exceptions"`
 	StudentAccess      map[string]any        `json:"student_access"`
@@ -206,26 +205,35 @@ ON CONFLICT (tenant_id) DO UPDATE SET
 
 // acceptanceCompositionSnapshot 从已经同步的平台目录生成验收夹具使用的完整组合快照。
 func acceptanceCompositionSnapshot(ctx context.Context, tx pgx.Tx, spec contracts.SandboxCompositionSpec) (contracts.SandboxCompositionSnapshot, error) {
-	var runtime contracts.CompiledRuntimeSnapshot
-	var adapterSpec []byte
-	var capabilityImpl *string
-	if err := tx.QueryRow(ctx, `SELECT r.id,r.eco,r.adapter_level,r.capability_impl,r.adapter_spec,ri.id,ri.image_url,ri.version
+	if len(spec.Runtimes) == 0 {
+		return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("验收组合至少需要一个运行时")
+	}
+	runtimes := make([]contracts.CompiledRuntimeSnapshot, 0, len(spec.Runtimes))
+	closure := make([]contracts.ImageClosureItem, 0, len(spec.Runtimes))
+	for _, ref := range spec.Runtimes {
+		var runtime contracts.CompiledRuntimeSnapshot
+		var adapterSpec []byte
+		var capabilityImpl *string
+		if err := tx.QueryRow(ctx, `SELECT r.id,r.eco,r.adapter_level,r.capability_impl,r.adapter_spec,ri.id,ri.image_url,ri.version
 FROM runtime r JOIN runtime_image ri ON ri.runtime_id=r.id
-WHERE r.code=$1 AND ri.version=$2`, spec.PrimaryRuntime.Code, spec.PrimaryRuntime.ImageVersion).Scan(
-		&runtime.RuntimeID, &runtime.Eco, &runtime.AdapterLevel, &capabilityImpl, &adapterSpec, &runtime.ImageID, &runtime.ImageURL, &runtime.ImageVersion); err != nil {
-		return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("读取验收运行时组合目录失败: %w", err)
-	}
-	if capabilityImpl != nil {
-		runtime.CapabilityImpl = *capabilityImpl
-	}
-	runtime.Code = spec.PrimaryRuntime.Code
-	runtime.AdapterSpec = append([]byte(nil), adapterSpec...)
-	if runtime.RuntimeID <= 0 || runtime.ImageID <= 0 || len(runtime.AdapterSpec) == 0 {
-		return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("验收运行时组合目录不完整: %s", spec.PrimaryRuntime.Code)
+WHERE r.code=$1 AND ri.version=$2`, ref.Code, ref.ImageVersion).Scan(
+			&runtime.RuntimeID, &runtime.Eco, &runtime.AdapterLevel, &capabilityImpl, &adapterSpec, &runtime.ImageID, &runtime.ImageURL, &runtime.ImageVersion); err != nil {
+			return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("读取验收运行时组合目录 %s 失败: %w", ref.InstanceCode, err)
+		}
+		if capabilityImpl != nil {
+			runtime.CapabilityImpl = *capabilityImpl
+		}
+		runtime.InstanceCode = ref.InstanceCode
+		runtime.Code = ref.Code
+		runtime.AdapterSpec = append([]byte(nil), adapterSpec...)
+		if runtime.RuntimeID <= 0 || runtime.ImageID <= 0 || len(runtime.AdapterSpec) == 0 {
+			return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("验收运行时组合目录不完整: %s", ref.InstanceCode)
+		}
+		runtimes = append(runtimes, runtime)
+		closure = append(closure, contracts.ImageClosureItem{Category: "runtime", Code: runtime.Code, ImageURL: runtime.ImageURL, Version: runtime.ImageVersion})
 	}
 	refs := append(append([]contracts.CompositionComponentRef{}, spec.Infra...), spec.Tools...)
 	components := make([]contracts.CompiledComponentSnapshot, 0, len(refs))
-	closure := []contracts.ImageClosureItem{{Category: "runtime", Code: runtime.Code, ImageURL: runtime.ImageURL, Version: runtime.ImageVersion}}
 	for _, ref := range refs {
 		var componentID int64
 		var category string
@@ -247,7 +255,7 @@ WHERE r.code=$1 AND ri.version=$2`, spec.PrimaryRuntime.Code, spec.PrimaryRuntim
 			}
 		}
 	}
-	snapshot := contracts.SandboxCompositionSnapshot{Spec: spec, Runtime: runtime, Components: components, ImageClosure: closure}
+	snapshot := contracts.SandboxCompositionSnapshot{Spec: spec, Runtimes: runtimes, Components: components, ImageClosure: closure}
 	digest, err := contracts.CanonicalSnapshotDigest(snapshot)
 	if err != nil {
 		return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("计算验收完整组合摘要失败: %w", err)
@@ -258,7 +266,7 @@ WHERE r.code=$1 AND ri.version=$2`, spec.PrimaryRuntime.Code, spec.PrimaryRuntim
 
 // seedSandboxRows 写入历史沙箱和工具行,用于沙箱详情、鉴权和历史记录查询。
 func seedSandboxRows(ctx context.Context, tx pgx.Tx) error {
-	spec := contracts.SandboxCompositionSpec{ID: "sandbox:acceptance:reentrancy-a", PrimaryRuntime: contracts.CompositionRuntimeRef{Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}, Tools: []contracts.CompositionComponentRef{{Code: "code-server", Selection: "explicit"}}, AccessProfile: contracts.SandboxAccessExperiment}
+	spec := contracts.SandboxCompositionSpec{ID: "sandbox:acceptance:reentrancy-a", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", Tools: []contracts.CompositionComponentRef{{Code: "code-server", Selection: "explicit"}}, AccessProfile: contracts.SandboxAccessExperiment}
 	composition, err := acceptanceCompositionSnapshot(ctx, tx, spec)
 	if err != nil {
 		return err
@@ -270,16 +278,16 @@ func seedSandboxRows(ctx context.Context, tx pgx.Tx) error {
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO sandbox (
-	id, tenant_id, runtime_id, image_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status,
+	id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status,
 	keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains,
 	snapshot_created_at, snapshot_expire_at, keep_alive_until, expire_at
 ) VALUES (
-		$1,$2,$3,$4,'chaimir-acceptance-sandbox-a','sandbox:acceptance:reentrancy-a','sandbox:acceptance:reentrancy-a',$12,$5,'experiment',$6,ARRAY[$7]::BIGINT[],$8,$9,
-	false,true,'910000000000000001/sandbox/code/910000000000001021/workspace.tar','6d0f2d2a4f7a7b7b6b0e0e9f7c8a1c2d3e4f506172839405162738495a6b7c8d',$10,$11,'snapshots/acceptance/reentrancy-a.tar','["workspace"]'::jsonb,
+		$1,$2,'chaimir-acceptance-sandbox-a','sandbox:acceptance:reentrancy-a','sandbox:acceptance:reentrancy-a',$10,$3,'experiment',$4,ARRAY[$5]::BIGINT[],$6,$7,
+	false,true,'910000000000000001/sandbox/code/910000000000001021/workspace.tar','6d0f2d2a4f7a7b7b6b0e0e9f7c8a1c2d3e4f506172839405162738495a6b7c8d',$8,$9,'snapshots/acceptance/reentrancy-a.tar','["workspace"]'::jsonb,
 	now(),now() + interval '7 days',NULL,now() + interval '2 hours'
 )
-ON CONFLICT (id) DO UPDATE SET runtime_id=EXCLUDED.runtime_id, image_id=EXCLUDED.image_id, namespace=EXCLUDED.namespace, source_ref=EXCLUDED.source_ref, scope_ref=EXCLUDED.scope_ref, composition_digest=EXCLUDED.composition_digest, composition_snapshot=EXCLUDED.composition_snapshot, access_profile=EXCLUDED.access_profile, owner_account_id=EXCLUDED.owner_account_id, shared_account_ids=EXCLUDED.shared_account_ids, phase=EXCLUDED.phase, status=EXCLUDED.status, keep_alive=EXCLUDED.keep_alive, snapshot_enabled=EXCLUDED.snapshot_enabled, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, init_code_ref=EXCLUDED.init_code_ref, init_script_ref=EXCLUDED.init_script_ref, snapshot_ref=EXCLUDED.snapshot_ref, snapshot_domains=EXCLUDED.snapshot_domains, snapshot_created_at=EXCLUDED.snapshot_created_at, snapshot_expire_at=EXCLUDED.snapshot_expire_at, keep_alive_until=EXCLUDED.keep_alive_until, expire_at=EXCLUDED.expire_at, updated_at=now()`,
-		acceptanceIDs.Sandbox, acceptanceIDs.TenantID, acceptanceIDs.Runtime, acceptanceIDs.RuntimeImage, compositionSnapshot, acceptanceIDs.StudentA, acceptanceIDs.StudentB, contracts.SandboxPhaseFullyReady, contracts.SandboxStatusDestroyed, acceptanceInitCodeRef, acceptanceInitScriptRef, digest); err != nil {
+ON CONFLICT (id) DO UPDATE SET namespace=EXCLUDED.namespace, source_ref=EXCLUDED.source_ref, scope_ref=EXCLUDED.scope_ref, composition_digest=EXCLUDED.composition_digest, composition_snapshot=EXCLUDED.composition_snapshot, access_profile=EXCLUDED.access_profile, owner_account_id=EXCLUDED.owner_account_id, shared_account_ids=EXCLUDED.shared_account_ids, phase=EXCLUDED.phase, status=EXCLUDED.status, keep_alive=EXCLUDED.keep_alive, snapshot_enabled=EXCLUDED.snapshot_enabled, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, init_code_ref=EXCLUDED.init_code_ref, init_script_ref=EXCLUDED.init_script_ref, snapshot_ref=EXCLUDED.snapshot_ref, snapshot_domains=EXCLUDED.snapshot_domains, snapshot_created_at=EXCLUDED.snapshot_created_at, snapshot_expire_at=EXCLUDED.snapshot_expire_at, keep_alive_until=EXCLUDED.keep_alive_until, expire_at=EXCLUDED.expire_at, updated_at=now()`,
+		acceptanceIDs.Sandbox, acceptanceIDs.TenantID, compositionSnapshot, acceptanceIDs.StudentA, acceptanceIDs.StudentB, contracts.SandboxPhaseFullyReady, contracts.SandboxStatusDestroyed, acceptanceInitCodeRef, acceptanceInitScriptRef, digest); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
@@ -302,12 +310,12 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
 	if err != nil {
 		return err
 	}
-	judgeComposition := contracts.SandboxCompositionSpec{ID: "judge:acceptance", PrimaryRuntime: contracts.CompositionRuntimeRef{Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}, AccessProfile: contracts.SandboxAccessJudgePrivate}
+	judgeComposition := contracts.SandboxCompositionSpec{ID: "judge:acceptance", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}
 	judgeSnapshot, err := acceptanceCompositionSnapshot(ctx, tx, judgeComposition)
 	if err != nil {
 		return err
 	}
-	battleComposition := contracts.SandboxCompositionSpec{ID: "judge:acceptance-battle", PrimaryRuntime: contracts.CompositionRuntimeRef{Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}, AccessProfile: contracts.SandboxAccessJudgePrivate}
+	battleComposition := contracts.SandboxCompositionSpec{ID: "judge:acceptance-battle", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}
 	battleCompositionSnapshot, err := acceptanceCompositionSnapshot(ctx, tx, battleComposition)
 	if err != nil {
 		return err
@@ -683,7 +691,7 @@ func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
 	if err != nil {
 		return fmt.Errorf("编码实验分组配置失败: %w", err)
 	}
-	envSpec := contracts.SandboxCompositionSpec{ID: "lab-foundry", PrimaryRuntime: contracts.CompositionRuntimeRef{Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}, Tools: []contracts.CompositionComponentRef{{Code: "code-server", Selection: "explicit"}}, AccessProfile: contracts.SandboxAccessExperiment}
+	envSpec := contracts.SandboxCompositionSpec{ID: "lab-foundry", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", Tools: []contracts.CompositionComponentRef{{Code: "code-server", Selection: "explicit"}}, AccessProfile: contracts.SandboxAccessExperiment}
 	envComposition, err := acceptanceCompositionSnapshot(ctx, tx, envSpec)
 	if err != nil {
 		return err
@@ -691,7 +699,7 @@ func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
 	components, err := jsonb(map[string]any{
 		"envs": []map[string]any{{
 			"id":                         "lab-foundry",
-			"primary_runtime":            map[string]any{"runtime_code": "evm-foundry", "image_version": platformRuntimeImageVersion("evm-foundry")},
+			"runtimes":                   []map[string]any{{"instance_code": "source-chain", "runtime_code": "evm-foundry", "image_version": platformRuntimeImageVersion("evm-foundry")}},
 			"tools":                      []map[string]any{{"code": "code-server", "selection": "explicit"}},
 			"access_profile":             "experiment",
 			"composition_snapshot":       envComposition,

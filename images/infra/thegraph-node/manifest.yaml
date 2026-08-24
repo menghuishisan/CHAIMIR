@@ -100,12 +100,6 @@ ports:
     protocol: TCP
     expose: internal
     purpose: Subgraph deploy API
-local_dev:
-  host_mappings:
-    - host: 127.0.0.1
-      env: CHAIMIR_DEV_THEGRAPH_QUERY_PORT
-      default: 18000
-      container_port: 8000
 security:
   run_as_non_root: true
   read_only_root_filesystem: false
@@ -142,4 +136,4 @@ supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
-  pull_by_digest_in_production: true
+  pull_by_digest: true

@@ -292,10 +292,17 @@ func validatePrevalidateRequest(req PrevalidateRequest) (PrevalidateRequest, err
 	req.InitCodeRef = strings.TrimSpace(req.InitCodeRef)
 	req.InitScriptRef = strings.TrimSpace(req.InitScriptRef)
 	req.Composition.ID = strings.TrimSpace(req.Composition.ID)
-	req.Composition.PrimaryRuntime.Code = strings.TrimSpace(req.Composition.PrimaryRuntime.Code)
-	req.Composition.PrimaryRuntime.ImageVersion = strings.TrimSpace(req.Composition.PrimaryRuntime.ImageVersion)
-	if req.Composition.ID == "" || req.Composition.PrimaryRuntime.Code == "" || req.Composition.PrimaryRuntime.ImageVersion == "" {
+	if req.Composition.ID == "" || len(req.Composition.Runtimes) == 0 {
 		return PrevalidateRequest{}, apperr.ErrContestVulnProblemInvalid
+	}
+	for index := range req.Composition.Runtimes {
+		runtime := &req.Composition.Runtimes[index]
+		runtime.InstanceCode = strings.TrimSpace(runtime.InstanceCode)
+		runtime.Code = strings.TrimSpace(runtime.Code)
+		runtime.ImageVersion = strings.TrimSpace(runtime.ImageVersion)
+		if runtime.InstanceCode == "" || runtime.Code == "" || runtime.ImageVersion == "" {
+			return PrevalidateRequest{}, apperr.ErrContestVulnProblemInvalid
+		}
 	}
 	req.Composition.AccessProfile = contracts.SandboxAccessVulnerabilityPrevalidate
 	return req, nil

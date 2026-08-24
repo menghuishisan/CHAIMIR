@@ -57,12 +57,6 @@ ports:
     protocol: TCP
     expose: proxy
     purpose: RPC gateway proxy
-local_dev:
-  host_mappings:
-    - host: 127.0.0.1
-      env: CHAIMIR_DEV_RPC_GATEWAY_PORT
-      default: 18092
-      container_port: 8080
 security:
   run_as_non_root: true
   read_only_root_filesystem: true
@@ -99,4 +93,4 @@ supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
-  pull_by_digest_in_production: true
+  pull_by_digest: true

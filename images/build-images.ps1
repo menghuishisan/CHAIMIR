@@ -13,14 +13,11 @@ param(
     [string]$BuildNetwork = $env:SUPPLY_CHAIN_BUILD_NETWORK,
     [int]$MaxAttempts = 3,
     [int]$RetryDelaySeconds = 10,
-    [switch]$Push,
-    [switch]$NoCache,
-    [switch]$Pull
+    [switch]$NoCache
 )
 
 $ErrorActionPreference = "Stop"
 Import-Module (Join-Path $PSScriptRoot "lib\ImageMetadata.psm1") -Force
-$script:LocalImageRefCache = @{}
 
 if ([string]::IsNullOrWhiteSpace($Registry)) {
     $Registry = $env:SUPPLY_CHAIN_REGISTRY
@@ -29,7 +26,7 @@ if ([string]::IsNullOrWhiteSpace($Registry)) {
     $Registry = $env:IMAGE_REGISTRY
 }
 if ([string]::IsNullOrWhiteSpace($Registry)) {
-    $Registry = "registry.chaimir.io"
+    throw "必须通过 -Registry 或 CHAIMIR_IMAGE_REGISTRY/SUPPLY_CHAIN_REGISTRY/IMAGE_REGISTRY 指定生产 Harbor registry"
 }
 if ([string]::IsNullOrWhiteSpace($RegistryEndpoint)) {
     $RegistryEndpoint = $Registry
@@ -41,10 +38,10 @@ if ([string]::IsNullOrWhiteSpace($DigestLockOut)) {
     $DigestLockOut = $DigestLock
 }
 if ([string]::IsNullOrWhiteSpace($Tag)) {
-    throw "Tag 不能为空;本地和生产构建都必须显式声明不可混淆的发布标签"
+    throw "Tag 不能为空;生产候选构建必须显式声明发布标签"
 }
-if ($Push -and [string]::IsNullOrWhiteSpace($Platform)) {
-    throw "启用 Push 时必须显式声明 Platform"
+if ([string]::IsNullOrWhiteSpace($Platform)) {
+    throw "生产候选构建必须显式声明 Platform"
 }
 if ($MaxAttempts -lt 1) {
     throw "MaxAttempts 必须大于等于 1"
@@ -90,24 +87,6 @@ function Invoke-DockerCli {
         $baseArguments += @("--config", $DockerConfig)
     }
     & docker @baseArguments @Arguments
-}
-
-# Test-LocalImageRef 判断本机是否已经存在同一 digest,避免重签名或恢复任务重复拉取。
-function Test-LocalImageRef {
-    param([string]$Ref)
-    if ($script:LocalImageRefCache.ContainsKey($Ref)) {
-        return [bool]$script:LocalImageRefCache[$Ref]
-    }
-    $previousErrorActionPreference = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        Invoke-DockerCli -Arguments @("image", "inspect", $Ref) 1>$null 2>$null
-        $exists = $LASTEXITCODE -eq 0
-        $script:LocalImageRefCache[$Ref] = $exists
-        return $exists
-    } finally {
-        $ErrorActionPreference = $previousErrorActionPreference
-    }
 }
 
 # Get-DockerConfigBasicAuth 从 Docker config.json 读取 registry basic auth。
@@ -224,71 +203,6 @@ function Invoke-DockerBuildWithRetry {
     throw "docker build 失败: $Image, exit=$LASTEXITCODE"
 }
 
-# Invoke-DockerPullWithRetry 按项目统一重试规则拉取本机缺失的构建基座。
-function Invoke-DockerPullWithRetry {
-    param(
-        [string]$Ref,
-        [string]$Image
-    )
-    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-        Write-Host "Docker pull attempt [$attempt/$MaxAttempts] $Image <- $Ref"
-        $previousPreference = $ErrorActionPreference
-        $ErrorActionPreference = "Continue"
-        try {
-            Invoke-DockerCli -Arguments @("pull", "--platform", $Platform, $Ref)
-            $exitCode = $LASTEXITCODE
-        } finally {
-            $ErrorActionPreference = $previousPreference
-        }
-        if ($exitCode -eq 0) {
-            $script:LocalImageRefCache[$Ref] = $true
-            return
-        }
-        if ($attempt -lt $MaxAttempts -and $RetryDelaySeconds -gt 0) {
-            Write-Warning "docker pull 失败: $Ref, attempt=$attempt, exit=$exitCode"
-            Start-Sleep -Seconds $RetryDelaySeconds
-        }
-    }
-    throw "docker pull 失败: $Ref, exit=$exitCode"
-}
-
-# Get-DockerfileBaseRefs 解析 FROM 依赖并替换 ARG,排除同一 Dockerfile 内的阶段别名。
-function Get-DockerfileBaseRefs {
-    param(
-        [string]$DockerfileText,
-        [hashtable]$BuildArguments
-    )
-    $resolvedArguments = @{}
-    foreach ($match in [regex]::Matches($DockerfileText, "(?im)^\s*ARG\s+([A-Z_][A-Z0-9_]*)(?:=([^\s]+))?\s*$")) {
-        if ($match.Groups[2].Success) {
-            $resolvedArguments[$match.Groups[1].Value] = $match.Groups[2].Value
-        }
-    }
-    foreach ($key in $BuildArguments.Keys) {
-        $resolvedArguments[$key] = $BuildArguments[$key]
-    }
-
-    $aliases = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $refs = [System.Collections.Generic.List[string]]::new()
-    foreach ($match in [regex]::Matches($DockerfileText, "(?im)^\s*FROM\s+(?:--platform=\S+\s+)?([^\s]+)(?:\s+AS\s+([^\s]+))?\s*$")) {
-        $ref = $match.Groups[1].Value
-        if ($ref -match "^\$\{?([A-Z_][A-Z0-9_]*)\}?$") {
-            $argumentName = $Matches[1]
-            if (-not $resolvedArguments.ContainsKey($argumentName)) {
-                throw "Dockerfile FROM 引用了未注入的构建参数: $argumentName"
-            }
-            $ref = [string]$resolvedArguments[$argumentName]
-        }
-        if ($ref -ne "scratch" -and -not $aliases.Contains($ref) -and -not $refs.Contains($ref)) {
-            $refs.Add($ref)
-        }
-        if ($match.Groups[2].Success) {
-            [void]$aliases.Add($match.Groups[2].Value)
-        }
-    }
-    return $refs.ToArray()
-}
-
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $rootPath ".."))
 $digestLockItems = Read-ChaimirDigestLock -Path $DigestLock
@@ -371,18 +285,14 @@ while ($remaining.Count -gt 0) {
 $selected = $ordered
 
 foreach ($item in $selected) {
-    if ($Push) {
-        $args = @("buildx", "build")
-        if (-not [string]::IsNullOrWhiteSpace($BuildxBuilder)) {
-            $args += @("--builder", $BuildxBuilder)
-        }
-        $args += @("--platform", $Platform, "--push", "--provenance=false", "--sbom=false", "-f", $item.Dockerfile, "-t", $item.Ref)
-        if ($RegistryEndpoint -match ":\d+$") {
-            $registryHost = ($RegistryEndpoint -replace "^https?://", "").Split("/")[0].Split(":")[0]
-            $args += @("--add-host", "$registryHost`:host-gateway")
-        }
-    } else {
-        $args = @("build", "-f", $item.Dockerfile, "-t", $item.Ref)
+    $args = @("buildx", "build")
+    if (-not [string]::IsNullOrWhiteSpace($BuildxBuilder)) {
+        $args += @("--builder", $BuildxBuilder)
+    }
+    $args += @("--platform", $Platform, "--push", "--provenance=false", "--sbom=false", "-f", $item.Dockerfile, "-t", $item.Ref)
+    if ($RegistryEndpoint -match ":\d+$") {
+        $registryHost = ($RegistryEndpoint -replace "^https?://", "").Split("/")[0].Split(":")[0]
+        $args += @("--add-host", "$registryHost`:host-gateway")
     }
     if ($NoCache) {
         $args += "--no-cache"
@@ -440,39 +350,24 @@ foreach ($item in $selected) {
     if (-not [string]::IsNullOrWhiteSpace($BuildNetwork)) {
         $args += @("--network", $BuildNetwork)
     }
-    if ($Pull) {
-        foreach ($baseRef in Get-DockerfileBaseRefs -DockerfileText $item.DockerfileText -BuildArguments $buildArguments) {
-            if (Test-LocalImageRef -Ref $baseRef) {
-                Write-Host "Skipping existing base image $baseRef"
-                continue
-            }
-            Invoke-DockerPullWithRetry -Ref $baseRef -Image $item.Image
-        }
-    }
     $args += $item.Context
     Write-Host "Building $($item.Image) -> $($item.Ref)"
     Invoke-DockerBuildWithRetry -Arguments $args -Image $item.Image
-    if ($Push) {
-        $digestLockItems[$item.Image] = Get-RegistryDigest -Ref $item.Ref
-        Write-ChaimirDigestLock -Path $DigestLockOut -Items $digestLockItems
-        Write-Host "Locked $($item.Image) $($digestLockItems[$item.Image])"
-    }
+    $digestLockItems[$item.Image] = Get-RegistryDigest -Ref $item.Ref
+    Write-ChaimirDigestLock -Path $DigestLockOut -Items $digestLockItems
+    Write-Host "Locked $($item.Image) $($digestLockItems[$item.Image])"
 }
 
-if ($Push) {
-    $cleanupArgs = @(
-        "-RepoRoot", $repoRoot,
-        "-Registry", $Registry,
-        "-DigestLockPath", $DigestLock,
-        "-CandidateDigestLockPath", $DigestLockOut,
-        "-KeepTags", $Tag,
-        "-Apply"
-    )
-    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "cleanup-local-images.ps1") @cleanupArgs
-    if ($LASTEXITCODE -ne 0) {
-        throw "构建成功但项目镜像清理失败,拒绝继续: exit=$LASTEXITCODE"
-    }
-    Write-Host "Built and pushed $($selected.Count) image(s). registry=$Registry registry_endpoint=$RegistryEndpoint tag=$Tag digestLock=$DigestLockOut"
-} else {
-    Write-Host "Built $($selected.Count) image(s). registry=$Registry tag=$Tag"
+$cleanupArgs = @(
+    "-RepoRoot", $repoRoot,
+    "-Registry", $Registry,
+    "-DigestLockPath", $DigestLock,
+    "-CandidateDigestLockPath", $DigestLockOut,
+    "-KeepTags", $Tag,
+    "-Apply"
+)
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "cleanup-local-images.ps1") @cleanupArgs
+if ($LASTEXITCODE -ne 0) {
+    throw "构建成功但项目镜像清理失败,拒绝继续: exit=$LASTEXITCODE"
 }
+Write-Host "Built and pushed $($selected.Count) image(s). registry=$Registry registry_endpoint=$RegistryEndpoint tag=$Tag digestLock=$DigestLockOut"

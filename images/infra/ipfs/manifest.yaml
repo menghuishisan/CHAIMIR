@@ -66,12 +66,6 @@ ports:
     protocol: TCP
     expose: proxy
     purpose: IPFS gateway
-local_dev:
-  host_mappings:
-    - host: 127.0.0.1
-      env: CHAIMIR_DEV_IPFS_API_PORT
-      default: 15001
-      container_port: 5001
 security:
   run_as_non_root: true
   read_only_root_filesystem: false
@@ -108,4 +102,4 @@ supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
-  pull_by_digest_in_production: true
+  pull_by_digest: true

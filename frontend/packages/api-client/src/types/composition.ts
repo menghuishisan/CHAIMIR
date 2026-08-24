@@ -1,7 +1,7 @@
 // ===== 沙箱组合声明与编译快照(实验 / 竞赛 / 判题共用)=====
 //
 // 后端把「教师声明什么」和「服务端编译出什么」分成了两组字段:
-// 教师提交 SandboxCompositionSpec(主运行时 + 组件 + 连接 + 访问边界),
+// 教师提交 SandboxCompositionSpec(命名 runtime 实例 + 组件 + 连接 + 访问边界),
 // 服务端编译后冻结成 SandboxCompositionSnapshot(含镜像地址、适配器规格、镜像闭包)。
 //
 // 前端只提交前者、只读展示后者 —— 快照里的镜像地址、digest、启动命令与安全上下文
@@ -14,8 +14,9 @@ import type {
   SandboxToolKind,
 } from '../constants/sandbox'
 
-/** CompositionRuntimeRef 是主运行时及其明确镜像版本。 */
+/** CompositionRuntimeRef 是组合中的一个命名 runtime 实例及其明确镜像版本。 */
 export interface CompositionRuntimeRef {
+  instance_code: string
   runtime_code: string
   image_version: string
   params?: Record<string, unknown>
@@ -44,7 +45,8 @@ export interface CompositionLink {
 /** SandboxCompositionSpec 是单个环境的唯一声明来源,由教师提交。 */
 export interface SandboxCompositionSpec {
   id: string
-  primary_runtime: CompositionRuntimeRef
+  runtimes: CompositionRuntimeRef[]
+  workspace_runtime_instance: string
   infra?: CompositionComponentRef[]
   tools?: CompositionComponentRef[]
   links?: CompositionLink[]
@@ -67,6 +69,7 @@ export type ScenarioNeutralCompositionSpec = Omit<SandboxCompositionSpec, 'acces
  * adapter_spec 是服务端校验过的声明序列化结果,前端只做摘要展示。
  */
 export interface CompiledRuntimeSnapshot {
+  instance_code: string
   runtime_id: number
   image_id: number
   code: string
@@ -110,7 +113,7 @@ export interface ImageClosureItem {
 export interface SandboxCompositionSnapshot {
   composition_digest: string
   spec: SandboxCompositionSpec
-  runtime: CompiledRuntimeSnapshot
+  runtimes: CompiledRuntimeSnapshot[]
   components?: CompiledComponentSnapshot[]
   image_closure: ImageClosureItem[]
 }

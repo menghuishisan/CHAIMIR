@@ -40,6 +40,7 @@ export type ContestSandboxResponse = {
   owner_account_id: SnowflakeID
   runtime_code: string
   runtime_image_version: string
+  runtime_instances: string[]
   phase: SandboxPhase
   status: SandboxStatus
   tool_access: import('./sandbox').SandboxToolAccess[]

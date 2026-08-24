@@ -20,14 +20,15 @@ func (s *Service) compileEnvironmentComponents(ctx context.Context, tenantID int
 	for idx := range config.Envs {
 		env := &config.Envs[idx]
 		snapshot, err := s.sandbox.CompileSandboxComposition(ctx, tenantID, contracts.SandboxCompositionSpec{
-			ID:              env.ID,
-			PrimaryRuntime:  env.PrimaryRuntime,
-			Infra:           env.Infra,
-			Tools:           env.Tools,
-			Links:           env.Links,
-			AccessProfile:   env.AccessProfile,
-			ResourceProfile: env.ResourceProfile,
-			NetworkProfile:  env.NetworkProfile,
+			ID:                       env.ID,
+			Runtimes:                 env.Runtimes,
+			WorkspaceRuntimeInstance: env.WorkspaceRuntimeInstance,
+			Infra:                    env.Infra,
+			Tools:                    env.Tools,
+			Links:                    env.Links,
+			AccessProfile:            env.AccessProfile,
+			ResourceProfile:          env.ResourceProfile,
+			NetworkProfile:           env.NetworkProfile,
 		})
 		if err != nil {
 			return ComponentConfig{}, apperr.ErrExperimentSandboxUnavailable.WithCause(err)

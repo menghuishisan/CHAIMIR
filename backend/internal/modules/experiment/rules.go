@@ -62,8 +62,13 @@ func validateComponentConfig(cfg ComponentConfigRequest, collabMode int16, group
 	simIDs := map[string]bool{}
 	for _, env := range cfg.Envs {
 		id := strings.TrimSpace(env.ID)
-		if !componentIDPattern.MatchString(id) || ids[id] || strings.TrimSpace(env.PrimaryRuntime.Code) == "" || strings.TrimSpace(env.PrimaryRuntime.ImageVersion) == "" || !env.AccessProfile.Valid() {
+		if !componentIDPattern.MatchString(id) || ids[id] || len(env.Runtimes) == 0 || !env.AccessProfile.Valid() {
 			return apperr.ErrExperimentInvalid
+		}
+		for _, runtime := range env.Runtimes {
+			if strings.TrimSpace(runtime.InstanceCode) == "" || strings.TrimSpace(runtime.Code) == "" || strings.TrimSpace(runtime.ImageVersion) == "" {
+				return apperr.ErrExperimentInvalid
+			}
 		}
 		if err := validateEnvComponentSandboxContract(env); err != nil {
 			return err
@@ -110,8 +115,11 @@ func validateComponentConfig(cfg ComponentConfigRequest, collabMode int16, group
 func normalizeComponentConfig(cfg ComponentConfigRequest) ComponentConfigRequest {
 	for idx := range cfg.Envs {
 		cfg.Envs[idx].ID = strings.TrimSpace(cfg.Envs[idx].ID)
-		cfg.Envs[idx].PrimaryRuntime.Code = strings.TrimSpace(cfg.Envs[idx].PrimaryRuntime.Code)
-		cfg.Envs[idx].PrimaryRuntime.ImageVersion = strings.TrimSpace(cfg.Envs[idx].PrimaryRuntime.ImageVersion)
+		for runtimeIndex := range cfg.Envs[idx].Runtimes {
+			cfg.Envs[idx].Runtimes[runtimeIndex].InstanceCode = strings.TrimSpace(cfg.Envs[idx].Runtimes[runtimeIndex].InstanceCode)
+			cfg.Envs[idx].Runtimes[runtimeIndex].Code = strings.TrimSpace(cfg.Envs[idx].Runtimes[runtimeIndex].Code)
+			cfg.Envs[idx].Runtimes[runtimeIndex].ImageVersion = strings.TrimSpace(cfg.Envs[idx].Runtimes[runtimeIndex].ImageVersion)
+		}
 		cfg.Envs[idx].AccessProfile = contracts.SandboxAccessProfile(strings.TrimSpace(string(cfg.Envs[idx].AccessProfile)))
 		for toolIdx := range cfg.Envs[idx].Tools {
 			cfg.Envs[idx].Tools[toolIdx].Code = strings.TrimSpace(cfg.Envs[idx].Tools[toolIdx].Code)
@@ -188,7 +196,7 @@ func componentConfigRequestFromModel(cfg ComponentConfig) ComponentConfigRequest
 		spec := env.CompositionSnapshot.Spec
 		out.Envs = append(out.Envs, EnvComponentRequest{
 			ID:                       env.ID,
-			PrimaryRuntime:           spec.PrimaryRuntime,
+			Runtimes:                 append([]contracts.CompositionRuntimeRef(nil), spec.Runtimes...),
 			Infra:                    append([]contracts.CompositionComponentRef(nil), spec.Infra...),
 			Tools:                    append([]contracts.CompositionComponentRef(nil), spec.Tools...),
 			Links:                    append([]contracts.CompositionLink(nil), spec.Links...),

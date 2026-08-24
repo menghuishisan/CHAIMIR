@@ -131,7 +131,8 @@ type ContestSandboxToolRunRequest struct {
 
 // ContestSandboxChainRequest 是 M8 授权网关的统一链操作请求。
 type ContestSandboxChainRequest struct {
-	Payload map[string]any `json:"payload"`
+	RuntimeInstance string         `json:"runtime_instance"`
+	Payload         map[string]any `json:"payload"`
 }
 
 // ContestSandboxResponse 是 M8 网关对学生暴露的沙箱摘要，不泄露组织租户的 Namespace。
@@ -141,6 +142,7 @@ type ContestSandboxResponse struct {
 	OwnerAccountID      ids.ID                         `json:"owner_account_id"`
 	RuntimeCode         string                         `json:"runtime_code"`
 	RuntimeImageVersion string                         `json:"runtime_image_version"`
+	RuntimeInstances    []string                       `json:"runtime_instances"`
 	Phase               int16                          `json:"phase"`
 	Status              int16                          `json:"status"`
 	ToolAccess          []contracts.SandboxToolAccess  `json:"tool_access"`

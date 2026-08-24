@@ -1,4 +1,4 @@
-﻿# 本文件声明 runtime/cosmos 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 runtime/cosmos 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: runtime
 name: cosmos
@@ -60,12 +60,6 @@ ports:
     protocol: TCP
     expose: proxy
     purpose: Cosmos REST API
-local_dev:
-  host_mappings:
-    - host: 127.0.0.1
-      env: CHAIMIR_DEV_COSMOS_RPC_PORT
-      default: 26657
-      container_port: 26657
 security:
   run_as_non_root: true
   read_only_root_filesystem: true
@@ -99,4 +93,4 @@ supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
-  pull_by_digest_in_production: true
+  pull_by_digest: true

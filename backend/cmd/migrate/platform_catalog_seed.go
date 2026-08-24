@@ -63,8 +63,8 @@ type platformInfraManifest struct {
 	Labels                             map[string]string    `json:"labels"`
 	Capabilities                       manifestCapabilities `json:"capabilities"`
 	Infra                              struct {
-		EcoTags          []string `json:"eco_tags"`
-		RequiredBindings []string `json:"required_bindings"`
+		EcoTags  []string          `json:"eco_tags"`
+		Bindings []manifestBinding `json:"bindings"`
 	} `json:"infra"`
 	Ports           []toolManifestPort          `json:"ports"`
 	Security        toolManifestSecurity        `json:"security"`
@@ -77,6 +77,7 @@ type platformInfraManifest struct {
 // manifestSecretRequirement 描述 manifest 对平台 Secret 键的最小运行期引用。
 type manifestSecretRequirement struct {
 	Env          string `json:"env"`
+	Source       string `json:"source"`
 	RuntimeValue string `json:"runtime_value"`
 }
 
@@ -367,9 +368,9 @@ func infraResourceSpecFromManifest(manifest platformInfraManifest, imageURL stri
 		component.EphemeralMounts = append(component.EphemeralMounts, workload.EphemeralMountSpec{Name: writable, MountPath: "/" + writable})
 	}
 	spec := map[string]any{
-		"components":        []workload.ComponentSpec{component},
-		"prepull_command":   command,
-		"required_bindings": append([]string(nil), manifest.Infra.RequiredBindings...),
+		"components":      []workload.ComponentSpec{component},
+		"prepull_command": command,
+		"bindings":        append([]manifestBinding(nil), manifest.Infra.Bindings...),
 		"capabilities": map[string]any{
 			"provides":       append([]string(nil), manifest.Capabilities.Provides...),
 			"requires":       append([]string(nil), manifest.Capabilities.Requires...),
@@ -494,7 +495,7 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 		resource       judge.JudgerResourceSpec
 	}
 	store := sandbox.NewStore(database)
-	items := make([]catalogJudger, 0, len(entries)+1)
+	var items []catalogJudger
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -517,7 +518,7 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 			return fmt.Errorf("生成判题器 %s 执行契约失败: %w", m.Name, resourceErr)
 		}
 		if proven {
-			ready, readyErr := platformRuntimeReadyForJudger(ctx, database, composition.PrimaryRuntime.Code)
+			ready, readyErr := platformRuntimeReadyForJudger(ctx, database, composition.Runtimes[0].Code)
 			if readyErr != nil {
 				return fmt.Errorf("读取判题器 %s 运行时状态失败: %w", m.Name, readyErr)
 			}
@@ -533,8 +534,8 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 		items = append(items, catalogJudger{id: platformJudgerID(m.Name), code: m.Name, name: m.Description, typ: platformJudgerType(m.Judger.Type), executorRef: m.Name, runtimeNeeded: strings.TrimSpace(m.Judger.RuntimeCode) != "", defaultTimeout: m.Resources.TimeoutSeconds, resource: resource})
 	}
 	onchainResource := judge.JudgerResourceSpec{}
-	onchainComposition := contracts.SandboxCompositionSpec{ID: "judge:onchain-assert", PrimaryRuntime: contracts.CompositionRuntimeRef{Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}, AccessProfile: contracts.SandboxAccessJudgePrivate}
-	ready, err := platformRuntimeReadyForJudger(ctx, database, onchainComposition.PrimaryRuntime.Code)
+	onchainComposition := contracts.SandboxCompositionSpec{ID: "judge:onchain-assert", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}
+	ready, err := platformRuntimeReadyForJudger(ctx, database, onchainComposition.Runtimes[0].Code)
 	if err != nil {
 		return fmt.Errorf("读取链上断言运行时状态失败: %w", err)
 	}
@@ -613,7 +614,7 @@ func platformJudgerResourceSpec(manifest platformJudgerManifest, imageURL string
 		MountWorkspace:         func() *bool { value := true; return &value }(),
 		EphemeralMounts:        []workload.EphemeralMountSpec{{Name: "judge-workdir", MountPath: "/judge-private"}, {Name: "judge-tmp", MountPath: "/tmp"}},
 	}
-	return contracts.SandboxCompositionSpec{ID: "judge:" + manifest.Name, PrimaryRuntime: contracts.CompositionRuntimeRef{Code: runtimeCode, ImageVersion: platformRuntimeImageVersion(runtimeCode)}, AccessProfile: contracts.SandboxAccessJudgePrivate}, judge.JudgerResourceSpec{
+	return contracts.SandboxCompositionSpec{ID: "judge:" + manifest.Name, Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: runtimeCode, ImageVersion: platformRuntimeImageVersion(runtimeCode)}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}, judge.JudgerResourceSpec{
 		GenesisRef:        genesisRef,
 		Command:           append([]string(nil), manifest.Judger.Command...),
 		ExecTarget:        execTarget,

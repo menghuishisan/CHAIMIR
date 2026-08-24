@@ -36,30 +36,30 @@ type CatalogJudger struct {
 
 // JudgeTask 是一次提交的判题任务快照。
 type JudgeTask struct {
-	ID               int64
-	TenantID         int64
-	JudgerID         int64
-	SourceRef        string
-	SourceOwnerID    int64
-	SourceCourseID   int64
-	SourceScope      string
+	ID                int64
+	TenantID          int64
+	JudgerID          int64
+	SourceRef         string
+	SourceOwnerID     int64
+	SourceCourseID    int64
+	SourceScope       string
 	SubmitterTenantID int64
-	SubmitterID      int64
-	ProblemRef       string
-	CodeStorageKey   string
-	CodeHash         string
-	InputSnapshot    JudgeInputSnapshot
-	SandboxMode      int16
-	TargetSandboxRef string
-	Priority         int16
-	Status           int16
-	RetryCount       int32
-	MaxRetries       int32
-	LastError        string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	LeaseToken       string
-	LeaseUntil       time.Time
+	SubmitterID       int64
+	ProblemRef        string
+	CodeStorageKey    string
+	CodeHash          string
+	InputSnapshot     JudgeInputSnapshot
+	SandboxMode       int16
+	TargetSandboxRef  string
+	Priority          int16
+	Status            int16
+	RetryCount        int32
+	MaxRetries        int32
+	LastError         string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	LeaseToken        string
+	LeaseUntil        time.Time
 }
 
 // JudgeResultDetail 是可解释结果中的一项脱敏详情。
@@ -126,15 +126,15 @@ type JudgeInputSnapshot struct {
 
 // SubmissionFingerprint 是 M3 生成的代码查重特征。
 type SubmissionFingerprint struct {
-	ID          int64
-	TenantID    int64
-	SourceRef   string
-	ProblemRef  string
+	ID                int64
+	TenantID          int64
+	SourceRef         string
+	ProblemRef        string
 	SubmitterTenantID int64
-	SubmitterID int64
-	CodeHash    string
-	SimVector   map[string]float64
-	CreatedAt   time.Time
+	SubmitterID       int64
+	CodeHash          string
+	SimVector         map[string]float64
+	CreatedAt         time.Time
 }
 
 // JudgeEventOutbox 是待可靠发布的终态事件。

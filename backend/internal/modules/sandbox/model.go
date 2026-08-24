@@ -3,6 +3,7 @@ package sandbox
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -109,8 +110,6 @@ type CatalogTool struct {
 type Sandbox struct {
 	ID                  int64
 	TenantID            int64
-	RuntimeID           int64
-	ImageID             int64
 	Namespace           string
 	SourceRef           string
 	ScopeRef            string
@@ -277,16 +276,16 @@ type CapabilityCommandSpec struct {
 // ToolResourceSpec 是 tool.resource_spec 的控制面可执行结构。
 type ToolResourceSpec struct {
 	// DisabledReason 记录目录能力暂不可用的原因;它是展示元数据,不是可执行工作负载声明。
-	DisabledReason   string                     `json:"disabled_reason,omitempty"`
-	BuiltinEndpoint  string                     `json:"builtin_endpoint"`
-	Components       []workload.ComponentSpec   `json:"components"`
-	Services         []workload.ServiceSpec     `json:"services"`
-	Routes           []workload.RouteSpec       `json:"routes"`
-	NetworkRules     []workload.NetworkRuleSpec `json:"network_rules"`
-	CommandPolicy    CommandToolPolicy          `json:"command_policy"`
-	PrepullCommand   []string                   `json:"prepull_command"`
-	RequiredBindings []string                   `json:"required_bindings,omitempty"`
-	Capabilities     CapabilityConstraints      `json:"capabilities"`
+	DisabledReason  string                     `json:"disabled_reason,omitempty"`
+	BuiltinEndpoint string                     `json:"builtin_endpoint"`
+	Components      []workload.ComponentSpec   `json:"components"`
+	Services        []workload.ServiceSpec     `json:"services"`
+	Routes          []workload.RouteSpec       `json:"routes"`
+	NetworkRules    []workload.NetworkRuleSpec `json:"network_rules"`
+	CommandPolicy   CommandToolPolicy          `json:"command_policy"`
+	PrepullCommand  []string                   `json:"prepull_command"`
+	Bindings        []ComponentBinding         `json:"bindings"`
+	Capabilities    CapabilityConstraints      `json:"capabilities"`
 }
 
 // PrepullImageSpec 描述预拉取闭环中单个镜像的真实拉取与最小自检命令。
@@ -299,13 +298,45 @@ type CommandToolPolicy struct {
 	MaxTimeoutSeconds     int32      `json:"max_timeout_seconds"`
 }
 
+// ComponentBinding 描述组件需要从组合连接图获得的一个能力端点。
+// 绑定以稳定角色和目标能力表达,不记录具体 runtime/tool code。
+type ComponentBinding struct {
+	Name            string `json:"name"`
+	Capability      string `json:"capability"`
+	Endpoint        string `json:"endpoint"`
+	Protocol        string `json:"protocol"`
+	RequiredAtStart bool   `json:"required_at_start"`
+	ConfigBinding   string `json:"config_binding"`
+}
+
+// RuntimePlan 汇总一个组合 runtime 实例的冻结目录行和镜像。
+type RuntimePlan struct {
+	InstanceCode string
+	Runtime      Runtime
+	Image        RuntimeImage
+}
+
 // CreateSandboxPlan 汇总创建沙箱时 service 交给编排器的完整上下文。
 type CreateSandboxPlan struct {
-	Sandbox         Sandbox
-	Runtime         Runtime
-	Image           RuntimeImage
-	Tools           []Tool
-	PrivateSidecars []workload.ComponentSpec
+	Sandbox                  Sandbox
+	WorkspaceRuntimeInstance string
+	Runtimes                 []RuntimePlan
+	Tools                    []Tool
+	PrivateSidecars          []workload.ComponentSpec
+}
+
+// WorkspaceRuntime 返回组合显式指定的工作区运行时,禁止按数组顺序隐式选择。
+func (p CreateSandboxPlan) WorkspaceRuntime(instanceCode string) (RuntimePlan, bool) {
+	instanceCode = strings.TrimSpace(instanceCode)
+	if instanceCode == "" {
+		return RuntimePlan{}, false
+	}
+	for _, runtime := range p.Runtimes {
+		if runtime.InstanceCode == instanceCode {
+			return runtime, true
+		}
+	}
+	return RuntimePlan{}, false
 }
 
 // SnapshotResult 描述一次 CSI 快照成功创建后的可恢复引用和覆盖卷域。

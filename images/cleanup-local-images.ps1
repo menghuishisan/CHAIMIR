@@ -44,7 +44,9 @@ foreach ($containerId in $containerIds) {
     }
 }
 
-$temporaryTagPattern = '^(e2e|candidate|refresh|local)-'
+# 这些标签只代表本地构建/回归过程中的临时引用,不属于发布契约。
+# refactor/prepull 也必须纳入清理,否则旧重构产物会长期占用本机空间。
+$temporaryTagPattern = '^(e2e|candidate|refresh|local|refactor|prepull|[0-9]{8}-(regression-fix|private-))'
 $images = @(docker image ls --format '{{json .}}' | ForEach-Object {
     if (-not [string]::IsNullOrWhiteSpace($_)) { $_ | ConvertFrom-Json }
 })
@@ -62,6 +64,12 @@ foreach ($candidateRef in @($protectedRefs | ForEach-Object { [string]$_ })) {
     } else {
         $unavailableProtectedCount++
     }
+}
+$missingProtectedRefs = @($protectedRefs | ForEach-Object { [string]$_ } | Where-Object {
+    -not $availableProtectedRefs.Contains($_)
+})
+if ($missingProtectedRefs.Count -gt 0) {
+    throw ("本机缺少正式/候选不可变 digest,拒绝继续清理且不会自动下载: " + ($missingProtectedRefs -join ', '))
 }
 $protectedRefs = $availableProtectedRefs
 $protectedRefSnapshot = @($protectedRefs | ForEach-Object { [string]$_ })
@@ -96,8 +104,10 @@ foreach ($image in $images) {
             $protectedImageRefs.Add([string]$repoDigest)
         }
     }
-    if ($protectedImageRefs.Count -gt 0 -and $isDangling) {
-        $skipped.Add("$ref (formal/candidate digest protected)")
+    if ($protectedImageRefs.Count -gt 0) {
+        # 用户未授权下载;删除最后一个本地引用后不得自动 pull 恢复 digest。
+        # 这类对象保留到下一次显式下载/重建流程,避免清理脚本产生网络副作用。
+        $skipped.Add("$ref (formal/candidate digest protected; no download)")
         continue
     }
 
@@ -105,13 +115,6 @@ foreach ($image in $images) {
         docker image rm $ref | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "删除临时镜像失败: $ref"
-        }
-        # Docker 删除最后一个 tag 时会一并删除本地 RepoDigest;按不可变引用回拉恢复唯一引用。
-        foreach ($protectedImageRef in $protectedImageRefs) {
-            docker pull $protectedImageRef | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                throw "恢复正式/候选 digest 引用失败: $protectedImageRef"
-            }
         }
         $removed.Add($ref)
     } else {

@@ -40,6 +40,7 @@ func contestSandboxResponseFromInfo(info contracts.SandboxInfo) ContestSandboxRe
 		OwnerAccountID:      ids.ID(info.OwnerAccountID),
 		RuntimeCode:         info.RuntimeCode,
 		RuntimeImageVersion: info.RuntimeImageVersion,
+		RuntimeInstances:    append([]string(nil), info.RuntimeInstances...),
 		Phase:               info.Phase,
 		Status:              info.Status,
 		ToolAccess:          append([]contracts.SandboxToolAccess(nil), info.ToolAccess...),

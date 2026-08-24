@@ -93,12 +93,15 @@ func (o *K8sOrchestrator) CreateSandboxResources(ctx context.Context, plan Creat
 			}
 		}
 	}
-	orderedPods := o.podsForPlan(plan)
+	orderedPods, err := o.podsForPlan(plan)
+	if err != nil {
+		return err
+	}
 	for _, pod := range orderedPods {
 		if _, err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("创建沙箱 Pod 失败: %w", err)
 		}
-		if len(plan.Runtime.AdapterSpec.StartupOrder) > 0 {
+		if hasStartupOrder(plan) {
 			if err := o.waitPodReady(ctx, cs, plan.Sandbox.Namespace, pod.Name); err != nil {
 				return err
 			}
@@ -143,7 +146,11 @@ func (o *K8sOrchestrator) ResetSandboxRuntime(ctx context.Context, plan CreateSa
 			return err
 		}
 	}
-	for _, pod := range o.podsForPlan(plan) {
+	pods, err := o.podsForPlan(plan)
+	if err != nil {
+		return err
+	}
+	for _, pod := range pods {
 		if !containsString(runtimeComputePodNames(plan), pod.Name) {
 			continue
 		}
@@ -339,7 +346,11 @@ func (o *K8sOrchestrator) RestoreSnapshotResources(ctx context.Context, plan Cre
 			}
 		}
 	}
-	for _, pod := range o.podsForPlan(plan) {
+	pods, err := o.podsForPlan(plan)
+	if err != nil {
+		return err
+	}
+	for _, pod := range pods {
 		if _, err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("创建快照恢复 Pod 失败: %w", err)
 		}
@@ -1027,18 +1038,20 @@ func (o *K8sOrchestrator) ensureRuntimeSecrets(ctx context.Context, plan CreateS
 		}
 		return nil
 	}
-	if err := collect(plan.Runtime.AdapterSpec.RuntimeContainer); err != nil {
-		return err
-	}
-	for _, component := range plan.Runtime.AdapterSpec.InfraSidecars {
-		if err := collect(component); err != nil {
+	for _, runtimePlan := range plan.Runtimes {
+		if err := collect(runtimePlan.Runtime.AdapterSpec.RuntimeContainer); err != nil {
 			return err
 		}
-	}
-	for _, pod := range plan.Runtime.AdapterSpec.Pods {
-		for _, component := range pod.Containers {
+		for _, component := range runtimePlan.Runtime.AdapterSpec.InfraSidecars {
 			if err := collect(component); err != nil {
 				return err
+			}
+		}
+		for _, pod := range runtimePlan.Runtime.AdapterSpec.Pods {
+			for _, component := range pod.Containers {
+				if err := collect(component); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -1224,14 +1237,16 @@ func (o *K8sOrchestrator) controlPlaneIngressPolicy(sb Sandbox, name, role strin
 
 // allowSandboxPodLinkPolicies 仅为 adapter_spec.network_rules 声明的 Pod 访问生成 ingress/egress 放行。
 func (o *K8sOrchestrator) allowSandboxPodLinkPolicies(plan CreateSandboxPlan) []*netv1.NetworkPolicy {
-	policies := make([]*netv1.NetworkPolicy, 0, len(plan.Runtime.AdapterSpec.NetworkRules)*2)
-	for _, rule := range plan.Runtime.AdapterSpec.NetworkRules {
-		ports := networkPolicyPortsForRefs(rule.Ports)
-		// deny-all 同时限制入站和出站,因此显式互通需要为源 Pod 出站和目标 Pod 入站各建一条策略。
-		policies = append(policies,
-			sandboxPodIngressPolicy(plan, rule, ports),
-			sandboxPodEgressPolicy(plan, rule, ports),
-		)
+	var policies []*netv1.NetworkPolicy
+	for _, runtimePlan := range plan.Runtimes {
+		for _, rule := range runtimePlan.Runtime.AdapterSpec.NetworkRules {
+			ports := networkPolicyPortsForRefs(rule.Ports)
+			// deny-all 同时限制入站和出站,因此显式互通需要为源 Pod 出站和目标 Pod 入站各建一条策略。
+			policies = append(policies,
+				sandboxPodIngressPolicy(plan, rule, ports),
+				sandboxPodEgressPolicy(plan, rule, ports),
+			)
+		}
 	}
 	return policies
 }
@@ -1396,12 +1411,16 @@ func validateSnapshotRefForNamespace(sb Sandbox) error {
 	return nil
 }
 
-// podForPlan 构造主运行时容器和工具 sidecar Pod。
-func (o *K8sOrchestrator) podsForPlan(plan CreateSandboxPlan) []*corev1.Pod {
+// podForPlan 构造全部 runtime 实例容器和工具 sidecar Pod。
+func (o *K8sOrchestrator) podsForPlan(plan CreateSandboxPlan) ([]*corev1.Pod, error) {
 	pods := podGroupForPlan(plan)
-	out := make([]*corev1.Pod, 0, len(pods)+len(plan.Tools))
+	var out []*corev1.Pod
 	for _, pod := range pods {
-		out = append(out, o.podFromSpec(plan, pod))
+		compiled, err := o.podFromSpec(plan, pod)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, compiled)
 	}
 	for _, tool := range plan.Tools {
 		if tool.Category == "infra" || tool.Kind == SandboxToolKindWebEmbed || tool.Kind == SandboxToolKindCommand {
@@ -1410,11 +1429,8 @@ func (o *K8sOrchestrator) podsForPlan(plan CreateSandboxPlan) []*corev1.Pod {
 			}
 		}
 	}
-	if len(plan.Runtime.AdapterSpec.StartupOrder) > 0 {
-		rank := make(map[string]int, len(plan.Runtime.AdapterSpec.StartupOrder))
-		for index, code := range plan.Runtime.AdapterSpec.StartupOrder {
-			rank[strings.TrimSpace(code)] = index
-		}
+	if hasStartupOrder(plan) {
+		rank := startupRankForPlan(plan)
 		sort.SliceStable(out, func(i, j int) bool {
 			left := startupPodRank(plan, out[i], rank)
 			right := startupPodRank(plan, out[j], rank)
@@ -1424,16 +1440,18 @@ func (o *K8sOrchestrator) podsForPlan(plan CreateSandboxPlan) []*corev1.Pod {
 			return out[i].Name < out[j].Name
 		})
 	}
-	return out
+	return out, nil
 }
 
 // startupPodRank 将启动依赖组件映射为实际 Pod 顺序,未参与依赖的 Pod 放在末尾。
 func startupPodRank(plan CreateSandboxPlan, pod *corev1.Pod, rank map[string]int) int {
 	key := pod.Name
-	for _, component := range pod.Spec.Containers {
-		if component.Name == plan.Runtime.AdapterSpec.RuntimeContainer.Name {
-			key = "primary_runtime"
-			break
+	if runtimePlan, ok := runtimePlanForPod(plan, pod.Name); ok {
+		for _, component := range pod.Spec.Containers {
+			if component.Name == runtimePlan.Runtime.AdapterSpec.RuntimeContainer.Name {
+				key = runtimePlan.InstanceCode
+				break
+			}
 		}
 	}
 	for _, tool := range plan.Tools {
@@ -1450,17 +1468,105 @@ func startupPodRank(plan CreateSandboxPlan, pod *corev1.Pod, rank map[string]int
 	return len(rank) + 1
 }
 
+// hasStartupOrder 判断组合内任一 runtime 是否声明了启动依赖。
+func hasStartupOrder(plan CreateSandboxPlan) bool {
+	for _, runtime := range plan.Runtimes {
+		if len(runtime.Runtime.AdapterSpec.StartupOrder) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// startupRankForPlan 汇总各 runtime 的启动顺序;同名组件以实例别名前缀区分。
+func startupRankForPlan(plan CreateSandboxPlan) map[string]int {
+	rank := make(map[string]int)
+	for _, runtime := range plan.Runtimes {
+		for index, code := range runtime.Runtime.AdapterSpec.StartupOrder {
+			code = strings.TrimSpace(code)
+			if code == "" {
+				continue
+			}
+			rank[runtime.InstanceCode+"/"+code] = index
+			if _, exists := rank[code]; !exists {
+				rank[code] = index
+			}
+		}
+	}
+	return rank
+}
+
 // podGroupForPlan 返回运行时声明的 Pod 组;未声明时按 runtime_container + infra_sidecars 生成单 Pod 拓扑。
 func podGroupForPlan(plan CreateSandboxPlan) []workload.PodSpec {
+	var pods []workload.PodSpec
+	for _, runtimePlan := range plan.Runtimes {
+		items := runtimePodSpecs(runtimePlan)
+		for itemIndex := range items {
+			for containerIndex := range items[itemIndex].Containers {
+				container := &items[itemIndex].Containers[containerIndex]
+				if container.Name == runtimePlan.Runtime.AdapterSpec.RuntimeContainer.Name && container.ImageURL == "" {
+					container.ImageURL = runtimePlan.Image.ImageURL
+				}
+			}
+		}
+		if runtimePlan.InstanceCode == plan.WorkspaceRuntimeInstance {
+			items = appendPrivateSidecarsToRuntimePod(items, runtimePlan.Runtime.AdapterSpec.RuntimeContainer.Name, plan.PrivateSidecars)
+		}
+		pods = append(pods, items...)
+	}
+	return pods
+}
+
+// runtimePodSpecs 返回带实例前缀的运行时 Pod 拓扑,确保未编译的自检计划也不会回退到共享 sandbox 名称。
+func runtimePodSpecs(plan RuntimePlan) []workload.PodSpec {
 	if len(plan.Runtime.AdapterSpec.Pods) > 0 {
 		pods := append([]workload.PodSpec(nil), plan.Runtime.AdapterSpec.Pods...)
-		return appendPrivateSidecarsToRuntimePod(pods, plan.Runtime.AdapterSpec.RuntimeContainer.Name, plan.PrivateSidecars)
+		seen := map[string]struct{}{}
+		for _, pod := range pods {
+			for _, container := range pod.Containers {
+				seen[container.Name] = struct{}{}
+			}
+		}
+		for _, sidecar := range plan.Runtime.AdapterSpec.InfraSidecars {
+			if _, exists := seen[sidecar.Name]; exists {
+				continue
+			}
+			for index := range pods {
+				for _, container := range pods[index].Containers {
+					if container.Name == plan.Runtime.AdapterSpec.RuntimeContainer.Name {
+						pods[index].Containers = append(pods[index].Containers, sidecar)
+						seen[sidecar.Name] = struct{}{}
+						break
+					}
+				}
+				if _, added := seen[sidecar.Name]; added {
+					break
+				}
+			}
+		}
+		return pods
 	}
-	specContainers := []workload.ComponentSpec{plan.Runtime.AdapterSpec.RuntimeContainer}
-	specContainers[0].ImageURL = plan.Image.ImageURL
-	specContainers = append(specContainers, plan.Runtime.AdapterSpec.InfraSidecars...)
-	specContainers = append(specContainers, plan.PrivateSidecars...)
-	return []workload.PodSpec{{Name: "sandbox", Containers: specContainers}}
+	containers := []workload.ComponentSpec{plan.Runtime.AdapterSpec.RuntimeContainer}
+	containers = append(containers, plan.Runtime.AdapterSpec.InfraSidecars...)
+	name := strings.TrimSpace(plan.InstanceCode)
+	if name == "" {
+		name = "sandbox"
+	} else {
+		name += "-sandbox"
+	}
+	return []workload.PodSpec{{Name: name, Containers: containers}}
+}
+
+// runtimePlanForPod 根据唯一 Pod 角色定位所属运行时实例,避免用第一个运行时解释其他实例容器。
+func runtimePlanForPod(plan CreateSandboxPlan, podName string) (RuntimePlan, bool) {
+	for _, runtimePlan := range plan.Runtimes {
+		for _, pod := range runtimePodSpecs(runtimePlan) {
+			if pod.Name == podName {
+				return runtimePlan, true
+			}
+		}
+	}
+	return RuntimePlan{}, false
 }
 
 // appendPrivateSidecarsToRuntimePod 把服务端私有执行容器放入运行时所在 Pod,不创建可代理工具入口。
@@ -1480,14 +1586,18 @@ func appendPrivateSidecarsToRuntimePod(pods []workload.PodSpec, runtimeContainer
 }
 
 // podFromSpec 把运行时 Pod 拓扑转换为受限 Kubernetes Pod。
-func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec workload.PodSpec) *corev1.Pod {
+func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec workload.PodSpec) (*corev1.Pod, error) {
+	runtimePlan, found := runtimePlanForPod(plan, spec.Name)
+	if !found {
+		return nil, fmt.Errorf("运行时 Pod %q 未绑定到运行时实例", spec.Name)
+	}
 	containers := make([]corev1.Container, 0, len(spec.Containers))
 	for _, container := range spec.Containers {
 		image := container.ImageURL
-		if container.Name == plan.Runtime.AdapterSpec.RuntimeContainer.Name && image == "" {
-			image = plan.Image.ImageURL
+		if container.Name == runtimePlan.Runtime.AdapterSpec.RuntimeContainer.Name && image == "" {
+			image = runtimePlan.Image.ImageURL
 		}
-		containers = append(containers, o.containerFromRuntime(container, image, plan.Runtime.AdapterSpec))
+		containers = append(containers, o.containerFromRuntime(container, image, runtimePlan.Runtime.AdapterSpec))
 	}
 	automount := false
 	enableServiceLinks := false
@@ -1515,7 +1625,7 @@ func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec workload.PodS
 			Volumes:                      podVolumesForPlan(plan),
 			Affinity:                     affinityForSharedRuntime(plan, spec),
 		},
-	}
+	}, nil
 }
 
 // toolPodForPlan 为 web-embed 工具组件创建独立 Pod,避免动态工具影响运行时 Pod 组拓扑。
@@ -1552,7 +1662,7 @@ func (o *K8sOrchestrator) toolPodForPlan(plan CreateSandboxPlan, tool Tool, comp
 	}
 }
 
-// affinityForSharedRuntime 让挂载共享 PVC 的运行时工作区 Pod 与主运行时落在同一节点,兼容生产常见 RWO 存储。
+// affinityForSharedRuntime 让挂载共享 PVC 的 runtime 工作区 Pod 与共享卷锚点落在同一节点,兼容生产常见 RWO 存储。
 func affinityForSharedRuntime(plan CreateSandboxPlan, spec workload.PodSpec) *corev1.Affinity {
 	needsSharedVolume := false
 	for _, component := range spec.Containers {
@@ -1567,7 +1677,7 @@ func affinityForSharedRuntime(plan CreateSandboxPlan, spec workload.PodSpec) *co
 	return requiredRuntimePodAffinity(plan)
 }
 
-// affinityForToolVolume 让工具的工作区或安全域 PVC 与主运行时共节点,避免 RWO 卷被跨节点挂载。
+// affinityForToolVolume 让工具的工作区或安全域 PVC 与 runtime 卷锚点共节点,避免 RWO 卷被跨节点挂载。
 func affinityForToolVolume(plan CreateSandboxPlan, component workload.ComponentSpec) *corev1.Affinity {
 	if !shouldMountWorkspace(component) && len(component.MountDomains) == 0 {
 		return nil
@@ -1575,21 +1685,21 @@ func affinityForToolVolume(plan CreateSandboxPlan, component workload.ComponentS
 	return requiredRuntimePodAffinity(plan)
 }
 
-// requiredRuntimePodAffinity 只依赖当前沙箱主运行时 Pod 标签,不放开跨租户或跨沙箱调度约束。
+// requiredRuntimePodAffinity 只依赖当前沙箱 runtime Pod 标签,不放开跨租户或跨沙箱调度约束。
 func requiredRuntimePodAffinity(plan CreateSandboxPlan) *corev1.Affinity {
-	runtimeRole := "sandbox"
-	found := false
+	workspaceRuntime, ok := plan.WorkspaceRuntime(plan.WorkspaceRuntimeInstance)
+	if !ok {
+		return nil
+	}
+	runtimeRole := ""
 	for _, pod := range podGroupForPlan(plan) {
-		for _, component := range pod.Containers {
-			if component.Name == plan.Runtime.AdapterSpec.RuntimeContainer.Name {
-				runtimeRole = pod.Name
-				found = true
-				break
-			}
-		}
-		if found {
+		if runtimePlan, found := runtimePlanForPod(plan, pod.Name); found && runtimePlan.InstanceCode == workspaceRuntime.InstanceCode {
+			runtimeRole = pod.Name
 			break
 		}
+	}
+	if runtimeRole == "" {
+		return nil
 	}
 	return &corev1.Affinity{PodAffinity: &corev1.PodAffinity{RequiredDuringSchedulingIgnoredDuringExecution: []corev1.PodAffinityTerm{{
 		LabelSelector: &metav1.LabelSelector{MatchLabels: sandboxPodRoleLabels(plan.Sandbox, runtimeRole)},
@@ -1631,9 +1741,9 @@ func (o *K8sOrchestrator) containerFromTool(plan CreateSandboxPlan, tool Tool, c
 	mounts := []corev1.VolumeMount{}
 	seenMountPaths := map[string]struct{}{}
 	if shouldMountWorkspace(component) {
-		mounts = appendUniqueVolumeMount(mounts, seenMountPaths, corev1.VolumeMount{Name: VolumeDomainWorkspace, MountPath: plan.Runtime.AdapterSpec.WorkspaceDir})
+		mounts = appendUniqueVolumeMount(mounts, seenMountPaths, corev1.VolumeMount{Name: VolumeDomainWorkspace, MountPath: workspaceMountPath(plan)})
 	}
-	for _, domain := range toolDomainVolumeMounts(plan.Runtime.AdapterSpec, component) {
+	for _, domain := range toolDomainVolumeMounts(mergedRuntimeAdapter(plan), component) {
 		mounts = appendUniqueVolumeMount(mounts, seenMountPaths, domain)
 	}
 	for _, mount := range toolEphemeralVolumeMounts(tool, component) {
@@ -1765,10 +1875,53 @@ func toolEphemeralVolumeName(toolCode, componentName, mountName string) string {
 }
 
 // volumeDomains 为 adapter 声明的安全域创建 Pod 卷,运行态默认用临时卷防止进入学生代码持久化。
+// mergedRuntimeAdapter 合并所有运行时声明的安全域,同名域必须在编译阶段保持同一挂载契约。
+func mergedRuntimeAdapter(plan CreateSandboxPlan) AdapterSpec {
+	merged := AdapterSpec{}
+	seen := map[string]struct{}{}
+	appendRuntimeDomains := func(runtimePlan RuntimePlan) {
+		for _, domain := range runtimePlan.Runtime.AdapterSpec.VolumeDomains {
+			if _, exists := seen[domain.Name]; exists {
+				continue
+			}
+			seen[domain.Name] = struct{}{}
+			merged.VolumeDomains = append(merged.VolumeDomains, domain)
+		}
+	}
+	if workspace, ok := plan.WorkspaceRuntime(plan.WorkspaceRuntimeInstance); ok {
+		merged.WorkspaceDir = workspace.Runtime.AdapterSpec.WorkspaceDir
+		appendRuntimeDomains(workspace)
+	}
+	for _, runtimePlan := range plan.Runtimes {
+		if runtimePlan.InstanceCode == plan.WorkspaceRuntimeInstance {
+			continue
+		}
+		if merged.WorkspaceDir == "" {
+			merged.WorkspaceDir = runtimePlan.Runtime.AdapterSpec.WorkspaceDir
+		}
+		appendRuntimeDomains(runtimePlan)
+	}
+	return merged
+}
+
+// workspaceMountPath 返回组合共享工作区的唯一挂载路径。
+func workspaceMountPath(plan CreateSandboxPlan) string {
+	adapter := mergedRuntimeAdapter(plan)
+	for _, domain := range adapter.VolumeDomains {
+		if domain.Name == VolumeDomainWorkspace && domain.MountPath != "" {
+			return domain.MountPath
+		}
+	}
+	if adapter.WorkspaceDir != "" {
+		return adapter.WorkspaceDir
+	}
+	return "/workspace"
+}
+
 func volumeDomainsForPlan(plan CreateSandboxPlan) []corev1.Volume {
 	shared := sharedVolumeDomainsForPlan(plan)
-	volumes := make([]corev1.Volume, 0, len(plan.Runtime.AdapterSpec.VolumeDomains))
-	for _, domain := range plan.Runtime.AdapterSpec.VolumeDomains {
+	volumes := make([]corev1.Volume, 0)
+	for _, domain := range mergedRuntimeAdapter(plan).VolumeDomains {
 		_, sharedDomain := shared[domain.Name]
 		volumes = append(volumes, volumeForDomain(domain, sharedDomain))
 	}
@@ -1840,8 +1993,8 @@ func studentAccessibleContainer(spec workload.ComponentSpec) bool {
 // persistentVolumeDomains 选出必须由 PVC 承载的卷域,确保 Pod 挂载和 PVC 创建口径一致。
 func persistentVolumeDomains(plan CreateSandboxPlan) []VolumeDomainSpec {
 	shared := sharedVolumeDomainsForPlan(plan)
-	domains := make([]VolumeDomainSpec, 0, len(plan.Runtime.AdapterSpec.VolumeDomains))
-	for _, domain := range plan.Runtime.AdapterSpec.VolumeDomains {
+	domains := make([]VolumeDomainSpec, 0)
+	for _, domain := range mergedRuntimeAdapter(plan).VolumeDomains {
 		if _, sharedDomain := shared[domain.Name]; sharedDomain || domain.Name == VolumeDomainWorkspace || domain.Persistence == VolumePersistenceMinioCode || domain.Persistence == VolumePersistenceSnapshot {
 			domains = append(domains, domain)
 		}
@@ -2095,7 +2248,7 @@ func toolComponentPodName(toolCode, componentName string) string {
 // runtimePodNames 返回阶段一必须 Ready 的运行时 Pod 列表,不把动态 Web 工具失败混作链节点失败。
 func runtimePodNames(plan CreateSandboxPlan) []string {
 	pods := podGroupForPlan(plan)
-	names := make([]string, 0, len(pods)+len(plan.Tools))
+	var names []string
 	for _, pod := range pods {
 		names = append(names, pod.Name)
 	}
@@ -2112,11 +2265,14 @@ func runtimePodNames(plan CreateSandboxPlan) []string {
 
 // runtimeComputePodNames 选择包含运行时主容器的 Pod,学生工作区独立 Pod 不参与链重置。
 func runtimeComputePodNames(plan CreateSandboxPlan) []string {
-	containerName := plan.Runtime.AdapterSpec.RuntimeContainer.Name
 	result := []string{}
 	for _, pod := range podGroupForPlan(plan) {
+		runtimePlan, ok := runtimePlanForPod(plan, pod.Name)
+		if !ok {
+			continue
+		}
 		for _, container := range pod.Containers {
-			if container.Name == containerName {
+			if container.Name == runtimePlan.Runtime.AdapterSpec.RuntimeContainer.Name {
 				result = append(result, pod.Name)
 				break
 			}

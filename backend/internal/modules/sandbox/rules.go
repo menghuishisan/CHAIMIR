@@ -1,4 +1,4 @@
-// sandbox rules 文件定义输入校验、状态机校验和安全规则,不访问 repo/db/contracts。
+// sandbox rules 文件定义输入校验、状态机校验和安全规则,不访问 repo/db。
 package sandbox
 
 import (
@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/intx"
@@ -18,23 +19,35 @@ import (
 )
 
 var (
-	codePattern      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
-	envNamePattern   = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
-	mountNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
-	portNamePattern  = regexp.MustCompile(`^[a-z][a-z0-9-]{0,14}$`)
+	codePattern        = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$`)
+	envNamePattern     = regexp.MustCompile(`^[A-Z_][A-Z0-9_]{0,63}$`)
+	bindingNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
+	mountNamePattern   = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
+	portNamePattern    = regexp.MustCompile(`^[a-z][a-z0-9-]{0,14}$`)
 )
 
 // validateCreateRequest 校验内部创建沙箱请求的租户、来源和资源开关。
 func validateCreateRequest(req CreateSandboxInputModel) error {
 	if req.TenantID <= 0 || strings.TrimSpace(req.CompositionSnapshot.Digest) == "" ||
-		req.CompositionSnapshot.Runtime.RuntimeID <= 0 || req.CompositionSnapshot.Runtime.ImageID <= 0 ||
-		strings.TrimSpace(req.CompositionSnapshot.Spec.PrimaryRuntime.Code) == "" ||
+		len(req.CompositionSnapshot.Runtimes) == 0 || len(req.CompositionSnapshot.Spec.Runtimes) == 0 ||
 		strings.TrimSpace(req.SourceRef) == "" || strings.TrimSpace(req.ScopeRef) == "" {
 		return apperr.ErrSandboxCreateRequestInvalid
 	}
-	if req.CompositionSnapshot.Spec.PrimaryRuntime.Code != req.CompositionSnapshot.Runtime.Code ||
-		req.CompositionSnapshot.Spec.PrimaryRuntime.ImageVersion != req.CompositionSnapshot.Runtime.ImageVersion {
+	specRuntimes := make(map[string]contracts.CompositionRuntimeRef, len(req.CompositionSnapshot.Spec.Runtimes))
+	for _, runtime := range req.CompositionSnapshot.Spec.Runtimes {
+		if strings.TrimSpace(runtime.InstanceCode) == "" || strings.TrimSpace(runtime.Code) == "" || strings.TrimSpace(runtime.ImageVersion) == "" {
+			return apperr.ErrSandboxCreateRequestInvalid
+		}
+		specRuntimes[runtime.InstanceCode] = runtime
+	}
+	if len(specRuntimes) != len(req.CompositionSnapshot.Spec.Runtimes) || len(specRuntimes) != len(req.CompositionSnapshot.Runtimes) {
 		return apperr.ErrSandboxCreateRequestInvalid
+	}
+	for _, runtime := range req.CompositionSnapshot.Runtimes {
+		declared, ok := specRuntimes[runtime.InstanceCode]
+		if !ok || runtime.RuntimeID <= 0 || runtime.ImageID <= 0 || runtime.Code != declared.Code || runtime.ImageVersion != declared.ImageVersion || len(runtime.AdapterSpec) == 0 {
+			return apperr.ErrSandboxCreateRequestInvalid
+		}
 	}
 	for _, component := range req.CompositionSnapshot.Components {
 		if component.ComponentID <= 0 || strings.TrimSpace(component.Code) == "" ||
@@ -248,7 +261,7 @@ func validateToolResourceSpecShape(spec *ToolResourceSpec, kind int16) error {
 	if err := validateToolNetworkRules(spec); err != nil {
 		return err
 	}
-	if err := validateRequiredBindings(spec.RequiredBindings); err != nil {
+	if err := validateComponentBindings(spec.Bindings); err != nil {
 		return err
 	}
 	if err := validatePrepullCommand(spec.PrepullCommand); err != nil {
@@ -274,18 +287,25 @@ func validateToolResourceSpecShape(spec *ToolResourceSpec, kind int16) error {
 	return nil
 }
 
-// validateRequiredBindings 校验工具声明的运行时连接环境变量唯一且符合环境变量命名规则。
-func validateRequiredBindings(bindings []string) error {
+// validateComponentBindings 校验组件绑定的角色、能力、端点、协议和环境变量契约。
+func validateComponentBindings(bindings []ComponentBinding) error {
 	seen := map[string]struct{}{}
-	for _, raw := range bindings {
-		name := strings.TrimSpace(raw)
-		if !envNamePattern.MatchString(name) {
+	for _, binding := range bindings {
+		name := strings.TrimSpace(binding.Name)
+		if name == "" || !bindingNamePattern.MatchString(name) || strings.TrimSpace(binding.Capability) == "" || strings.TrimSpace(binding.Endpoint) == "" {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		if binding.Protocol != "TCP" && binding.Protocol != "HTTP" && binding.Protocol != "HTTPS" && binding.Protocol != "WS" && binding.Protocol != "WSS" && binding.Protocol != "GRPC" {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
 		if _, exists := seen[name]; exists {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
 		seen[name] = struct{}{}
+		parts := strings.SplitN(strings.TrimSpace(binding.ConfigBinding), ":", 2)
+		if len(parts) != 2 || parts[0] != "env" || !envNamePattern.MatchString(parts[1]) {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
 	}
 	return nil
 }
@@ -1064,7 +1084,31 @@ func networkPortDeclared(ports map[string]int32, port int32) bool {
 // podTopologyForAdapter 返回 adapter 归一化后的运行时 Pod 组,供校验与服务解析复用。
 func podTopologyForAdapter(spec AdapterSpec) []workload.PodSpec {
 	if len(spec.Pods) > 0 {
-		return spec.Pods
+		pods := append([]workload.PodSpec(nil), spec.Pods...)
+		seen := map[string]struct{}{}
+		for _, pod := range pods {
+			for _, container := range pod.Containers {
+				seen[container.Name] = struct{}{}
+			}
+		}
+		for _, sidecar := range spec.InfraSidecars {
+			if _, exists := seen[sidecar.Name]; exists {
+				continue
+			}
+			for index := range pods {
+				for _, container := range pods[index].Containers {
+					if container.Name == spec.RuntimeContainer.Name {
+						pods[index].Containers = append(pods[index].Containers, sidecar)
+						seen[sidecar.Name] = struct{}{}
+						break
+					}
+				}
+				if _, added := seen[sidecar.Name]; added {
+					break
+				}
+			}
+		}
+		return pods
 	}
 	containers := []workload.ComponentSpec{spec.RuntimeContainer}
 	containers = append(containers, spec.InfraSidecars...)
@@ -1200,6 +1244,16 @@ func validatePlanImagesCurrentlyAdmitted(cfg config.SandboxConfig, runtime Runti
 	for _, component := range runtime.AdapterSpec.InfraSidecars {
 		if err := validateInfraSidecarImage(component, cfg); err != nil {
 			return err
+		}
+	}
+	for _, pod := range runtime.AdapterSpec.Pods {
+		for _, component := range pod.Containers {
+			if component.ImageURL == "" || component.Name == runtime.AdapterSpec.RuntimeContainer.Name {
+				continue
+			}
+			if err := validateInfraSidecarImage(component, cfg); err != nil {
+				return err
+			}
 		}
 	}
 	for _, tool := range tools {

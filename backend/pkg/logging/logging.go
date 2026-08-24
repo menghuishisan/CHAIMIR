@@ -44,7 +44,7 @@ func WithAttrs(ctx context.Context, attrs ...slog.Attr) context.Context {
 		return ctx
 	}
 	existing := AttrsFromContext(ctx)
-	merged := make([]slog.Attr, 0, len(existing)+len(attrs))
+	var merged []slog.Attr
 	merged = append(merged, existing...)
 	merged = append(merged, attrs...)
 	return context.WithValue(ctx, attrsCtxKey{}, merged)
@@ -56,7 +56,7 @@ func AttrsFromContext(ctx context.Context, extra ...slog.Attr) []slog.Attr {
 	if attrs, ok := ctx.Value(attrsCtxKey{}).([]slog.Attr); ok {
 		base = attrs
 	}
-	out := make([]slog.Attr, 0, len(base)+len(extra))
+	var out []slog.Attr
 	out = append(out, base...)
 	out = append(out, extra...)
 	return out

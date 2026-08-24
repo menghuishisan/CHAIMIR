@@ -266,8 +266,9 @@ export class SandboxApi {
   /**
    * 查询运行时链上状态。
    */
-  async chainQuery(instanceId: string, target: string): Promise<SandboxChainResponse> {
+  async chainQuery(instanceId: string, runtimeInstance: string, target: string): Promise<SandboxChainResponse> {
     return this.client.get(`/sandbox/sandboxes/${encodePathSegment(instanceId)}/chain/query`, {
+      runtime_instance: runtimeInstance,
       target,
     })
   }

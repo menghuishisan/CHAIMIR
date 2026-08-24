@@ -95,6 +95,7 @@ Thumbs.db
 .codex/
 .playwright-mcp/
 .superpowers/
+参赛材料/
 
 # ---- AI/本地开发规范文件(不上传公共仓库)----
 AGENTS.md

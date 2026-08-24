@@ -57,4 +57,4 @@ supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
-  pull_by_digest_in_production: true
+  pull_by_digest: true

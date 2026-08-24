@@ -94,8 +94,6 @@ func sandboxFromRow(row sqlcgen.Sandbox) (Sandbox, error) {
 	return Sandbox{
 		ID:                  row.ID,
 		TenantID:            row.TenantID,
-		RuntimeID:           row.RuntimeID,
-		ImageID:             row.ImageID,
 		Namespace:           row.Namespace,
 		SourceRef:           row.SourceRef,
 		ScopeRef:            row.ScopeRef,

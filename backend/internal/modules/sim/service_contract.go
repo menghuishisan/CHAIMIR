@@ -173,12 +173,12 @@ func (s *Service) UpdateSessionAuthorizedAccounts(ctx context.Context, req contr
 		if err != nil {
 			return err
 		}
-		previous := make(map[int64]struct{}, len(session.SharedAccountIDs)+1)
+		previous := make(map[int64]struct{})
 		previous[session.OwnerAccountID] = struct{}{}
 		for _, accountID := range session.SharedAccountIDs {
 			previous[accountID] = struct{}{}
 		}
-		next := make(map[int64]struct{}, len(accountIDs)+1)
+		next := make(map[int64]struct{})
 		next[session.OwnerAccountID] = struct{}{}
 		for _, accountID := range accountIDs {
 			next[accountID] = struct{}{}

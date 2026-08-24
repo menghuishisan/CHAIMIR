@@ -1,7 +1,7 @@
 // 判题器配置表单(判题器页内)。
 //
 // 后端把判题器拆成三部分:声明式判题环境组合、受控执行策略、自检样例。
-//   - 组合(composition):主运行时 + 镜像版本 + 组件,访问边界固定为判题私有环境;
+//   - 组合(composition):命名 runtime 实例 + 镜像版本 + 组件,访问边界固定为判题私有环境;
 //     服务端编译后冻结成快照,前端只提交声明,不提交也不回填镜像地址、digest 与工作负载。
 //   - 执行策略(resource_spec):初始链状态、判题命令、执行目标、超时与重试。
 //   - 自检样例:随判题器镜像由平台目录同步提供,表单不改动。
@@ -468,8 +468,8 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   dense
                   columns={2}
                   items={[
-                    { term: '运行时', description: snapshot.runtime.code, mono: true },
-                    { term: '镜像版本', description: snapshot.runtime.image_version, mono: true },
+                    { term: '运行时', description: snapshot.runtimes.map((runtime) => `${runtime.instance_code}: ${runtime.code}`).join(' / '), mono: true },
+                    { term: '镜像版本', description: snapshot.runtimes.map((runtime) => `${runtime.instance_code}: ${runtime.image_version}`).join(' / '), mono: true },
                     {
                       term: '组件数',
                       description: `${snapshot.components?.length ?? 0} 个`,
@@ -597,10 +597,11 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
 
 /** emptyComposition 给出「不需要沙箱」时必须提交的空组合:后端要求这三项一律留空。 */
 function emptyComposition(): JudgerRequest['composition'] {
-  return {
-    id: '',
-    primary_runtime: { runtime_code: '', image_version: '' },
-    access_profile: SANDBOX_ACCESS_PROFILE.JUDGE_PRIVATE,
+	return {
+		id: '',
+		runtimes: [],
+		workspace_runtime_instance: '',
+		access_profile: SANDBOX_ACCESS_PROFILE.JUDGE_PRIVATE,
   }
 }
 

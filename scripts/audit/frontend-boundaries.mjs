@@ -215,7 +215,7 @@ for (const name of ["acceptance", "staging", "prod-saas", "prod-school"]) {
   const source = read(relativePath);
   if (/^images:\s*$/m.test(source))
     failures.push(`${relativePath}: overlay 不得复制镜像 digest`);
-  if (new RegExp(`value:\s*${escapeRegex(PUBLIC_HOST)}`).test(source))
+  if (new RegExp(`value:\\s*${escapeRegex(PUBLIC_HOST)}`).test(source))
     failures.push(`${relativePath}: 正式域名只能在 base 维护`);
   if (name !== "prod-school" && /^\s*- DEPLOY_MODE=/m.test(source))
     failures.push(`${relativePath}: 不得重复覆盖默认部署形态`);

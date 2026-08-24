@@ -59,8 +59,13 @@ func (s *Service) compositionFromProblem(_ context.Context, _ int64, problem Con
 
 func normalizeContestComposition(spec contracts.SandboxCompositionSpec, profile contracts.SandboxAccessProfile) (contracts.SandboxCompositionSpec, error) {
 	spec.ID = strings.TrimSpace(spec.ID)
-	if spec.ID == "" || spec.PrimaryRuntime.Code == "" || spec.PrimaryRuntime.ImageVersion == "" {
-		return contracts.SandboxCompositionSpec{}, fmt.Errorf("题目组合缺少主运行时或作用域")
+	if spec.ID == "" || len(spec.Runtimes) == 0 || strings.TrimSpace(spec.WorkspaceRuntimeInstance) == "" {
+		return contracts.SandboxCompositionSpec{}, fmt.Errorf("题目组合缺少 runtime 实例或作用域")
+	}
+	for _, runtime := range spec.Runtimes {
+		if strings.TrimSpace(runtime.InstanceCode) == "" || strings.TrimSpace(runtime.Code) == "" || strings.TrimSpace(runtime.ImageVersion) == "" {
+			return contracts.SandboxCompositionSpec{}, fmt.Errorf("题目组合 runtime 实例声明不完整")
+		}
 	}
 	if spec.AccessProfile != "" && spec.AccessProfile != profile {
 		return contracts.SandboxCompositionSpec{}, fmt.Errorf("题目组合访问配置与竞赛场景不一致")

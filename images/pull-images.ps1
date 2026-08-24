@@ -9,9 +9,7 @@ param(
     [string[]]$Images = @(),
     [switch]$PrintBuildArgs,
     [int]$MaxAttempts = 3,
-    [int]$RetryDelaySeconds = 5,
-    [switch]$FailFast,
-    [switch]$NoCleanupFailedPull
+    [int]$RetryDelaySeconds = 5
 )
 
 $ErrorActionPreference = "Stop"
@@ -24,7 +22,7 @@ if ([string]::IsNullOrWhiteSpace($Registry)) {
     $Registry = $env:IMAGE_REGISTRY
 }
 if ([string]::IsNullOrWhiteSpace($Registry)) {
-    $Registry = "registry.chaimir.io"
+    throw "必须通过 -Registry 或 CHAIMIR_IMAGE_REGISTRY/SUPPLY_CHAIN_REGISTRY/IMAGE_REGISTRY 指定生产 Harbor registry"
 }
 if ([string]::IsNullOrWhiteSpace($DigestLock)) {
     $DigestLock = Join-Path $Root "image-digests.lock"
@@ -280,7 +278,7 @@ function Invoke-DockerPullWithRetry {
             Write-Warning $line
         }
         Write-Warning "镜像拉取失败: $($Item.Ref), attempt=$attempt, exit=$pullExitCode"
-        if (-not $NoCleanupFailedPull -and -not $hadImageBeforePull) {
+        if (-not $hadImageBeforePull) {
             $previousErrorActionPreference = $ErrorActionPreference
             $ErrorActionPreference = "Continue"
             try {

@@ -23,7 +23,8 @@ func teacherComponentConfigDTOFromModel(cfg ComponentConfig) TeacherComponentCon
 		spec := env.CompositionSnapshot.Spec
 		out.Envs = append(out.Envs, TeacherEnvComponentDTO{
 			ID:                       env.ID,
-			PrimaryRuntime:           spec.PrimaryRuntime,
+			Runtimes:                 append([]contracts.CompositionRuntimeRef(nil), spec.Runtimes...),
+			WorkspaceRuntimeInstance: spec.WorkspaceRuntimeInstance,
 			Infra:                    append([]contracts.CompositionComponentRef(nil), spec.Infra...),
 			Tools:                    append([]contracts.CompositionComponentRef(nil), spec.Tools...),
 			Links:                    append([]contracts.CompositionLink(nil), spec.Links...),
@@ -51,7 +52,7 @@ func studentExperimentDTOFromModel(item Experiment, myGroupID int64) StudentExpe
 	}
 	for _, env := range item.Components.Envs {
 		spec := env.CompositionSnapshot.Spec
-		components.Envs = append(components.Envs, StudentEnvComponent{ID: env.ID, PrimaryRuntime: spec.PrimaryRuntime, Infra: append([]contracts.CompositionComponentRef(nil), spec.Infra...), Tools: append([]contracts.CompositionComponentRef(nil), spec.Tools...), Links: append([]contracts.CompositionLink(nil), spec.Links...), AccessProfile: spec.AccessProfile, CompositionDigest: env.CompositionSnapshot.Digest})
+		components.Envs = append(components.Envs, StudentEnvComponent{ID: env.ID, Runtimes: append([]contracts.CompositionRuntimeRef(nil), spec.Runtimes...), WorkspaceRuntimeInstance: spec.WorkspaceRuntimeInstance, Infra: append([]contracts.CompositionComponentRef(nil), spec.Infra...), Tools: append([]contracts.CompositionComponentRef(nil), spec.Tools...), Links: append([]contracts.CompositionLink(nil), spec.Links...), AccessProfile: spec.AccessProfile, CompositionDigest: env.CompositionSnapshot.Digest})
 	}
 	for _, sim := range item.Components.Sims {
 		components.Sims = append(components.Sims, StudentSimComponent{ID: sim.ID, PackageCode: sim.PackageCode, Version: sim.Version})

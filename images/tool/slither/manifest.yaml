@@ -1,4 +1,4 @@
-﻿# 本文件声明 tool/slither 镜像的职责、端口、安全、资源和供应链约束。
+# 本文件声明 tool/slither 镜像的职责、端口、安全、资源和供应链约束。
 schema_version: 1
 category: tool
 name: slither
@@ -50,8 +50,6 @@ tool:
     default_timeout_seconds: 60
     max_timeout_seconds: 180
 ports: []
-local_dev:
-  host_mappings: []
 security:
   run_as_non_root: true
   read_only_root_filesystem: false
@@ -93,4 +91,4 @@ supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
-  pull_by_digest_in_production: true
+  pull_by_digest: true

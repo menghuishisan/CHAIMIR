@@ -267,8 +267,6 @@ func (s *Service) lockRecycle(ctx context.Context, sb Sandbox) (Sandbox, error) 
 		return Sandbox{}, err
 	}
 	locked.Namespace = sb.Namespace
-	locked.RuntimeID = sb.RuntimeID
-	locked.ImageID = sb.ImageID
 	locked.SourceRef = sb.SourceRef
 	locked.OwnerAccountID = sb.OwnerAccountID
 	locked.SnapshotEnabled = sb.SnapshotEnabled

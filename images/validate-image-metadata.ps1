@@ -324,6 +324,14 @@ foreach ($entry in $catalog.Values) {
         $errors.Add("目录与逻辑镜像名不一致: $relative -> $($entry.Image)")
     }
     $lines = Get-Content -LiteralPath $entry.Manifest
+    $contents = Get-Content -LiteralPath $entry.Manifest -Raw
+    if ($contents -match '(?m)^local_dev:\s*$') {
+        $errors.Add("manifest 不得包含本地专用 local_dev 配置,生产契约必须唯一: $relative")
+    }
+    $supplyChainLines = Get-ChaimirYamlBlock -Path $entry.Manifest -BlockName "supply_chain"
+    if ((Get-ChaimirYamlValue -Lines $supplyChainLines -Key "pull_by_digest") -ne "true") {
+        $errors.Add("supply_chain.pull_by_digest 必须为 true: $relative")
+    }
     $manifestCategory = Get-ChaimirTopLevelYamlValue -Lines $lines -Key "category"
     $manifestName = Get-ChaimirTopLevelYamlValue -Lines $lines -Key "name"
     if ($manifestCategory -ne $category -or $manifestName -ne $name) {

@@ -64,8 +64,6 @@ env_keys:
   secret:
     - HYP_CHAINS
 ports: []
-local_dev:
-  host_mappings: []
 security:
   run_as_non_root: true
   read_only_root_filesystem: true
@@ -113,4 +111,4 @@ supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
-  pull_by_digest_in_production: true
+  pull_by_digest: true

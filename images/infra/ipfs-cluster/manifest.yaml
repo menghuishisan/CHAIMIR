@@ -81,12 +81,6 @@ ports:
     protocol: TCP
     expose: internal
     purpose: IPFS Cluster peer transport
-local_dev:
-  host_mappings:
-    - host: 127.0.0.1
-      env: CHAIMIR_DEV_IPFS_CLUSTER_API_PORT
-      default: 19094
-      container_port: 9094
 security:
   run_as_non_root: true
   read_only_root_filesystem: false
@@ -124,4 +118,4 @@ supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
-  pull_by_digest_in_production: true
+  pull_by_digest: true

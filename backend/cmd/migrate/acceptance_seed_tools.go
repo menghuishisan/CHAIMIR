@@ -67,12 +67,11 @@ type toolManifest struct {
 	Name               string                      `json:"name"`
 	Image              string                      `json:"image"`
 	Description        string                      `json:"description"`
-	Source             map[string]any              `json:"source"`
+	Source             map[string]any              `json:"source" yaml:"source"`
 	Upstream           map[string]any              `json:"upstream"`
 	DataDriven         bool                        `json:"data_driven"`
 	Tool               toolManifestTool            `json:"tool"`
 	Ports              []toolManifestPort          `json:"ports"`
-	LocalDev           map[string]any              `json:"local_dev"`
 	Auth               map[string]any              `json:"auth"`
 	Security           toolManifestSecurity        `json:"security"`
 	SecurityExceptions []map[string]any            `json:"security_exceptions"`
@@ -110,8 +109,18 @@ type toolManifestTool struct {
 	EphemeralMounts       []workload.EphemeralMountSpec `json:"ephemeral_mounts"`
 	ReadinessPath         string                        `json:"readiness_path"`
 	KeepaliveCommand      []string                      `json:"keepalive_command"`
-	RequiredBindings      []string                      `json:"required_bindings"`
+	Bindings              []manifestBinding             `json:"bindings"`
 	CommandPolicy         map[string]any                `json:"command_policy"`
+}
+
+// manifestBinding 是 images manifest 与 M2 WorkloadSpec 共用的能力端点绑定。
+type manifestBinding struct {
+	Name            string `json:"name"`
+	Capability      string `json:"capability"`
+	Endpoint        string `json:"endpoint"`
+	Protocol        string `json:"protocol"`
+	RequiredAtStart bool   `json:"required_at_start"`
+	ConfigBinding   string `json:"config_binding"`
 }
 
 type toolManifestPort struct {
@@ -232,7 +241,7 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 		}
 		appendManifestSecretEnv(spec, manifest.SecretsRequired)
 		spec["prepull_command"] = command
-		spec["required_bindings"] = append([]string(nil), manifest.Tool.RequiredBindings...)
+		spec["bindings"] = append([]manifestBinding(nil), manifest.Tool.Bindings...)
 		if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
 			return nil, err
 		}
@@ -263,7 +272,7 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 	if len(command) > 0 {
 		spec["prepull_command"] = command
 	}
-	spec["required_bindings"] = append([]string(nil), manifest.Tool.RequiredBindings...)
+	spec["bindings"] = append([]manifestBinding(nil), manifest.Tool.Bindings...)
 	if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
 		return nil, err
 	}

@@ -237,27 +237,27 @@ func (s *Service) ObserveSandboxToolAccess(ctx context.Context, access contracts
 }
 
 // ChainDeployForPrincipal 执行经业务授权的链部署。
-func (s *Service) ChainDeployForPrincipal(ctx context.Context, access contracts.SandboxPrincipalRequest, payload map[string]any) (map[string]any, error) {
+func (s *Service) ChainDeployForPrincipal(ctx context.Context, access contracts.SandboxPrincipalRequest, runtimeInstance string, payload map[string]any) (map[string]any, error) {
 	if _, _, err := s.sandboxForPrincipal(ctx, access); err != nil {
 		return nil, err
 	}
-	return s.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: access.TenantID, SandboxID: access.SandboxID, SourceRef: access.SourceRef, Payload: payload})
+	return s.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: access.TenantID, SandboxID: access.SandboxID, SourceRef: access.SourceRef, RuntimeInstance: runtimeInstance, Payload: payload})
 }
 
 // ChainSendTxForPrincipal 执行经业务授权的链交易。
-func (s *Service) ChainSendTxForPrincipal(ctx context.Context, access contracts.SandboxPrincipalRequest, payload map[string]any) (map[string]any, error) {
+func (s *Service) ChainSendTxForPrincipal(ctx context.Context, access contracts.SandboxPrincipalRequest, runtimeInstance string, payload map[string]any) (map[string]any, error) {
 	if _, _, err := s.sandboxForPrincipal(ctx, access); err != nil {
 		return nil, err
 	}
-	return s.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: access.TenantID, SandboxID: access.SandboxID, SourceRef: access.SourceRef, Payload: payload})
+	return s.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: access.TenantID, SandboxID: access.SandboxID, SourceRef: access.SourceRef, RuntimeInstance: runtimeInstance, Payload: payload})
 }
 
 // ChainQueryForPrincipal 执行经业务授权的链查询。
-func (s *Service) ChainQueryForPrincipal(ctx context.Context, access contracts.SandboxPrincipalRequest, target string) (map[string]any, error) {
+func (s *Service) ChainQueryForPrincipal(ctx context.Context, access contracts.SandboxPrincipalRequest, runtimeInstance, target string) (map[string]any, error) {
 	if _, _, err := s.sandboxForPrincipal(ctx, access); err != nil {
 		return nil, err
 	}
-	return s.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: access.TenantID, SandboxID: access.SandboxID, SourceRef: access.SourceRef, Target: target})
+	return s.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: access.TenantID, SandboxID: access.SandboxID, SourceRef: access.SourceRef, RuntimeInstance: runtimeInstance, Target: target})
 }
 
 // sameStringSlice 比较终端固定命令，避免 attach 阶段命令替换。

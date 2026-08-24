@@ -1,6 +1,6 @@
 // 实验编排向导:环境与仿真步(第 2 步)。
 //
-// 代码环境按声明式组合提交:主运行时 + 镜像版本 + 学生工具 + 基础设施 + 组件参数。
+// 代码环境按声明式组合提交:命名 runtime 实例 + 镜像版本 + 学生工具 + 基础设施 + 组件参数。
 // 镜像地址、digest、启动命令、安全上下文与网络策略都由服务端编译器产出,前端不编辑也不回显为输入
 // (docs/对齐-后端待补齐清单-2026-08-23.md §6.3 / §7.5)。
 // 兼容性也不在前端算:目录不下发「哪个运行时允许哪些工具」,保存时由服务端编译器判定并回报。
@@ -151,7 +151,7 @@ export function WizardComponentsStep({ draft, errors, onChange }: WizardComponen
                     <div className="truncate text-base text-ink">代码环境 {index + 1}</div>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Badge tone="neutral">
-                        {env.primary_runtime.runtime_code} · {env.primary_runtime.image_version}
+                        {env.runtimes.map((runtime) => `${runtime.instance_code}: ${runtime.runtime_code} · ${runtime.image_version}`).join(' / ')}
                       </Badge>
                       {env.tools.map((tool) => (
                         <Badge key={tool.code} tone="jade">
@@ -337,7 +337,8 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
     })
     onSave({
       id: spec.id,
-      primary_runtime: spec.primary_runtime,
+		runtimes: spec.runtimes,
+		workspace_runtime_instance: spec.workspace_runtime_instance,
       infra: spec.infra ?? [],
       tools: spec.tools ?? [],
       links: spec.links ?? [],

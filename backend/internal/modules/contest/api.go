@@ -716,7 +716,7 @@ func (a contestAPI) deployContestSandboxChain(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxDeployRequestInvalid) {
 		return
 	}
-	out, err := a.svc.DeployContestSandboxChain(c.Request.Context(), sandboxID, req.Payload)
+	out, err := a.svc.DeployContestSandboxChain(c.Request.Context(), sandboxID, req.RuntimeInstance, req.Payload)
 	httpx.Write(c, out, err)
 }
 
@@ -730,7 +730,7 @@ func (a contestAPI) sendContestSandboxChainTx(c *gin.Context) {
 	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxTxRequestInvalid) {
 		return
 	}
-	out, err := a.svc.SendContestSandboxChainTx(c.Request.Context(), sandboxID, req.Payload)
+	out, err := a.svc.SendContestSandboxChainTx(c.Request.Context(), sandboxID, req.RuntimeInstance, req.Payload)
 	httpx.Write(c, out, err)
 }
 
@@ -740,7 +740,7 @@ func (a contestAPI) queryContestSandboxChain(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.QueryContestSandboxChain(c.Request.Context(), sandboxID, c.Query("target"))
+	out, err := a.svc.QueryContestSandboxChain(c.Request.Context(), sandboxID, c.Query("runtime_instance"), c.Query("target"))
 	httpx.Write(c, out, err)
 }
 

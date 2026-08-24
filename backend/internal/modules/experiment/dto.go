@@ -52,7 +52,8 @@ type TeacherComponentConfigDTO struct {
 // TeacherEnvComponentDTO 展示声明和服务端生成的摘要,摘要不能由客户端提交或修改。
 type TeacherEnvComponentDTO struct {
 	ID                       string                              `json:"id"`
-	PrimaryRuntime           contracts.CompositionRuntimeRef     `json:"primary_runtime"`
+	Runtimes                 []contracts.CompositionRuntimeRef   `json:"runtimes"`
+	WorkspaceRuntimeInstance string                              `json:"workspace_runtime_instance"`
 	Infra                    []contracts.CompositionComponentRef `json:"infra"`
 	Tools                    []contracts.CompositionComponentRef `json:"tools"`
 	Links                    []contracts.CompositionLink         `json:"links"`
@@ -92,13 +93,14 @@ type StudentComponentConfig struct {
 
 // StudentEnvComponent 描述学生可见的运行环境和工具。
 type StudentEnvComponent struct {
-	ID                string                              `json:"id"`
-	PrimaryRuntime    contracts.CompositionRuntimeRef     `json:"primary_runtime"`
-	Infra             []contracts.CompositionComponentRef `json:"infra"`
-	Tools             []contracts.CompositionComponentRef `json:"tools"`
-	Links             []contracts.CompositionLink         `json:"links"`
-	AccessProfile     contracts.SandboxAccessProfile      `json:"access_profile"`
-	CompositionDigest string                              `json:"composition_digest"`
+	ID                       string                              `json:"id"`
+	Runtimes                 []contracts.CompositionRuntimeRef   `json:"runtimes"`
+	WorkspaceRuntimeInstance string                              `json:"workspace_runtime_instance"`
+	Infra                    []contracts.CompositionComponentRef `json:"infra"`
+	Tools                    []contracts.CompositionComponentRef `json:"tools"`
+	Links                    []contracts.CompositionLink         `json:"links"`
+	AccessProfile            contracts.SandboxAccessProfile      `json:"access_profile"`
+	CompositionDigest        string                              `json:"composition_digest"`
 }
 
 // StudentSimComponent 描述学生可见的仿真包锁定版本。

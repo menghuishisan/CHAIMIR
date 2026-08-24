@@ -201,30 +201,30 @@ func (s *Service) ObserveContestSandboxToolAccess(ctx context.Context, access co
 }
 
 // DeployContestSandboxChain 执行当前竞赛成员可用的链部署。
-func (s *Service) DeployContestSandboxChain(ctx context.Context, sandboxID int64, payload map[string]any) (map[string]any, error) {
+func (s *Service) DeployContestSandboxChain(ctx context.Context, sandboxID int64, runtimeInstance string, payload map[string]any) (map[string]any, error) {
 	resolved, err := s.resolveContestSandboxAccess(ctx, sandboxID, contestSandboxCapabilityChain)
 	if err != nil {
 		return nil, err
 	}
-	return s.sandbox.ChainDeployForPrincipal(ctx, resolved.access, payload)
+	return s.sandbox.ChainDeployForPrincipal(ctx, resolved.access, runtimeInstance, payload)
 }
 
 // SendContestSandboxChainTx 执行当前竞赛成员可用的链交易。
-func (s *Service) SendContestSandboxChainTx(ctx context.Context, sandboxID int64, payload map[string]any) (map[string]any, error) {
+func (s *Service) SendContestSandboxChainTx(ctx context.Context, sandboxID int64, runtimeInstance string, payload map[string]any) (map[string]any, error) {
 	resolved, err := s.resolveContestSandboxAccess(ctx, sandboxID, contestSandboxCapabilityChain)
 	if err != nil {
 		return nil, err
 	}
-	return s.sandbox.ChainSendTxForPrincipal(ctx, resolved.access, payload)
+	return s.sandbox.ChainSendTxForPrincipal(ctx, resolved.access, runtimeInstance, payload)
 }
 
 // QueryContestSandboxChain 执行当前竞赛成员可用的链查询。
-func (s *Service) QueryContestSandboxChain(ctx context.Context, sandboxID int64, target string) (map[string]any, error) {
+func (s *Service) QueryContestSandboxChain(ctx context.Context, sandboxID int64, runtimeInstance, target string) (map[string]any, error) {
 	resolved, err := s.resolveContestSandboxAccess(ctx, sandboxID, contestSandboxCapabilityChain)
 	if err != nil {
 		return nil, err
 	}
-	return s.sandbox.ChainQueryForPrincipal(ctx, resolved.access, target)
+	return s.sandbox.ChainQueryForPrincipal(ctx, resolved.access, runtimeInstance, target)
 }
 
 // revokeContestSandboxGrants 在同一 M8 事务中使赛事全部活跃沙箱授权失效，并返回需关闭长连接的主体。

@@ -29,14 +29,10 @@ CREATE TABLE IF NOT EXISTS runtime_image (
 
 CREATE TABLE IF NOT EXISTS sandbox_composition (
     composition_digest VARCHAR(128) PRIMARY KEY,
-    runtime_id BIGINT NOT NULL REFERENCES runtime(id),
-    runtime_image_id BIGINT NOT NULL,
     snapshot JSONB NOT NULL,
     status SMALLINT NOT NULL DEFAULT 1 CHECK (status IN (1, 2)),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    FOREIGN KEY (runtime_image_id, runtime_id) REFERENCES runtime_image(id, runtime_id),
-    UNIQUE (runtime_image_id, composition_digest)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS sandbox_composition_prepull (
@@ -74,8 +70,6 @@ CREATE TABLE IF NOT EXISTS tool (
 CREATE TABLE IF NOT EXISTS sandbox (
     id BIGINT PRIMARY KEY,
     tenant_id BIGINT NOT NULL REFERENCES tenant(id),
-    runtime_id BIGINT NOT NULL REFERENCES runtime(id),
-    image_id BIGINT NOT NULL,
     namespace VARCHAR(128) NOT NULL UNIQUE,
     source_ref VARCHAR(128) NOT NULL,
     scope_ref VARCHAR(128) NOT NULL,
@@ -106,7 +100,6 @@ CREATE TABLE IF NOT EXISTS sandbox (
     CONSTRAINT chk_sandbox_shared_accounts_positive CHECK (0 < ALL(shared_account_ids)),
     CONSTRAINT chk_sandbox_shared_accounts_no_null CHECK (array_position(shared_account_ids, NULL) IS NULL),
     CONSTRAINT chk_sandbox_shared_accounts_exclude_owner CHECK (NOT (shared_account_ids @> ARRAY[owner_account_id])),
-    FOREIGN KEY (image_id, runtime_id) REFERENCES runtime_image(id, runtime_id),
     FOREIGN KEY (tenant_id, owner_account_id) REFERENCES account(tenant_id, id)
 );
 

@@ -606,9 +606,9 @@ func (a sandboxAPI) chainDeploy(c *gin.Context) {
 	var out map[string]any
 	var err error
 	if identity.IsSystem {
-		out, err = a.svc.ChainDeploy(c.Request.Context(), contracts.SandboxChainDeployRequest{TenantID: identity.TenantID, SandboxID: id, SourceRef: identity.SourceRef, Payload: req.Payload})
+		out, err = a.svc.ChainDeploy(c.Request.Context(), contracts.SandboxChainDeployRequest{TenantID: identity.TenantID, SandboxID: id, SourceRef: identity.SourceRef, RuntimeInstance: req.RuntimeInstance, Payload: req.Payload})
 	} else {
-		out, err = a.svc.ChainDeployForOwner(c.Request.Context(), identity.TenantID, identity.AccountID, id, req.Payload)
+		out, err = a.svc.ChainDeployForOwner(c.Request.Context(), identity.TenantID, identity.AccountID, id, req.RuntimeInstance, req.Payload)
 	}
 	httpx.Write(c, out, err)
 }
@@ -630,9 +630,9 @@ func (a sandboxAPI) chainSendTx(c *gin.Context) {
 	var out map[string]any
 	var err error
 	if identity.IsSystem {
-		out, err = a.svc.ChainSendTx(c.Request.Context(), contracts.SandboxChainTxRequest{TenantID: identity.TenantID, SandboxID: id, SourceRef: identity.SourceRef, Payload: req.Payload})
+		out, err = a.svc.ChainSendTx(c.Request.Context(), contracts.SandboxChainTxRequest{TenantID: identity.TenantID, SandboxID: id, SourceRef: identity.SourceRef, RuntimeInstance: req.RuntimeInstance, Payload: req.Payload})
 	} else {
-		out, err = a.svc.ChainSendTxForOwner(c.Request.Context(), identity.TenantID, identity.AccountID, id, req.Payload)
+		out, err = a.svc.ChainSendTxForOwner(c.Request.Context(), identity.TenantID, identity.AccountID, id, req.RuntimeInstance, req.Payload)
 	}
 	httpx.Write(c, out, err)
 }
@@ -650,9 +650,9 @@ func (a sandboxAPI) chainQuery(c *gin.Context) {
 	var out map[string]any
 	var err error
 	if identity.IsSystem {
-		out, err = a.svc.ChainQuery(c.Request.Context(), contracts.SandboxChainQueryRequest{TenantID: identity.TenantID, SandboxID: id, SourceRef: identity.SourceRef, Target: c.Query("target")})
+		out, err = a.svc.ChainQuery(c.Request.Context(), contracts.SandboxChainQueryRequest{TenantID: identity.TenantID, SandboxID: id, SourceRef: identity.SourceRef, RuntimeInstance: c.Query("runtime_instance"), Target: c.Query("target")})
 	} else {
-		out, err = a.svc.ChainQueryForOwner(c.Request.Context(), identity.TenantID, identity.AccountID, id, c.Query("target"))
+		out, err = a.svc.ChainQueryForOwner(c.Request.Context(), identity.TenantID, identity.AccountID, id, c.Query("runtime_instance"), c.Query("target"))
 	}
 	httpx.Write(c, out, err)
 }
@@ -669,7 +669,7 @@ func (a sandboxAPI) chainReset(c *gin.Context) {
 	}
 	var err error
 	if identity.IsSystem {
-		err = a.svc.ChainReset(c.Request.Context(), contracts.SandboxChainResetRequest{TenantID: identity.TenantID, SandboxID: id, SourceRef: identity.SourceRef})
+		err = a.svc.ChainReset(c.Request.Context(), contracts.SandboxChainResetRequest{TenantID: identity.TenantID, SandboxID: id, SourceRef: identity.SourceRef, RuntimeInstance: c.Query("runtime_instance")})
 	} else {
 		err = apperr.ErrForbidden
 	}

@@ -283,9 +283,10 @@ export class ContestApi {
   /** 查询竞赛授权沙箱链状态。 */
   async sandboxChainQuery(
     sandboxId: string,
+    runtimeInstance: string,
     target: string
   ): Promise<ContestSandboxChainResponse> {
-    return this.client.get(`/contest/sandboxes/${encodePathSegment(sandboxId)}/chain/query`, { target })
+    return this.client.get(`/contest/sandboxes/${encodePathSegment(sandboxId)}/chain/query`, { runtime_instance: runtimeInstance, target })
   }
 
   /** 获取竞赛授权沙箱网页工具代理地址。 */

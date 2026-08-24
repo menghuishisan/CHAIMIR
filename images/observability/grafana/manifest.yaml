@@ -1,4 +1,4 @@
-﻿# 本文件声明 observability/grafana 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
+# 本文件声明 observability/grafana 上游固定镜像的来源、配置、端口、数据卷和生产门禁。
 schema_version: 1
 category: observability
 name: grafana
@@ -45,8 +45,6 @@ ports:
     protocol: TCP
     expose: gateway
     purpose: Grafana UI through authenticated ingress
-local_dev:
-  host_mappings: []
 security:
   run_as_non_root: true
   read_only_root_filesystem: false
@@ -92,6 +90,6 @@ supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
-  pull_by_digest_in_production: true
+  pull_by_digest: true
   deployable: false
   block_reason: "当前 Wolfi 仓库只提供 grafana-13.0=13.0.2-r1;Trivy 要求修复版本 13.0.3-r3 或 13.0.4-r2,上游安全包尚未发布,因此在可验证修复包发布前禁止部署。"

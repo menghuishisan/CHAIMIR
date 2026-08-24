@@ -121,10 +121,15 @@ func validateJudgerRequest(req JudgerRequest) (JudgerExecutionSpec, error) {
 		return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
 	}
 	if judgerNeedsSandbox(req.Type, req.RuntimeRequired) {
-		if strings.TrimSpace(req.Composition.ID) == "" || strings.TrimSpace(req.Composition.PrimaryRuntime.Code) == "" || strings.TrimSpace(req.Composition.PrimaryRuntime.ImageVersion) == "" || req.Composition.AccessProfile != contracts.SandboxAccessJudgePrivate {
+		if strings.TrimSpace(req.Composition.ID) == "" || len(req.Composition.Runtimes) == 0 || req.Composition.AccessProfile != contracts.SandboxAccessJudgePrivate {
 			return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
 		}
-	} else if strings.TrimSpace(req.Composition.ID) != "" || strings.TrimSpace(req.Composition.PrimaryRuntime.Code) != "" || strings.TrimSpace(req.Composition.PrimaryRuntime.ImageVersion) != "" {
+		for _, runtime := range req.Composition.Runtimes {
+			if strings.TrimSpace(runtime.InstanceCode) == "" || strings.TrimSpace(runtime.Code) == "" || strings.TrimSpace(runtime.ImageVersion) == "" {
+				return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
+			}
+		}
+	} else if strings.TrimSpace(req.Composition.ID) != "" || len(req.Composition.Runtimes) != 0 {
 		return JudgerExecutionSpec{}, apperr.ErrJudgerConfigInvalid
 	}
 	return parseJudgerExecutionSpec(req.ResourceSpec, req.Type, req.RuntimeRequired)

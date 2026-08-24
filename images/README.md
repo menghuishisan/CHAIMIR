@@ -45,11 +45,11 @@ CI 的后端、前端和通用镜像流水线在 Trivy 扫描、SBOM、推送 Ha
 powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 -Scope all -Registry registry.chaimir.io
 ```
 
-脚本会先一次性读取本机全部 digest 引用;本地已经存在目标不可变 digest 时直接复用,不会再次访问 registry。缺失镜像默认最多尝试 3 次。单次 `docker pull` 失败后,若本地原本没有该 digest 引用,会执行 `docker image rm <ref>` 清理失败残留后重试;若本地已存在该 digest,则保留本地可用镜像,避免瞬时 registry 错误破坏已预热结果。当前镜像全部重试失败后立即停止并返回非 0,不得继续拉取后续镜像。生产不应启用 `-NoCleanupFailedPull`,该开关仅用于诊断 Docker 本地状态。
+脚本只接受正式或候选 digest 锁,并按不可变引用拉取。目标 digest 已存在时复用现有对象;缺失镜像最多重试 3 次。单次 `docker pull` 失败后,若本次没有产生该引用,立即清理失败残留后重试;已存在的可用 digest 不被破坏。全部重试失败立即返回非 0,不得回退到 tag 或继续静默执行。
 
 ## 构建与候选锁
 
-本地完整功能测试、预发布和生产必须走同一套 Harbor + digest lock 机制。构建类镜像不得先落到 `local`、`chaimir/*:dev` 或其他本地命名空间再转换;构建命令必须直接使用与生产一致的 Harbor 分类命名空间,并从 Harbor 返回值生成候选锁:
+完整功能测试、预发布和生产必须走同一套 Harbor + digest lock 机制。构建类镜像不得先落到 `local`、`chaimir/*:dev` 或其他临时命名空间再转换;构建命令必须直接使用与生产一致的 Harbor 分类命名空间,并从 Harbor 返回值生成候选锁:
 
 完整镜像包、首次环境或发布验收使用下面的全量流程。日常源码修改不需要重复处理全部镜像,但不能因此降低被修改镜像的任何门禁。
 
@@ -59,13 +59,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/build-images.ps1 `
   -Tag $env:GIT_COMMIT `
   -DigestLock .tmp/backend-functional-test/evidence/candidate-image-digests.lock `
   -DigestLockOut .tmp/backend-functional-test/evidence/candidate-image-digests.lock `
-  -Platform linux/amd64 `
-  -Push
+  -Platform linux/amd64
 ```
 
-`-Push` 使用 `docker buildx build --push` 将镜像直接推入 `registry.chaimir.io`,并把 Registry 解析出的 digest 写入 `-DigestLockOut`。`-DigestLock` 同时作为构建依赖输入:例如 `base/judge-min` 依赖 `base/go-builder` 时,必须先让 `base/go-builder` 写入同一候选锁,后续镜像才能按 `registry.chaimir.io/base/go-builder@sha256:...` 构建。
+脚本固定使用 `docker buildx build --push` 将镜像直接推入 `registry.chaimir.io`,并把 Registry 解析出的 digest 写入 `-DigestLockOut`。`-DigestLock` 同时作为构建依赖输入:例如 `base/judge-min` 依赖 `base/go-builder` 时,必须先让 `base/go-builder` 写入同一候选锁,后续镜像才能按 `registry.chaimir.io/base/go-builder@sha256:...` 构建。
 
-构建脚本会根据 Dockerfile 中的受控镜像参数做内部依赖拓扑排序;本机已有同一基础镜像 digest 时不会重复拉取。网络代理或 registry mirror 只能配置在 Docker Desktop、BuildKit 或 CI runner 传输层,脚本和仓库配置不维护本地专用镜像源。
+构建脚本会根据 Dockerfile 中的受控镜像参数做内部依赖拓扑排序。网络代理或 registry mirror 只能配置在 Docker Desktop、BuildKit 或 CI runner 传输层,脚本和仓库配置不维护本地专用镜像源。
 
 候选锁只能用于回拉和安全校验,不能直接作为正式发布锁。完成构建后必须用同一拉取脚本按 digest 拉回:
 
@@ -76,7 +75,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
   -DigestLock .tmp/backend-functional-test/evidence/candidate-image-digests.lock
 ```
 
-拉回后的镜像必须经过统一 Trivy 配置的 HIGH/CRITICAL 阻断扫描、CycloneDX SBOM 生成、Cosign 镜像签名、SBOM 证明和双重验证。只有全部镜像通过后,候选锁才能晋升为正式 `images/image-digests.lock` 或生成 `PLATFORM_IMAGE_ATTESTATIONS_JSON`。平台构建镜像只允许通过 `images/build-images.ps1 -Push` 推送并生成候选锁,拉取脚本不承担构建产物发布职责。
+拉回后的镜像必须经过统一 Trivy 配置的 HIGH/CRITICAL 阻断扫描、CycloneDX SBOM 生成、Cosign 镜像签名、SBOM 证明和双重验证。只有全部镜像通过后,候选锁才能晋升为正式 `images/image-digests.lock` 或生成 `PLATFORM_IMAGE_ATTESTATIONS_JSON`。平台构建镜像只允许通过 `images/build-images.ps1` 推送并生成候选锁,拉取脚本不承担构建产物发布职责。
 
 ### 日常源码迭代的选择性刷新
 
@@ -89,7 +88,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
 
 选择性证明命令必须带 `-Images`、`-NoEnvWrite` 和 `-DigestFragmentsDir`;脚本只有在选定集合全部通过时才生成 `verified-images.lock`。再用 `images/sync-image-metadata.ps1 -FragmentsPath` 增量晋升正式锁、`deploy/base` 与资源所属 component 的镜像引用、`deploy/config/chaimir.env` 和存在时的环境 `backend/.env` 准入证明。未选镜像继续使用正式锁中的原 digest,不重复构建、拉取、扫描或签名。完成晋升后执行 `make dev-refresh`,检查只有受影响的工作负载滚动更新。
 
-`images/build-images.ps1 -Push` 成功后会自动调用 `images/cleanup-local-images.ps1 -Apply`:只清理 `e2e-*`、`candidate-*`、`refresh-*`、`local-*` 临时标签和没有正式/候选 digest、没有容器引用的悬空层。正式锁、当前候选锁、运行中或已保留容器、Harbor/Trivy/Cosign 状态不会删除。清理器会在删除后逐项执行 `docker image inspect image@digest`,任一正式或候选引用不可访问即失败。
+`images/build-images.ps1` 成功后会自动调用 `images/cleanup-local-images.ps1 -Apply`:只清理 `e2e-*`、`candidate-*`、`refresh-*`、`local-*`、`refactor-*`、`prepull-*` 临时标签和没有正式/候选 digest、没有容器引用的悬空层。正式锁、当前候选锁、运行中或已保留容器、Harbor/Trivy/Cosign 状态不会删除;清理器不会自动下载恢复引用。
 
 无需密钥的静态门禁统一运行 `images/validate-image-metadata.ps1`:它校验目录/category/name、Dockerfile/构建路径、不可变基础镜像和正式锁现有条目,但不会把尚待流水线首次晋升的新镜像误判为失败。
 

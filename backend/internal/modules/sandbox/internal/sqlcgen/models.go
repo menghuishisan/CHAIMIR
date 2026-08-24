@@ -888,8 +888,6 @@ type RuntimeImage struct {
 type Sandbox struct {
 	ID                  int64              `json:"id"`
 	TenantID            int64              `json:"tenant_id"`
-	RuntimeID           int64              `json:"runtime_id"`
-	ImageID             int64              `json:"image_id"`
 	Namespace           string             `json:"namespace"`
 	SourceRef           string             `json:"source_ref"`
 	ScopeRef            string             `json:"scope_ref"`
@@ -920,8 +918,6 @@ type Sandbox struct {
 
 type SandboxComposition struct {
 	CompositionDigest string             `json:"composition_digest"`
-	RuntimeID         int64              `json:"runtime_id"`
-	RuntimeImageID    int64              `json:"runtime_image_id"`
 	Snapshot          []byte             `json:"snapshot"`
 	Status            int16              `json:"status"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`

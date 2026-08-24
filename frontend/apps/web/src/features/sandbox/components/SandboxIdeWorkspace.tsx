@@ -46,6 +46,7 @@ import {
   Button,
   ChainProgress,
   Input,
+  Select,
   Tabs,
   TabsContent,
   TabsList,
@@ -120,7 +121,7 @@ export interface SandboxWorkspaceApi {
   ): Promise<SandboxCommandToolRunResponse>
   chainDeploy(instanceId: string, data: SandboxChainRequest): Promise<SandboxChainResponse>
   chainSendTx(instanceId: string, data: SandboxChainRequest): Promise<SandboxChainResponse>
-  chainQuery(instanceId: string, target: string): Promise<SandboxChainResponse>
+  chainQuery(instanceId: string, runtimeInstance: string, target: string): Promise<SandboxChainResponse>
   getToolProxyUrl(
     instanceId: string,
     toolCode: string,
@@ -332,7 +333,7 @@ export function SandboxIdeWorkspace({ sandboxId, onSaved, workspaceApi }: Sandbo
 
       {capabilities.chain_operations.length > 0 ? (
         <TabsContent value="chain" className="min-h-0 flex-1">
-          <ChainPanel sandboxId={sandboxId} workspaceApi={workspace} operations={capabilities.chain_operations} />
+          <ChainPanel sandboxId={sandboxId} workspaceApi={workspace} operations={capabilities.chain_operations} runtimeInstances={instance.runtime_instances} />
         </TabsContent>
       ) : null}
 
@@ -693,6 +694,7 @@ interface ChainPanelProps {
   sandboxId: string
   workspaceApi: SandboxWorkspaceApi
   operations: SandboxChainOperation[]
+  runtimeInstances: string[]
 }
 
 /**
@@ -701,8 +703,9 @@ interface ChainPanelProps {
  * 故用文档编辑器并在本地校验合法性),查询只要一个目标标识。响应原样呈现 ——
  * 它是链上事实,不该被前端改写。
  */
-function ChainPanel({ sandboxId, workspaceApi, operations }: ChainPanelProps) {
+function ChainPanel({ sandboxId, workspaceApi, operations, runtimeInstances }: ChainPanelProps) {
   const [operation, setOperation] = useState<SandboxChainOperation>(operations[0])
+  const [runtimeInstance, setRuntimeInstance] = useState(runtimeInstances[0] ?? '')
   const [payloadText, setPayloadText] = useState('{\n  \n}')
   const [target, setTarget] = useState('')
   const [result, setResult] = useState<string>()
@@ -719,7 +722,11 @@ function ChainPanel({ sandboxId, workspaceApi, operations }: ChainPanelProps) {
           setPanelError('请填写要查询的目标,例如合约地址或状态键。')
           return
         }
-        const response = await workspaceApi.chainQuery(sandboxId, target.trim())
+        if (runtimeInstance === '') {
+          setPanelError('当前环境没有可用的运行时实例。')
+          return
+        }
+        const response = await workspaceApi.chainQuery(sandboxId, runtimeInstance, target.trim())
         setResult(JSON.stringify(response, null, 2))
         return
       }
@@ -739,19 +746,27 @@ function ChainPanel({ sandboxId, workspaceApi, operations }: ChainPanelProps) {
 
       const response =
         operation === 'deploy'
-          ? await workspaceApi.chainDeploy(sandboxId, { payload })
-          : await workspaceApi.chainSendTx(sandboxId, { payload })
+          ? await workspaceApi.chainDeploy(sandboxId, { runtime_instance: runtimeInstance, payload })
+          : await workspaceApi.chainSendTx(sandboxId, { runtime_instance: runtimeInstance, payload })
       setResult(JSON.stringify(response, null, 2))
     } catch (error) {
       setPanelError(userFacingErrorMessage(error, '这次链操作没有成功,请检查参数后重试。'))
     } finally {
       setBusy(false)
     }
-  }, [operation, payloadText, sandboxId, target, workspaceApi])
+  }, [operation, payloadText, runtimeInstance, sandboxId, target, workspaceApi])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
       <div className="flex flex-wrap items-center gap-2">
+        <Select
+          id={`${sandboxId}-chain-runtime`}
+          options={runtimeInstances.map((item) => ({ value: item, label: item }))}
+          value={runtimeInstance}
+          placeholder="选择运行时实例"
+          disabled={runtimeInstances.length === 0}
+          onValueChange={setRuntimeInstance}
+        />
         {operations.map((item) => (
           <Button
             key={item}

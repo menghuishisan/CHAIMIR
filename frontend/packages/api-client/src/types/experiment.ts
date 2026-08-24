@@ -65,7 +65,8 @@ export interface StudentComponentConfig {
  */
 export interface StudentEnvComponent {
   id: string
-  primary_runtime: CompositionRuntimeRef
+  runtimes: CompositionRuntimeRef[]
+  workspace_runtime_instance: string
   infra: CompositionComponentRef[]
   tools: CompositionComponentRef[]
   links: CompositionLink[]
@@ -114,12 +115,13 @@ export interface ComponentConfigRequest {
 }
 
 /**
- * EnvComponentRequest 是教师声明的一个环境:主运行时 + 组件 + 连接 + 访问边界 + 生命周期。
+ * EnvComponentRequest 是教师声明的一个环境:命名 runtime 实例 + 组件 + 连接 + 访问边界 + 生命周期。
  * 镜像地址、digest、启动命令与安全上下文都由服务端编译产出,不在这里提交(§7.5)。
  */
 export interface EnvComponentRequest {
   id: string
-  primary_runtime: CompositionRuntimeRef
+  runtimes: CompositionRuntimeRef[]
+  workspace_runtime_instance: string
   infra: CompositionComponentRef[]
   tools: CompositionComponentRef[]
   links: CompositionLink[]

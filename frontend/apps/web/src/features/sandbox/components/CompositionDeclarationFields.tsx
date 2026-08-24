@@ -1,4 +1,4 @@
-// CompositionDeclarationFields 统一编排页里的组合声明表单:主运行时、镜像版本、学生工具与基础设施。
+// CompositionDeclarationFields 统一编排页里的组合声明表单:命名 runtime 实例、镜像版本、学生工具与基础设施。
 //
 // 四个编排入口(实验环境、题库实操题、漏洞题预验证、判题私有环境)共用本组件,
 // 不各写一遍取数、下拉与勾选逻辑。
@@ -7,8 +7,8 @@
 // 状态门禁在服务端做,故这里不按状态二次过滤,也不在前端算运行时与工具的兼容性 ——
 // 兼容性由服务端编译器判定并在保存时回报(对齐清单 §6.3)。
 
-import { Server } from 'lucide-react'
-import { Callout, Checkbox, FormField, Select, Skeleton } from '@chaimir/ui'
+import { Plus, Server, Trash2 } from 'lucide-react'
+import { Button, Callout, Checkbox, FormField, Input, Select, Skeleton } from '@chaimir/ui'
 import type { SandboxCatalogTool } from '@chaimir/api-client'
 import { ResourceState } from '../../../components/ResourceState'
 import { sandboxToolKindLabel } from '../../../utils/labels/sandbox'
@@ -38,7 +38,6 @@ export function CompositionDeclarationFields({
   derivedInfraCodes = [],
 }: CompositionDeclarationFieldsProps) {
   const catalog = useOrchestrationCatalog()
-  const imageOptions = catalog.imageOptions(value.runtimeCode)
 
   return (
     <ResourceState
@@ -50,40 +49,67 @@ export function CompositionDeclarationFields({
     >
       {() => (
         <div className="flex flex-col gap-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <FormField label="运行时" htmlFor={`${idPrefix}-runtime`} required>
-              <Select
-                id={`${idPrefix}-runtime`}
-                options={catalog.runtimeOptions}
-                value={value.runtimeCode}
-                placeholder="选择运行时"
-                onValueChange={(runtimeCode) =>
-                  onChange({ runtimeCode, imageVersion: '', toolCodes: [], infraCodes: [] })
-                }
-              />
-            </FormField>
-            <FormField
-              label="镜像版本"
-              htmlFor={`${idPrefix}-image`}
-              required
-              helper="发布后按这个版本固定,平台换镜像不会改变已发布内容"
-            >
-              <Select
-                id={`${idPrefix}-image`}
-                options={imageOptions}
-                value={value.imageVersion}
-                placeholder={
-                  value.runtimeCode === ''
-                    ? '请先选择运行时'
-                    : imageOptions.length > 0
-                      ? '选择版本'
-                      : '该运行时暂无可用版本'
-                }
-                disabled={imageOptions.length === 0}
-                onValueChange={(imageVersion) => onChange({ ...value, imageVersion })}
-              />
-            </FormField>
-          </div>
+          <FormField label="运行时实例" required helper="每个实例需要唯一别名,跨链连接和链操作都按别名定位。">
+            <div className="flex flex-col gap-3">
+              {value.runtimes.map((runtime, index) => {
+                const imageOptions = catalog.imageOptions(runtime.runtimeCode)
+                return (
+                  <div key={`${idPrefix}-runtime-${index}`} className="grid gap-3 rounded border border-line p-3 sm:grid-cols-4 sm:items-end">
+                    <FormField label="实例别名" htmlFor={`${idPrefix}-runtime-${index}-instance`} required>
+                      <Input
+                        id={`${idPrefix}-runtime-${index}-instance`}
+                        value={runtime.instanceCode}
+                        placeholder="source-chain"
+                        onChange={(event) => onChange({
+                          ...value,
+                          runtimes: value.runtimes.map((item, itemIndex) => itemIndex === index ? { ...item, instanceCode: event.target.value } : item),
+                          workspaceRuntimeInstance: runtime.instanceCode === value.workspaceRuntimeInstance ? event.target.value : value.workspaceRuntimeInstance,
+                        })}
+                      />
+                    </FormField>
+                    <FormField label="运行时" htmlFor={`${idPrefix}-runtime-${index}-code`} required>
+                      <Select
+                        id={`${idPrefix}-runtime-${index}-code`}
+                        options={catalog.runtimeOptions}
+                        value={runtime.runtimeCode}
+                        placeholder="选择运行时"
+                        onValueChange={(runtimeCode) => onChange({ ...value, runtimes: value.runtimes.map((item, itemIndex) => itemIndex === index ? { ...item, runtimeCode, imageVersion: '' } : item) })}
+                      />
+                    </FormField>
+                    <FormField label="镜像版本" htmlFor={`${idPrefix}-runtime-${index}-image`} required>
+                      <Select
+                        id={`${idPrefix}-runtime-${index}-image`}
+                        options={imageOptions}
+                        value={runtime.imageVersion}
+                        placeholder={runtime.runtimeCode === '' ? '请先选择运行时' : imageOptions.length > 0 ? '选择版本' : '该运行时暂无可用版本'}
+                        disabled={imageOptions.length === 0}
+                        onValueChange={(imageVersion) => onChange({ ...value, runtimes: value.runtimes.map((item, itemIndex) => itemIndex === index ? { ...item, imageVersion } : item) })}
+                      />
+                    </FormField>
+                    <Button type="button" variant="ghost" size="sm" aria-label={`移除运行时实例 ${runtime.instanceCode || index + 1}`} title="移除运行时实例" disabled={value.runtimes.length <= 1} onClick={() => {
+                      const runtimes = value.runtimes.filter((_, itemIndex) => itemIndex !== index)
+                      onChange({ ...value, runtimes, workspaceRuntimeInstance: runtime.instanceCode === value.workspaceRuntimeInstance ? '' : value.workspaceRuntimeInstance })
+                    }}>
+                      <Trash2 size={16} aria-hidden="true" />
+                    </Button>
+                  </div>
+                )
+              })}
+              <Button type="button" variant="outline" size="sm" leftIcon={Plus} onClick={() => onChange({ ...value, runtimes: [...value.runtimes, { instanceCode: `chain-${value.runtimes.length + 1}`, runtimeCode: '', imageVersion: '' }] })}>
+                添加运行时实例
+              </Button>
+            </div>
+          </FormField>
+
+          <FormField label="工作区运行时" required helper="文件、终端和初始化由这个实例的工作区能力承载。">
+            <Select
+              id={`${idPrefix}-workspace-runtime`}
+              options={value.runtimes.filter((runtime) => runtime.instanceCode.trim() !== '').map((runtime) => ({ label: runtime.instanceCode, value: runtime.instanceCode }))}
+              value={value.workspaceRuntimeInstance}
+              placeholder="选择工作区运行时"
+              onValueChange={(workspaceRuntimeInstance) => onChange({ ...value, workspaceRuntimeInstance })}
+            />
+          </FormField>
 
           <FormField label="工具" helper={toolsHelper}>
             <ComponentChecklist

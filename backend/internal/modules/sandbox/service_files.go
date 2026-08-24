@@ -367,12 +367,8 @@ func (s *Service) sandboxRuntime(ctx context.Context, tenantID, sandboxID int64)
 	}); err != nil {
 		return Sandbox{}, Runtime{}, err
 	}
-	var runtime Runtime
-	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		var err error
-		runtime, err = tx.GetRuntimeByID(ctx, sb.RuntimeID)
-		return err
-	}); err != nil {
+	runtime, _, err := s.workspaceRuntimeForSandbox(ctx, sb)
+	if err != nil {
 		return Sandbox{}, Runtime{}, apperr.ErrSandboxRuntimeNotFound.WithCause(err)
 	}
 	return sb, runtime, nil
@@ -403,12 +399,8 @@ func (s *Service) sandboxRuntimeForOwner(ctx context.Context, tenantID, accountI
 	if err != nil {
 		return Sandbox{}, Runtime{}, err
 	}
-	var runtime Runtime
-	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		var err error
-		runtime, err = tx.GetRuntimeByID(ctx, sb.RuntimeID)
-		return err
-	}); err != nil {
+	runtime, _, err := s.workspaceRuntimeForSandbox(ctx, sb)
+	if err != nil {
 		return Sandbox{}, Runtime{}, apperr.ErrSandboxRuntimeNotFound.WithCause(err)
 	}
 	return sb, runtime, nil

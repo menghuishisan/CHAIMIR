@@ -44,10 +44,11 @@ type ComponentConfigRequest struct {
 	Stages      []StageConfig         `json:"stages"`
 }
 
-// EnvComponentRequest 描述教师选择的主运行时、工具和连接,不接受服务端摘要字段。
+// EnvComponentRequest 描述教师选择的命名 runtime 实例、工具和连接,不接受服务端摘要字段。
 type EnvComponentRequest struct {
 	ID                       string                              `json:"id"`
-	PrimaryRuntime           contracts.CompositionRuntimeRef     `json:"primary_runtime"`
+	Runtimes                 []contracts.CompositionRuntimeRef   `json:"runtimes"`
+	WorkspaceRuntimeInstance string                              `json:"workspace_runtime_instance"`
 	Infra                    []contracts.CompositionComponentRef `json:"infra"`
 	Tools                    []contracts.CompositionComponentRef `json:"tools"`
 	Links                    []contracts.CompositionLink         `json:"links"`

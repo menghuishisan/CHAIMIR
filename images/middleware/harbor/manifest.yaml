@@ -71,8 +71,6 @@ ports:
     protocol: TCP
     expose: gateway
     purpose: Harbor portal/API behind operator ingress
-local_dev:
-  host_mappings: []
 security:
   run_as_non_root: true
   read_only_root_filesystem: false
@@ -115,6 +113,6 @@ supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
-  pull_by_digest_in_production: true
+  pull_by_digest: true
   deployable: false
   block_reason: "2026-06-22 使用 Trivy 0.71.2 扫描 Harbor v2.15.1 官方组件集仍存在 56 个 CRITICAL 与 389 个 HIGH,其中 436 个带 fixed version;在官方干净版本、源码重建或替代仓库方案通过门禁前不得部署。"
