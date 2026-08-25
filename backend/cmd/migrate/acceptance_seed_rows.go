@@ -27,8 +27,8 @@ type acceptanceImageAttestation struct {
 }
 
 const (
-	acceptanceInitCodeRef   = "minio://chaimir-code/910000000000000001/sandbox/init/lab-reentrancy-foundry/workspace.tar"
-	acceptanceInitScriptRef = "minio://chaimir-code/910000000000000001/sandbox/init/lab-reentrancy-foundry/init.sh"
+	acceptanceInitCodeRef   = "s3://chaimir-code/910000000000000001/sandbox/init/lab-reentrancy-foundry/workspace.tar"
+	acceptanceInitScriptRef = "s3://chaimir-code/910000000000000001/sandbox/init/lab-reentrancy-foundry/init.sh"
 
 	// 验收仿真会话挂在这个内置场景上,它由 sim.SyncBuiltinPackages 入库,此处只按 code 定位。
 	acceptanceSimPackageCode    = "builtin__runtime-gas-metering"
@@ -327,7 +327,7 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
 		"judger_code":                 "testcase-evm",
 		"judger_type":                 1,
 		"judger_version":              judgerImageURL,
-		"suite_ref":                   "minio://chaimir-code/910000000000000001/judge/suites/ctf-reentrancy-vault/public-regression.tar.gz",
+		"suite_ref":                   "s3://chaimir-code/910000000000000001/judge/suites/ctf-reentrancy-vault/public-regression.tar.gz",
 		"suite_archive_name":          "public-regression.tar.gz",
 		"version_hash":                "acceptance-version-hash",
 		"composition_snapshot":        judgeSnapshot,
@@ -340,7 +340,7 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
 		"max_score":                   100,
 		"expectation":                 map[string]any{"public": true},
 		"sanitized_code_archive_name": "submission.zip",
-		"sanitized_code_archive_ref":  "minio://chaimir-code/acceptance/submissions/S20260001/reentrancy-fixed.zip",
+		"sanitized_code_archive_ref":  "s3://chaimir-code/acceptance/submissions/S20260001/reentrancy-fixed.zip",
 	})
 	if err != nil {
 		return fmt.Errorf("编码判题输入快照失败: %w", err)
@@ -356,7 +356,7 @@ INSERT INTO judge_task (
 	target_sandbox_ref, priority, status, retry_count, max_retries
 ) VALUES (
 	$1,$2,$3,'teaching:2026:submission-item:910000000000005041-910000000000005032',$4,$5,'teaching',$6,'ctf-reentrancy-vault:1.0.0',
-	'minio://chaimir-code/acceptance/submissions/S20260001/reentrancy-fixed.zip','6d0f2d2a4f7a7b7b6b0e0e9f7c8a1c2d3e4f506172839405162738495a6b7c8d',
+	's3://chaimir-code/acceptance/submissions/S20260001/reentrancy-fixed.zip','6d0f2d2a4f7a7b7b6b0e0e9f7c8a1c2d3e4f506172839405162738495a6b7c8d',
 	$7,2,'sandbox:acceptance:reentrancy-a',5,$8,0,1
 )
 ON CONFLICT (tenant_id, source_ref, problem_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_id=EXCLUDED.submitter_id, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
@@ -396,7 +396,7 @@ INSERT INTO judge_task (
 	target_sandbox_ref, priority, status, retry_count, max_retries
 ) VALUES (
 	$1,$2,$3,'contest:2026:battle:acceptance-001',$4,0,'contest',$5,'battle-reentrancy-vault:1.0.0',
-	'minio://chaimir-code/acceptance/battle/replay-a.zip',$6,$7,1,'sandbox:acceptance-battle-001',5,$8,0,1
+	's3://chaimir-code/acceptance/battle/replay-a.zip',$6,$7,1,'sandbox:acceptance-battle-001',5,$8,0,1
 )
 ON CONFLICT (tenant_id, source_ref, problem_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_id=EXCLUDED.submitter_id, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
 		acceptanceIDs.BattleJudgeTask, acceptanceIDs.TenantID, acceptanceIDs.JudgerOnchain, acceptanceIDs.TeacherMain, acceptanceIDs.StudentA, strings.Repeat("a", 64), battleSnapshot, contracts.JudgeTaskStatusDone); err != nil {
@@ -435,7 +435,7 @@ func seedContentRows(ctx context.Context, tx pgx.Tx) error {
 		"flag_rule":  "链上余额断言通过后计分",
 		"judge_config": map[string]any{
 			"judger_code": "testcase-evm",
-			"suite_ref":   "minio://chaimir-code/910000000000000001/judge/suites/ctf-reentrancy-vault/public-regression.tar.gz",
+			"suite_ref":   "s3://chaimir-code/910000000000000001/judge/suites/ctf-reentrancy-vault/public-regression.tar.gz",
 			"max_score":   100,
 			"expectation": map[string]any{"public": true, "flag_input_key": "answer"},
 		},
@@ -532,7 +532,7 @@ ON CONFLICT (item_id) DO UPDATE SET body=EXCLUDED.body, sensitive_fields=EXCLUDE
 }
 
 // seedTeachingRows 写入课程、课节、作业、提交、讨论和课程成绩。
-// 课程不写 cover_ref:种子只写库不往 MinIO 放字节,编个引用会让封面「有引用但取不到」;
+// 课程不写 cover_ref:种子只写库不往 ObjectStorage 放字节,编个引用会让封面「有引用但取不到」;
 // 留空则走设计好的纸材质回落,真实封面在验收时经上传入口产生(同 seedAcceptanceTenant 的说明)。
 func seedTeachingRows(ctx context.Context, tx pgx.Tx) error {
 	schedule, err := jsonb(map[string]any{"items": []map[string]any{{"weekday": 2, "time": "13:30-15:05", "room": "链安实验室 A302"}}})
@@ -992,14 +992,14 @@ ON CONFLICT (tenant_id, team_id, member_tenant_id, account_id) DO UPDATE SET is_
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO battle_entry (id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at)
-VALUES ($1,$2,$3,$4,$5,2,'minio://chaimir-code/acceptance/battle/replay-a.zip',$6,1,true,now() - interval '20 minutes')
+VALUES ($1,$2,$3,$4,$5,2,'s3://chaimir-code/acceptance/battle/replay-a.zip',$6,1,true,now() - interval '20 minutes')
 ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUDED.problem_id, team_id=EXCLUDED.team_id, role=EXCLUDED.role, artifact_ref=EXCLUDED.artifact_ref, artifact_hash=EXCLUDED.artifact_hash, version_no=EXCLUDED.version_no, is_active=EXCLUDED.is_active, submitted_at=EXCLUDED.submitted_at`,
 		acceptanceIDs.BattleEntryA, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleTeamA, strings.Repeat("a", 64)); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO battle_entry (id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at)
-VALUES ($1,$2,$3,$4,$5,1,'minio://chaimir-code/acceptance/battle/replay-b.zip',$6,1,true,now() - interval '19 minutes')
+VALUES ($1,$2,$3,$4,$5,1,'s3://chaimir-code/acceptance/battle/replay-b.zip',$6,1,true,now() - interval '19 minutes')
 ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUDED.problem_id, team_id=EXCLUDED.team_id, role=EXCLUDED.role, artifact_ref=EXCLUDED.artifact_ref, artifact_hash=EXCLUDED.artifact_hash, version_no=EXCLUDED.version_no, is_active=EXCLUDED.is_active, submitted_at=EXCLUDED.submitted_at`,
 		acceptanceIDs.BattleEntryB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleTeamB, strings.Repeat("b", 64)); err != nil {
 		return err
@@ -1258,7 +1258,7 @@ INSERT INTO transfer_task (
 	artifact_content_type, artifact_file_name, completed_at
 ) VALUES (
 	$1,$2,$3,'export','audit-log-export','succeeded','text/csv','audit-log-acceptance.csv',
-	1,3,'','minio://chaimir-report/910000000000000001/transfer/export/910000000000013001/audit-log-acceptance.csv',2048,
+	1,3,'','s3://chaimir-report/910000000000000001/transfer/export/910000000000013001/audit-log-acceptance.csv',2048,
 	'text/csv','audit-log-acceptance.csv',now()
 )
 ON CONFLICT (id) DO UPDATE SET account_id=EXCLUDED.account_id, channel=EXCLUDED.channel, subject=EXCLUDED.subject, status=EXCLUDED.status, content_type=EXCLUDED.content_type, file_name=EXCLUDED.file_name, attempt_count=EXCLUDED.attempt_count, max_attempts=EXCLUDED.max_attempts, last_error=EXCLUDED.last_error, artifact_ref=EXCLUDED.artifact_ref, artifact_size=EXCLUDED.artifact_size, artifact_content_type=EXCLUDED.artifact_content_type, artifact_file_name=EXCLUDED.artifact_file_name, completed_at=EXCLUDED.completed_at, updated_at=now()`,

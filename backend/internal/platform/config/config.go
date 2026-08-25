@@ -15,29 +15,29 @@ import (
 
 // Config 是后端运行所需的全部配置集合。
 type Config struct {
-	Deploy     DeployConfig
-	Server     ServerConfig
-	Postgres   PostgresConfig
-	Redis      RedisConfig
-	NATS       NATSConfig
-	MinIO      MinIOConfig
-	Auth       AuthConfig
-	Bootstrap  BootstrapConfig
-	Identity   IdentityConfig
-	SMS        SMSConfig
-	Upload     UploadConfig
-	SimBackend SimBackendConfig
-	Transfer   TransferConfig
-	Contest    ContestConfig
-	Notify     NotifyConfig
-	Teaching   TeachingConfig
-	Experiment ExperimentConfig
-	Grade      GradeConfig
-	Admin      AdminConfig
-	Sandbox    SandboxConfig
-	Judge      JudgeConfig
-	Monitoring MonitoringConfig
-	Snowflake  SnowflakeConfig
+	Deploy        DeployConfig
+	Server        ServerConfig
+	Postgres      PostgresConfig
+	Redis         RedisConfig
+	NATS          NATSConfig
+	ObjectStorage ObjectStorageConfig
+	Auth          AuthConfig
+	Bootstrap     BootstrapConfig
+	Identity      IdentityConfig
+	SMS           SMSConfig
+	Upload        UploadConfig
+	SimBackend    SimBackendConfig
+	Transfer      TransferConfig
+	Contest       ContestConfig
+	Notify        NotifyConfig
+	Teaching      TeachingConfig
+	Experiment    ExperimentConfig
+	Grade         GradeConfig
+	Admin         AdminConfig
+	Sandbox       SandboxConfig
+	Judge         JudgeConfig
+	Monitoring    MonitoringConfig
+	Snowflake     SnowflakeConfig
 }
 
 // DeployConfig 描述部署形态和平台管理员层开关。
@@ -122,8 +122,8 @@ type NATSConfig struct {
 	DeadLetterPrefix     string
 }
 
-// MinIOConfig 描述对象存储连接和桶命名。
-type MinIOConfig struct {
+// ObjectStorageConfig 描述 S3 兼容对象存储连接和桶命名。
+type ObjectStorageConfig struct {
 	Endpoint                string
 	UseSSL                  bool
 	Region                  string
@@ -597,17 +597,17 @@ func Load() (*Config, error) {
 		FlushTimeoutMs:       reqInt("NATS_FLUSH_TIMEOUT_MS"),
 		DeadLetterPrefix:     req("NATS_DEAD_LETTER_PREFIX"),
 	}
-	c.MinIO = MinIOConfig{
-		Endpoint:                req("MINIO_ENDPOINT"),
-		UseSSL:                  reqBool("MINIO_USE_SSL"),
-		Region:                  req("MINIO_REGION"),
-		AccessKey:               req("MINIO_ACCESS_KEY"),
-		SecretKey:               req("MINIO_SECRET_KEY"),
-		BucketCode:              req("MINIO_BUCKET_CODE"),
-		BucketAttach:            req("MINIO_BUCKET_ATTACHMENT"),
-		BucketReport:            req("MINIO_BUCKET_REPORT"),
-		BucketBackup:            req("MINIO_BUCKET_BACKUP"),
-		PingTimeoutSeconds:      reqInt("MINIO_PING_TIMEOUT_SECONDS"),
+	c.ObjectStorage = ObjectStorageConfig{
+		Endpoint:                req("OBJECT_STORAGE_ENDPOINT"),
+		UseSSL:                  reqBool("OBJECT_STORAGE_USE_SSL"),
+		Region:                  req("OBJECT_STORAGE_REGION"),
+		AccessKey:               req("OBJECT_STORAGE_ACCESS_KEY"),
+		SecretKey:               req("OBJECT_STORAGE_SECRET_KEY"),
+		BucketCode:              req("OBJECT_STORAGE_BUCKET_CODE"),
+		BucketAttach:            req("OBJECT_STORAGE_BUCKET_ATTACHMENT"),
+		BucketReport:            req("OBJECT_STORAGE_BUCKET_REPORT"),
+		BucketBackup:            req("OBJECT_STORAGE_BUCKET_BACKUP"),
+		PingTimeoutSeconds:      reqInt("OBJECT_STORAGE_PING_TIMEOUT_SECONDS"),
 		DownloadGrantTTLSeconds: reqInt("STORAGE_DOWNLOAD_GRANT_TTL_SECONDS"),
 		StreamGrantTTLSeconds:   reqInt("STORAGE_STREAM_GRANT_TTL_SECONDS"),
 	}
@@ -977,13 +977,13 @@ func Load() (*Config, error) {
 	if strings.TrimSpace(c.NATS.DeadLetterPrefix) == "" {
 		errs = append(errs, "NATS_DEAD_LETTER_PREFIX 不能为空")
 	}
-	if c.MinIO.PingTimeoutSeconds <= 0 {
-		errs = append(errs, "MINIO_PING_TIMEOUT_SECONDS 必须大于 0")
+	if c.ObjectStorage.PingTimeoutSeconds <= 0 {
+		errs = append(errs, "OBJECT_STORAGE_PING_TIMEOUT_SECONDS 必须大于 0")
 	}
-	if c.MinIO.DownloadGrantTTLSeconds <= 0 {
+	if c.ObjectStorage.DownloadGrantTTLSeconds <= 0 {
 		errs = append(errs, "STORAGE_DOWNLOAD_GRANT_TTL_SECONDS 必须大于 0")
 	}
-	if c.MinIO.StreamGrantTTLSeconds <= 0 || c.MinIO.StreamGrantTTLSeconds >= c.MinIO.DownloadGrantTTLSeconds {
+	if c.ObjectStorage.StreamGrantTTLSeconds <= 0 || c.ObjectStorage.StreamGrantTTLSeconds >= c.ObjectStorage.DownloadGrantTTLSeconds {
 		errs = append(errs, "STORAGE_STREAM_GRANT_TTL_SECONDS 必须大于 0 且小于 STORAGE_DOWNLOAD_GRANT_TTL_SECONDS")
 	}
 	if c.Upload.VirusScanTimeoutSeconds <= 0 {

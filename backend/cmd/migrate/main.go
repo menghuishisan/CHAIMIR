@@ -324,7 +324,7 @@ func seed(ctx context.Context, cfg *config.Config) (resultErr error) {
 		return err
 	}
 	defer closeRedisClient(redisClient, "关闭初始化 Redis 客户端失败", &resultErr)
-	objectStore, err := storage.New(ctx, cfg.MinIO)
+	objectStore, err := storage.New(ctx, cfg.ObjectStorage)
 	if err != nil {
 		return err
 	}
@@ -346,7 +346,7 @@ func seed(ctx context.Context, cfg *config.Config) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	identityFiles, err := storage.NewServiceFromConfig(cfg.Auth, cfg.MinIO, cfg.Upload)
+	identityFiles, err := storage.NewServiceFromConfig(cfg.Auth, cfg.ObjectStorage, cfg.Upload)
 	if err != nil {
 		return err
 	}

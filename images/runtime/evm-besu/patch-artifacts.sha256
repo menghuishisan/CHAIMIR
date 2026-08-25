@@ -49,6 +49,7 @@ cfa3f654caff906653385f4b7ddaa539d795b78f5711a622482b17d2b73484c0  netty-transpor
 41ca8fe192083d17917be7ddcecded4da4fc1db1d1656d03d0bcb14e2f431155  netty-transport-native-unix-common-4.2.16.Final.jar
 01942a72d716db20ef24bec17eb313d9736b61ded7d1c4647cd1096df6bdae60  netty-transport-rxtx-4.2.16.Final.jar
 908271a2e1e4940a2ae9615e80bfb967394692f5dda005a332c545ed5b7dde2c  netty-transport-sctp-4.2.16.Final.jar
+5345dabce2cbf10bc9c6a80a8d7beeaa4cd975028aa04f1903a96b8e440529f6  netty-transport-sctp-4.2.17.Final.jar
 0f072ebf51b5642adbc2129cf5d06f96d6a94b0912d7cae2cbb8287df73deaef  netty-transport-udt-4.2.16.Final.jar
 4b40a06396f239f8de2da57419adde6e94e5edc18a2171d471ea05eeed4e5c2d  jackson-core-2.21.4.jar
 3888e9e69ab66fbacaacc9aea0e9ffbf15368288e4aca468b024dba11c09fbf9  jackson-databind-2.21.4.jar

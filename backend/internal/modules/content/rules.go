@@ -248,7 +248,7 @@ func unsafeInlineBodyString(value string) bool {
 // validateObjectRefString 要求正文中的对象引用必须符合统一文件服务格式。
 func validateObjectRefString(value string) error {
 	trimmed := strings.TrimSpace(value)
-	if !strings.HasPrefix(strings.ToLower(trimmed), "minio://") {
+	if !strings.HasPrefix(strings.ToLower(trimmed), "s3://") {
 		return nil
 	}
 	if _, err := storage.ParseObjectRef(trimmed); err != nil {

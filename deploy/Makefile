@@ -111,7 +111,7 @@ existing-workloads-wait: ## 等待已部署的生产安全组件与平台工作�
 	kubectl -n chaimir-data rollout status statefulset/postgres --timeout=180s
 	kubectl -n chaimir-data rollout status statefulset/redis --timeout=120s
 	kubectl -n chaimir-data rollout status statefulset/nats --timeout=120s
-	kubectl -n chaimir-data rollout status statefulset/minio --timeout=120s
+	kubectl -n chaimir-data rollout status statefulset/rustfs --timeout=120s
 	kubectl -n chaimir-data rollout status statefulset/clamav --timeout=300s
 	kubectl -n chaimir-system rollout status deployment/chaimir-backend --timeout=180s
 	kubectl -n chaimir-system rollout status deployment/chaimir-frontend --timeout=180s
@@ -353,7 +353,7 @@ middleware-wait: apply-acceptance ## 等待中间件就绪(迁移前置)
 	kubectl -n chaimir-data rollout status statefulset/postgres --timeout=180s
 	kubectl -n chaimir-data rollout status statefulset/redis --timeout=120s
 	kubectl -n chaimir-data rollout status statefulset/nats --timeout=120s
-	kubectl -n chaimir-data rollout status statefulset/minio --timeout=120s
+	kubectl -n chaimir-data rollout status statefulset/rustfs --timeout=120s
 	kubectl -n chaimir-data rollout status statefulset/clamav --timeout=300s
 
 # ---- 数据库迁移(中间件就绪后)----

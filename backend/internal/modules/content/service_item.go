@@ -434,7 +434,7 @@ func (s *Service) rewriteAttachmentRefs(ctx context.Context, value any, sourceTe
 func parseContentAttachmentRef(raw, expectedBucket string, sourceTenantID int64) (storage.ObjectRef, bool, error) {
 	ref, err := storage.ParseObjectRef(strings.TrimSpace(raw))
 	if err != nil {
-		if strings.HasPrefix(strings.TrimSpace(raw), "minio://") {
+		if strings.HasPrefix(strings.TrimSpace(raw), "s3://") {
 			return storage.ObjectRef{}, false, apperr.ErrContentBodyInvalid.WithCause(err)
 		}
 		return storage.ObjectRef{}, false, nil

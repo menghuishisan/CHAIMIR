@@ -1931,7 +1931,7 @@ func volumeDomainsForPlan(plan CreateSandboxPlan) []corev1.Volume {
 // volumeForDomain 按安全域持久化策略构造 Kubernetes 卷,跨 Pod 共享域使用沙箱级临时 PVC。
 func volumeForDomain(domain VolumeDomainSpec, shared bool) corev1.Volume {
 	volume := corev1.Volume{Name: domain.Name}
-	if shared || domain.Name == VolumeDomainWorkspace || domain.Persistence == VolumePersistenceMinioCode || domain.Persistence == VolumePersistenceSnapshot {
+	if shared || domain.Name == VolumeDomainWorkspace || domain.Persistence == VolumePersistenceObjectStorageCode || domain.Persistence == VolumePersistenceSnapshot {
 		volume.VolumeSource = corev1.VolumeSource{PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: domain.Name}}
 		return volume
 	}
@@ -1995,7 +1995,7 @@ func persistentVolumeDomains(plan CreateSandboxPlan) []VolumeDomainSpec {
 	shared := sharedVolumeDomainsForPlan(plan)
 	domains := make([]VolumeDomainSpec, 0)
 	for _, domain := range mergedRuntimeAdapter(plan).VolumeDomains {
-		if _, sharedDomain := shared[domain.Name]; sharedDomain || domain.Name == VolumeDomainWorkspace || domain.Persistence == VolumePersistenceMinioCode || domain.Persistence == VolumePersistenceSnapshot {
+		if _, sharedDomain := shared[domain.Name]; sharedDomain || domain.Name == VolumeDomainWorkspace || domain.Persistence == VolumePersistenceObjectStorageCode || domain.Persistence == VolumePersistenceSnapshot {
 			domains = append(domains, domain)
 		}
 	}

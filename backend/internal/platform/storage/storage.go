@@ -1,4 +1,4 @@
-// storage 封装 MinIO 客户端与统一对象键规则,供代码、附件、报告和备份复用。
+// storage 封装 S3 兼容对象存储客户端与统一对象键规则,供代码、附件、报告和备份复用。
 package storage
 
 import (
@@ -16,10 +16,10 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// ErrObjectRefInvalid 表示对象引用不是受支持的 minio://bucket/key 格式。
+// ErrObjectRefInvalid 表示对象引用不是受支持的 s3://bucket/key 格式。
 var ErrObjectRefInvalid = errors.New("对象存储引用格式非法")
 
-// Storage 封装 MinIO 客户端与平台约定桶名。
+// Storage 封装 S3 兼容客户端与平台约定桶名。
 type Storage struct {
 	client       *minio.Client
 	bucketCode   string
@@ -42,15 +42,15 @@ type ReadSeekCloser interface {
 	io.Closer
 }
 
-// New 创建 MinIO 客户端并执行启动期连通性检查。
-func New(ctx context.Context, cfg config.MinIOConfig) (*Storage, error) {
+// New 创建 S3 兼容客户端并执行启动期连通性检查。
+func New(ctx context.Context, cfg config.ObjectStorageConfig) (*Storage, error) {
 	for _, bucket := range []string{cfg.BucketCode, cfg.BucketAttach, cfg.BucketReport, cfg.BucketBackup} {
 		if !safeObjectRefBucket(bucket) {
 			return nil, fmt.Errorf("对象存储桶名非法: %s", bucket)
 		}
 	}
 	if cfg.PingTimeoutSeconds <= 0 {
-		return nil, fmt.Errorf("MINIO_PING_TIMEOUT_SECONDS 必须大于 0")
+		return nil, fmt.Errorf("OBJECT_STORAGE_PING_TIMEOUT_SECONDS 必须大于 0")
 	}
 	client, err := minio.New(cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
@@ -58,12 +58,12 @@ func New(ctx context.Context, cfg config.MinIOConfig) (*Storage, error) {
 		Region: cfg.Region,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("创建 MinIO 客户端失败: %w", err)
+		return nil, fmt.Errorf("创建对象存储客户端失败: %w", err)
 	}
 	pingCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.PingTimeoutSeconds)*time.Second)
 	defer cancel()
 	if _, err := client.ListBuckets(pingCtx); err != nil {
-		return nil, fmt.Errorf("MinIO 连通性检查失败: %w", err)
+		return nil, fmt.Errorf("对象存储连通性检查失败: %w", err)
 	}
 	return &Storage{
 		client:       client,
@@ -226,7 +226,7 @@ func (s *Storage) CopyObject(ctx context.Context, srcBucket, srcKey, dstBucket, 
 	if err != nil {
 		return 0, fmt.Errorf("复制对象 %s/%s 到 %s/%s 失败: %w", srcBucket, srcKey, dstBucket, dstKey, err)
 	}
-	// MinIO 服务端复制成功时返回的 CopyObjectInfo.Size 在部分版本中为 0。
+	// S3 服务端复制成功时返回的 CopyObjectInfo.Size 在部分版本中为 0。
 	// 备份清单必须记录目标对象的真实大小,因此复制完成后统一读取目标对象元数据。
 	info, err := s.client.StatObject(ctx, dstBucket, dstKey, minio.StatObjectOptions{})
 	if err != nil {

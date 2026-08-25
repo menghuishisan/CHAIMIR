@@ -20,14 +20,14 @@ source:
 upstream:
   image: node:22-bookworm
   version: 22-bookworm
-  digest: sha256:4228fca437e45714a3ebd1d4ecd1dcc583cf79f5a940aa025e286b472d93b67c
+  digest: sha256:a05717adfe7289e2a0fa36a694dc430a510adab6467c7036e51551198935abef
   components:
     - image: ghcr.io/foundry-rs/foundry:v1.7.1
       digest: sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
       role: foundry-toolchain
     - image: node:22-bookworm
       role: node-runtime
-      digest: sha256:4228fca437e45714a3ebd1d4ecd1dcc583cf79f5a940aa025e286b472d93b67c
+      digest: sha256:a05717adfe7289e2a0fa36a694dc430a510adab6467c7036e51551198935abef
   reuse_policy: toolchain-wrapper
 data_driven: true
 env_keys:

@@ -23,7 +23,7 @@ upstream:
   digest: sha256:ac85d23b4250308ce5f6d004fff7fa6779f82932d1ba32fd3d4811531d43d0bc
   runtime_image: cgr.dev/chainguard/wolfi-base
   runtime_version: "2026-07-07"
-  runtime_digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
+  runtime_digest: sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
   packages:
     - bash=5.3-r12
     - ca-certificates=20260413-r0
@@ -31,7 +31,7 @@ upstream:
     - openjdk-25-jre=25.0.3-r5
     - libstdc++=16.1.0-r4
   patch_artifact_checksum_file: patch-artifacts.sha256
-  patch_artifact_checksum_file_sha256: sha256:5ad98c95ee1e9531538372681a9d3c167bbe3ca7f04db0344003f5d1142118a3
+  patch_artifact_checksum_file_sha256: sha256:422b0c962e170500e49cc89ac2f3936c47c92d0a790691001b45682c3d44965d
   reuse_policy: thin-wrapper
 data_driven: true
 env_keys:

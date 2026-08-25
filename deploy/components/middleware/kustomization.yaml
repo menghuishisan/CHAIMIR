@@ -1,4 +1,4 @@
-# 中间件 Kustomize Component(PG/Redis/NATS/MinIO/ClamAV 单实例)。
+# 中间件 Kustomize Component(PG/Redis/NATS/S3 对象存储/ClamAV 单实例)。
 # 依据 docs/总-部署架构设计.md §五:私有化与验收使用单实例中间件;
 #   SaaS/staging 用托管/集群(不 include 本 component,overlay 经 ConfigMap 接外部端点)。
 # 以 Component 形式提供,供 overlays/acceptance 与 overlays/prod-school 按需 include。
@@ -9,7 +9,7 @@ resources:
   - postgres.yaml
   - redis.yaml
   - nats.yaml
-  - minio.yaml
+  - rustfs.yaml
   - clamav.yaml
 
 # 中间件镜像引用由镜像晋级脚本从 images/image-digests.lock 同步。
@@ -17,9 +17,9 @@ images:
   - name: chaimir/middleware/clamav
     newName: registry.chaimir.io/middleware/clamav
     digest: sha256:5eeae8652cff5a00d4321628345bd53bb0488f285e7f038a49cdc4042a3f1445
-  - name: chaimir/middleware/minio
-    newName: registry.chaimir.io/middleware/minio
-    digest: sha256:6bb4539a21e09550a3b2bad4fe4ecca07a655200ff5bbf700158316f094d48c0
+  - name: chaimir/middleware/rustfs
+    newName: registry.chaimir.io/middleware/rustfs
+    digest: sha256:800cf3f352a0a27e3275ca854a51f0027975d7acc7a0d52089a35bcc9fcbf0b5
   - name: chaimir/middleware/nats
     newName: registry.chaimir.io/middleware/nats
     digest: sha256:c8a1fe28c2b1d1e69189471582973d5b13b79835bcd1ac717f760610f981935b

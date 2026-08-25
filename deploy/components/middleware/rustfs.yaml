@@ -1,18 +1,18 @@
-# MinIO 单实例(对象存储:代码/附件/报告/PDF/备份)。
-# 依据 docs/总-技术选型.md §9:MinIO 当前稳定;官方镜像不重打包。
+# S3 对象存储 单实例(对象存储:代码/附件/报告/PDF/备份)。
+# 使用已固定 digest 的上游 RustFS,不重打包、不使用可变 tag。
 # 访问凭据从 chaimir-secret 注入。bucket 由 migrate/seed 或应用首次启动创建。
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: minio
+  name: rustfs
   namespace: chaimir-data
   labels:
-    app.kubernetes.io/name: minio
+    app.kubernetes.io/name: rustfs
     app.kubernetes.io/part-of: chaimir
 spec:
   selector:
-    app.kubernetes.io/name: minio
+    app.kubernetes.io/name: rustfs
   ports:
     - name: api
       port: 9000
@@ -24,54 +24,64 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: minio
+  name: rustfs
   namespace: chaimir-data
   labels:
-    app.kubernetes.io/name: minio
+    app.kubernetes.io/name: rustfs
     app.kubernetes.io/part-of: chaimir
 spec:
-  serviceName: minio
+  serviceName: rustfs
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: minio
+      app.kubernetes.io/name: rustfs
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: minio
+        app.kubernetes.io/name: rustfs
         app.kubernetes.io/part-of: chaimir
     spec:
       imagePullSecrets:
         - name: chaimir-harbor-pull
       securityContext:
         runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 1000
+        runAsUser: 10001
+        fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: minio
-          image: chaimir/middleware/minio:placeholder
-          args: ["server", "/data", "--console-address", ":9001"]
+        - name: rustfs
+          image: chaimir/middleware/rustfs:placeholder
           ports:
             - name: api
               containerPort: 9000
             - name: console
               containerPort: 9001
           env:
-            - name: MINIO_ROOT_USER
+            - name: RUSTFS_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: chaimir-data-secret
-                  key: MINIO_ACCESS_KEY
-            - name: MINIO_ROOT_PASSWORD
+                  key: OBJECT_STORAGE_ACCESS_KEY
+            - name: RUSTFS_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: chaimir-data-secret
-                  key: MINIO_SECRET_KEY
+                  key: OBJECT_STORAGE_SECRET_KEY
+            - name: RUSTFS_VOLUMES
+              value: /data
+            - name: RUSTFS_ADDRESS
+              value: ":9000"
+            - name: RUSTFS_CONSOLE_ADDRESS
+              value: ":9001"
+            - name: RUSTFS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: chaimir-data-config
+                  key: OBJECT_STORAGE_REGION
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
+            readOnlyRootFilesystem: false
             capabilities:
               drop: ["ALL"]
           resources:
@@ -79,13 +89,13 @@ spec:
             limits: {cpu: 500m, memory: 512Mi}
           readinessProbe:
             httpGet:
-              path: /minio/health/ready
+              path: /health/ready
               port: api
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /minio/health/live
+              path: /health/live
               port: api
             initialDelaySeconds: 15
             periodSeconds: 20

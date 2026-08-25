@@ -61,7 +61,7 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 	return map[string]any{
 		"workspace_dir": "/workspace",
 		"volume_domains": []map[string]any{
-			{"name": "workspace", "mount_path": "/workspace", "student_access": "read_write", "persistence": "minio_code", "snapshot_scope": "always"},
+			{"name": "workspace", "mount_path": "/workspace", "student_access": "read_write", "persistence": "object_storage_code", "snapshot_scope": "always"},
 			{"name": "runtime-state", "mount_path": "/runtime-state", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "snapshot_enabled"},
 			{"name": "judge-private", "mount_path": "/judge-private", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "never"},
 			{"name": "runtime-tmp", "mount_path": "/tmp", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "never"},

@@ -8,7 +8,7 @@ LABEL org.opencontainers.image.description="Chaimir Node builder base image"
 RUN apk upgrade --no-cache \
     && npm install -g npm@11.17.0 \
     && npm install -g undici@6.27.0 \
-    && npm install -g brace-expansion@5.0.9 ip-address@10.3.1 tar@7.5.19 \
+    && npm install -g brace-expansion@5.0.9 ip-address@10.3.1 tar@7.5.21 \
     && for package in undici brace-expansion ip-address tar; do \
         rm -rf "/usr/local/lib/node_modules/npm/node_modules/${package}" \
         && cp -a "/usr/local/lib/node_modules/${package}" "/usr/local/lib/node_modules/npm/node_modules/${package}"; \

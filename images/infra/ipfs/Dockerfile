@@ -26,10 +26,15 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 AS dirs
 RUN mkdir -p /out/runtime-state/ipfs /out/workspace
 
-FROM gcr.io/distroless/base-debian12:nonroot@sha256:4b5196599229a5cf312a676cfe1ee8587ecf2371dcc22620f8c7a66d77d125c8
+FROM debian:13-slim@sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
 
 LABEL org.opencontainers.image.title="infra/ipfs"
 LABEL org.opencontainers.image.description="Chaimir IPFS Kubo node image"
+
+RUN mkdir -p /etc/ssl/certs /runtime-state/ipfs /workspace \
+    && chown -R 1000:1000 /runtime-state /workspace
+
+COPY --from=kubo-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 # IPFS 数据目录由 runtime-state 卷承载,镜像内不写入业务数据。
 COPY --from=kubo-build /out/ipfs /usr/local/bin/ipfs

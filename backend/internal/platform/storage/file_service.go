@@ -75,7 +75,7 @@ type IssueDownloadGrantRequest struct {
 }
 
 // NewServiceFromConfig 根据统一配置构造文件服务,收敛下载授权和上传安全扫描装配。
-func NewServiceFromConfig(authCfg config.AuthConfig, minioCfg config.MinIOConfig, uploadCfg config.UploadConfig) (Service, error) {
+func NewServiceFromConfig(authCfg config.AuthConfig, objectStorageCfg config.ObjectStorageConfig, uploadCfg config.UploadConfig) (Service, error) {
 	scanner, err := upload.NewScannerFromConfig(uploadCfg)
 	if err != nil {
 		return Service{}, err
@@ -83,10 +83,10 @@ func NewServiceFromConfig(authCfg config.AuthConfig, minioCfg config.MinIOConfig
 	if strings.TrimSpace(authCfg.HMACKey) == "" {
 		return Service{}, fmt.Errorf("统一文件服务签名密钥不能为空")
 	}
-	if minioCfg.DownloadGrantTTLSeconds <= 0 {
+	if objectStorageCfg.DownloadGrantTTLSeconds <= 0 {
 		return Service{}, fmt.Errorf("统一文件服务下载授权 TTL 必须大于 0")
 	}
-	if minioCfg.StreamGrantTTLSeconds <= 0 || minioCfg.StreamGrantTTLSeconds >= minioCfg.DownloadGrantTTLSeconds {
+	if objectStorageCfg.StreamGrantTTLSeconds <= 0 || objectStorageCfg.StreamGrantTTLSeconds >= objectStorageCfg.DownloadGrantTTLSeconds {
 		return Service{}, fmt.Errorf("统一文件服务视频流授权 TTL 必须大于 0 且小于普通下载授权 TTL")
 	}
 	if uploadCfg.VirusScanMaxBytes <= 0 {
@@ -95,8 +95,8 @@ func NewServiceFromConfig(authCfg config.AuthConfig, minioCfg config.MinIOConfig
 	return Service{
 		Scanner:           scanner,
 		SigningKey:        authCfg.HMACKey,
-		DownloadGrantTTL:  time.Duration(minioCfg.DownloadGrantTTLSeconds) * time.Second,
-		StreamGrantTTL:    time.Duration(minioCfg.StreamGrantTTLSeconds) * time.Second,
+		DownloadGrantTTL:  time.Duration(objectStorageCfg.DownloadGrantTTLSeconds) * time.Second,
+		StreamGrantTTL:    time.Duration(objectStorageCfg.StreamGrantTTLSeconds) * time.Second,
 		VirusScanMaxBytes: uploadCfg.VirusScanMaxBytes,
 	}, nil
 }

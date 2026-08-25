@@ -8,7 +8,7 @@ kind: Kustomization
 resources:
   - ../../base
   - ../../config/external-secret
-  # 不 include middleware:用托管 PG/Redis/NATS/MinIO,经 ConfigMap 指向外部端点。
+  # 不 include middleware:用托管 PG/Redis/NATS/S3 对象存储,经 ConfigMap 指向外部端点。
 
 # 中间件外接端点 + SaaS 形态(host 为 staging 托管中间件内部域名)。
 configMapGenerator:
@@ -19,7 +19,7 @@ configMapGenerator:
       - PG_HOST=postgres.staging-data.internal
       - REDIS_HOST=redis.staging-data.internal
       - NATS_URL=nats://nats.staging-data.internal:4222
-      - MINIO_ENDPOINT=minio.staging-data.internal:9000
+      - OBJECT_STORAGE_ENDPOINT=rustfs.staging-data.internal:9000
       - UPLOAD_VIRUS_SCAN_ADDRESS=clamav.staging-data.internal:3310
 
 # 预发布双副本(轻量验证伸缩)。

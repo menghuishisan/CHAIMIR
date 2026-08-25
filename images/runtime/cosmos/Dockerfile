@@ -12,7 +12,7 @@ RUN for attempt in 1 2 3 4 5 6 7 8; do \
     done \
     && echo "${GAIA_SOURCE_SHA256}  /tmp/gaia-source.tar.gz" | sha256sum -c -
 
-FROM golang:1.26.5-bookworm@sha256:5ab8e9af080c5f58dab00dd8055ea9309ec54c47722681b5ee8d0a3602f85316 AS build
+FROM golang:1.26.6-bookworm@sha256:433f9dc4f8ea3a1ce4e28f9f15d0f7c056b10475307f886d6f1ac1ccc4abd976 AS build
 
 ARG GAIA_VERSION=v27.5.0
 ARG GAIA_SOURCE_COMMIT=d089f568a9ef2f4d5e6d5660cb128782f4d1b2c0
@@ -247,10 +247,13 @@ EOF
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/chaimir-cosmos-entrypoint /tmp/chaimir-cosmos-entrypoint.go \
     && mkdir -p /out/rootfs/workspace /out/rootfs/runtime-state/cosmos /out/rootfs/tmp
 
-FROM gcr.io/distroless/cc-debian12:nonroot@sha256:b0ae8e989418b458e0f25489bc3be523718938a2b70864cc0f6a00af1ddbd985
+FROM debian:13-slim@sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
 
 LABEL org.opencontainers.image.title="runtime/cosmos"
 LABEL org.opencontainers.image.description="Chaimir Cosmos SDK local chain runtime built from official Gaia source"
+
+RUN mkdir -p /usr/local/lib /workspace /tmp \
+    && chown -R 1000:1000 /usr/local/lib /workspace /tmp
 
 COPY --from=build --chown=1000:1000 /out/rootfs/ /
 COPY --from=build --chown=1000:1000 /out/gaiad /usr/local/bin/gaiad

@@ -65,11 +65,13 @@ foreach ($candidateRef in @($protectedRefs | ForEach-Object { [string]$_ })) {
         $unavailableProtectedCount++
     }
 }
+# 选择性构建/重建时,未受影响的正式摘要可能只存在于远端;清理只作用于本机对象,
+# 缺失的远端引用没有可删除的本机对象,因此不能把它误判为清理失败或触发隐式下载。
 $missingProtectedRefs = @($protectedRefs | ForEach-Object { [string]$_ } | Where-Object {
     -not $availableProtectedRefs.Contains($_)
 })
 if ($missingProtectedRefs.Count -gt 0) {
-    throw ("本机缺少正式/候选不可变 digest,拒绝继续清理且不会自动下载: " + ($missingProtectedRefs -join ', '))
+    Write-Warning ("本机未缓存正式/候选不可变 digest,跳过这些远端引用的本机保护检查: " + ($missingProtectedRefs -join ', '))
 }
 $protectedRefs = $availableProtectedRefs
 $protectedRefSnapshot = @($protectedRefs | ForEach-Object { [string]$_ })

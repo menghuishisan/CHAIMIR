@@ -30,7 +30,7 @@ deploy/
 │   ├── networkpolicy/       静态命名空间 deny-all + 精确放行;动态沙箱 deny-all 模板
 │   └── cronjobs/            每日备份;业务生命周期清理由各模块后台任务负责
 ├── clusters/cilium-kind/    无默认 CNI Kind 配置、生产同版 Cilium values 与验收入口
-├── components/middleware/   PG16/Redis7/NATS2.10/MinIO 单实例(overlay 按需 include)
+├── components/middleware/   PG16/Redis7/NATS2.10/S3 对象存储 单实例(overlay 按需 include)
 ├── overlays/
 │   ├── acceptance/          生产安全基线 + 单实例测试数据组件 + Harbor digest 镜像
 │   ├── staging/             SaaS 形态,中间件外接,main 自动部署

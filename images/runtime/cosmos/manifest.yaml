@@ -22,8 +22,9 @@ upstream:
   version: v27.5.0
   source_commit: d089f568a9ef2f4d5e6d5660cb128782f4d1b2c0
   source_sha256: 9d53edfac968af4a2444b0f0748bd95adb071e920ee320dae3c1078555a3a0fa
-  builder: golang:1.26.5-bookworm@sha256:5ab8e9af080c5f58dab00dd8055ea9309ec54c47722681b5ee8d0a3602f85316
-  runtime: gcr.io/distroless/cc-debian12:nonroot@sha256:b0ae8e989418b458e0f25489bc3be523718938a2b70864cc0f6a00af1ddbd985
+  builder: golang:1.26.6-bookworm@sha256:433f9dc4f8ea3a1ce4e28f9f15d0f7c056b10475307f886d6f1ac1ccc4abd976
+  runtime_image: debian:13-slim
+  runtime_digest: sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
   source_downloader: alpine:3.23
   source_downloader_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: source-build

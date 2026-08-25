@@ -1,7 +1,7 @@
 # 本文件定义 Besu 企业 EVM 运行时镜像,复用官方 Besu 应用并使用 Wolfi 运行层。
 FROM hyperledger/besu:26.6.1@sha256:ac85d23b4250308ce5f6d004fff7fa6779f82932d1ba32fd3d4811531d43d0bc AS upstream
 
-FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795 AS patched-besu
+FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72 AS patched-besu
 
 ARG NETTY_VERSION=4.2.16.Final
 ARG JACKSON_VERSION=2.21.4
@@ -33,6 +33,13 @@ RUN set -eux; \
         echo "${expected}  ${old}.patched" | sha256sum -c -; \
         mv "${old}.patched" "${old}"; \
     done; \
+    expected="$(awk '$2 == "netty-transport-sctp-4.2.17.Final.jar" { print $1; exit }' /usr/local/share/chaimir/patch-artifacts.sha256)"; \
+    test -n "${expected}"; \
+    curl -fL --retry 10 --retry-all-errors --connect-timeout 20 --retry-delay 3 \
+        "https://repo.maven.apache.org/maven2/io/netty/netty-transport-sctp/4.2.17.Final/netty-transport-sctp-4.2.17.Final.jar" \
+        -o "netty-transport-sctp-4.2.10.Final.jar.sctp-patched"; \
+    echo "${expected}  netty-transport-sctp-4.2.10.Final.jar.sctp-patched" | sha256sum -c -; \
+    mv "netty-transport-sctp-4.2.10.Final.jar.sctp-patched" "netty-transport-sctp-4.2.10.Final.jar"; \
     expected="$(awk '$2 == "jackson-core-2.21.4.jar" { print $1; exit }' /usr/local/share/chaimir/patch-artifacts.sha256)"; \
     test -n "${expected}"; \
     curl -fL --retry 10 --retry-all-errors --connect-timeout 20 --retry-delay 3 \
@@ -55,13 +62,13 @@ RUN set -eux; \
     echo "${expected}  jackson-datatype-jdk8-2.21.1.jar.patched" | sha256sum -c -; \
     mv "jackson-datatype-jdk8-2.21.1.jar.patched" "jackson-datatype-jdk8-2.21.1.jar"
 
-FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
+FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
 
 LABEL org.opencontainers.image.title="runtime/evm-besu"
 LABEL org.opencontainers.image.description="Chaimir Hyperledger Besu enterprise EVM runtime"
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    packages='bash=5.3-r12 ca-certificates=20260413-r0 curl=8.21.0-r1 jq=1.8.1-r0 openjdk-25-jre=25.0.3-r5 libstdc++=16.1.0-r4' \
+    packages='bash=5.3-r12 ca-certificates=20260413-r0 curl=8.21.0-r1 jq=1.8.1-r5 openjdk-25-jre=25.0.3-r5 libstdc++=16.1.0-r4' \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \

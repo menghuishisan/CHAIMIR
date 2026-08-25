@@ -18,7 +18,7 @@
 - J2 链上断言、J3 Flag、J5 仿真检查点由 M3 后端策略统一承接,不得在 `images/judger` 下重复维护执行器镜像。镜像判题只保留需要独立工具链/沙箱命令的 J1 测试用例和 J4 静态扫描。
 - 容器内部端口优先沿用官方默认端口;生产禁止固定宿主机端口、`hostPort`、`hostNetwork`;本地开发宿主机映射必须可配置并默认绑定 `127.0.0.1`。
 - 学生可进入容器不得挂载密钥、判题私有数据、宿主机路径、ServiceAccount token、答案、flag 或其他用户数据。
-- PostgreSQL、Redis、MinIO、NATS、CouchDB、Harbor、Ingress、监控等基础设施镜像也在本目录治理;是否有 Dockerfile 由 `source.type` 决定,不是由分类决定。
+- PostgreSQL、Redis、S3 对象存储、NATS、CouchDB、Harbor、Ingress、监控等基础设施镜像也在本目录治理;是否有 Dockerfile 由 `source.type` 决定,不是由分类决定。
 
 ## 实现范围
 

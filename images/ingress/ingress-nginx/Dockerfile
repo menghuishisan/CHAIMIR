@@ -1,5 +1,5 @@
 # 本文件定义 ingress-nginx 控制器安全运行镜像,基于 Wolfi 维护包保留 Kubernetes Ingress 能力。
-FROM cgr.dev/chainguard/wolfi-base@sha256:fdcd31a2db35958c251ea22e80cda72a8222228114e736ec7dd9c94452a2dc51
+FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
 
 LABEL org.opencontainers.image.title="ingress/ingress-nginx"
 LABEL org.opencontainers.image.description="Chaimir ingress-nginx controller on Wolfi"
@@ -10,7 +10,7 @@ ENV LUA_PATH="/usr/lib/lua/?.lua;/usr/share/lua/?.lua;;" \
 
 # 固定安装已包含安全修复的控制器与完整兼容运行时,网络抖动只在该步骤内重试。
 RUN for attempt in 1 2 3 4 5 6 7 8 9 10; do \
-        if apk add --no-cache --timeout 300 ingress-nginx-controller-1.15=1.15.10-r2 ingress-nginx-controller-compat-1.15=1.15.10-r2; then break; fi; \
+        if apk add --no-cache --timeout 300 ingress-nginx-controller-1.15=1.15.10-r2 ingress-nginx-controller-compat-1.15=1.15.10-r2 libcrypto3=3.6.3-r5 libssl3=3.6.3-r5; then break; fi; \
         if [ "$attempt" -eq 10 ]; then echo "apk package installation failed after 10 attempts" >&2; exit 1; fi; \
         sleep 5; \
     done

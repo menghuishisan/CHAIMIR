@@ -213,7 +213,7 @@ func downloadGrantTokenPayloadFromGrant(grant DownloadGrant) downloadGrantTokenP
 		ResourceType:     grant.ResourceType,
 		ResourceID:       grant.ResourceID,
 		Mode:             grant.Mode,
-		ObjectRef:        "minio://" + grant.Object.Bucket + "/" + grant.Object.Key,
+		ObjectRef:        "s3://" + grant.Object.Bucket + "/" + grant.Object.Key,
 		ExpiresAt:        grant.ExpiresAt.UTC(),
 	}
 }

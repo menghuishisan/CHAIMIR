@@ -5,7 +5,15 @@ LABEL org.opencontainers.image.title="tool/jupyter"
 LABEL org.opencontainers.image.description="Chaimir Jupyter notebook tool image"
 
 USER root
-RUN apt-get -o Acquire::Retries=3 update \
+RUN for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do \
+        if [ -f "$source" ]; then \
+            sed -i \
+                -e 's|http://archive.ubuntu.com/ubuntu|https://mirror.leaseweb.com/ubuntu|g' \
+                -e 's|http://security.ubuntu.com/ubuntu|https://mirror.leaseweb.com/ubuntu|g' \
+                "$source"; \
+        fi; \
+    done \
+    && apt-get -o Acquire::Retries=3 update \
     && apt-get -o Acquire::Retries=3 -y upgrade \
     && /opt/conda/bin/python -m pip install --no-cache-dir --upgrade \
         "setuptools" \

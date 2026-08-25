@@ -13,20 +13,20 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: sandbox-infra
   chaimir.io/scope: sandbox
-  chaimir.io/source: thin-wrapper
+  chaimir.io/source: platform-built
 description: IPFS/Kubo 内容寻址存储节点镜像。
 source:
-  type: thin-wrapper
+  type: platform-built
 upstream:
-  registry: docker.io
-  image: ipfs/kubo
+  source_repo: https://github.com/ipfs/kubo
+  source_ref: v0.42.0
   version: v0.42.0
-  digest: sha256:6a99314a4fae81abc50a73ccccc0dc4cd49da672a08aca84d25c38c5aa3a8bb3
+  source_commit: 969853d9609b3a261ef4e41a5eec437188c09ffe
   dirs_image: alpine:3.23
   dirs_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
-  runtime_image: gcr.io/distroless/base-debian12:nonroot
-  runtime_digest: sha256:4b5196599229a5cf312a676cfe1ee8587ecf2371dcc22620f8c7a66d77d125c8
-  reuse_policy: official-image-binary
+  runtime_image: debian:13-slim
+  runtime_digest: sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
+  reuse_policy: rebuild-official-release-source
 data_driven: true
 capabilities:
   provides:

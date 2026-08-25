@@ -1137,7 +1137,7 @@ func hasVolumeDomain(spec AdapterSpec, name string) bool {
 func normalizeAndValidateVolumeDomains(spec *AdapterSpec) error {
 	if len(spec.VolumeDomains) == 0 {
 		spec.VolumeDomains = []VolumeDomainSpec{
-			{Name: VolumeDomainWorkspace, MountPath: spec.WorkspaceDir, StudentAccess: VolumeAccessReadWrite, Persistence: VolumePersistenceMinioCode, SnapshotScope: VolumeSnapshotAlways},
+			{Name: VolumeDomainWorkspace, MountPath: spec.WorkspaceDir, StudentAccess: VolumeAccessReadWrite, Persistence: VolumePersistenceObjectStorageCode, SnapshotScope: VolumeSnapshotAlways},
 			{Name: VolumeDomainRuntimeState, MountPath: "/runtime-state", StudentAccess: VolumeAccessNone, Persistence: VolumePersistenceEphemeral, SnapshotScope: VolumeSnapshotEnabled},
 		}
 	}
@@ -1161,7 +1161,7 @@ func normalizeAndValidateVolumeDomains(spec *AdapterSpec) error {
 		}
 		if domain.Name == VolumeDomainWorkspace {
 			workspaceSeen = true
-			if domain.MountPath != path.Clean(spec.WorkspaceDir) || domain.StudentAccess != VolumeAccessReadWrite || domain.Persistence != VolumePersistenceMinioCode {
+			if domain.MountPath != path.Clean(spec.WorkspaceDir) || domain.StudentAccess != VolumeAccessReadWrite || domain.Persistence != VolumePersistenceObjectStorageCode {
 				return apperr.ErrSandboxVolumeDomainInvalid
 			}
 		}
@@ -1191,7 +1191,7 @@ func validVolumeAccess(access string) bool {
 
 // validVolumePersistence 校验卷域持久化策略枚举。
 func validVolumePersistence(persistence string) bool {
-	return persistence == VolumePersistenceMinioCode || persistence == VolumePersistenceEphemeral || persistence == VolumePersistenceSnapshot
+	return persistence == VolumePersistenceObjectStorageCode || persistence == VolumePersistenceEphemeral || persistence == VolumePersistenceSnapshot
 }
 
 // validVolumeSnapshotScope 校验卷域快照策略枚举。

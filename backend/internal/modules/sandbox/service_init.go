@@ -56,10 +56,10 @@ func (s *Service) restoreArchiveToWorkspaceDirChecked(ctx context.Context, sb Sa
 	if err != nil {
 		return apperr.ErrSandboxInitObjectRefInvalid.WithCause(err)
 	}
-	if err := validateInitObjectRef(sb.TenantID, ref, s.minio.BucketCode(), s.minio.BucketAttach()); err != nil {
+	if err := validateInitObjectRef(sb.TenantID, ref, s.objectStorage.BucketCode(), s.objectStorage.BucketAttach()); err != nil {
 		return err
 	}
-	reader, err := s.minio.Get(ctx, ref.Bucket, ref.Key)
+	reader, err := s.objectStorage.Get(ctx, ref.Bucket, ref.Key)
 	if err != nil {
 		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}
@@ -114,10 +114,10 @@ func (s *Service) runInitScriptIfNeeded(ctx context.Context, sb Sandbox, runtime
 	if err != nil {
 		return apperr.ErrSandboxInitObjectRefInvalid.WithCause(err)
 	}
-	if err := validateInitObjectRef(sb.TenantID, ref, s.minio.BucketCode(), s.minio.BucketAttach()); err != nil {
+	if err := validateInitObjectRef(sb.TenantID, ref, s.objectStorage.BucketCode(), s.objectStorage.BucketAttach()); err != nil {
 		return err
 	}
-	reader, err := s.minio.Get(ctx, ref.Bucket, ref.Key)
+	reader, err := s.objectStorage.Get(ctx, ref.Bucket, ref.Key)
 	if err != nil {
 		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
 	}

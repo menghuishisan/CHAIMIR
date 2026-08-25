@@ -1,55 +1,52 @@
-# 本文件声明 middleware/minio 平台构建镜像的来源、配置、端口、数据卷和生产门禁。
+# 本文件声明 middleware/rustfs 的 S3 对象存储能力、固定来源、端口、数据卷和生产门禁。
 schema_version: 1
 category: middleware
-name: minio
-image: middleware/minio
+name: rustfs
+image: middleware/rustfs
 labels:
-  app.kubernetes.io/name: minio
+  app.kubernetes.io/name: rustfs
   app.kubernetes.io/component: middleware
   app.kubernetes.io/part-of: chaimir
   chaimir.io/category: middleware
-  chaimir.io/image: middleware/minio
+  chaimir.io/image: middleware/rustfs
   chaimir.io/data-driven: "false"
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: stateful-middleware
   chaimir.io/scope: middleware
-  chaimir.io/source: platform-built
-description: MinIO 对象存储平台构建镜像。
+  chaimir.io/source: upstream-pinned
+description: RustFS S3 兼容对象存储和备份对象仓库。
 source:
-  type: platform-built
+  type: upstream-pinned
 upstream:
-  source_repository: https://github.com/minio/minio
-  commit: 7aac2a2c5b7c882e68c1ce017d8256be2feea27f
-  version: "RELEASE.2026-06-27T00-00-00Z.chaimir.7aac2a2c5b7c"
-  builder_arg: GO_BUILDER_IMAGE
-  runtime: gcr.io/distroless/static-debian12:nonroot
-  runtime_digest: sha256:b7bb25d9f7c31d2bdd1982feb4dafcaf137703c7075dbe2febb41c24212b946f
-  reuse_policy: source-build
-  license: AGPL-3.0
+  image: rustfs/rustfs
+  registry: docker.io
+  version: 1.0.0-rc.3
+  digest: sha256:800cf3f352a0a27e3275ca854a51f0027975d7acc7a0d52089a35bcc9fcbf0b5
+  source_repository: https://github.com/rustfs/rustfs
+  commit: 1aae6803739a5bac67e0d702ac46d43f09fb06dd
+  license: Apache-2.0
+  reuse_policy: upstream-pinned
 private_delivery:
   offline_bundle: true
   import_project: middleware
 data_driven: false
 capabilities:
-  - object-storage
+  - s3-object-storage
   - artifact-store
   - backup-store
 env_keys:
   config:
-    - MINIO_ENDPOINT
-    - MINIO_REGION
-    - MINIO_BUCKET_CODE
-    - MINIO_BUCKET_ATTACHMENT
-    - MINIO_BUCKET_REPORT
-    - MINIO_BUCKET_BACKUP
+    - RUSTFS_ADDRESS
+    - RUSTFS_VOLUMES
+    - RUSTFS_REGION
   secret:
-    - MINIO_ACCESS_KEY
-    - MINIO_SECRET_KEY
+    - RUSTFS_ACCESS_KEY
+    - RUSTFS_SECRET_KEY
 secrets_required:
-  - env: MINIO_ACCESS_KEY
+  - env: RUSTFS_ACCESS_KEY
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
-  - env: MINIO_SECRET_KEY
+  - env: RUSTFS_SECRET_KEY
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
 ports:
@@ -62,7 +59,7 @@ ports:
     container_port: 9001
     protocol: TCP
     expose: internal
-    purpose: MinIO console, only for operators through authenticated access
+    purpose: RustFS console, only for operators through authenticated access
 security:
   run_as_non_root: true
   read_only_root_filesystem: false
@@ -75,18 +72,16 @@ security:
   network_policy: deny-all
 security_exceptions:
   - field: read_only_root_filesystem
-    reason: MinIO 需要写对象数据、元数据和临时状态;只允许写入对象存储数据卷。
+    reason: RustFS 需要写对象数据、元数据和运行日志;只允许写入声明的数据卷。
     writable_mounts:
-      - runtime-state
-student_access:
-  enabled: false
+      - data
 data_volumes:
   - name: data
     mount_path: /data
     backup_required: true
 backup:
   required: true
-  mode: bucket-replication-and-volume
+  mode: object-copy-and-volume
 network:
   expose: internal
   default_deny: true
@@ -96,18 +91,15 @@ resources:
   memory_request: 128Mi
   memory_limit: 512Mi
   ephemeral_storage_limit: 1Gi
-build:
-  context: images/middleware/minio
-  dockerfile: Dockerfile
 selftest:
   commands:
-    - name: minio-version
+    - name: rustfs-version
       command:
-        - minio
+        - rustfs
         - --version
   upstream_healthcheck:
     type: http
-    path: /minio/health/ready
+    path: /health/ready
     port: 9000
 supply_chain:
   sbom: true

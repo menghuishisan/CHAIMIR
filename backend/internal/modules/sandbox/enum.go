@@ -190,8 +190,8 @@ const (
 )
 
 const (
-	// VolumePersistenceMinioCode 表示仅工作区代码由 MinIO 持久化。
-	VolumePersistenceMinioCode = "minio_code"
+	// VolumePersistenceObjectStorageCode 表示仅工作区代码由 ObjectStorage 持久化。
+	VolumePersistenceObjectStorageCode = "object_storage_code"
 	// VolumePersistenceEphemeral 表示卷域默认随沙箱销毁。
 	VolumePersistenceEphemeral = "ephemeral"
 	// VolumePersistenceSnapshot 表示卷域只允许通过受控快照保留。

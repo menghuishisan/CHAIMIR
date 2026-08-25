@@ -21,7 +21,7 @@ upstream:
   registry: cgr.dev
   image: chainguard/wolfi-base
   version: "2026-07-07"
-  digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
+  digest: sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
   packages:
     - clamav-1.5-daemon=1.5.2-r7
     - clamav-1.5-scanner=1.5.2-r7

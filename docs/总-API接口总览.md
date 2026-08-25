@@ -109,7 +109,7 @@
 
 **鉴权载体**:`<video src>`、`<img src>` 这类由浏览器自身发起的请求发不出 `Authorization` 头,故本入口接受 **Bearer 头**(XHR 取件)**或路径受限 Cookie**(浏览器直连),沿用 M2 浏览器工具代理已有的 `chaimir_access` 机制。两个入口共用 Cookie 与会话校验底座,但首次建链方式不同:M2 工具代理只接受 `/auth/browser-ticket` 签发的短时路径票据,统一文件服务由签发 `mode=stream` 授权的业务接口直接写 Cookie。文件服务**不接受任何 query 形式的 access token** —— `token` 参数位只表示投放授权,同名两义会让验签路径产生歧义。Cookie 作用域限定 `storage.DownloadCookiePath`(`/api/v1/storage`)、`HttpOnly`,有效期与 access token 一致;授权仍绑定租户、账号与资源前缀,`authorizeDownloadGrant` 的会话比对不因载体变化而放宽。
 
-> 所有模块签发的授权都只能由本入口消费。业务模块和前端页面不得拼接 MinIO 地址、复制 token 验签逻辑或新增模块私有下载路由。
+> 所有模块签发的授权都只能由本入口消费。业务模块和前端页面不得拼接 S3 对象存储 地址、复制 token 验签逻辑或新增模块私有下载路由。
 
 ### M2 沙箱引擎 `/api/v1/sandbox`
 - `/runtimes`、`/tools`:运行时/工具管理 + 接入即测 `[平台管理员]`;镜像预拉取提供触发与状态查询,完成以全目标节点真实拉取成功为准。

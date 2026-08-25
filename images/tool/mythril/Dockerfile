@@ -1,20 +1,21 @@
 # 本文件定义 Mythril 符号执行安全分析工具镜像。
-FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795 AS build
+FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72 AS build
 
 ARG SOLC_VERSION=0.8.26
 ARG SOLC_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
 ARG SOLC_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
+ARG PIP_INDEX_URL=https://pypi.org/simple
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    packages='ca-certificates gcc git libstdc++ make python-3.10=3.10.20-r10 python-3.10-dev py3.10-pip' \
+    packages='ca-certificates gcc git libstdc++ make python-3.10=3.10.21-r0 python-3.10-dev py3.10-pip' \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 3)); \
     done \
     && python3.10 -m venv /opt/mythril \
-    && /opt/mythril/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/mythril/bin/pip install --no-cache-dir \
+    && /opt/mythril/bin/pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" --upgrade pip \
+    && /opt/mythril/bin/pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
         "mythril==0.24.8" \
         "setuptools==80.9.0" \
         "urllib3>=2.6.0" \
@@ -26,7 +27,7 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         /opt/mythril/lib/python3.10/site-packages/setuptools/_vendor/jaraco.context-*.dist-info \
     && /opt/mythril/bin/myth version
 
-FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
+FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
 
 ARG SOLC_VERSION=0.8.26
 ARG SOLC_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
@@ -37,7 +38,7 @@ LABEL org.opencontainers.image.description="Chaimir Mythril symbolic execution t
 
 ADD --checksum=sha256:d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef https://binaries.soliditylang.org/linux-amd64/${SOLC_PATH} /usr/local/bin/solc-${SOLC_VERSION}
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    packages='ca-certificates libstdc++ python-3.10=3.10.20-r10' \
+    packages='ca-certificates libstdc++ python-3.10=3.10.21-r0' \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \

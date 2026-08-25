@@ -187,7 +187,7 @@ func seedAcceptance(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	defer database.Close()
-	objectStore, err := storage.New(ctx, cfg.MinIO)
+	objectStore, err := storage.New(ctx, cfg.ObjectStorage)
 	if err != nil {
 		return err
 	}
@@ -216,15 +216,15 @@ func seedAcceptance(ctx context.Context, cfg *config.Config) error {
 	if err := seedAcceptanceAccounts(ctx, database, cfg.Bootstrap.AdminPassword, includeIsolationTenant); err != nil {
 		return err
 	}
-	if err := seedAcceptanceExperimentAssets(ctx, objectStore, cfg.MinIO.BucketCode); err != nil {
+	if err := seedAcceptanceExperimentAssets(ctx, objectStore, cfg.ObjectStorage.BucketCode); err != nil {
 		return err
 	}
-	replayRef, replayKey, err := seedAcceptanceReplayObject(ctx, objectStore, cfg.MinIO.BucketReport)
+	replayRef, replayKey, err := seedAcceptanceReplayObject(ctx, objectStore, cfg.ObjectStorage.BucketReport)
 	if err != nil {
 		return err
 	}
 	if err := seedAcceptanceBusiness(ctx, database, includeIsolationTenant, replayRef); err != nil {
-		if cleanupErr := objectStore.Delete(ctx, cfg.MinIO.BucketReport, replayKey); cleanupErr != nil {
+		if cleanupErr := objectStore.Delete(ctx, cfg.ObjectStorage.BucketReport, replayKey); cleanupErr != nil {
 			return fmt.Errorf("写入验收业务数据失败: %w; 清理回放对象失败: %v", err, cleanupErr)
 		}
 		return err
@@ -380,7 +380,7 @@ func ensureAcceptanceSeedAllowed(cfg *config.Config) error {
 
 // seedAcceptanceTenant 创建验收租户,不依赖生产 bootstrap 租户;隔离租户仅用于 SaaS 多租户验收。
 //
-// 刻意不写 logo_ref:校徽与课程封面存的是对象引用,而种子只写库不往 MinIO 放字节。
+// 刻意不写 logo_ref:校徽与课程封面存的是对象引用,而种子只写库不往 ObjectStorage 放字节。
 // 编一个引用出来会让验收环境「有校徽但取不到」——比没有校徽更难排查;留空则走设计好的
 // 回落(徽记位显示校名首字、封面用平台纸材质),校徽/封面本身在验收时经上传入口真实产生。
 // 同理 course.cover_ref 也不写(见 acceptance_seed_rows.go 的 course 插入)。

@@ -22,7 +22,7 @@ upstream:
   version: "0.44.0"
   digest: sha256:c14c6d8e2b2b1ed89f6a89babf48d807b18a43e372fda7fb495d3a9050b65b8b
   runtime: cgr.dev/chainguard/wolfi-base
-  runtime_digest: sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
+  runtime_digest: sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
   reuse_policy: thin-wrapper
 data_driven: true
 env_keys:

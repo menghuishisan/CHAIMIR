@@ -20,7 +20,7 @@ configMapGenerator:
       - PG_HOST=postgres.prod-data.internal
       - REDIS_HOST=redis.prod-data.internal
       - NATS_URL=nats://nats.prod-data.internal:4222
-      - MINIO_ENDPOINT=minio.prod-data.internal:9000
+      - OBJECT_STORAGE_ENDPOINT=rustfs.prod-data.internal:9000
       - UPLOAD_VIRUS_SCAN_ADDRESS=clamav.prod-data.internal:3310
 
 # 生产后端起步 3 副本(HPA 接管伸缩区间)。

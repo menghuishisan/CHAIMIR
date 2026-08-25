@@ -93,7 +93,7 @@ selftest:
         - --version
 supply_chain:
   deployable: false
-  block_reason: "官方 smartcontract/chainlink:2.58.0 amd64 digest 已完成拉取,但主 chainlink 二进制仍命中 Go 标准库 HIGH;在上游发布 Go 修复版本或完成可验证源码重建、HIGH/CRITICAL 扫描、Cosign 签名证明并写入正式 digest lock 前不得部署。"
+  block_reason: "已复核 smartcontract/chainlink:2.58.0 与 2.61.0 amd64 digest;2.61.0 的主 chainlink 二进制仍命中 Go 1.26.5 标准库 HIGH 与 golang.org/x/mod HIGH,且多平台辅助二进制仍有高危项。尝试以固定源码 commit、Go 1.26.6 和修复依赖重建时,公开模块下载未完成,因此尚无可验证的源码重建产物。完成核心二进制重建、HIGH/CRITICAL 扫描、Cosign 签名证明并写入正式 digest lock 前不得部署。"
   sbom: true
   trivy_required: true
   cosign_required: true

@@ -332,6 +332,12 @@ foreach ($item in $selected) {
     if ($item.DockerfileText -match "(?m)^\s*ARG\s+GO_MODULE_PROXY\b" -and -not [string]::IsNullOrWhiteSpace($env:GO_MODULE_PROXY)) {
         $buildArguments["GO_MODULE_PROXY"] = $env:GO_MODULE_PROXY
     }
+    if ($item.DockerfileText -match "(?m)^\s*ARG\s+PIP_INDEX_URL\b" -and -not [string]::IsNullOrWhiteSpace($env:PIP_INDEX_URL)) {
+        $buildArguments["PIP_INDEX_URL"] = $env:PIP_INDEX_URL
+    }
+    if ($item.DockerfileText -match "(?m)^\s*ARG\s+NPM_CONFIG_REGISTRY\b" -and -not [string]::IsNullOrWhiteSpace($env:NPM_CONFIG_REGISTRY)) {
+        $buildArguments["NPM_CONFIG_REGISTRY"] = $env:NPM_CONFIG_REGISTRY
+    }
     foreach ($key in $buildArguments.Keys | Sort-Object) {
         $args += @("--build-arg", "$key=$($buildArguments[$key])")
     }

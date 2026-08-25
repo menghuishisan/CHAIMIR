@@ -84,7 +84,7 @@ func run() error {
 		return err
 	}
 	defer database.Close()
-	objects, err := storage.New(ctx, cfg.MinIO)
+	objects, err := storage.New(ctx, cfg.ObjectStorage)
 	if err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-// storage 提供统一对象引用解析,确保模块间传递的 minio:// 引用语义一致。
+// storage 提供统一对象引用解析,确保模块间传递的 s3:// 引用语义一致。
 package storage
 
 import (
@@ -8,26 +8,26 @@ import (
 
 var bucketNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$`)
 
-// ObjectRef 表示一条 minio://bucket/key 形式的对象引用。
+// ObjectRef 表示一条 s3://bucket/key 形式的对象引用。
 type ObjectRef struct {
 	Bucket string
 	Key    string
 }
 
-// ObjectRefString 构造 minio://bucket/key 引用,与解析校验共用同一安全规则。
+// ObjectRefString 构造 s3://bucket/key 引用,与解析校验共用同一安全规则。
 func ObjectRefString(bucket, key string) (string, error) {
 	if !safeObjectRefBucket(bucket) || !safeObjectRefKey(key) {
 		return "", ErrObjectRefInvalid
 	}
-	return "minio://" + bucket + "/" + key, nil
+	return "s3://" + bucket + "/" + key, nil
 }
 
-// ParseObjectRef 解析 minio://bucket/key 引用,并拒绝会混淆 bucket/key 边界的非法片段。
+// ParseObjectRef 解析 s3://bucket/key 引用,并拒绝会混淆 bucket/key 边界的非法片段。
 func ParseObjectRef(raw string) (ObjectRef, error) {
-	if !strings.HasPrefix(raw, "minio://") {
+	if !strings.HasPrefix(raw, "s3://") {
 		return ObjectRef{}, ErrObjectRefInvalid
 	}
-	trimmed := strings.TrimPrefix(raw, "minio://")
+	trimmed := strings.TrimPrefix(raw, "s3://")
 	idx := strings.Index(trimmed, "/")
 	if idx <= 0 || idx == len(trimmed)-1 {
 		return ObjectRef{}, ErrObjectRefInvalid
@@ -39,7 +39,7 @@ func ParseObjectRef(raw string) (ObjectRef, error) {
 	return ObjectRef{Bucket: bucket, Key: key}, nil
 }
 
-// safeObjectRefBucket 限制 bucket 为 MinIO/S3 单段名称,禁止混入路径分隔或空白。
+// safeObjectRefBucket 限制 bucket 为 S3 单段名称,禁止混入路径分隔或空白。
 func safeObjectRefBucket(bucket string) bool {
 	if bucket != strings.TrimSpace(bucket) || strings.Contains(bucket, "/") || strings.Contains(bucket, "\\") {
 		return false

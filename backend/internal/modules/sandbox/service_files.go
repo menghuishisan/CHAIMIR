@@ -244,7 +244,7 @@ func (s *Service) saveSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 		return "", "", sandboxExecFailure(apperr.ErrSandboxFilePersistFailed, err, stderr)
 	}
 	hash := crypto.SHA256Hex(stdout)
-	if err := s.minio.Put(ctx, s.minio.BucketCode(), sb.CodeStorageKey, bytes.NewReader(stdout), int64(len(stdout)), "application/x-tar"); err != nil {
+	if err := s.objectStorage.Put(ctx, s.objectStorage.BucketCode(), sb.CodeStorageKey, bytes.NewReader(stdout), int64(len(stdout)), "application/x-tar"); err != nil {
 		return "", "", apperr.ErrSandboxFilePersistFailed.WithCause(err)
 	}
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
@@ -262,7 +262,7 @@ func (s *Service) saveSandboxFiles(ctx context.Context, tenantID, sandboxID int6
 	}); err != nil {
 		return "", "", err
 	}
-	ref, err := storage.ObjectRefString(s.minio.BucketCode(), sb.CodeStorageKey)
+	ref, err := storage.ObjectRefString(s.objectStorage.BucketCode(), sb.CodeStorageKey)
 	if err != nil {
 		return "", "", apperr.ErrSandboxFilePersistFailed.WithCause(err)
 	}

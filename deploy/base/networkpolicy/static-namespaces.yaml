@@ -97,7 +97,7 @@ spec:
         - protocol: TCP
           port: 4222   # NATS
         - protocol: TCP
-          port: 9000   # MinIO
+          port: 9000   # S3 对象存储
         - protocol: TCP
           port: 3310   # ClamAV clamd
 ---

@@ -143,14 +143,14 @@ func newInfrastructure(ctx context.Context, cfg *config.Config) (*infrastructure
 	if err != nil {
 		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, nil))
 	}
-	objectStore, err := storage.New(ctx, cfg.MinIO)
+	objectStore, err := storage.New(ctx, cfg.ObjectStorage)
 	if err != nil {
 		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
 	}
 	if err := objectStore.EnsureBuckets(ctx); err != nil {
 		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
 	}
-	fileService, err := storage.NewServiceFromConfig(cfg.Auth, cfg.MinIO, cfg.Upload)
+	fileService, err := storage.NewServiceFromConfig(cfg.Auth, cfg.ObjectStorage, cfg.Upload)
 	if err != nil {
 		return nil, errors.Join(err, closeStartupInfrastructure(database, redisClient, bus))
 	}

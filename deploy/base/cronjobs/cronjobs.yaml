@@ -21,7 +21,7 @@ metadata:
     app.kubernetes.io/part-of: chaimir
     app.kubernetes.io/component: cronjob
 spec:
-  schedule: "23 2 * * *"  # 每日 02:23 全量备份 DB + MinIO 业务对象,并写入 M9 backup_record。
+  schedule: "23 2 * * *"  # 每日 02:23 全量备份 DB + S3 对象存储 业务对象,并写入 M9 backup_record。
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 7
   failedJobsHistoryLimit: 3

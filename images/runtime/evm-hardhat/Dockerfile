@@ -1,7 +1,7 @@
 # 本文件定义 Hardhat 教学运行时镜像,用于 Solidity 开发体验类实验。
 FROM ghcr.io/foundry-rs/foundry:v1.7.1@sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72 AS foundry
 
-FROM node:22-bookworm@sha256:4228fca437e45714a3ebd1d4ecd1dcc583cf79f5a940aa025e286b472d93b67c
+FROM node:22-trixie-slim@sha256:a05717adfe7289e2a0fa36a694dc430a510adab6467c7036e51551198935abef
 
 LABEL org.opencontainers.image.title="runtime/evm-hardhat"
 LABEL org.opencontainers.image.description="Chaimir Hardhat EVM teaching runtime"
@@ -18,7 +18,9 @@ COPY --from=foundry /usr/local/bin/cast /usr/local/bin/cast
 COPY --from=foundry /usr/local/bin/chisel /usr/local/bin/chisel
 COPY package.json package-lock.json /opt/chaimir/evm-hardhat/
 ADD --checksum=sha256:0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782 https://github.com/ethereum/solidity/releases/download/v0.8.20/solc-static-linux /tmp/solc-0.8.20
-RUN apt-get -o Acquire::Retries=5 update \
+RUN sed -i 's|http://deb.debian.org/debian$|http://ftp.de.debian.org/debian|' /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=8 update \
+    && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 dist-upgrade -y --no-install-recommends \
     && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends bash git ca-certificates jq \
     && rm -rf /var/lib/apt/lists/* \
     && echo "${SOLC_0_8_20_SHA256}  /tmp/solc-0.8.20" | sha256sum -c - \

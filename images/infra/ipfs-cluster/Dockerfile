@@ -20,10 +20,15 @@ RUN test "$(git rev-parse HEAD)" = "${IPFS_CLUSTER_COMMIT}" \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/chaimir-ipfs-cluster-entrypoint /src/ipfs-cluster-entrypoint.go \
     && mkdir -p /tmp/chaimir-ipfs-cluster/runtime-state/ipfs-cluster /tmp/chaimir-ipfs-cluster/workspace
 
-FROM gcr.io/distroless/base-debian12:nonroot@sha256:4b5196599229a5cf312a676cfe1ee8587ecf2371dcc22620f8c7a66d77d125c8
+FROM debian:13-slim@sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
 
 LABEL org.opencontainers.image.title="infra/ipfs-cluster"
 LABEL org.opencontainers.image.description="Chaimir IPFS Cluster coordination image"
+
+RUN mkdir -p /etc/ssl/certs /runtime-state/ipfs-cluster /workspace \
+    && chown -R 1000:1000 /runtime-state /workspace
+
+COPY --from=cluster-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 # 集群配置和密钥由运行期注入,镜像只准备非 root 运行目录。
 COPY --from=cluster-build /out/ipfs-cluster-service /usr/local/bin/ipfs-cluster-service

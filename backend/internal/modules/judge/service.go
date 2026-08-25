@@ -46,17 +46,17 @@ type objectStorage interface {
 
 // Service 承载 judge 模块业务编排,依赖 repo 接口和平台横切能力。
 type Service struct {
-	store    Store
-	ids      snowflake.Generator
-	cfg      config.JudgeConfig
-	hmacKey  []byte
-	minio    objectStorage
-	sandbox  contracts.SandboxService
-	content  contracts.ContentJudgeReadService
-	audit    audit.Writer
-	identity contracts.IdentityService
-	bus      eventbus.Bus
-	wsHub    *ws.Hub
+	store         Store
+	ids           snowflake.Generator
+	cfg           config.JudgeConfig
+	hmacKey       []byte
+	objectStorage objectStorage
+	sandbox       contracts.SandboxService
+	content       contracts.ContentJudgeReadService
+	audit         audit.Writer
+	identity      contracts.IdentityService
+	bus           eventbus.Bus
+	wsHub         *ws.Hub
 }
 
 // ServiceDeps 是 judge service 的装配依赖集合。
@@ -104,17 +104,17 @@ func NewService(deps ServiceDeps) (*Service, error) {
 		return nil, fmt.Errorf("judge service 缺少事件总线")
 	}
 	return &Service{
-		store:    deps.Store,
-		ids:      deps.IDs,
-		cfg:      deps.Config,
-		hmacKey:  []byte(deps.Auth.HMACKey),
-		minio:    deps.Storage,
-		sandbox:  deps.Sandbox,
-		content:  deps.Content,
-		audit:    deps.Audit,
-		identity: deps.Identity,
-		bus:      deps.EventBus,
-		wsHub:    deps.WSHub,
+		store:         deps.Store,
+		ids:           deps.IDs,
+		cfg:           deps.Config,
+		hmacKey:       []byte(deps.Auth.HMACKey),
+		objectStorage: deps.Storage,
+		sandbox:       deps.Sandbox,
+		content:       deps.Content,
+		audit:         deps.Audit,
+		identity:      deps.Identity,
+		bus:           deps.EventBus,
+		wsHub:         deps.WSHub,
 	}, nil
 }
 
@@ -571,10 +571,10 @@ func (s *Service) storeSanitizedCodeArchive(ctx context.Context, tenantID, taskI
 	if err != nil {
 		return "", apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
 	}
-	if err := s.minio.Put(ctx, s.minio.BucketCode(), key, bytes.NewReader(data), int64(len(data)), "application/x-tar"); err != nil {
+	if err := s.objectStorage.Put(ctx, s.objectStorage.BucketCode(), key, bytes.NewReader(data), int64(len(data)), "application/x-tar"); err != nil {
 		return "", apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
 	}
-	ref, err := storage.ObjectRefString(s.minio.BucketCode(), key)
+	ref, err := storage.ObjectRefString(s.objectStorage.BucketCode(), key)
 	if err != nil {
 		return "", apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
 	}
@@ -598,13 +598,13 @@ func validateSourceOwnership(ownership SourceOwnership) error {
 	return nil
 }
 
-// readObjectRef 读取 minio://bucket/key 对象,限制在统一对象存储接口内。
+// readObjectRef 读取 s3://bucket/key 对象,限制在统一对象存储接口内。
 func (s *Service) readObjectRef(ctx context.Context, objectRef string) (string, []byte, error) {
 	ref, err := storage.ParseObjectRef(objectRef)
 	if err != nil {
 		return "", nil, err
 	}
-	rc, err := s.minio.Get(ctx, ref.Bucket, ref.Key)
+	rc, err := s.objectStorage.Get(ctx, ref.Bucket, ref.Key)
 	if err != nil {
 		return "", nil, err
 	}

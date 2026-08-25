@@ -21,6 +21,8 @@ upstream:
   image: solanalabs/solana:v1.18.26
   version: v1.18.26
   digest: sha256:098806e64d44bccdbedbf07c2edabd1c850b92c8a4a0f81eba9c789034813db6
+  runtime_image: debian:13-slim
+  runtime_digest: sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
   reuse_policy: thin-wrapper
 data_driven: true
 env_keys:

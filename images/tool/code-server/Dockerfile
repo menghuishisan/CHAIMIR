@@ -2,24 +2,25 @@
 FROM ghcr.io/coder/code-server:4.126.0@sha256:e1f03b5faaefd63ba6c7173a5290c6ec0526ac907f23acfe6bc949dd965279e4 AS upstream
 
 FROM node:22-trixie-slim@sha256:4228fca437e45714a3ebd1d4ecd1dcc583cf79f5a940aa025e286b472d93b67c AS patched
+ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
 COPY --from=upstream /usr/lib/code-server /usr/lib/code-server
 COPY --from=upstream /usr/bin/code-server /usr/bin/code-server
-RUN npm --prefix /usr/lib/code-server install --omit=dev --ignore-scripts --package-lock=false --no-audit --no-fund \
+RUN npm --prefix /usr/lib/code-server --registry "${NPM_CONFIG_REGISTRY}" install --omit=dev --ignore-scripts --package-lock=false --no-audit --no-fund \
     basic-ftp@5.3.1 \
         adm-zip@0.6.0 \
         minimatch@3.1.4 \
         path-to-regexp@8.4.0 \
-        tar@7.5.19 \
+        tar@7.5.21 \
         ws@8.21.0 \
-    && npm --prefix /usr/lib/code-server/lib/vscode install --omit=dev --ignore-scripts --package-lock=false --no-audit --no-fund \
+    && npm --prefix /usr/lib/code-server/lib/vscode --registry "${NPM_CONFIG_REGISTRY}" install --omit=dev --ignore-scripts --package-lock=false --no-audit --no-fund \
         picomatch@4.0.4 \
         tar-fs@2.1.4 \
         undici@7.29.0 \
-    && npm --prefix /usr/lib/code-server/lib/vscode/node_modules/@github/copilot-linux-x64/foundry-local-sdk/node_modules/foundry-local-sdk \
+    && npm --prefix /usr/lib/code-server/lib/vscode/node_modules/@github/copilot-linux-x64/foundry-local-sdk/node_modules/foundry-local-sdk --registry "${NPM_CONFIG_REGISTRY}" \
         install --omit=dev --ignore-scripts --package-lock=false --no-audit --no-fund adm-zip@0.6.0 \
     && test -x /usr/lib/code-server/bin/code-server
 
-FROM cgr.dev/chainguard/wolfi-base@sha256:02dab76bd852a70556b5b2002195c8a5fdab77d323c433bf6642aab080489795
+FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
 
 LABEL org.opencontainers.image.title="tool/code-server"
 LABEL org.opencontainers.image.description="Chaimir code-server web IDE image"

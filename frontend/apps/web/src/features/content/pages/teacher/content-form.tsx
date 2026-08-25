@@ -703,7 +703,7 @@ function readAttachments(body: Record<string, unknown>): ContentAttachment[] {
     const candidate = item as Partial<ContentAttachment>
     return (
       typeof candidate.object_ref === 'string' &&
-      candidate.object_ref.startsWith('minio://') &&
+      candidate.object_ref.startsWith('s3://') &&
       typeof candidate.file_name === 'string' &&
       typeof candidate.size === 'number'
     )

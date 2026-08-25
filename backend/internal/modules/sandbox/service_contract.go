@@ -91,7 +91,7 @@ func (s *Service) GetSandboxWorkspaceArchive(ctx context.Context, tenantID, sand
 	if strings.TrimSpace(sb.CodeHash) == "" || strings.TrimSpace(sb.CodeStorageKey) == "" {
 		return "", nil
 	}
-	ref, err := storage.ObjectRefString(s.minio.BucketCode(), sb.CodeStorageKey)
+	ref, err := storage.ObjectRefString(s.objectStorage.BucketCode(), sb.CodeStorageKey)
 	if err != nil {
 		return "", apperr.ErrSandboxFilePersistFailed.WithCause(err)
 	}

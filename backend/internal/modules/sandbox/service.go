@@ -104,20 +104,20 @@ type objectStorage interface {
 
 // Service 承载 sandbox 模块业务编排,依赖 repo 接口和平台横切能力。
 type Service struct {
-	store        Store
-	ids          snowflake.Generator
-	cfg          config.SandboxConfig
-	minio        objectStorage
-	orchestrator Orchestrator
-	audit        audit.Writer
-	identity     contracts.IdentityService
-	bus          eventbus.Bus
-	wsHub        *ws.Hub
-	capabilities map[string]ChainCapability
-	saveMu       sync.Mutex
-	saveTimers   map[int64]*time.Timer
-	startupMu    sync.Mutex
-	startup      map[int64]struct{}
+	store         Store
+	ids           snowflake.Generator
+	cfg           config.SandboxConfig
+	objectStorage objectStorage
+	orchestrator  Orchestrator
+	audit         audit.Writer
+	identity      contracts.IdentityService
+	bus           eventbus.Bus
+	wsHub         *ws.Hub
+	capabilities  map[string]ChainCapability
+	saveMu        sync.Mutex
+	saveTimers    map[int64]*time.Timer
+	startupMu     sync.Mutex
+	startup       map[int64]struct{}
 }
 
 // resolvedSandboxCreateDependencies 是创建或发布前校验沙箱模板时解析出的 M2 能力快照。
@@ -170,18 +170,18 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	}
 	capabilities[BuiltinExecCapability] = execChainCapability{orchestrator: deps.Orchestrator, timeoutSeconds: deps.Config.ChainRPCTimeoutSeconds}
 	return &Service{
-		store:        deps.Store,
-		ids:          deps.IDs,
-		cfg:          deps.Config,
-		minio:        deps.Storage,
-		orchestrator: deps.Orchestrator,
-		audit:        deps.Audit,
-		identity:     deps.Identity,
-		bus:          deps.EventBus,
-		wsHub:        deps.WSHub,
-		capabilities: capabilities,
-		saveTimers:   map[int64]*time.Timer{},
-		startup:      map[int64]struct{}{},
+		store:         deps.Store,
+		ids:           deps.IDs,
+		cfg:           deps.Config,
+		objectStorage: deps.Storage,
+		orchestrator:  deps.Orchestrator,
+		audit:         deps.Audit,
+		identity:      deps.Identity,
+		bus:           deps.EventBus,
+		wsHub:         deps.WSHub,
+		capabilities:  capabilities,
+		saveTimers:    map[int64]*time.Timer{},
+		startup:       map[int64]struct{}{},
 	}, nil
 }
 
