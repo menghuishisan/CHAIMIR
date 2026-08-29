@@ -6,9 +6,9 @@ LABEL org.opencontainers.image.description="Chaimir Node builder base image"
 
 # 构建基座先应用发行版安全更新,并固定升级 npm 以修复 Node 官方镜像内置 npm 依赖漏洞。
 RUN apk upgrade --no-cache \
-    && npm install -g npm@11.17.0 \
-    && npm install -g undici@6.27.0 \
-    && npm install -g brace-expansion@5.0.9 ip-address@10.3.1 tar@7.5.21 \
+    && npm install -g --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 npm@11.17.0 \
+    && npm install -g --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 undici@6.27.0 \
+    && npm install -g --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 brace-expansion@5.0.9 ip-address@10.3.1 tar@7.5.21 \
     && for package in undici brace-expansion ip-address tar; do \
         rm -rf "/usr/local/lib/node_modules/npm/node_modules/${package}" \
         && cp -a "/usr/local/lib/node_modules/${package}" "/usr/local/lib/node_modules/npm/node_modules/${package}"; \

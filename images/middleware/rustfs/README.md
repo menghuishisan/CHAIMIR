@@ -4,6 +4,6 @@
 
 平台只依赖 S3 能力契约，不依赖 RustFS 的私有 API。后端统一使用 `OBJECT_STORAGE_*` 配置和 `s3://bucket/key` 对象引用；教师组合通过对象存储能力选择提供者，不能写死具体镜像名。
 
-当前固定候选为 `rustfs/rustfs:1.0.0-rc.3@sha256:800cf3f352a0a27e3275ca854a51f0027975d7acc7a0d52089a35bcc9fcbf0b5`。已在项目 Trivy 0.72.0 高危/严重门禁下通过扫描，并实际验证建桶、上传、读取、列举、服务端复制和删除；推送 Harbor、SBOM、Cosign 和正式 digest 锁晋升仍必须按统一供应链流程完成。
+当前构建以固定的 `rustfs/rustfs:1.0.0-rc.3@sha256:800cf3f352a0a27e3275ca854a51f0027975d7acc7a0d52089a35bcc9fcbf0b5` 为基础，仅将 Alpine OpenSSL、libssl3、libcrypto3 更新到 `3.5.8-r0`，以消除 CVE-2026-14456。最终镜像必须通过项目 Trivy 0.72.0 高危/严重门禁、SBOM、Cosign 和正式 digest 锁晋升，并实际验证建桶、上传、读取、列举、服务端复制和删除。
 
 生产环境不得暴露控制台或将对象存储地址返回给学生；所有文件访问继续通过平台统一文件服务和短时授权出口。

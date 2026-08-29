@@ -268,29 +268,41 @@ function Update-ImageAttestations {
     }
     foreach ($item in $parsedAttestations) {
         $imageURL = [string]$item.image_url
-        if ($imageURL -notmatch "^(.+/)([^/]+/[^/@]+)@(sha256:[0-9a-f]{64})$") {
-            throw "$Path 中 $Key 包含非法镜像引用"
+        $canonicalPrefix = "^$([regex]::Escape($registry))/"
+        if ($imageURL -notmatch "$canonicalPrefix([^/]+/[^/@]+)@(sha256:[0-9a-f]{64})$") {
+            throw "$Path 中 $Key 必须使用 canonical registry $registry"
         }
-        $prefix = $Matches[1]
-        $logical = $Matches[2]
-        $digest = $Matches[3]
+        $prefix = "$registry/"
+        $logical = $Matches[1]
+        $digest = $Matches[2]
         if ($byLogical.ContainsKey($logical)) {
             throw "$Path 中 $Key 重复登记 $logical"
         }
-        if (-not $Digests.ContainsKey($logical)) {
+        # 未选镜像的既有证明必须保留，但只能保留仍在权威锁中且 digest 未漂移的通过项。
+        # 本轮已验证片段优先覆盖同一逻辑镜像，避免旧证明遮蔽新 digest。
+        if (-not $Digests.ContainsKey($logical) -or $Digests[$logical] -ne $digest) {
             continue
         }
         if ($VerifiedDigests.ContainsKey($logical)) {
             $digest = $VerifiedDigests[$logical]
-            $item.image_url = "$prefix$logical@$digest"
-            $item.digest = $digest
-            $item.cosign_verified = $true
-            $item.trivy_status = "passed"
-        }
-        elseif ($digest -ne $Digests[$logical] -or -not ([bool]$item.cosign_verified) -or -not [string]::Equals(([string]$item.trivy_status), "passed", [System.StringComparison]::OrdinalIgnoreCase)) {
+            $byLogical[$logical] = [pscustomobject][ordered]@{
+                image_url       = "$prefix$logical@$digest"
+                digest          = $digest
+                cosign_verified = $true
+                trivy_status    = "passed"
+            }
+            continue
+        } elseif (-not [bool]$item.cosign_verified -or -not [string]::Equals(([string]$item.trivy_status), "passed", [System.StringComparison]::OrdinalIgnoreCase)) {
             continue
         }
-        $byLogical[$logical] = $item
+        # Runtime config accepts only the four attestation contract fields;
+        # evidence paths remain in the evidence directory, never in env JSON.
+        $byLogical[$logical] = [pscustomobject][ordered]@{
+            image_url       = "$prefix$logical@$digest"
+            digest          = $digest
+            cosign_verified = $true
+            trivy_status    = "passed"
+        }
     }
 
     foreach ($logical in $VerifiedDigests.Keys) {
@@ -314,16 +326,27 @@ function Update-ImageAttestations {
 
 $fragments = Read-VerifiedFragments -Path $FragmentsPath
 $catalog = Get-ChaimirImageCatalog -ImagesRoot (Join-Path $RepoRoot "images")
+$lockFragments = @{}
 foreach ($image in $fragments.Keys) {
     if (-not $catalog.ContainsKey($image)) {
         throw "digest 片段引用未登记镜像: $image"
     }
-    if ($catalog[$image].SourceType -notin @("platform-built", "thin-wrapper", "build-base")) {
-        throw "digest 片段不能覆盖非构建镜像: $image"
-    }
     if (-not $catalog[$image].Deployable) {
         throw "digest 片段不能晋升 manifest 已阻断的镜像: $image"
     }
+    if ($catalog[$image].SourceType -in @("platform-built", "thin-wrapper", "build-base")) {
+        $lockFragments[$image] = $fragments[$image]
+        continue
+    }
+    if ($catalog[$image].SourceType -eq "upstream-pinned") {
+        $upstream = Get-ChaimirYamlBlock -Path $catalog[$image].Manifest -BlockName "upstream"
+        $expectedDigest = Get-ChaimirYamlValue -Lines $upstream -Key "digest"
+        if ($expectedDigest -notmatch '^sha256:[0-9a-f]{64}$' -or $fragments[$image] -ne $expectedDigest) {
+            throw "upstream-pinned 镜像 digest 片段与 manifest.upstream.digest 不一致: $image"
+        }
+        continue
+    }
+    throw "digest 片段不能覆盖不支持的镜像来源类型: $image -> $($catalog[$image].SourceType)"
 }
 
 $merged = Read-ChaimirDigestLock -Path $DigestLockPath -Required
@@ -333,8 +356,8 @@ foreach ($image in @($merged.Keys)) {
         $merged.Remove($image)
     }
 }
-foreach ($image in $fragments.Keys) {
-    $merged[$image] = $fragments[$image]
+foreach ($image in $lockFragments.Keys) {
+    $merged[$image] = $lockFragments[$image]
 }
 
 Write-ChaimirDigestLock -Path $DigestLockPath -Items $merged

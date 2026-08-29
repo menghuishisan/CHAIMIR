@@ -20,11 +20,11 @@ source:
 upstream:
   registry: cgr.dev
   image: chainguard/wolfi-base
-  version: "2026-07-07"
-  digest: sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
+  version: "2026-08-26"
+  digest: sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
   packages:
-    - couchdb-3.3=3.3.3-r16
-    - couchdb-3.3-compat=3.3.3-r16
+    - couchdb-3.3=3.3.3-r18
+    - couchdb-3.3-compat=3.3.3-r18
   reuse_policy: wolfi-package-build
   license: Apache-2.0
 private_delivery:

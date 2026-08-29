@@ -114,10 +114,29 @@ function Assert-DependencyRegistry {
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $DependencyContext, "-n", "harbor", "rollout", "status", "deployment/harbor-core", "--timeout=120s")
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $DependencyContext, "-n", "harbor", "rollout", "status", "deployment/harbor-registry", "--timeout=120s")
 
-    $statusCode = & curl.exe -sS -o NUL -w "%{http_code}" "https://$registryHost/v2/"
-    if ($LASTEXITCODE -ne 0 -or $statusCode -ne "401") {
-        throw "外部 Harbor 健康检查失败: http=$statusCode"
-    }
+    # Harbor Ingress 在 Pod 滚动完成后还可能需要短暂时间恢复本机 443 转发；
+    # 使用直连和有界重试，避免把一次瞬时 503 当成永久依赖故障。
+    $deadline = (Get-Date).AddSeconds(180)
+    $statusCode = ""
+    do {
+        # PowerShell 7 may promote native stderr to a terminating error even when
+        # the process exit code is handled; keep the bounded retry loop intact.
+        try {
+            $statusCode = [string](& curl.exe --noproxy "*" -sS -o NUL -w "%{http_code}" --connect-timeout 3 --max-time 10 "https://$registryHost/v2/" 2>$null)
+            $curlExitCode = $LASTEXITCODE
+        }
+        catch {
+            $statusCode = ""
+            $curlExitCode = 1
+        }
+        if ($curlExitCode -eq 0 -and $statusCode.Trim() -eq "401") {
+            return
+        }
+        if ((Get-Date) -ge $deadline) {
+            throw "外部 Harbor 健康检查失败: http=$($statusCode.Trim()) curl_exit=$curlExitCode"
+        }
+        Start-Sleep -Seconds 2
+    } while ($true)
 }
 
 # Remove-LegacyWorkloads 删除旧 Kindnet 集群中的平台测试资源,只保留 Harbor 与外部入口。
@@ -206,6 +225,8 @@ function Wait-KubernetesApi {
 }
 
 # Approve-KubeletServingCertificates 仅批准受控 Kind 节点提交且 SAN 匹配的 kubelet 服务证书。
+# Docker 重启后 Kind 节点可能重新分配 InternalIP;身份正确但 SAN 仍指向旧地址的未批准 CSR
+# 可以安全清理,而主体或组不匹配的请求必须继续拒绝。
 function Approve-KubeletServingCertificates {
     $kind = Get-Kind
     $nodes = @(& $kind get nodes --name $ClusterName)
@@ -216,6 +237,21 @@ function Approve-KubeletServingCertificates {
     New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
     $controlPlane = "$ClusterName-control-plane"
     $approvedNodes = [System.Collections.Generic.HashSet[string]]::new()
+    $staleCsrNames = [System.Collections.Generic.List[string]]::new()
+    $nodeIPs = @{}
+    foreach ($node in $nodes) {
+        $nodeRaw = & kubectl --context $runtimeContext get node $node -o json
+        if ($LASTEXITCODE -ne 0) {
+            throw "读取 $node 失败"
+        }
+        $nodeState = $nodeRaw | ConvertFrom-Json
+        $nodeIP = [string]($nodeState.status.addresses | Where-Object { $_.type -eq "InternalIP" } | Select-Object -First 1 -ExpandProperty address)
+        if ($nodeIP -notmatch '^([0-9]{1,3}\.){3}[0-9]{1,3}$') {
+            throw "无法读取 $node 的 InternalIP"
+        }
+        $nodeIPs[$node] = $nodeIP
+    }
+
     $deadline = (Get-Date).AddSeconds(180)
     do {
         $csrRaw = & kubectl --context $runtimeContext get certificatesigningrequests -o json
@@ -224,7 +260,8 @@ function Approve-KubeletServingCertificates {
         }
         $csrList = $csrRaw | ConvertFrom-Json
         foreach ($csr in $csrList.items) {
-            if ($csr.spec.signerName -ne "kubernetes.io/kubelet-serving" -or $csr.status.conditions.Count -gt 0) {
+            $conditions = @($csr.status.conditions | Where-Object { $null -ne $_ })
+            if ($csr.spec.signerName -ne "kubernetes.io/kubelet-serving" -or $conditions.Count -gt 0) {
                 continue
             }
 
@@ -233,39 +270,75 @@ function Approve-KubeletServingCertificates {
                 throw "拒绝身份不匹配的 kubelet 服务证书请求: csr=$($csr.metadata.name) user=$($csr.spec.username)"
             }
 
-            $nodeRaw = & kubectl --context $runtimeContext get node $node -o json
-            if ($LASTEXITCODE -ne 0) {
-                throw "读取 $node 失败"
-            }
-            $nodeState = $nodeRaw | ConvertFrom-Json
-            $nodeIP = [string]($nodeState.status.addresses | Where-Object { $_.type -eq "InternalIP" } | Select-Object -First 1 -ExpandProperty address)
-            if ($nodeIP -notmatch '^([0-9]{1,3}\.){3}[0-9]{1,3}$') {
-                throw "无法读取 $node 的 InternalIP"
-            }
+            $nodeIP = $nodeIPs[$node]
 
             $csrPath = Join-Path $tmpRoot "$($csr.metadata.name).pem"
             [System.IO.File]::WriteAllBytes($csrPath, [Convert]::FromBase64String([string]$csr.spec.request))
-            Invoke-Native -FilePath "docker" -Arguments @("cp", $csrPath, "${controlPlane}:/root/kubelet-serving.pem")
-            $requestDetails = @(& docker exec $controlPlane openssl req -in /root/kubelet-serving.pem -noout -subject -text)
-            if ($LASTEXITCODE -ne 0) {
-                throw "解析 $node 的 kubelet 服务证书请求失败"
-            }
-            Invoke-Native -FilePath "docker" -Arguments @("exec", $controlPlane, "rm", "-f", "/root/kubelet-serving.pem")
-            $details = $requestDetails -join "`n"
-            if ($details -notmatch "CN\s*=\s*system:node:$([Regex]::Escape($node))" -or
-                $details -notmatch 'O\s*=\s*system:nodes' -or
-                $details -notmatch [Regex]::Escape("DNS:$node") -or
-                $details -notmatch [Regex]::Escape("IP Address:$nodeIP")) {
-                throw "拒绝 SAN 或主体不匹配的 kubelet 服务证书请求: csr=$($csr.metadata.name) node=$node ip=$nodeIP"
+            $requestDetails = @()
+            $requestCopied = $false
+            try {
+                Invoke-Native -FilePath "docker" -Arguments @("cp", $csrPath, "${controlPlane}:/root/kubelet-serving.pem")
+                $requestCopied = $true
+                $requestDetails = @(& docker exec $controlPlane openssl req -in /root/kubelet-serving.pem -noout -subject -text)
+                if ($LASTEXITCODE -ne 0) {
+                    throw "解析 $node 的 kubelet 服务证书请求失败"
+                }
+            } finally {
+                if ($requestCopied) {
+                    Invoke-Native -FilePath "docker" -Arguments @("exec", $controlPlane, "rm", "-f", "/root/kubelet-serving.pem")
+                }
             }
 
-            Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "certificate", "approve", $csr.metadata.name)
-            [void]$approvedNodes.Add($node)
+            $details = $requestDetails -join "`n"
+            $subjectMatches = $details -match "CN\s*=\s*system:node:$([Regex]::Escape($node))(?=\s|,|$)"
+            $organizationMatches = $details -match 'O\s*=\s*system:nodes(?=\s|,|$)'
+            $dnsNames = @([Regex]::Matches($details, 'DNS:([^,\s]+)') | ForEach-Object { $_.Groups[1].Value })
+            $ipAddresses = @([Regex]::Matches($details, 'IP Address:([0-9A-Fa-f:.]+)') | ForEach-Object { $_.Groups[1].Value })
+            $canonicalSan = $subjectMatches -and $organizationMatches -and
+                $dnsNames.Count -eq 1 -and $dnsNames[0] -eq $node -and
+                $ipAddresses.Count -eq 1 -and $ipAddresses[0] -eq $nodeIP
+            $allIpv4 = $ipAddresses.Count -gt 0 -and
+                @($ipAddresses | Where-Object { $_ -match '^([0-9]{1,3}\.){3}[0-9]{1,3}$' }).Count -eq $ipAddresses.Count
+            $staleSan = $subjectMatches -and $organizationMatches -and
+                $dnsNames.Count -eq 1 -and $dnsNames[0] -eq $node -and
+                $allIpv4 -and -not $canonicalSan
+
+            if ($canonicalSan) {
+                Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "certificate", "approve", $csr.metadata.name)
+                [void]$approvedNodes.Add($node)
+                continue
+            }
+            if ($staleSan) {
+                [void]$staleCsrNames.Add([string]$csr.metadata.name)
+                Write-Output "清理 SAN 已过期的 kubelet 服务证书请求: csr=$($csr.metadata.name) node=$node old_san_ip=$($ipAddresses -join ',') current_ip=$nodeIP"
+                continue
+            }
+
+            throw "拒绝 SAN 或主体不匹配的 kubelet 服务证书请求: csr=$($csr.metadata.name) node=$node ip=$nodeIP"
+        }
+
+        if ($staleCsrNames.Count -gt 0) {
+            $deleteArgs = @("--context", $runtimeContext, "delete", "certificatesigningrequests") + @($staleCsrNames) + @("--ignore-not-found=true")
+            Invoke-Native -FilePath "kubectl" -Arguments $deleteArgs
+            $staleCsrNames.Clear()
         }
 
         foreach ($node in $nodes) {
-            & docker exec $node test -s /var/lib/kubelet/pki/kubelet-server-current.pem 2>$null
-            if ($LASTEXITCODE -eq 0) {
+            $certDetails = @(& docker exec $node openssl x509 -in /var/lib/kubelet/pki/kubelet-server-current.pem -noout -subject -text 2>$null)
+            $certExitCode = $LASTEXITCODE
+            if ($certExitCode -eq 0) {
+                $certText = $certDetails -join "`n"
+                $certDnsNames = @([Regex]::Matches($certText, 'DNS:([^,\s]+)') | ForEach-Object { $_.Groups[1].Value })
+                $certIpAddresses = @([Regex]::Matches($certText, 'IP Address:([0-9A-Fa-f:.]+)') | ForEach-Object { $_.Groups[1].Value })
+                $certSubjectMatches = $certText -match "CN\s*=\s*system:node:$([Regex]::Escape($node))(?=\s|,|$)"
+                $certOrganizationMatches = $certText -match 'O\s*=\s*system:nodes(?=\s|,|$)'
+                $certCanonical = $certSubjectMatches -and $certOrganizationMatches -and
+                    $certDnsNames.Count -eq 1 -and $certDnsNames[0] -eq $node -and
+                    $certIpAddresses.Count -eq 1 -and $certIpAddresses[0] -eq $nodeIPs[$node]
+            } else {
+                $certCanonical = $false
+            }
+            if ($certCanonical) {
                 [void]$approvedNodes.Add($node)
             }
         }
@@ -578,7 +651,9 @@ function Write-ContainerKubeconfig {
     }
     $config = $raw | ConvertFrom-Json
     $server = [Uri]$config.clusters[0].cluster.server
-    $config.clusters[0].cluster.server = "https://host.docker.internal:$($server.Port)"
+    # Helm 服务固定使用 Docker Desktop host network，因此 Kubernetes API 必须走宿主机回环地址；
+    # bridge 网络下的 host.docker.internal 无法访问 Docker Desktop 仅监听回环的 API 端口。
+    $config.clusters[0].cluster.server = "https://127.0.0.1:$($server.Port)"
     $config.clusters[0].cluster | Add-Member -NotePropertyName "tls-server-name" -NotePropertyValue "localhost" -Force
     Write-Utf8NoBom -Path $Path -Content ($config | ConvertTo-Json -Depth 100)
 }

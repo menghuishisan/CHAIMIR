@@ -2,10 +2,14 @@
 FROM ghcr.io/coder/code-server:4.126.0@sha256:e1f03b5faaefd63ba6c7173a5290c6ec0526ac907f23acfe6bc949dd965279e4 AS upstream
 
 FROM node:22-trixie-slim@sha256:4228fca437e45714a3ebd1d4ecd1dcc583cf79f5a940aa025e286b472d93b67c AS patched
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
 ARG NPM_CONFIG_REGISTRY=https://registry.npmjs.org
 COPY --from=upstream /usr/lib/code-server /usr/lib/code-server
 COPY --from=upstream /usr/bin/code-server /usr/bin/code-server
-RUN npm --prefix /usr/lib/code-server --registry "${NPM_CONFIG_REGISTRY}" install --omit=dev --ignore-scripts --package-lock=false --no-audit --no-fund \
+RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && npm --prefix /usr/lib/code-server --registry "${NPM_CONFIG_REGISTRY}" install --omit=dev --ignore-scripts --package-lock=false --no-audit --no-fund \
     basic-ftp@5.3.1 \
         adm-zip@0.6.0 \
         minimatch@3.1.4 \
@@ -20,17 +24,25 @@ RUN npm --prefix /usr/lib/code-server --registry "${NPM_CONFIG_REGISTRY}" instal
         install --omit=dev --ignore-scripts --package-lock=false --no-audit --no-fund adm-zip@0.6.0 \
     && test -x /usr/lib/code-server/bin/code-server
 
-FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
+FROM cgr.dev/chainguard/wolfi-base@sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
 
 LABEL org.opencontainers.image.title="tool/code-server"
 LABEL org.opencontainers.image.description="Chaimir code-server web IDE image"
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    packages='bash=5.3-r12 ca-certificates=20260413-r0 git=2.55.0-r3 git-lfs=3.7.1-r19 openssh-client=10.4_p1-r1 nodejs-24=24.18.0-r2 npm=12.0.1-r2' \
-    && for attempt in 1 2 3 4 5 6 7 8; do \
-        apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
-        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
-        sleep $((attempt * 3)); \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && packages='bash=5.3-r12 ca-certificates=20260413-r0 git=2.55.0-r3 git-lfs=3.7.1-r19 openssh-client=10.4_p1-r1 nodejs-24=24.18.0-r2 npm=12.0.2-r0' \
+    && for package in ${packages}; do \
+        installed=0; \
+        for attempt in 1 2 3 4 5 6 7 8; do \
+            if apk add --cache-dir /var/cache/apk --update-cache "${package}"; then installed=1; break; fi; \
+            sleep $((attempt * 3)); \
+        done; \
+        if [ "${installed}" -ne 1 ]; then echo "failed to install ${package}" >&2; exit 1; fi; \
     done \
     && addgroup -g 1000 coder \
     && adduser -D -u 1000 -G coder -h /home/coder -s /bin/bash coder \

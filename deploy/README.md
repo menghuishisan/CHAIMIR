@@ -167,7 +167,7 @@ M2 快照能力分为两层:通用 `VolumeSnapshot` CRD/snapshot-controller 与�
 
 ## Harbor 与供应链工具
 
-Harbor 使用官方 Helm chart,但 Helm 本身不安装到宿主机。先在 `config/chaimir.env` 填写 `SUPPLY_CHAIN_KUBECONFIG_HOST_PATH`,复制 `config/supply-chain.secret.env.example` 为 `config/supply-chain.secret.env` 并填写 Harbor 管理员密码、robot 凭据和 Cosign 私钥口令,再执行:
+Harbor 是供应链启动根，不是平台的 `images/` 运行期镜像。安装固定使用 chart `1.19.2`（归档 SHA256 `36d8eeb41b4df1aeff18c9af7709110a2fac2194b491d37957822b3359cd5e9a`）及其受控补丁：八个实际运行组件只按 `repository@sha256:digest` 渲染，数据库权限初始化不允许吞错。首次安装前必须在每个目标节点导入同一份已验证的 OCI 引导包；缺少组件 digest、SBOM、Cosign 验证或预置证据时 `make harbor-up` 必须失败。Helm 本身不安装到宿主机。先在 `config/chaimir.env` 填写 `SUPPLY_CHAIN_KUBECONFIG_HOST_PATH`,复制 `config/supply-chain.secret.env.example` 为 `config/supply-chain.secret.env` 并填写 Harbor 管理员密码、robot 凭据和 Cosign 私钥口令,再执行:
 
 ```bash
 cd deploy

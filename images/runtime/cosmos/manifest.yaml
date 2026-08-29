@@ -23,8 +23,8 @@ upstream:
   source_commit: d089f568a9ef2f4d5e6d5660cb128782f4d1b2c0
   source_sha256: 9d53edfac968af4a2444b0f0748bd95adb071e920ee320dae3c1078555a3a0fa
   builder: golang:1.26.6-bookworm@sha256:433f9dc4f8ea3a1ce4e28f9f15d0f7c056b10475307f886d6f1ac1ccc4abd976
-  runtime_image: debian:13-slim
-  runtime_digest: sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
+  runtime_image: cgr.dev/chainguard/glibc-dynamic
+  runtime_digest: sha256:d0046044cd28948d3380eb0d98709dc7e63f98161fe7105135e1025650bad17a
   source_downloader: alpine:3.23
   source_downloader_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: source-build

@@ -10,6 +10,9 @@ USER root
 
 # 建立非 root 工作区和链状态目录,组网细节由 M2 runtime manifest 编排。
 RUN apk upgrade --no-cache \
+	&& apk add --no-cache \
+		'libcrypto3>=3.5.8-r0' \
+		'libssl3>=3.5.8-r0' \
 	&& mkdir -p /workspace /runtime-state/fisco \
     && chown -R 1000:1000 /workspace /runtime-state
 

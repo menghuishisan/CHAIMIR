@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "kind": "supply-chain-bootstrap",
+  "chart": {
+    "repository": "https://helm.goharbor.io",
+    "name": "harbor",
+    "version": "1.19.2",
+    "application_version": "2.15.2",
+    "archive_sha256": "sha256:36d8eeb41b4df1aeff18c9af7709110a2fac2194b491d37957822b3359cd5e9a"
+  },
+  "sources": {
+    "harbor": {
+      "repository": "https://github.com/goharbor/harbor.git",
+      "ref": "v2.15.2",
+      "commit": "080b0220574cc853ae1e2946ce7a5610ba855757"
+    },
+    "distribution": {
+      "repository": "https://github.com/goharbor/distribution.git",
+      "ref": "v2.8.3-harbor.1",
+      "commit": "493dca9a81a8e9e15d739141c5c5cfd9ad21b18d"
+    },
+    "runtime_base": {
+      "registry": "docker.io",
+      "image": "library/photon",
+      "version": "5.0-20260214",
+      "digest": "sha256:1c4f1a00f97a3d5276c6a4f6e1fe1e4372e5b5c4107e813030f716666dd2fb5a"
+    }
+  },
+  "topology": {
+    "expose_type": "ingress",
+    "metrics_enabled": false,
+    "components": [
+      { "id": "core", "image": "middleware/harbor-core", "values_path": "core.image" },
+      { "id": "jobservice", "image": "middleware/harbor-jobservice", "values_path": "jobservice.image" },
+      { "id": "portal", "image": "middleware/harbor-portal", "values_path": "portal.image" },
+      { "id": "registry", "image": "middleware/registry-photon", "values_path": "registry.registry.image" },
+      { "id": "registryctl", "image": "middleware/harbor-registryctl", "values_path": "registry.controller.image" },
+      { "id": "database", "image": "middleware/harbor-db", "values_path": "database.internal.image" },
+      { "id": "valkey", "image": "middleware/valkey-photon", "values_path": "redis.internal.image" },
+      { "id": "trivy", "image": "middleware/trivy-adapter-photon", "values_path": "trivy.image" }
+    ],
+    "disabled_components": [
+      "nginx",
+      "exporter",
+      "prepare",
+      "log"
+    ]
+  },
+  "admission": {
+    "max_high": 0,
+    "max_critical": 0,
+    "require_sbom": true,
+    "require_signed_oci_bundle": true,
+    "require_node_preload": true
+  }
+}

@@ -352,15 +352,16 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
 	if err := execJSON(ctx, tx, `
 INSERT INTO judge_task (
 	id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope,
-	submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode,
+	submitter_tenant_id, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode,
 	target_sandbox_ref, priority, status, retry_count, max_retries
 ) VALUES (
-	$1,$2,$3,'teaching:2026:submission-item:910000000000005041-910000000000005032',$4,$5,'teaching',$6,'ctf-reentrancy-vault:1.0.0',
+	$1,$2,(SELECT id FROM judger WHERE code='testcase-evm'),'teaching:2026:submission-item:910000000000005041-910000000000005032',$3,$4,'teaching',$2,$5,'ctf-reentrancy-vault:1.0.0',
 	's3://chaimir-code/acceptance/submissions/S20260001/reentrancy-fixed.zip','6d0f2d2a4f7a7b7b6b0e0e9f7c8a1c2d3e4f506172839405162738495a6b7c8d',
-	$7,2,'sandbox:acceptance:reentrancy-a',5,$8,0,1
+	$6,2,'sandbox:acceptance:reentrancy-a',5,$7,0,1
 )
-ON CONFLICT (tenant_id, source_ref, problem_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_id=EXCLUDED.submitter_id, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
-		acceptanceIDs.JudgeTask, acceptanceIDs.TenantID, acceptanceIDs.Judger, acceptanceIDs.TeacherMain, acceptanceIDs.Course, acceptanceIDs.StudentA, snapshot, contracts.JudgeTaskStatusDone); err != nil {
+
+ON CONFLICT (tenant_id, source_ref, problem_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_tenant_id=EXCLUDED.submitter_tenant_id, submitter_id=EXCLUDED.submitter_id, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
+		acceptanceIDs.JudgeTask, acceptanceIDs.TenantID, acceptanceIDs.TeacherMain, acceptanceIDs.Course, acceptanceIDs.StudentA, snapshot, contracts.JudgeTaskStatusDone); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
@@ -392,14 +393,15 @@ ON CONFLICT (tenant_id, task_id, version) DO UPDATE SET passed=EXCLUDED.passed, 
 	if err := execJSON(ctx, tx, `
 INSERT INTO judge_task (
 	id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope,
-	submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode,
+	submitter_tenant_id, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode,
 	target_sandbox_ref, priority, status, retry_count, max_retries
 ) VALUES (
-	$1,$2,$3,'contest:2026:battle:acceptance-001',$4,0,'contest',$5,'battle-reentrancy-vault:1.0.0',
-	's3://chaimir-code/acceptance/battle/replay-a.zip',$6,$7,1,'sandbox:acceptance-battle-001',5,$8,0,1
+	$1,$2,(SELECT id FROM judger WHERE code='onchain-assert'),'contest:2026:battle:acceptance-001',$3,0,'contest',$2,$4,'battle-reentrancy-vault:1.0.0',
+	's3://chaimir-code/acceptance/battle/replay-a.zip',$5,$6,1,'sandbox:acceptance-battle-001',5,$7,0,1
 )
-ON CONFLICT (tenant_id, source_ref, problem_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_id=EXCLUDED.submitter_id, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
-		acceptanceIDs.BattleJudgeTask, acceptanceIDs.TenantID, acceptanceIDs.JudgerOnchain, acceptanceIDs.TeacherMain, acceptanceIDs.StudentA, strings.Repeat("a", 64), battleSnapshot, contracts.JudgeTaskStatusDone); err != nil {
+
+ON CONFLICT (tenant_id, source_ref, problem_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_tenant_id=EXCLUDED.submitter_tenant_id, submitter_id=EXCLUDED.submitter_id, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
+		acceptanceIDs.BattleJudgeTask, acceptanceIDs.TenantID, acceptanceIDs.TeacherMain, acceptanceIDs.StudentA, strings.Repeat("a", 64), battleSnapshot, contracts.JudgeTaskStatusDone); err != nil {
 		return err
 	}
 	battleDetails, err := jsonb([]contracts.JudgeResultDetail{{Case: "防御合约阻止重复提款", Passed: true, ExpectedLabel: "攻击交易应被拒绝", Actual: "攻击交易已回滚"}})
@@ -915,9 +917,9 @@ ON CONFLICT (tenant_id, team_id, member_tenant_id, account_id) DO UPDATE SET is_
 		return fmt.Errorf("编码竞赛提交内容引用失败: %w", err)
 	}
 	if err := execJSON(ctx, tx, `
-	INSERT INTO solve_submission (id, tenant_id, contest_id, problem_id, team_id, submitter_id, content_ref, source_ref, scope_ref, passed, score, sandbox_ref)
-	VALUES ($1,$2,$3,$4,$5,$6,$7,'contest:2026:solve:ZA2026-001','contest:2026:solve:ZA2026-001',true,500,'sandbox:contest:ZA2026-001')
-	ON CONFLICT (tenant_id, source_ref) DO UPDATE SET content_ref=EXCLUDED.content_ref, scope_ref=EXCLUDED.scope_ref, passed=EXCLUDED.passed, score=EXCLUDED.score, sandbox_ref=EXCLUDED.sandbox_ref`,
+	INSERT INTO solve_submission (id, tenant_id, contest_id, problem_id, team_id, submitter_tenant_id, submitter_id, content_ref, source_ref, scope_ref, passed, score, sandbox_ref)
+	VALUES ($1,$2,$3,$4,$5,$2,$6,$7,'contest:2026:solve:ZA2026-001','contest:2026:solve:ZA2026-001',true,500,'sandbox:contest:ZA2026-001')
+	ON CONFLICT (tenant_id, source_ref) DO UPDATE SET submitter_tenant_id=EXCLUDED.submitter_tenant_id, submitter_id=EXCLUDED.submitter_id, content_ref=EXCLUDED.content_ref, scope_ref=EXCLUDED.scope_ref, passed=EXCLUDED.passed, score=EXCLUDED.score, sandbox_ref=EXCLUDED.sandbox_ref`,
 		acceptanceIDs.SolveSubmission, acceptanceIDs.TenantID, acceptanceIDs.Contest, acceptanceIDs.ContestProblem, acceptanceIDs.TeamA, acceptanceIDs.StudentA, contentRef); err != nil {
 		return err
 	}

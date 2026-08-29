@@ -13,20 +13,33 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: secrets-control-plane
   chaimir.io/scope: cluster
-  chaimir.io/source: upstream-pinned
+  chaimir.io/source: thin-wrapper
 description: External Secrets Operator 密钥同步控制器。
 source:
-  type: upstream-pinned
+  type: thin-wrapper
 upstream:
   registry: ghcr.io
   image: external-secrets/external-secrets
-  version: v2.9.0
-  digest: sha256:44eb290f1c7f5d8f4eec2168cea4a6cfbc72a955c6781eb835e1c40700475dbd
-  reuse_policy: upstream-pinned
+  version: v2.10.0
+  digest: sha256:814117b0fd6d121b03e8ba3b6db1cecbe7449a354fc0fc9c4faf73a37aa221b1
+  source_archive: https://github.com/external-secrets/external-secrets/archive/refs/tags/v2.10.0.tar.gz
+  source_sha256: a0c8834a9ecc7b98b5107f748a48a40189ff7a16e5b7033418e9b89992a159df
+  builder_image: golang:1.26.6-bookworm
+  builder_digest: sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
+  runtime_image: gcr.io/distroless/static
+  runtime_digest: sha256:f2ea2709ac8db56323cbd7d014277f32cb572d9ea124b0076f7aafe5980678fe
+  dependency_overrides:
+    golang.org/x/net: v0.57.0
+    golang.org/x/text: v0.41.0
+    golang.org/x/crypto: v0.55.0
+  reuse_policy: fixed-source-rebuild
   license: Apache-2.0
 private_delivery:
   offline_bundle: true
   import_project: infra
+build:
+  context: images/infra/external-secrets
+  dockerfile: Dockerfile
 data_driven: false
 capabilities:
   provides:

@@ -21,8 +21,15 @@ upstream:
   image: graphprotocol/graph-node:0.44.0
   version: "0.44.0"
   digest: sha256:c14c6d8e2b2b1ed89f6a89babf48d807b18a43e372fda7fb495d3a9050b65b8b
-  runtime: cgr.dev/chainguard/wolfi-base
-  runtime_digest: sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
+  runtime: gcr.io/distroless/cc-debian12:nonroot
+  runtime_digest: sha256:777e96cf322c46bc32aca926c263624c4dc8d7cf37e2fa65ba2c7e697318ebbb
+  build_bases:
+    - image: registry.chaimir.io/base/go-builder
+      digest: sha256:fb0a1352643623882f008691aaa1459262c0c5e1030878dbdbc5e916a852a869
+      role: entrypoint-builder
+    - image: docker.io/library/alpine
+      digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+      role: runtime-state-stage
   reuse_policy: thin-wrapper
 data_driven: true
 env_keys:

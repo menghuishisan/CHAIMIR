@@ -9,6 +9,10 @@ ARG VITE_SIM_WORKER_COMMAND_TIMEOUT_MS
 ARG VITE_SIM_STEP_INTERVAL_MS
 FROM ${NODE_BUILDER_IMAGE} AS builder
 
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+
 ARG VITE_API_BASE_URL
 ARG VITE_WS_BASE_URL
 ARG VITE_API_TIMEOUT_MS
@@ -22,7 +26,13 @@ USER root
 WORKDIR /src/frontend
 
 # 使用仓库声明的 pnpm 版本构建唯一 Web 应用,避免 CI 与本地工具链分叉。
-RUN corepack enable && corepack prepare pnpm@9.1.0 --activate
+RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && corepack enable \
+    && for attempt in 1 2 3 4 5; do \
+        if corepack prepare pnpm@9.1.0 --activate; then break; fi; \
+        if [ "$attempt" -eq 5 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done
 
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml frontend/turbo.json frontend/tsconfig.base.json ./
 COPY frontend/eslint.config.js frontend/.prettierrc.json ./
@@ -44,7 +54,11 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
     NODE_OPTIONS=--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}
 
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && pnpm config set fetch-retries 3 \
+    && pnpm config set fetch-timeout 60000 \
+    && pnpm config set network-concurrency 8 \
+    && pnpm install --frozen-lockfile
 COPY frontend/packages ./packages
 COPY frontend/apps ./apps
 RUN pnpm build && \
@@ -61,11 +75,23 @@ RUN find /out -type f \( -name '*.js' -o -name '*.css' -o -name '*.html' -o -nam
 
 FROM ${NGINX_RUNTIME_IMAGE}
 
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+
 LABEL org.opencontainers.image.title="service/frontend"
 LABEL org.opencontainers.image.description="Chaimir frontend static asset service"
 
 # Nginx 官方镜像默认监听 80;平台内部统一使用容器端口 8080,避免 root 绑定低端口。
-RUN apk upgrade --no-cache \
+RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && sed -i 's#https://dl-cdn.alpinelinux.org/alpine#https://mirrors.aliyun.com/alpine#g' /etc/apk/repositories \
+    && rm -f /var/cache/apk/* \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
+        apk upgrade --cache-dir /var/cache/apk --update-cache && break; \
+        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done \
     && rm -rf /usr/share/nginx/html/* \
     && mkdir -p /var/cache/nginx/client_temp /var/cache/nginx/proxy_temp /var/cache/nginx/fastcgi_temp /var/cache/nginx/uwsgi_temp /var/cache/nginx/scgi_temp \
     && chown -R 101:101 /usr/share/nginx/html /var/cache/nginx /run /var/run /var/log/nginx

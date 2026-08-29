@@ -23,16 +23,14 @@ RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 \
     if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}"; fi \
     && go mod download \
     && go get golang.org/x/mod@v0.40.0 golang.org/x/text@v0.41.0 google.golang.org/grpc@v1.82.1 \
-    && go mod tidy \
-    && go mod vendor \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/peer ./cmd/peer \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/orderer ./cmd/orderer \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/configtxgen ./cmd/configtxgen \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/configtxlator ./cmd/configtxlator \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/cryptogen ./cmd/cryptogen \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/discover ./cmd/discover \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/ledgerutil ./cmd/ledgerutil \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/bin/osnadmin ./cmd/osnadmin \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=mod -trimpath -ldflags="-s -w" -o /out/bin/peer ./cmd/peer \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=mod -trimpath -ldflags="-s -w" -o /out/bin/orderer ./cmd/orderer \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=mod -trimpath -ldflags="-s -w" -o /out/bin/configtxgen ./cmd/configtxgen \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=mod -trimpath -ldflags="-s -w" -o /out/bin/configtxlator ./cmd/configtxlator \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=mod -trimpath -ldflags="-s -w" -o /out/bin/cryptogen ./cmd/cryptogen \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=mod -trimpath -ldflags="-s -w" -o /out/bin/discover ./cmd/discover \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=mod -trimpath -ldflags="-s -w" -o /out/bin/ledgerutil ./cmd/ledgerutil \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=mod -trimpath -ldflags="-s -w" -o /out/bin/osnadmin ./cmd/osnadmin \
     && cp sampleconfig/core.yaml sampleconfig/configtx.yaml sampleconfig/orderer.yaml /out/config/
 
 FROM scratch

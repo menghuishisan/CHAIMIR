@@ -1,16 +1,31 @@
 # 本文件定义 Mythril 符号执行安全分析工具镜像。
-FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72 AS build
+FROM cgr.dev/chainguard/wolfi-base@sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c AS build
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
 
 ARG SOLC_VERSION=0.8.26
 ARG SOLC_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
 ARG SOLC_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
-ARG PIP_INDEX_URL=https://pypi.org/simple
+ARG SOLC_URL=https://binaries.soliditylang.org/linux-amd64/solc-linux-amd64-v0.8.26+commit.8a97fa7a
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    packages='ca-certificates gcc git libstdc++ make python-3.10=3.10.21-r0 python-3.10-dev py3.10-pip' \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && packages='ca-certificates curl gcc git libstdc++ make python-3.10=3.10.21-r1 python-3.10-dev py3.10-pip' \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
+        if curl --fail --location --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 --user-agent 'chaimir-image-builder/1.0' --output "/tmp/solc-${SOLC_VERSION}" "${SOLC_URL}" \
+            && echo "${SOLC_SHA256}  /tmp/solc-${SOLC_VERSION}" | sha256sum -c -; then \
+            break; \
+        fi; \
+        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+        rm -f "/tmp/solc-${SOLC_VERSION}"; \
         sleep $((attempt * 3)); \
     done \
     && python3.10 -m venv /opt/mythril \
@@ -27,7 +42,11 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         /opt/mythril/lib/python3.10/site-packages/setuptools/_vendor/jaraco.context-*.dist-info \
     && /opt/mythril/bin/myth version
 
-FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
+FROM cgr.dev/chainguard/wolfi-base@sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
 
 ARG SOLC_VERSION=0.8.26
 ARG SOLC_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
@@ -36,14 +55,15 @@ ARG SOLC_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
 LABEL org.opencontainers.image.title="tool/mythril"
 LABEL org.opencontainers.image.description="Chaimir Mythril symbolic execution tool image"
 
-ADD --checksum=sha256:d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef https://binaries.soliditylang.org/linux-amd64/${SOLC_PATH} /usr/local/bin/solc-${SOLC_VERSION}
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    packages='ca-certificates libstdc++ python-3.10=3.10.21-r0' \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && packages='ca-certificates libstdc++ python-3.10=3.10.21-r1' \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 3)); \
     done
+COPY --from=build /tmp/solc-${SOLC_VERSION} /usr/local/bin/solc-${SOLC_VERSION}
 COPY --from=build /opt/mythril /opt/mythril
 RUN rm -rf /opt/mythril/lib/python3.10/site-packages/pip /opt/mythril/lib/python3.10/site-packages/pip-*.dist-info /opt/mythril/lib/python3.10/site-packages/setuptools-*.dist-info
 RUN addgroup -g 1000 chaimir \

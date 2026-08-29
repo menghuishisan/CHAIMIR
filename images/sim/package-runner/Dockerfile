@@ -14,14 +14,23 @@ USER root
 WORKDIR /src/frontend
 
 # 使用仓库声明的 pnpm 版本,避免 CI 与本地工具链分叉。
-RUN corepack enable && corepack prepare pnpm@9.1.0 --activate
+RUN corepack enable \
+    && for attempt in 1 2 3 4 5; do \
+        if corepack prepare pnpm@9.1.0 --activate; then break; fi; \
+        if [ "$attempt" -eq 5 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done
 
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml frontend/tsconfig.base.json ./
 COPY frontend/packages/sim-sdk ./packages/sim-sdk
 
 # 只装 sim-sdk 一个工作区包的开发依赖(仅 typescript):
 # runner 承载不可信代码,依赖越少可审计面越小,运行期更是零第三方依赖。
-RUN pnpm install --frozen-lockfile --filter @chaimir/sim-sdk
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm config set fetch-retries 3 \
+    && pnpm config set fetch-timeout 60000 \
+    && pnpm config set network-concurrency 8 \
+    && pnpm install --frozen-lockfile --filter @chaimir/sim-sdk
 RUN pnpm --filter @chaimir/sim-sdk build:container
 
 FROM ${NODE_BUILDER_IMAGE}

@@ -1,10 +1,21 @@
 # 本文件构建合约交互面板工具镜像。
-FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
+FROM cgr.dev/chainguard/wolfi-base@sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
 
 LABEL org.opencontainers.image.title="tool/contract-ui"
 LABEL org.opencontainers.image.description="Chaimir contract interaction panel image"
 
-RUN apk add --no-cache python-3.13=3.13.14-r3 py3.13-pip=26.1.2-r1 \
+RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && packages='python-3.13=3.13.14-r3 py3.13-pip=26.1.2-r1' \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
+        apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
+        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done \
     && python3.13 -m venv /opt/contract-ui \
     && /opt/contract-ui/bin/pip install --no-cache-dir "setuptools==80.9.0" "eth-abi==5.2.0" "eth-utils==5.3.1" "eth-hash[pycryptodome]==0.8.0" \
     && addgroup -g 1000 chaimir \

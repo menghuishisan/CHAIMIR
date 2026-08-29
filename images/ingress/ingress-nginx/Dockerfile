@@ -1,5 +1,5 @@
 # 本文件定义 ingress-nginx 控制器安全运行镜像,基于 Wolfi 维护包保留 Kubernetes Ingress 能力。
-FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
+FROM cgr.dev/chainguard/wolfi-base@sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
 
 LABEL org.opencontainers.image.title="ingress/ingress-nginx"
 LABEL org.opencontainers.image.description="Chaimir ingress-nginx controller on Wolfi"

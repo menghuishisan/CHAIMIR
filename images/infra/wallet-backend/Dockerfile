@@ -6,7 +6,7 @@ LABEL org.opencontainers.image.description="Chaimir wallet backend service"
 
 WORKDIR /app
 COPY package.json package-lock.json /app/
-RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+    RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3
 COPY wallet-backend.mjs /app/wallet-backend.mjs
 
 FROM node:24-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436

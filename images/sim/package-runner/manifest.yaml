@@ -79,7 +79,7 @@ selftest:
       command:
         - /bin/sh
         - -c
-        - echo '{"op":"__selftest__"}' | node /opt/sim-runner/runtime/containerMain.js | grep -q '"ok":false'
+        - echo '{"op":"__selftest__"}' | SIM_RUNNER_INPUT_MAX_BYTES=52428800 node /opt/sim-runner/runtime/containerMain.js | grep -q '"ok":false'
 supply_chain:
   sbom: true
   trivy_required: true

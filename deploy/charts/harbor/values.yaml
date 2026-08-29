@@ -1,13 +1,19 @@
 # Harbor 官方 Helm chart 的非密 values;密钥由 supply-chain.secret.env 或 KMS 注入。
 externalURL: https://registry.chaimir.io
 harborAdminPassword: ""
+imagePullPolicy: IfNotPresent
+
+# bootstrap.lock.json 固定当前闭包；指标出口关闭时 exporter 不得被 chart 隐式创建。
+metrics:
+  enabled: false
 
 expose:
   type: ingress
   tls:
     enabled: true
     certSource: secret
-    secretName: harbor-tls
+    secret:
+      secretName: harbor-tls
   ingress:
     hosts:
       core: registry.chaimir.io

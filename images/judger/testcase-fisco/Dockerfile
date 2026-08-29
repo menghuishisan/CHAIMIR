@@ -1,5 +1,8 @@
 # 本文件定义 FISCO BCOS 合约测试判题镜像。
 ARG JUDGE_MIN_IMAGE=invalid.invalid/base/judge-min:required
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
 
 FROM fiscoorg/fiscobcos:v3.12.1@sha256:93db5277a5c896fde402f2165d133cc3d346effef4165ec417ef098eb2ede74b AS fisco-upstream
 

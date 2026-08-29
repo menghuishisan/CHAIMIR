@@ -61,21 +61,30 @@ import (
 	"syscall"
 )
 
-func ensureEnv(key, value string) {
+func ensureEnv(key, value string) error {
 	if os.Getenv(key) != "" {
-		return
+		return nil
 	}
-	os.Setenv(key, value)
+	return os.Setenv(key, value)
 }
 
 func main() {
 	runtimeHome := os.Getenv("CHAIMIR_COSMOS_HOME")
-	ensureEnv("HOME", "/workspace")
+	if err := ensureEnv("HOME", "/workspace"); err != nil {
+		fmt.Fprintf(os.Stderr, "设置 Cosmos HOME 失败: %v\n", err)
+		os.Exit(1)
+	}
 	if os.Getenv("TMPDIR") == "" {
 		if runtimeHome == "" {
-			ensureEnv("TMPDIR", "/tmp")
+			if err := ensureEnv("TMPDIR", "/tmp"); err != nil {
+				fmt.Fprintf(os.Stderr, "设置 Cosmos TMPDIR 失败: %v\n", err)
+				os.Exit(1)
+			}
 		} else {
-			ensureEnv("TMPDIR", runtimeHome+"/tmp")
+			if err := ensureEnv("TMPDIR", runtimeHome+"/tmp"); err != nil {
+				fmt.Fprintf(os.Stderr, "设置 Cosmos TMPDIR 失败: %v\n", err)
+				os.Exit(1)
+			}
 		}
 	}
 	for _, dir := range []string{os.Getenv("HOME"), os.Getenv("TMPDIR")} {
@@ -247,13 +256,10 @@ EOF
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/chaimir-cosmos-entrypoint /tmp/chaimir-cosmos-entrypoint.go \
     && mkdir -p /out/rootfs/workspace /out/rootfs/runtime-state/cosmos /out/rootfs/tmp
 
-FROM debian:13-slim@sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
+FROM cgr.dev/chainguard/glibc-dynamic@sha256:d0046044cd28948d3380eb0d98709dc7e63f98161fe7105135e1025650bad17a
 
 LABEL org.opencontainers.image.title="runtime/cosmos"
 LABEL org.opencontainers.image.description="Chaimir Cosmos SDK local chain runtime built from official Gaia source"
-
-RUN mkdir -p /usr/local/lib /workspace /tmp \
-    && chown -R 1000:1000 /usr/local/lib /workspace /tmp
 
 COPY --from=build --chown=1000:1000 /out/rootfs/ /
 COPY --from=build --chown=1000:1000 /out/gaiad /usr/local/bin/gaiad

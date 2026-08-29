@@ -21,8 +21,14 @@ upstream:
   image: solanalabs/solana:v1.18.26
   version: v1.18.26
   digest: sha256:098806e64d44bccdbedbf07c2edabd1c850b92c8a4a0f81eba9c789034813db6
-  runtime_image: debian:13-slim
-  runtime_digest: sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
+  runtime_image: cgr.dev/chainguard/glibc-dynamic
+  runtime_digest: sha256:d0046044cd28948d3380eb0d98709dc7e63f98161fe7105135e1025650bad17a
+  builder_image: golang:1.26.6-bookworm
+  builder_digest: sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
+  runtime_libs_image: debian:13-slim
+  runtime_libs_digest: sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
+  runtime_tools_image: cgr.dev/chainguard/wolfi-base
+  runtime_tools_digest: sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
   reuse_policy: thin-wrapper
 data_driven: true
 env_keys:

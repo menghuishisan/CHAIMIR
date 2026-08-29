@@ -13,20 +13,31 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: cluster-admission-helper
   chaimir.io/scope: ingress
-  chaimir.io/source: upstream-pinned
+  chaimir.io/source: thin-wrapper
 description: ingress-nginx admission webhook 证书创建与配置修补工具。
 source:
-  type: upstream-pinned
+  type: thin-wrapper
 upstream:
   registry: registry.k8s.io
   image: ingress-nginx/kube-webhook-certgen
   version: v1.6.9
   digest: sha256:01038e7de14b78d702d2849c3aad72fd25903c4765af63cf16aa3398f5d5f2dd
-  reuse_policy: upstream-pinned
+  reuse_policy: fixed-source-rebuild
+  source_repository: https://github.com/kubernetes/ingress-nginx
+  builder_image: golang:1.26.6-bookworm
+  builder_digest: sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
+  runtime_image: gcr.io/distroless/static-debian12:nonroot
+  runtime_digest: sha256:b7bb25d9f7c31d2bdd1982feb4dafcaf137703c7075dbe2febb41c24212b946f
+  dependency_overrides:
+    golang.org/x/net: v0.56.0
+    golang.org/x/text: v0.39.0
   license: Apache-2.0
 private_delivery:
   offline_bundle: true
   import_project: ingress
+build:
+  context: images/ingress/kube-webhook-certgen
+  dockerfile: Dockerfile
 data_driven: false
 capabilities:
   - admission-certificate-bootstrap

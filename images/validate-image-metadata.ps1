@@ -24,6 +24,24 @@ $allowedCategories = @("service", "runtime", "infra", "tool", "judger", "sim", "
 $buildSourceTypes = @("platform-built", "thin-wrapper", "build-base")
 $internalBuildArguments = Get-ChaimirInternalImageBuildArguments
 $errors = [System.Collections.Generic.List[string]]::new()
+$deployableImages = @($catalog.Values | Where-Object { $_.Deployable } | ForEach-Object { $_.Image })
+$expectedDigests = @{}
+foreach ($catalogEntry in $catalog.Values) {
+    if (-not $catalogEntry.Deployable) {
+        continue
+    }
+    if ($lock.ContainsKey($catalogEntry.Image)) {
+        $expectedDigests[$catalogEntry.Image] = $lock[$catalogEntry.Image]
+        continue
+    }
+    $upstream = Get-ChaimirYamlBlock -Path $catalogEntry.Manifest -BlockName "upstream"
+    $upstreamDigest = Get-ChaimirYamlValue -Lines $upstream -Key "digest"
+    if ($catalogEntry.SourceType -eq "upstream-pinned" -and $upstreamDigest -match '^sha256:[0-9a-f]{64}$') {
+        $expectedDigests[$catalogEntry.Image] = $upstreamDigest
+    } else {
+        $errors.Add("可部署镜像缺少正式 digest 期望值: $($catalogEntry.Image)")
+    }
+}
 
 # Test-DockerfileImmutableSources 拒绝可变字面量基础镜像和可静默生效的镜像参数默认值。
 function Test-DockerfileImmutableSources {
@@ -395,15 +413,27 @@ foreach ($image in $lock.Keys) {
 
 # 本地/私有化静态证明不得引用已阻断、已删除或与正式锁不一致的旧 digest。
 $attestationLine = Get-Content -LiteralPath $DeployConfigPath | Where-Object { $_ -match "^PLATFORM_IMAGE_ATTESTATIONS_JSON=" }
+$registryLine = Get-Content -LiteralPath $DeployConfigPath | Where-Object { $_ -match "^IMAGE_REGISTRY=" }
 if (@($attestationLine).Count -ne 1) {
     $errors.Add("$DeployConfigPath 必须且只能声明一次 PLATFORM_IMAGE_ATTESTATIONS_JSON")
 } else {
+    if (@($registryLine).Count -ne 1) {
+        $errors.Add("$DeployConfigPath 必须且只能声明一次 IMAGE_REGISTRY")
+        $attestationRegistry = ""
+    } else {
+        $registryText = [string]$registryLine
+        $attestationRegistry = $registryText.Substring($registryText.IndexOf("=") + 1).Trim().TrimEnd("/")
+        if ($attestationRegistry -notmatch "^[^/:]+(?::[0-9]+)?$") {
+            $errors.Add("$DeployConfigPath 中 IMAGE_REGISTRY 必须是 registry host 或 host:port")
+        }
+    }
     $attestationJSON = $attestationLine.Substring($attestationLine.IndexOf("=") + 1)
     $seenAttestations = @{}
     $parsedAttestations = ConvertFrom-Json -InputObject $attestationJSON
     foreach ($item in $parsedAttestations) {
         $imageURL = [string]$item.image_url
-        if ($imageURL -notmatch "^.+/([^/]+/[^/@]+)@(sha256:[0-9a-f]{64})$") {
+        $canonicalPrefix = if ([string]::IsNullOrWhiteSpace($attestationRegistry)) { "^$" } else { "^$([regex]::Escape($attestationRegistry))/" }
+        if ($imageURL -notmatch "$canonicalPrefix([^/]+/[^/@]+)@(sha256:[0-9a-f]{64})$") {
             $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 包含非法镜像引用")
             continue
         }
@@ -414,11 +444,23 @@ if (@($attestationLine).Count -ne 1) {
             continue
         }
         $seenAttestations[$logical] = $true
-        if (-not ($lock.ContainsKey($logical)) -or $lock[$logical] -ne $digest) {
-            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 与正式 digest lock 不一致: $logical")
+        if (-not $expectedDigests.ContainsKey($logical) -or $expectedDigests[$logical] -ne $digest) {
+            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 与镜像期望 digest 不一致: $logical")
+        }
+        if (-not $catalog.ContainsKey($logical) -or -not $catalog[$logical].Deployable) {
+            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 包含未登记或已阻断镜像: $logical")
         }
         if (-not ([bool]$item.cosign_verified) -or -not [string]::Equals(([string]$item.trivy_status), "passed", [System.StringComparison]::OrdinalIgnoreCase)) {
             $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 包含未通过门禁的条目: $logical")
+        }
+    }
+
+    # 准入清单必须覆盖全部可部署 manifest。构建镜像的 digest 来自正式锁，
+    # upstream-pinned 镜像的 digest 来自 manifest.upstream.digest；两类都必须
+    # 有当前环境的扫描、SBOM 和签名证明，不能把“未进入正式锁”误当成免检。
+    foreach ($deployableImage in $deployableImages) {
+        if (-not $seenAttestations.ContainsKey($deployableImage)) {
+            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 缺少可部署镜像证明: $deployableImage")
         }
     }
 }

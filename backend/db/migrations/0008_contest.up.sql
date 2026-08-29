@@ -45,7 +45,8 @@ CREATE TABLE IF NOT EXISTS contest_problem (
             jsonb_typeof(battle_config) = 'object'
             AND battle_config ?& ARRAY['execution_profile', 'entry_roles', 'replay_profile']
             AND battle_config - ARRAY['execution_profile', 'entry_roles', 'replay_profile'] = '{}'::jsonb
-            AND jsonb_typeof(battle_config->'execution_profile') = 'object'
+            AND jsonb_typeof(battle_config->'execution_profile') = 'string'
+            AND battle_config->>'execution_profile' = 'contest-battle'
             AND jsonb_typeof(battle_config->'entry_roles') = 'array'
             AND jsonb_typeof(battle_config->'replay_profile') = 'object'
         )

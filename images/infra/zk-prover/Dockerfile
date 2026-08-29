@@ -3,7 +3,7 @@ FROM node:24-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb484
 
 WORKDIR /opt/chaimir/zk-prover
 COPY package.json package-lock.json /opt/chaimir/zk-prover/
-RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+    RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3
 
 FROM node:24-alpine3.23@sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
 

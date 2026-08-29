@@ -1,7 +1,7 @@
 # 本文件定义 Besu 企业 EVM 运行时镜像,复用官方 Besu 应用并使用 Wolfi 运行层。
 FROM hyperledger/besu:26.6.1@sha256:ac85d23b4250308ce5f6d004fff7fa6779f82932d1ba32fd3d4811531d43d0bc AS upstream
 
-FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72 AS patched-besu
+FROM cgr.dev/chainguard/wolfi-base@sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c AS patched-besu
 
 ARG NETTY_VERSION=4.2.16.Final
 ARG JACKSON_VERSION=2.21.4
@@ -62,7 +62,7 @@ RUN set -eux; \
     echo "${expected}  jackson-datatype-jdk8-2.21.1.jar.patched" | sha256sum -c -; \
     mv "jackson-datatype-jdk8-2.21.1.jar.patched" "jackson-datatype-jdk8-2.21.1.jar"
 
-FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
+FROM cgr.dev/chainguard/wolfi-base@sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
 
 LABEL org.opencontainers.image.title="runtime/evm-besu"
 LABEL org.opencontainers.image.description="Chaimir Hyperledger Besu enterprise EVM runtime"

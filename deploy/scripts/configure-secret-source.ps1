@@ -45,10 +45,21 @@ if (-not (Test-Path -LiteralPath $PostgresPrivateKeyPath -PathType Leaf)) { thro
 
 & kubectl --context $Context create namespace chaimir-secrets --dry-run=client -o yaml | & kubectl --context $Context apply -f - | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "创建密钥源命名空间失败" }
-& kubectl --context $Context -n chaimir-secrets create secret generic chaimir `
-    --from-env-file=$SecretEnvPath `
-    --from-file="POSTGRES_TLS_CERTIFICATE=$PostgresCertificatePath" `
-    --from-file="POSTGRES_TLS_PRIVATE_KEY=$PostgresPrivateKeyPath" `
-    --dry-run=client -o yaml | & kubectl --context $Context apply -f - | Out-Null
+# Kubernetes CLI 不允许 --from-env-file 与 --from-file 混用;统一构造一个
+# Secret data 映射,确保环境变量和 TLS 文件仍落在同一个受控密钥源。
+$secretData = @{}
+foreach ($entry in $values.GetEnumerator()) {
+    $secretData[$entry.Key] = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$entry.Value))
+}
+$secretData["POSTGRES_TLS_CERTIFICATE"] = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $PostgresCertificatePath)))
+$secretData["POSTGRES_TLS_PRIVATE_KEY"] = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $PostgresPrivateKeyPath)))
+$secretManifest = @{
+    apiVersion = "v1"
+    kind = "Secret"
+    metadata = @{ name = "chaimir"; namespace = "chaimir-secrets" }
+    type = "Opaque"
+    data = $secretData
+} | ConvertTo-Json -Depth 10 -Compress
+$secretManifest | & kubectl --context $Context apply -f - | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "更新密钥源失败" }
 Write-Output "密钥源已更新;敏感值未输出"

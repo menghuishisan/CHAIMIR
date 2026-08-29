@@ -7,7 +7,7 @@ LABEL org.opencontainers.image.description="Chaimir blockchain event listener se
 WORKDIR /app
 COPY package.json package-lock.json /app/
 RUN apk upgrade --no-cache \
-    && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /root/.npm
 COPY event-listener.mjs /app/event-listener.mjs
 RUN chown -R 1000:1000 /app

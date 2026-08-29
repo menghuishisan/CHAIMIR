@@ -1,11 +1,17 @@
 # 本文件构建钱包模拟器工具镜像。
-FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
+FROM cgr.dev/chainguard/wolfi-base@sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
 
 LABEL org.opencontainers.image.title="tool/wallet-sim"
 LABEL org.opencontainers.image.description="Chaimir wallet simulator tool image"
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
-    packages='python-3.13=3.13.14-r3 py3.13-pip=26.1.2-r1' \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && packages='python-3.13=3.13.14-r3 py3.13-pip=26.1.2-r1' \
+    && apk upgrade --no-cache \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \

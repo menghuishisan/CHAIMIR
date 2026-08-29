@@ -24,8 +24,8 @@ upstream:
   source_commit: 969853d9609b3a261ef4e41a5eec437188c09ffe
   dirs_image: alpine:3.23
   dirs_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
-  runtime_image: debian:13-slim
-  runtime_digest: sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
+  runtime_image: gcr.io/distroless/static-debian12:nonroot
+  runtime_digest: sha256:b7bb25d9f7c31d2bdd1982feb4dafcaf137703c7075dbe2febb41c24212b946f
   reuse_policy: rebuild-official-release-source
 data_driven: true
 capabilities:

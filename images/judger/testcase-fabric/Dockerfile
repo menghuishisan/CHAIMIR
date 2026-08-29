@@ -8,11 +8,16 @@ FROM ${FABRIC_TOOLS_IMAGE} AS fabric-tools
 
 FROM ubuntu:22.04@sha256:0e0a0fc6d18feda9db1590da249ac93e8d5abfea8f4c3c0c849ce512b5ef8982
 
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+
 LABEL org.opencontainers.image.title="judger/testcase-fabric"
 LABEL org.opencontainers.image.description="Chaimir Fabric chaincode testcase judger image"
 
 USER root
-RUN apt-get -o Acquire::Retries=3 update \
+RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && apt-get -o Acquire::Retries=3 update \
     && apt-get -o Acquire::Retries=3 -y upgrade \
     && apt-get -o Acquire::Retries=3 -y install --no-install-recommends ca-certificates bash \
     && rm -rf /var/lib/apt/lists/* \

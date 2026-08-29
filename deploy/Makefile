@@ -14,6 +14,8 @@ SUPPLY_CHAIN_SECRET_EXAMPLE := config/supply-chain.secret.env.example
 SUPPLY_CHAIN_COMPOSE := image-supply-chain.compose.yaml
 SUPPLY_CHAIN_PROJECT := chaimir-supply-chain
 CILIUM_CLUSTER_SCRIPT := scripts/cilium-cluster.ps1
+DOCKER_RUNTIME_SCRIPT := scripts/docker-runtime.ps1
+DOCKER_RUNTIME_WATCHER_SCRIPT := scripts/docker-runtime-watcher.ps1
 IMAGE_DIGEST_LOCK := ../images/image-digests.lock
 INGRESS_NGINX_DIGEST := $(shell powershell -NoProfile -Command "((Select-String -Path '$(IMAGE_DIGEST_LOCK)' -Pattern '^ingress/ingress-nginx ').Line -split '\\s+')[1]")
 GVISOR_CHECK_DIGEST := $(shell powershell -NoProfile -Command "((Select-String -Path '$(IMAGE_DIGEST_LOCK)' -Pattern '^base/chain-tools ').Line -split '\\s+')[1]")
@@ -23,11 +25,9 @@ TLS_SECRET := chaimir-tls
 METRICS_SERVER_VERSION := v0.8.1
 POLICY_CONTROLLER_VERSION := 0.10.6
 EXTERNAL_SECRETS_MANIFEST := ../images/infra/external-secrets/manifest.yaml
-EXTERNAL_SECRETS_REGISTRY := $(shell powershell -NoProfile -Command "((Select-String -Path '$(EXTERNAL_SECRETS_MANIFEST)' -Pattern '^  registry: ').Line -split '\\s+')[2]")
-EXTERNAL_SECRETS_UPSTREAM_IMAGE := $(shell powershell -NoProfile -Command "((Select-String -Path '$(EXTERNAL_SECRETS_MANIFEST)' -Pattern '^  image: ').Line -split '\\s+')[2]")
 EXTERNAL_SECRETS_VERSION := $(shell powershell -NoProfile -Command "(((Select-String -Path '$(EXTERNAL_SECRETS_MANIFEST)' -Pattern '^  version: ').Line -split '\\s+')[2]).TrimStart('v')")
-EXTERNAL_SECRETS_DIGEST := $(shell powershell -NoProfile -Command "((Select-String -Path '$(EXTERNAL_SECRETS_MANIFEST)' -Pattern '^  digest: sha256:').Line -split '\\s+')[2]")
-EXTERNAL_SECRETS_IMAGE := $(EXTERNAL_SECRETS_REGISTRY)/$(EXTERNAL_SECRETS_UPSTREAM_IMAGE)@$(EXTERNAL_SECRETS_DIGEST)
+EXTERNAL_SECRETS_DIGEST := $(shell powershell -NoProfile -Command "((Select-String -Path '$(IMAGE_DIGEST_LOCK)' -Pattern '^infra/external-secrets ').Line -split '\\s+')[1]")
+EXTERNAL_SECRETS_IMAGE := registry.chaimir.io/infra/external-secrets@$(EXTERNAL_SECRETS_DIGEST)
 # 多镜像预拉取 DaemonSet 会在一次准入请求中校验完整镜像集合,保持 fail-closed 并给签名层拉取保留足够时间。
 POLICY_CONTROLLER_WEBHOOK_TIMEOUT_SECONDS := 30
 POLICY_CONTROLLER_WEBHOOK_REPLICAS := 2
@@ -50,20 +50,40 @@ help: ## 显示可用目标
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 # ---- 一键起步 ----
+.PHONY: docker-runtime-ready
+docker-runtime-ready: ## 有界检查 Docker Desktop/WSL，不可用时自动受控恢复
+	powershell -NoProfile -ExecutionPolicy Bypass -File $(DOCKER_RUNTIME_SCRIPT) -Action Ensure
+
+.PHONY: docker-runtime-recover
+docker-runtime-recover: ## 显式重启 Docker Desktop/WSL 并等待 Docker API 恢复
+	powershell -NoProfile -ExecutionPolicy Bypass -File $(DOCKER_RUNTIME_SCRIPT) -Action Recover
+
+.PHONY: docker-runtime-watcher-install
+docker-runtime-watcher-install: ## 安装 Docker 恢复后自动启动 Cilium 的用户级 watcher
+	powershell -NoProfile -ExecutionPolicy Bypass -File $(DOCKER_RUNTIME_WATCHER_SCRIPT) -Action Install
+
+.PHONY: docker-runtime-watcher-uninstall
+docker-runtime-watcher-uninstall: ## 卸载 Docker 恢复 watcher 计划任务
+	powershell -NoProfile -ExecutionPolicy Bypass -File $(DOCKER_RUNTIME_WATCHER_SCRIPT) -Action Uninstall
+
+.PHONY: docker-runtime-watcher-check
+docker-runtime-watcher-check: ## 单次执行 Docker 恢复 watcher 探测并按需恢复 Cilium
+	powershell -NoProfile -ExecutionPolicy Bypass -File $(DOCKER_RUNTIME_WATCHER_SCRIPT) -Action RunOnce
+
 .PHONY: cilium-cluster-up
-cilium-cluster-up: ## 创建或修复无默认 CNI 集群,安装并验收生产基线 Cilium
+cilium-cluster-up: docker-runtime-ready ## 创建或修复无默认 CNI 集群,安装并验收生产基线 Cilium
 	powershell -NoProfile -ExecutionPolicy Bypass -File $(CILIUM_CLUSTER_SCRIPT) -Action Up
 
 .PHONY: cilium-cluster-start
-cilium-cluster-start: ## 恢复现有 Cilium 集群与外部 HTTPS 入口,不重复安装或数据面验收
+cilium-cluster-start: docker-runtime-ready ## 恢复现有 Cilium 集群与外部 HTTPS 入口,不重复安装或数据面验收
 	powershell -NoProfile -ExecutionPolicy Bypass -File $(CILIUM_CLUSTER_SCRIPT) -Action Start
 
 .PHONY: cilium-cluster-check
-cilium-cluster-check: ## 校验 Cilium 独占状态、正式镜像和真实 NetworkPolicy 数据面
+cilium-cluster-check: docker-runtime-ready ## 校验 Cilium 独占状态、正式镜像和真实 NetworkPolicy 数据面
 	powershell -NoProfile -ExecutionPolicy Bypass -File $(CILIUM_CLUSTER_SCRIPT) -Action Check
 
 .PHONY: cilium-edge-up
-cilium-edge-up: ## 将外部 canonical HTTPS 入口连接到 Cilium 集群
+cilium-edge-up: docker-runtime-ready ## 将外部 canonical HTTPS 入口连接到 Cilium 集群
 	powershell -NoProfile -ExecutionPolicy Bypass -File $(CILIUM_CLUSTER_SCRIPT) -Action Edge
 
 .PHONY: cilium-cluster-down
@@ -75,7 +95,7 @@ cilium-cluster-stop: ## 暂停项目 Kind 节点,保留数据库进程、volume 
 	powershell -NoProfile -ExecutionPolicy Bypass -File $(CILIUM_CLUSTER_SCRIPT) -Action Stop
 
 .PHONY: dev-up
-dev-up: cilium-cluster-up context-check gvisor-up gvisor-check ingress-up metrics-up policy-controller-up external-secrets-up tls secret-source-up apply-acceptance registry-pull-secret-sync middleware-wait acceptance-seed application-wait generated-config-gc cilium-edge-up ## 按统一生产安全基线拉起完整平台和验收夹具
+dev-up: cilium-cluster-up context-check gvisor-up gvisor-check ingress-up metrics-up policy-controller-up registry-pull-secret-bootstrap external-secrets-up tls secret-source-up apply-acceptance registry-pull-secret-sync middleware-wait acceptance-seed application-wait generated-config-gc cilium-edge-up ## 按统一生产安全基线拉起完整平台和验收夹具
 	@echo "环境就绪。前端: https://www.chaimir.io (需将 www.chaimir.io 指向 127.0.0.1 并信任 config/chaimir-tls/tls.crt)"
 
 .PHONY: dev-start
@@ -131,8 +151,11 @@ external-secrets-up: supply-chain-tools-pull ## 安装固定版本 External Secr
 			--namespace external-secrets --create-namespace --rollback-on-failure --timeout 10m \
 			--set installCRDs=true --set replicaCount=2 --set podDisruptionBudget.enabled=true \
 			--set webhook.replicaCount=2 --set webhook.podDisruptionBudget.enabled=true \
-			--set certController.replicaCount=2 --set certController.podDisruptionBudget.enabled=true \
-			--post-renderer /bin/sh --post-renderer-args /workspace/deploy/scripts/external-secrets-post-renderer.sh --wait'
+		--set certController.replicaCount=2 --set certController.podDisruptionBudget.enabled=true \
+			--set imagePullSecrets[0].name=chaimir-harbor-pull \
+			--set webhook.imagePullSecrets[0].name=chaimir-harbor-pull \
+			--set certController.imagePullSecrets[0].name=chaimir-harbor-pull \
+		--post-renderer chaimir-external-secrets-digest --wait'
 	$(MAKE) external-secrets-check
 
 .PHONY: external-secrets-check
@@ -163,10 +186,11 @@ registry-runtime-dns: context-check ## 确认 Cilium 节点已配置 canonical H
 .PHONY: registry-pull-secret-bootstrap
 registry-pull-secret-bootstrap: context-check ## 在签名准入前创建静态命名空间并同步工作负载 pull 凭据
 	kubectl apply -f base/namespaces/namespaces.yaml
+	kubectl create namespace external-secrets --dry-run=client -o yaml | kubectl apply -f -
 	@auth_dir="$$(sed -n 's/^SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR=//p' "$(SUPPLY_CHAIN_CONFIG)")"; \
 	auth_file="$$auth_dir/config.json"; \
 	test -f "$$auth_file" || { echo "缺少 $$auth_file;请先完成 Harbor robot 凭据校验"; exit 1; }; \
-	for namespace in chaimir-system chaimir-data chaimir-prepull; do \
+	for namespace in external-secrets chaimir-system chaimir-data chaimir-prepull; do \
 		kubectl -n $$namespace create secret generic chaimir-harbor-pull \
 			--from-file=.dockerconfigjson="$$auth_file" \
 			--type=kubernetes.io/dockerconfigjson \
@@ -395,13 +419,18 @@ supply-chain-tools-check: ## 通过 Docker 容器检查 Trivy/Cosign/Helm 可执
 	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm helm version
 
 .PHONY: harbor-up
-harbor-up: supply-chain-secret-check ## 经容器化 Helm 安装 Harbor 到当前集群(官方 chart,非我方平台清单)
+harbor-up: supply-chain-secret-check ## 验证已签名 bootstrap bundle 后经容器化 Helm 安装固定 Harbor chart
 	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_KUBECONFIG_HOST_PATH=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_KUBECONFIG_HOST_PATH"; exit 1; }
 	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_KUBECONFIG_HOST_PATH=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_HARBOR_KUBECONFIG_HOST_PATH"; exit 1; }
 	@test -n "$$(sed -n 's/^HARBOR_ADMIN_PASSWORD=//p' $(SUPPLY_CHAIN_SECRET_FILE))" || { echo "请先在 $(SUPPLY_CHAIN_SECRET_FILE) 填写 HARBOR_ADMIN_PASSWORD"; exit 1; }
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-harbor-chart.ps1 -RepoRoot "$$(cd .. && pwd)" -ConfigPath "$(SUPPLY_CHAIN_CONFIG)"
 	SUPPLY_CHAIN_KUBECONFIG_HOST_PATH="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_KUBECONFIG_HOST_PATH=//p' $(SUPPLY_CHAIN_CONFIG))" \
+	SUPPLY_CHAIN_HARBOR_RELEASE_NAME="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_RELEASE_NAME=//p' $(SUPPLY_CHAIN_CONFIG))" \
+	SUPPLY_CHAIN_HARBOR_NAMESPACE="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_NAMESPACE=//p' $(SUPPLY_CHAIN_CONFIG))" \
+	SUPPLY_CHAIN_HARBOR_VALUES_PATH="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_VALUES_PATH=//p' $(SUPPLY_CHAIN_CONFIG))" \
+	SUPPLY_CHAIN_HARBOR_EXTERNAL_URL="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_EXTERNAL_URL=//p' $(SUPPLY_CHAIN_CONFIG))" \
 	HARBOR_ADMIN_PASSWORD="$$(sed -n 's/^HARBOR_ADMIN_PASSWORD=//p' $(SUPPLY_CHAIN_SECRET_FILE))" \
-		docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm --entrypoint sh helm -lc 'set -eu; helm repo add harbor "$$SUPPLY_CHAIN_HARBOR_CHART_REPOSITORY"; helm repo update; helm upgrade --install "$$SUPPLY_CHAIN_HARBOR_RELEASE_NAME" harbor/harbor --namespace "$$SUPPLY_CHAIN_HARBOR_NAMESPACE" --create-namespace -f "$$SUPPLY_CHAIN_HARBOR_VALUES_PATH" --set-string externalURL="$$SUPPLY_CHAIN_HARBOR_EXTERNAL_URL" --set-string harborAdminPassword="$$HARBOR_ADMIN_PASSWORD"'
+		docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm --entrypoint sh helm -lc 'helm upgrade --install "$$SUPPLY_CHAIN_HARBOR_RELEASE_NAME" /workspace/.tmp/harbor-bootstrap/chart/harbor --namespace "$$SUPPLY_CHAIN_HARBOR_NAMESPACE" --create-namespace -f "/workspace/$$SUPPLY_CHAIN_HARBOR_VALUES_PATH" -f /workspace/.tmp/harbor-bootstrap/chart/bootstrap-images.values.yaml --set-string externalURL="$$SUPPLY_CHAIN_HARBOR_EXTERNAL_URL" --set-string harborAdminPassword="$$HARBOR_ADMIN_PASSWORD"'
 
 .PHONY: harbor-projects-ensure
 harbor-projects-ensure: supply-chain-secret-check ## 按镜像分类创建 Harbor project 和供应链 robot

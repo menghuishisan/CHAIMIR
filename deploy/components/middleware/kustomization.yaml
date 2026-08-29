@@ -16,19 +16,19 @@ resources:
 images:
   - name: chaimir/middleware/clamav
     newName: registry.chaimir.io/middleware/clamav
-    digest: sha256:5eeae8652cff5a00d4321628345bd53bb0488f285e7f038a49cdc4042a3f1445
+    digest: sha256:c16cc3c7a3dcb1f7120bd1a7e4251cefdfbd6deaa4b847f1da6a0a2ab39dd354
   - name: chaimir/middleware/rustfs
     newName: registry.chaimir.io/middleware/rustfs
-    digest: sha256:800cf3f352a0a27e3275ca854a51f0027975d7acc7a0d52089a35bcc9fcbf0b5
+    digest: sha256:9f8e59b58d1b00931b12a03dbbcc014d7ca3a2aadecfdb5361f16fe07b1d9e08
   - name: chaimir/middleware/nats
     newName: registry.chaimir.io/middleware/nats
-    digest: sha256:c8a1fe28c2b1d1e69189471582973d5b13b79835bcd1ac717f760610f981935b
+    digest: sha256:9a2e624d079bfebee7ffd905b562af915991ed3644cb10737934cd4c0e35feda
   - name: chaimir/middleware/postgres
     newName: registry.chaimir.io/middleware/postgres
-    digest: sha256:344e6a15f1d778db725d5c6bbbb3ce384872222c1bfe13d003476582b9625da7
+    digest: sha256:ea605021430638bf1d7f2aee0e3586a91797852de6bbd18e08cd106c6c36147b
   - name: chaimir/middleware/redis
     newName: registry.chaimir.io/middleware/redis
-    digest: sha256:55a24360a131488be0c49a877af45d63d4cdd7919cb972765e59e9390324a7e1
+    digest: sha256:c9ca7f5ce2e7f762128903c4684cffa38019f81fd2fd965dabbb30481e742fc4
 
 # 注:chaimir-data-config(PG 库名/用户等非密值)由 deploy/config 这个 config component
 #   从「唯一」env 源 chaimir.env 统一生成,本 component 不再单独生成,避免重复定义。

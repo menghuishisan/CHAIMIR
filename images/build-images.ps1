@@ -342,14 +342,17 @@ foreach ($item in $selected) {
         $args += @("--build-arg", "$key=$($buildArguments[$key])")
     }
     if ($BuildNetwork -ne "host") {
-        $proxyBuildArgs = @{
-            HTTP_PROXY  = $env:SUPPLY_CHAIN_HTTP_PROXY
-            HTTPS_PROXY = $env:SUPPLY_CHAIN_HTTPS_PROXY
-            NO_PROXY    = $env:SUPPLY_CHAIN_NO_PROXY
-        }
-        foreach ($proxyKey in $proxyBuildArgs.Keys) {
-            if (-not [string]::IsNullOrWhiteSpace($proxyBuildArgs[$proxyKey])) {
-                $args += @("--build-arg", "$proxyKey=$($proxyBuildArgs[$proxyKey])")
+        $proxyBuildArgs = @(
+            @('HTTP_PROXY', $env:SUPPLY_CHAIN_HTTP_PROXY),
+            @('HTTPS_PROXY', $env:SUPPLY_CHAIN_HTTPS_PROXY),
+            @('NO_PROXY', $env:SUPPLY_CHAIN_NO_PROXY),
+            @('http_proxy', $env:SUPPLY_CHAIN_HTTP_PROXY),
+            @('https_proxy', $env:SUPPLY_CHAIN_HTTPS_PROXY),
+            @('no_proxy', $env:SUPPLY_CHAIN_NO_PROXY)
+        )
+        foreach ($proxyPair in $proxyBuildArgs) {
+            if (-not [string]::IsNullOrWhiteSpace($proxyPair[1])) {
+                $args += @('--build-arg', "$($proxyPair[0])=$($proxyPair[1])")
             }
         }
     }

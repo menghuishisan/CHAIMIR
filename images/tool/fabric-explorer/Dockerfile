@@ -13,7 +13,10 @@ LABEL org.opencontainers.image.title="tool/fabric-explorer"
 LABEL org.opencontainers.image.description="Chaimir native Hyperledger Fabric explorer"
 
 USER root
-RUN apk add --no-cache ca-certificates \
+RUN apk add --no-cache \
+        ca-certificates \
+        'libcrypto3>=3.5.8-r0' \
+        'libssl3>=3.5.8-r0' \
     && addgroup -S -g 1000 chaimir \
     && adduser -S -u 1000 -G chaimir -h /workspace -s /sbin/nologin chaimir \
     && mkdir -p /workspace /tmp \

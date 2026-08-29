@@ -18,16 +18,18 @@ description: Hardhat EVM 教学运行时镜像。
 source:
   type: thin-wrapper
 upstream:
-  image: node:22-bookworm
-  version: 22-bookworm
-  digest: sha256:a05717adfe7289e2a0fa36a694dc430a510adab6467c7036e51551198935abef
+  image: node:22-bookworm-slim
+  version: 22-bookworm-slim
+  digest: sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
+  runtime_image: cgr.dev/chainguard/glibc-dynamic
+  runtime_digest: sha256:d0046044cd28948d3380eb0d98709dc7e63f98161fe7105135e1025650bad17a
   components:
     - image: ghcr.io/foundry-rs/foundry:v1.7.1
       digest: sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
       role: foundry-toolchain
-    - image: node:22-bookworm
+    - image: node:22-bookworm-slim
       role: node-runtime
-      digest: sha256:a05717adfe7289e2a0fa36a694dc430a510adab6467c7036e51551198935abef
+      digest: sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5
   reuse_policy: toolchain-wrapper
 data_driven: true
 env_keys:

@@ -13,10 +13,10 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: stateful-middleware
   chaimir.io/scope: middleware
-  chaimir.io/source: upstream-pinned
+  chaimir.io/source: thin-wrapper
 description: RustFS S3 兼容对象存储和备份对象仓库。
 source:
-  type: upstream-pinned
+  type: thin-wrapper
 upstream:
   image: rustfs/rustfs
   registry: docker.io
@@ -25,10 +25,13 @@ upstream:
   source_repository: https://github.com/rustfs/rustfs
   commit: 1aae6803739a5bac67e0d702ac46d43f09fb06dd
   license: Apache-2.0
-  reuse_policy: upstream-pinned
+  reuse_policy: fixed-upstream-wrapper
 private_delivery:
   offline_bundle: true
   import_project: middleware
+build:
+  context: images/middleware/rustfs
+  dockerfile: Dockerfile
 data_driven: false
 capabilities:
   - s3-object-storage

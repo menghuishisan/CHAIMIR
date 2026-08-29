@@ -1,0 +1,144 @@
+# 本文件声明 runtime/op-geth 的 Optimism 执行层能力、端点和运行期配置边界。
+schema_version: 1
+category: runtime
+name: op-geth
+image: runtime/op-geth
+labels:
+  app.kubernetes.io/name: op-geth
+  app.kubernetes.io/component: runtime
+  app.kubernetes.io/part-of: chaimir
+  chaimir.io/category: runtime
+  chaimir.io/image: runtime/op-geth
+  chaimir.io/data-driven: "true"
+  chaimir.io/student-access: "false"
+  chaimir.io/sensitivity: student-runtime
+  chaimir.io/scope: sandbox
+  chaimir.io/source: platform-built
+description: Optimism OP Labs 官方 OP Geth 源码重建执行层镜像。
+source:
+  type: platform-built
+upstream:
+  registry: us-docker.pkg.dev
+  image: oplabs-tools-artifacts/images/op-geth
+  version: v1.101702.2
+  digest: sha256:40c7bf1e70cd6022e26bcff6a437eceb47b55f61e49572b0f792ae2461fdaab1
+  upstream_tag: latest
+  source_repository: https://github.com/ethereum-optimism/op-geth
+  source_commit: e8800cffe53d459cde8a07c8e8f1de9d86e79e07
+  source_archive: https://github.com/ethereum-optimism/op-geth/archive/e8800cffe53d459cde8a07c8e8f1de9d86e79e07.tar.gz
+  source_sha256: 82001bf36be8425dddb7c0c3f231b3dd8572e40576e4148d323f9146d7181191
+  license: GPL-3.0
+  reuse_policy: source-rebuild
+  builder_image: base/go-builder
+  builder_digest: sha256:fb0a1352643623882f008691aaa1459262c0c5e1030878dbdbc5e916a852a869
+  runtime_image: alpine:3.23
+  runtime_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+build:
+  context: images/runtime/op-geth
+  dockerfile: Dockerfile
+data_driven: true
+capabilities:
+  provides:
+    - chain-runtime
+    - evm-json-rpc
+    - evm-engine-api
+    - op-geth-execution
+  requires: []
+  conflicts: []
+  cardinality: one
+  placement: sandbox
+  config_schema:
+    type: object
+    additionalProperties: false
+    required: [data_dir, genesis, rpc_port, engine_port]
+    properties:
+      data_dir:
+        type: string
+        minLength: 1
+        x-chaimir-env: runtime/OP_GETH_DATA_DIR
+      genesis:
+        type: string
+        minLength: 1
+        x-chaimir-env: runtime/OP_GETH_GENESIS_PATH
+      rpc_port:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        x-chaimir-env: runtime/OP_GETH_RPC_PORT
+      engine_port:
+        type: integer
+        minimum: 1
+        maximum: 65535
+        x-chaimir-env: runtime/OP_GETH_ENGINE_PORT
+  student_access: private
+runtime:
+  eco: evm
+  adapter_level: 1
+  command_schema:
+    executable: geth
+    required_args:
+      - init
+      - --authrpc.jwtsecret
+      - --authrpc.addr
+      - --authrpc.port
+      - --http
+      - --http.api
+    forbidden_args:
+      - --dev
+      - --unlock
+infra:
+  roles:
+    - l2-execution
+    - engine-api-provider
+  bindings: []
+env_keys:
+  config:
+    - OP_GETH_DATA_DIR
+    - OP_GETH_ENGINE_PORT
+    - OP_GETH_RPC_PORT
+    - OP_GETH_GENESIS_PATH
+  secret:
+    - OP_GETH_JWT_SECRET
+secrets_required:
+  - env: OP_GETH_JWT_SECRET
+ports:
+  - name: rpc
+    container_port: 8545
+    protocol: TCP
+    expose: internal
+    purpose: L2 JSON-RPC
+  - name: engine
+    container_port: 8551
+    protocol: TCP
+    expose: internal
+    purpose: authenticated Engine API for op-node
+security:
+  run_as_non_root: true
+  read_only_root_filesystem: false
+  allow_privilege_escalation: false
+  privileged: false
+  host_network: false
+  automount_service_account_token: false
+  drop_capabilities: [ALL]
+  network_policy: deny-all
+security_exceptions:
+  - field: read_only_root_filesystem
+    reason: OP Geth 必须写执行层数据库和链状态。
+    writable_mounts: [runtime-state]
+student_access:
+  enabled: false
+resources:
+  cpu_request: 500m
+  cpu_limit: "2"
+  memory_request: 1Gi
+  memory_limit: 4Gi
+  ephemeral_storage_limit: 8Gi
+selftest:
+  commands:
+    - name: op-geth-version
+      command: [geth, version]
+supply_chain:
+  sbom: true
+  trivy_required: true
+  cosign_required: true
+  pull_by_digest: true

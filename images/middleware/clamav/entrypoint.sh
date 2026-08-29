@@ -8,4 +8,5 @@ if ! find "$db_dir" -maxdepth 1 \( -name '*.cvd' -o -name '*.cld' \) | grep -q .
   freshclam --config-file=/etc/clamav/freshclam.conf --datadir="$db_dir"
 fi
 
-exec /usr/sbin/clamd --config-file=/etc/clamav/clamd.conf
+# Keep clamd attached to PID 1 so Kubernetes can observe its lifetime and probes.
+exec /usr/sbin/clamd --foreground --config-file=/etc/clamav/clamd.conf

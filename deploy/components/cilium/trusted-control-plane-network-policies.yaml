@@ -14,6 +14,13 @@ metadata:
   labels:
     app.kubernetes.io/part-of: chaimir-trusted-control-plane
 ---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: external-secrets
+  labels:
+    app.kubernetes.io/part-of: chaimir-trusted-control-plane
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -64,6 +71,21 @@ kind: NetworkPolicy
 metadata:
   name: allow-trusted-control-plane
   namespace: cosign-system
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - {}
+  egress:
+    - {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-trusted-control-plane
+  namespace: external-secrets
 spec:
   podSelector: {}
   policyTypes:

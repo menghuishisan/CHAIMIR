@@ -20,8 +20,8 @@ source:
 upstream:
   registry: cgr.dev
   image: chainguard/wolfi-base
-  version: "2026-08-25"
-  digest: sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
+  version: "2026-08-26"
+  digest: sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
   source_repository: https://github.com/chainguard-forks/ingress-nginx
   source_commit: 5a85da174c066f62bbce8315fb1c4f2e71446683
   packages:

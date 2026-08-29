@@ -86,10 +86,14 @@ services:
     image: ${SUPPLY_CHAIN_HELM_IMAGE:?SUPPLY_CHAIN_HELM_IMAGE is required}
     entrypoint: ["helm"]
     working_dir: /workspace
+    # Docker Desktop Kubernetes API 仅绑定宿主机回环地址；host network 让容器化 Helm
+    # 使用同步 kubeconfig 中的 127.0.0.1:<port>，避免 bridge 网络访问 host.docker.internal 超时。
+    network_mode: host
     extra_hosts:
       - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-registry.chaimir.io}:host-gateway"
     environment:
       KUBECONFIG: /kubeconfig
+      HELM_PLUGINS: /workspace/deploy/helm-plugins
       HARBOR_ADMIN_PASSWORD: ${HARBOR_ADMIN_PASSWORD:-}
       SUPPLY_CHAIN_HARBOR_CHART_REPOSITORY: ${SUPPLY_CHAIN_HARBOR_CHART_REPOSITORY:?SUPPLY_CHAIN_HARBOR_CHART_REPOSITORY is required}
       SUPPLY_CHAIN_HARBOR_RELEASE_NAME: ${SUPPLY_CHAIN_HARBOR_RELEASE_NAME:?SUPPLY_CHAIN_HARBOR_RELEASE_NAME is required}

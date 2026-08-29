@@ -1,6 +1,7 @@
 # 本文件构建 Chaimir 部署期 migrate 命令镜像。
 ARG GO_BUILDER_IMAGE=invalid.invalid/base/go-builder:required
 ARG RUNTIME_IMAGE=invalid.invalid/base/runtime-min:required
+ARG GO_MODULE_PROXY=
 
 FROM ${GO_BUILDER_IMAGE} AS builder
 
@@ -8,7 +9,9 @@ WORKDIR /src
 
 # 先下载依赖,再复制源码,保证依赖层可缓存。
 COPY --chown=1000:1000 backend/go.mod backend/go.sum ./
-RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 go mod download
+RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 \
+    if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}"; fi \
+    && go mod download
 COPY --chown=1000:1000 backend/ ./
 COPY --chown=1000:1000 images/tool /src/acceptance-images/tool
 COPY --chown=1000:1000 images/infra /src/acceptance-images/infra

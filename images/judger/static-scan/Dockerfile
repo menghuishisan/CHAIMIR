@@ -5,16 +5,23 @@ FROM ${JUDGE_MIN_IMAGE} AS judge-base
 
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+
 ARG SOLC_VERSION=0.8.26
 ARG SOLC_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
 ARG SOLC_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
+ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 LABEL org.opencontainers.image.title="judger/static-scan"
 LABEL org.opencontainers.image.description="Chaimir static scan judger image"
 
 USER root
 ADD --checksum=sha256:d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef https://binaries.soliditylang.org/linux-amd64/${SOLC_PATH} /usr/local/bin/solc-${SOLC_VERSION}
-RUN for attempt in 1 2 3 4 5; do \
+RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && sed -i 's#https://dl-cdn.alpinelinux.org/alpine#https://mirrors.aliyun.com/alpine#g' /etc/apk/repositories \
+    && for attempt in 1 2 3 4 5; do \
         if apk upgrade --no-cache --timeout 300; then break; fi; \
         if [ "$attempt" -eq 5 ]; then echo "apk upgrade failed after 5 attempts" >&2; exit 1; fi; \
         sleep 3; \
@@ -28,7 +35,7 @@ RUN for attempt in 1 2 3 4 5; do \
     && chmod 0755 /usr/local/bin/solc-${SOLC_VERSION} \
     && ln -s /usr/local/bin/solc-${SOLC_VERSION} /usr/local/bin/solc \
     && python3 -m venv /opt/slither \
-    && /opt/slither/bin/pip install --no-cache-dir --timeout 300 --retries 5 --upgrade \
+    && /opt/slither/bin/pip install --index-url "${PIP_INDEX_URL}" --no-cache-dir --timeout 300 --retries 8 --upgrade \
         "pip>=25.3" \
         "setuptools>=80.0.0" \
         "wheel>=0.46.0" \

@@ -22,9 +22,12 @@ upstream:
     - image: ghcr.io/foundry-rs/foundry:v1.7.1
       digest: sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
       role: foundry-toolchain
-    - image: node:24-alpine3.23
-      digest: sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
-      role: node-runtime
+    - image: node:24-trixie-slim
+      digest: sha256:db4f733c26868756bae92ac764d7e99bf31809ce7db886ed525960fe7d544601
+      role: node-build
+    - image: alpine:3.23
+      digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+      role: runtime-shell
   reuse_policy: self-developed-judger
 data_driven: true
 capabilities:

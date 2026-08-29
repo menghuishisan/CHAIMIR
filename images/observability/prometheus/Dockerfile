@@ -4,11 +4,21 @@ ARG NODE_BUILDER_IMAGE=invalid.invalid/base/node-builder:required
 
 FROM ${NODE_BUILDER_IMAGE} AS assets
 
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+
 ARG PROMETHEUS_SOURCE_URL=https://github.com/prometheus/prometheus/archive/refs/tags/v3.12.0.tar.gz
 ARG PROMETHEUS_SOURCE_SHA256=ca7a8dd2c57048bb952a493a2957811c6f380089c2b158c2def484b874c3b6d7
 
 USER root
-RUN apk add --no-cache bash=5.3.3-r1 gzip=1.14-r2
+RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
+        apk add --cache-dir /var/cache/apk --update-cache bash=5.3.3-r1 gzip=1.14-r2 && break; \
+        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done
 USER chaimir
 
 # Prometheus 的生产静态资源不发布 source map;限制 Node 堆避免 Docker Desktop 在资源紧张时断开 BuildKit 状态流。
@@ -23,7 +33,8 @@ RUN echo "${PROMETHEUS_SOURCE_SHA256}  /tmp/prometheus-source.tar.gz" | sha256su
 
 WORKDIR /src/prometheus/web/ui
 RUN --mount=type=cache,target=/src/.npm,uid=100,gid=101 \
-    for attempt in 1 2 3 4 5 6 7 8; do \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
         if npm_config_cache=/src/.npm npm ci --ignore-scripts --no-audit --no-fund \
             && cd react-app \
             && npm_config_cache=/src/.npm npm ci --ignore-scripts --no-audit --no-fund; then \
@@ -49,6 +60,10 @@ RUN scripts/compress_assets.sh
 
 FROM ${GO_BUILDER_IMAGE} AS build
 
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+
 ARG PROMETHEUS_VERSION=3.12.0
 ARG PROMETHEUS_COMMIT=9f27dffc1f93ca23287972f632025879f2d1c658
 ARG GO_MODULE_PROXY=https://proxy.golang.org|direct
@@ -62,7 +77,8 @@ COPY --from=assets --chown=1000:1000 /src/prometheus /src/prometheus
 WORKDIR /src/prometheus
 RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 \
     --mount=type=cache,target=/tmp/go-cache,uid=1000,gid=1000 \
-    for attempt in 1 2 3 4 5 6 7 8; do \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
         if timeout 900 go get golang.org/x/crypto@v0.53.0 golang.org/x/text@v0.39.0 google.golang.org/grpc@v1.82.1; then \
             break; \
         fi; \
@@ -83,12 +99,23 @@ RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 \
         wait "$build_pid" \
     )
 
-FROM cgr.dev/chainguard/wolfi-base@sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
+FROM cgr.dev/chainguard/wolfi-base@sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
 
 LABEL org.opencontainers.image.title="observability/prometheus"
 LABEL org.opencontainers.image.description="Chaimir Prometheus source build on Wolfi"
 
-RUN apk add --no-cache ca-certificates=20260413-r0 tzdata=2026c-r0 \
+RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && packages='ca-certificates=20260413-r0 tzdata=2026c-r0' \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
+        apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
+        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done \
     && mkdir -p /etc/prometheus /prometheus \
     && printf '%s\n' \
       'global:' \

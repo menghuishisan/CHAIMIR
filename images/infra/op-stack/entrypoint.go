@@ -3,6 +3,7 @@ package main
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -16,13 +17,14 @@ func main() {
 		requiredEnv(name)
 	}
 	validateURL("OP_NODE_L1_ETH_RPC", os.Getenv("OP_NODE_L1_ETH_RPC"), "http", "https", "ws", "wss")
-	validateURL("OP_NODE_L2_ENGINE_RPC", os.Getenv("OP_NODE_L2_ENGINE_RPC"), "http", "https", "ws", "wss")
+	validateURL("OP_NODE_L2_ENGINE_RPC", os.Getenv("OP_NODE_L2_ENGINE_RPC"), "http", "https")
 	validateURL("OP_NODE_L1_BEACON", os.Getenv("OP_NODE_L1_BEACON"), "http", "https")
 	rollupConfig := os.Getenv("OP_NODE_ROLLUP_CONFIG")
 	info, err := os.Stat(rollupConfig)
 	if err != nil || info.IsDir() {
 		fail("OP_NODE_ROLLUP_CONFIG must point to a mounted rollup config file")
 	}
+	validateRollupConfig(rollupConfig)
 	jwt := strings.TrimSpace(os.Getenv("CHAIMIR_OP_NODE_L2_ENGINE_JWT"))
 	if len(jwt) != 64 {
 		fail("CHAIMIR_OP_NODE_L2_ENGINE_JWT must contain 32 bytes as 64 hexadecimal characters")
@@ -74,6 +76,25 @@ func validateURL(name, raw string, schemes ...string) {
 		}
 	}
 	fail(fmt.Sprintf("%s uses an unsupported protocol", name))
+}
+
+// validateRollupConfig rejects incomplete input before op-node reaches its
+// upstream configuration constructor, which panics when the L1 chain ID is absent.
+func validateRollupConfig(path string) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		fail("read OP_NODE_ROLLUP_CONFIG: " + err.Error())
+	}
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(contents, &config); err != nil {
+		fail("OP_NODE_ROLLUP_CONFIG must contain valid JSON")
+	}
+	for _, field := range []string{"l1_chain_id", "l2_chain_id", "genesis"} {
+		value, ok := config[field]
+		if !ok || len(value) == 0 || string(value) == "null" || string(value) == "{}" || string(value) == "\"\"" {
+			fail("OP_NODE_ROLLUP_CONFIG is missing required field: " + field)
+		}
+	}
 }
 
 func fail(message string) {

@@ -26,8 +26,8 @@ upstream:
   builder_arg: GO_BUILDER_IMAGE
   assets_builder_arg: NODE_BUILDER_IMAGE
   runtime_image: cgr.dev/chainguard/wolfi-base
-  runtime_version: "2026-07-07"
-  runtime_digest: sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
+  runtime_version: "2026-08-26"
+  runtime_digest: sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
   runtime_packages:
     - ca-certificates=20260413-r0
     - tzdata=2026c-r0

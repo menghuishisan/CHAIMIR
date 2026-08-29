@@ -172,6 +172,35 @@ function Read-ManifestTrivySkipMap {
     return $items
 }
 
+# Get-TrivyHighCriticalCounts 从同一次镜像扫描产出的 JSON 中汇总门禁严重度。
+# 原始报告会作为证据保留，汇总仅用于让 blocked 条目可直接定位。
+function Get-TrivyHighCriticalCounts {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [pscustomobject]@{ High = -1; Critical = -1 }
+    }
+
+    try {
+        $report = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    } catch {
+        return [pscustomobject]@{ High = -1; Critical = -1 }
+    }
+
+    $high = 0
+    $critical = 0
+    foreach ($result in @($report.Results)) {
+        foreach ($finding in @($result.Vulnerabilities)) {
+            if ($finding.Severity -eq "HIGH") {
+                $high++
+            } elseif ($finding.Severity -eq "CRITICAL") {
+                $critical++
+            }
+        }
+    }
+    return [pscustomobject]@{ High = $high; Critical = $critical }
+}
+
 # Invoke-ComposeTool 通过统一 Docker Compose 入口运行 Trivy/Cosign。
 function Invoke-ComposeTool {
     param(
@@ -257,7 +286,9 @@ if (-not [string]::IsNullOrWhiteSpace($dockerConfigDir)) {
 $scanLog = Join-Path $EvidenceDir "image-attestations-trivy.log"
 $signLog = Join-Path $EvidenceDir "image-attestations-cosign.log"
 $sbomDir = Join-Path $EvidenceDir "sbom"
+$trivyDir = Join-Path $EvidenceDir "trivy"
 New-Item -ItemType Directory -Force -Path $sbomDir | Out-Null
+New-Item -ItemType Directory -Force -Path $trivyDir | Out-Null
 $jsonPath = Join-Path $EvidenceDir "platform-image-attestations.json"
 $summaryPath = Join-Path $EvidenceDir "image-attestations-summary.txt"
 Remove-Item -LiteralPath $scanLog, $signLog -ErrorAction SilentlyContinue
@@ -290,9 +321,15 @@ foreach ($item in $items) {
     }
     $toolRef = "$registryEndpoint/$($item.Image)@$($item.Digest)"
     $canonicalRef = "$registry/$($item.Image)@$($item.Digest)"
+    $trivyName = $item.Image.Replace("/", "-") + ".json"
+    $trivyPath = Join-Path $trivyDir $trivyName
+    $trivyContainerPath = "/evidence/trivy/$trivyName"
     Write-Host "Attesting $canonicalRef via $registryEndpoint"
     try {
-        $trivyArgs = @("image", "--config", "/workspace/deploy/ci/trivy.yaml")
+        $trivyArgs = @(
+            "image", "--config", "/workspace/deploy/ci/trivy.yaml",
+            "--format", "json", "--output", $trivyContainerPath
+        )
         if ($allowHttpRegistry) {
             $trivyArgs += "--insecure"
         }
@@ -304,11 +341,18 @@ foreach ($item in $items) {
         $trivyArgs += $toolRef
         Invoke-ComposeTool -Tool "trivy" -ToolArgs $trivyArgs -Context "Trivy 扫描 $canonicalRef" *>> $scanLog
     } catch {
+        $counts = Get-TrivyHighCriticalCounts -Path $trivyPath
+        $countDetail = if ($counts.High -ge 0 -and $counts.Critical -ge 0) {
+            "HIGH=$($counts.High), CRITICAL=$($counts.Critical)"
+        } else {
+            "未生成可解析的 Trivy JSON"
+        }
         $blockedItems.Add([pscustomobject]@{
             image    = $item.Image
             digest   = $item.Digest
-            reason   = "Trivy 扫描未通过: $($_.Exception.Message)"
+            reason   = "Trivy 扫描未通过 ($countDetail): $($_.Exception.Message)"
             manifest = ""
+            trivy_report = $trivyPath
         })
         Write-Warning "Blocking attestation ${canonicalRef}: Trivy 扫描未通过"
         continue
@@ -422,7 +466,8 @@ $summary = @(
     "backend_env=$BackendEnvPath",
     "scan_log=$scanLog",
     "sign_log=$signLog",
-    "sbom_dir=$sbomDir"
+    "sbom_dir=$sbomDir",
+    "trivy_dir=$trivyDir"
 )
 if ($blockedItems.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace($DigestFragmentsDir)) {
     if ($attestations.Count -ne $items.Count) {

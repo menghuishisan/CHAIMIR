@@ -33,7 +33,16 @@ LABEL org.opencontainers.image.title="runtime/evm-geth"
 LABEL org.opencontainers.image.description="Chaimir go-ethereum private-chain runtime built from official source"
 
 USER root
-RUN apk add --no-cache bash ca-certificates curl jq \
+RUN for attempt in 1 2 3 4 5; do \
+      apk upgrade --no-cache \
+      && apk add --no-cache \
+         'libcrypto3>=3.5.8-r0' \
+         'libssl3>=3.5.8-r0' \
+         bash ca-certificates curl jq \
+      && break; \
+      if [ "${attempt}" -eq 5 ]; then exit 1; fi; \
+      sleep $((attempt * 3)); \
+    done \
     && mkdir -p /workspace /runtime-state/geth \
     && chown -R 1000:1000 /workspace /runtime-state
 

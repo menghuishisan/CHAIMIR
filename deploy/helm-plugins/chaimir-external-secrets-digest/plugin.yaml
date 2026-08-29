@@ -1,0 +1,8 @@
+apiVersion: v1
+name: chaimir-external-secrets-digest
+version: 1.0.0
+type: postrenderer/v1
+runtime: subprocess
+runtimeConfig:
+  platformCommand:
+    - command: /workspace/deploy/scripts/external-secrets-post-renderer.sh

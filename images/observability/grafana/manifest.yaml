@@ -13,19 +13,32 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: observability
   chaimir.io/scope: observability
-  chaimir.io/source: thin-wrapper
-description: Grafana 监控看板安全薄封装镜像。
+  chaimir.io/source: platform-built
+description: Grafana 监控看板官方 distroless 镜像。
 source:
-  type: thin-wrapper
+  type: platform-built
 upstream:
-  registry: cgr.dev
-  image: chainguard/wolfi-base
-  version: "2026-07-07"
-  digest: sha256:a31344ab2cb8618db84f535eec56f76f6178b142cb92cb2e48676cc2dcebea72
-  packages:
-    - grafana-13.0=13.0.2-r1
-    - grafana-13.0-oci-entrypoint-compat=13.0.2-r1
-  reuse_policy: wolfi-package-build
+  registry: docker.io
+  image: grafana/grafana
+  version: "13.2.0"
+  digest: sha256:08e6ab6d67a5e21e6540724d3673a572840a43b1ba02d03922d0a21a7dbb38f9
+  upstream_tag: 13.2.0-distroless
+  source_repository: https://github.com/grafana/grafana
+  source_commit: f681b1359f6a0b8ecb9f2c49a88ac72b75bde73b
+  source_archive: https://codeload.github.com/grafana/grafana/tar.gz/f681b1359f6a0b8ecb9f2c49a88ac72b75bde73b
+  source_sha256: 8ea494789b17d13d7e6032ff158af581d512b9ba3c7e99fae33ba5c19e78a9bd
+  plugin_source_repository: https://github.com/grafana/grafana-prometheus-datasource
+  plugin_source_tag: v13.1.7
+  plugin_source_commit: 2e10053dd7d940f9eb91701df5122c8e348a0d18
+  plugin_source_archive: https://codeload.github.com/grafana/grafana-prometheus-datasource/tar.gz/2e10053dd7d940f9eb91701df5122c8e348a0d18
+  plugin_source_sha256: 8e66640a7c45b6762d1ac14aa7a94b87fa21c771b4d0d739a3a6716d6a019954
+  builder_image: golang:1.26.6-alpine
+  builder_digest: sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83
+  sanitize_image: alpine:3.24.1
+  sanitize_digest: sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+  runtime_image: gcr.io/distroless/static-debian13
+  runtime_digest: sha256:f2ea2709ac8db56323cbd7d014277f32cb572d9ea124b0076f7aafe5980678fe
+  reuse_policy: source-rebuild
   license: AGPL-3.0
 private_delivery:
   offline_bundle: true
@@ -83,13 +96,12 @@ selftest:
     type: http
     path: /api/health
     port: 3000
-build:
-  context: images/observability/grafana
-  dockerfile: Dockerfile
 supply_chain:
   sbom: true
   trivy_required: true
   cosign_required: true
   pull_by_digest: true
-  deployable: false
-  block_reason: "当前 Wolfi 仓库只提供 grafana-13.0=13.0.2-r1;Trivy 要求修复版本 13.0.3-r3 或 13.0.4-r2,上游安全包尚未发布,因此在可验证修复包发布前禁止部署。"
+  deployable: true
+build:
+  context: images/observability/grafana
+  dockerfile: Dockerfile

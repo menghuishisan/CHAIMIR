@@ -18,7 +18,7 @@
 - J2 链上断言、J3 Flag、J5 仿真检查点由 M3 后端策略统一承接,不得在 `images/judger` 下重复维护执行器镜像。镜像判题只保留需要独立工具链/沙箱命令的 J1 测试用例和 J4 静态扫描。
 - 容器内部端口优先沿用官方默认端口;生产禁止固定宿主机端口、`hostPort`、`hostNetwork`;本地开发宿主机映射必须可配置并默认绑定 `127.0.0.1`。
 - 学生可进入容器不得挂载密钥、判题私有数据、宿主机路径、ServiceAccount token、答案、flag 或其他用户数据。
-- PostgreSQL、Redis、S3 对象存储、NATS、CouchDB、Harbor、Ingress、监控等基础设施镜像也在本目录治理;是否有 Dockerfile 由 `source.type` 决定,不是由分类决定。
+- PostgreSQL、Redis、S3 对象存储、NATS、CouchDB、Ingress、监控等平台运行期基础设施镜像也在本目录治理;是否有 Dockerfile 由 `source.type` 决定,不是由分类决定。Harbor 是供应链引导根，不是平台运行期或可编排镜像；其固定 chart、组件闭包、补丁与 OCI 引导证据只在 `deploy/charts/harbor/` 治理，不能写入本目录或正式 digest lock。
 
 ## 实现范围
 
@@ -94,6 +94,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
 
 项目清理只按 `docs/总-镜像与容器设计.md` 的“项目级 Docker 清理边界”执行。常规清理不得删除正式锁在本机的最后 digest 引用、Harbor PVC、Trivy 缓存、认证、Cosign 密钥或尚未晋升的证据,也不得对整台宿主机执行全局 prune。
 
-`PLATFORM_IMAGE_ATTESTATIONS_JSON` 是环境相关的全平台准入证明,由 `deploy/scripts/image-attestations-generate.ps1` 在目标 registry 完成扫描、签名和验签后写入运行环境或 Secret,不能仅凭新 digest 在仓库中伪造。仓库自动同步只更新可审计的 digest 权威文件与静态引用。
+`PLATFORM_IMAGE_ATTESTATIONS_JSON` 是环境相关的全平台准入证明,由 `deploy/scripts/image-attestations-generate.ps1` 在目标 registry 完成扫描、签名和验签后写入运行环境或 Secret,不能仅凭新 digest 在仓库中伪造。同步时只能写入当前验证片段中的镜像;不得因 digest 未变化而保留旧的 `passed` 字段。未在当前证明中的镜像必须重新验证后才可恢复准入。仓库自动同步只更新可审计的 digest 权威文件与静态引用。
 
 部署工作流不消费可变 tag:权威锁合入 `main` 后,staging 校验静态 overlay 与该锁中的全部服务 digest 一致;生产发布对 tag 所指提交执行同一校验。两者都通过 `deploy/scripts/verify-overlay-image-lock.ps1` 只读验证,通过后直接在默认加载限制下应用仓库 overlay,不生成第二份临时覆盖。
