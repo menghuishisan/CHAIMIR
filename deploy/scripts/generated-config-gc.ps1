@@ -82,7 +82,10 @@ function Remove-UnreferencedGeneratedResources {
         if ($LASTEXITCODE -ne 0) {
             throw "读取 $($rule.Namespace) 的 $($rule.Kind) 失败"
         }
-        $candidates = @((($raw | ConvertFrom-Json).items | Where-Object { $_.metadata.name.StartsWith($rule.Prefix) }).metadata.name)
+        # 显式过滤空管道结果,避免 PowerShell 将空结果包装成一个空字符串并误触发保护门禁。
+        $candidates = @((($raw | ConvertFrom-Json).items | Where-Object {
+                    -not [string]::IsNullOrWhiteSpace($_.metadata.name) -and $_.metadata.name.StartsWith($rule.Prefix)
+                }).metadata.name | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         $active = @($candidates | Where-Object { $References.Contains("$($rule.Namespace)|$($rule.Kind)|$_") })
         if ($candidates.Count -gt 0 -and $active.Count -eq 0) {
             throw "$($rule.Namespace) 的 $($rule.Prefix) 未找到当前引用,拒绝清理"

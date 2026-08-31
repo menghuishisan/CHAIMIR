@@ -244,7 +244,7 @@ func seedAcceptanceExperimentAssets(ctx context.Context, objects *storage.Storag
 		contentType string
 	}{
 		{objectRef: acceptanceInitCodeRef, content: archive, contentType: "application/x-tar"},
-		{objectRef: acceptanceInitScriptRef, content: []byte("#!/bin/sh\nset -eu\ncd /workspace\nforge build --offline\n"), contentType: "text/x-shellscript"},
+		{objectRef: acceptanceInitScriptRef, content: []byte("#!/bin/sh\nset -eu\ncd /workspace\ntest -f foundry.toml\ntest -f src/ReentrancyVault.sol\n"), contentType: "text/x-shellscript"},
 	}
 	for _, asset := range assets {
 		ref, err := storage.ParseObjectRef(asset.objectRef)

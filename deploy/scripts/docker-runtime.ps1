@@ -11,6 +11,22 @@ $evidenceRoot = Join-Path $repoRoot ".tmp\docker-runtime"
 $logPath = Join-Path $evidenceRoot "recovery.log"
 New-Item -ItemType Directory -Force -Path $evidenceRoot | Out-Null
 
+# Stop-ProcessTree 在外部命令超时时终止整个进程树，避免 wsl.exe 子进程残留并阻塞后续恢复。
+function Stop-ProcessTree {
+    param([Parameter(Mandatory = $true)][Diagnostics.Process]$Process)
+
+    try {
+        & taskkill.exe /PID $Process.Id /T /F | Out-Null
+    } catch {
+        Write-Host "终止进程树失败，进程可能已退出或当前账户无权限: $($_.Exception.Message)"
+    }
+    try {
+        if (-not $Process.HasExited) { $Process.Kill() }
+    } catch {
+        Write-Host "终止超时进程失败，进程可能已退出或当前账户无权限: $($_.Exception.Message)"
+    }
+}
+
 # Invoke-ProcessWithTimeout 执行外部进程并在超过边界时终止本次探测，避免 WSL 卡死拖住部署入口。
 function Invoke-ProcessWithTimeout {
     param(
@@ -42,7 +58,7 @@ function Invoke-ProcessWithTimeout {
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            try { $process.Kill() } catch { }
+            Stop-ProcessTree -Process $process
             return [pscustomobject]@{
                 ExitCode = $null
                 TimedOut = $true
@@ -70,14 +86,14 @@ function Write-Evidence {
 
     $line = "[$(Get-Date -Format o)] $Message"
     Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
-    Write-Output $line
+    Write-Host $line
 }
 
 # Test-RuntimeProbe 验证 WSL 列表、Docker Desktop 发行版命令和 Docker API 均在有界时间内返回。
 function Test-RuntimeProbe {
     $checks = @(
-        @{ Name = "wsl-list"; File = "wsl.exe"; Args = @("-l", "-v", "--all"); Timeout = 15 },
-        @{ Name = "docker-desktop-init"; File = "wsl.exe"; Args = @("-d", "docker-desktop", "-e", "/bin/true"); Timeout = 15 },
+        @{ Name = "wsl-list"; File = "wsl.exe"; Args = @("-l", "-v", "--all"); Timeout = 60 },
+        @{ Name = "docker-desktop-init"; File = "wsl.exe"; Args = @("-d", "docker-desktop", "-e", "/bin/true"); Timeout = 60 },
         @{ Name = "docker-api"; File = "docker.exe"; Args = @("info", "--format", "{{.ServerVersion}}"); Timeout = 30 }
     )
     foreach ($check in $checks) {
@@ -93,6 +109,37 @@ function Test-RuntimeProbe {
         }
     }
     return $true
+}
+
+# Get-DockerDesktopState 只读取 Docker Desktop 控制面的状态，不访问 WSL，避免正常启动阶段产生额外 WSL 请求。
+function Get-DockerDesktopState {
+    $result = Invoke-ProcessWithTimeout -FilePath "docker.exe" -Arguments @("desktop", "status") -TimeoutSeconds 10
+    if ($result.TimedOut -or $result.ExitCode -ne 0) {
+        return $null
+    }
+    $text = ($result.Stdout + "`n" + $result.Stderr)
+    if ($text -match '(?im)^\s*Status\s+(\S+)\s*$') {
+        return $matches[1].ToLowerInvariant()
+    }
+    return $null
+}
+
+# Wait-DockerDesktopStart 等待 Docker Desktop 自己完成启动，避免入口在 WSL/VHD 正常挂载期间主动停止它。
+function Wait-DockerDesktopStart {
+    param([int]$TimeoutSeconds = 300)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $state = Get-DockerDesktopState
+        if ($state -eq "running") {
+            return $true
+        }
+        if ($state -in @("stopped", "error")) {
+            return $false
+        }
+        Start-Sleep -Seconds 5
+    } while ((Get-Date) -lt $deadline)
+    return $false
 }
 
 # Wait-RuntimeReady 等待 Docker Desktop 重启后的 API 与 WSL 发行版重新稳定。
@@ -120,7 +167,22 @@ function Recover-Runtime {
         Write-Evidence "docker desktop stop 返回 exit=$($stop.ExitCode): $detail"
     }
 
-    $shutdown = Invoke-ProcessWithTimeout -FilePath "wsl.exe" -Arguments @("--shutdown") -TimeoutSeconds 45
+    $shutdown = Invoke-ProcessWithTimeout -FilePath "wsl.exe" -Arguments @("--shutdown") -TimeoutSeconds 180
+    if ($shutdown.TimedOut) {
+        Write-Evidence "WSL 关闭超过 180s，终止 Docker 专用发行版后重试"
+        foreach ($distribution in @("docker-desktop", "docker-desktop-data")) {
+            $terminate = Invoke-ProcessWithTimeout -FilePath "wsl.exe" -Arguments @("--terminate", $distribution) -TimeoutSeconds 30
+            if ($terminate.TimedOut) {
+                Write-Evidence "WSL 发行版 $distribution 终止超时"
+            } elseif ($terminate.ExitCode -ne 0) {
+                $detail = (($terminate.Stderr + " " + $terminate.Stdout).Trim() -replace "\s+", " ")
+                Write-Evidence "WSL 发行版 $distribution 终止返回 exit=$($terminate.ExitCode): $detail"
+            } else {
+                Write-Evidence "WSL 发行版 $distribution 已终止"
+            }
+        }
+        $shutdown = Invoke-ProcessWithTimeout -FilePath "wsl.exe" -Arguments @("--shutdown") -TimeoutSeconds 90
+    }
     if ($shutdown.TimedOut -or $shutdown.ExitCode -ne 0) {
         $detail = (($shutdown.Stderr + " " + $shutdown.Stdout).Trim() -replace "\s+", " ")
         throw "WSL 受控关闭失败: $detail"
@@ -131,18 +193,35 @@ function Recover-Runtime {
         $detail = (($start.Stderr + " " + $start.Stdout).Trim() -replace "\s+", " ")
         throw "Docker Desktop 启动失败: $detail"
     }
-    Wait-RuntimeReady
+    Wait-RuntimeReady -TimeoutSeconds 300
     Write-Evidence "Docker Desktop/WSL 恢复完成"
 }
 
-if ($Action -eq "Recover") {
+$runtimeMutex = New-Object System.Threading.Mutex($false, "Global\Chaimir.DockerRuntimeRecovery")
+if (-not $runtimeMutex.WaitOne(0)) {
+    throw "已有 Docker Desktop/WSL 恢复流程运行，拒绝并发操作"
+}
+try {
+    if ($Action -eq "Recover") {
+        Recover-Runtime
+        return
+    }
+
+    $desktopState = Get-DockerDesktopState
+    if ($desktopState -eq "starting") {
+        Write-Evidence "Docker Desktop 正在启动，等待其完成 WSL/VHD 挂载"
+        if (Wait-DockerDesktopStart -TimeoutSeconds 300 -and (Test-RuntimeProbe)) {
+            Write-Evidence "Docker Desktop/WSL/Docker API 已就绪"
+            return
+        }
+        Write-Evidence "Docker Desktop 启动等待未完成，进入受控恢复"
+    } elseif (Test-RuntimeProbe) {
+        Write-Evidence "Docker Desktop/WSL/Docker API 已就绪"
+        return
+    }
+
     Recover-Runtime
-    return
+} finally {
+    $runtimeMutex.ReleaseMutex()
+    $runtimeMutex.Dispose()
 }
-
-if (Test-RuntimeProbe) {
-    Write-Evidence "Docker Desktop/WSL/Docker API 已就绪"
-    return
-}
-
-Recover-Runtime

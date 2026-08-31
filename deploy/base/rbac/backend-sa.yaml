@@ -131,7 +131,7 @@ subjects:
     name: chaimir-sandbox-rbac-provisioner
     namespace: chaimir-system
 ---
-# 后端只读取固定 Harbor 拉取凭据,避免读取控制命名空间中的 JWT/数据库等 Secret。
+# 后端只读取固定的 Harbor 拉取凭据和平台运行期 Secret,避免读取其它控制面 Secret。
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -142,7 +142,7 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
-    resourceNames: ["chaimir-harbor-pull"]
+    resourceNames: ["chaimir-harbor-pull", "chaimir-secret"]
     verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

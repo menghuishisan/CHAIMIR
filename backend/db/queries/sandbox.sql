@@ -127,8 +127,8 @@ RETURNING id, runtime_image_id, composition_digest, status, attempt_id, daemonse
 
 -- name: FinishCompositionPrepull :one
 UPDATE sandbox_composition_prepull
-SET status = $3, daemonset_name = $4, desired_nodes = $5, ready_nodes = $6, detail = $7,
-    completed_at = CASE WHEN $3 = 2 OR $3 = 3 THEN now() ELSE NULL END, updated_at = now()
+SET status = $3::smallint, daemonset_name = $4, desired_nodes = $5, ready_nodes = $6, detail = $7,
+    completed_at = CASE WHEN $3::smallint = 2 OR $3::smallint = 3 THEN now() ELSE NULL END, updated_at = now()
 WHERE runtime_image_id = $1 AND composition_digest = $2 AND status = 4 AND attempt_id = sqlc.arg(attempt_id)::text
 RETURNING id, runtime_image_id, composition_digest, status, attempt_id, daemonset_name, image_closure,
           desired_nodes, ready_nodes, detail, started_at, completed_at, created_at, updated_at;

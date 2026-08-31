@@ -126,6 +126,8 @@ make dev-up
 
 Docker Desktop 重启不会删除 Kind 节点 `/var` Docker volume 或 Harbor PVC,因此同一 digest 的 Harbor 数据和节点 containerd 缓存会保留。集群入口把项目 Kind 节点的 Docker restart policy 固定为 `unless-stopped`,并会主动启动仍存在但已停止的节点;若节点容器地址在重启后变化,入口只删除节点归属失效的派生 `CiliumEndpoint`,等待当前 Agent 以新地址重新发布,不重建业务 Pod 或清空镜像缓存。恢复验收从当前 `CiliumNode` 读取全部主机地址与健康端点地址,由每个 Kind 节点主动探测完整地址矩阵,不等待仍可能保留重启前结果的 Cilium 后台健康缓存。Docker 恢复后执行 `make dev-start` 即可恢复网站;只有镜像、配置或数据库源码变化时才执行 `make dev-refresh`。应用滚动完成后,刷新入口会按当前控制器和 Pod 引用精确清理未使用的 Kustomize 哈希 ConfigMap/Secret,不保留旧配置副本。不得执行 `make cilium-cluster-down`、删除 Harbor PVC、删除 Kind 节点 volume 或带 volume 的全局 Docker prune,否则相应集群数据或镜像缓存会被明确删除并需要重新拉取。
 
+若 Docker Desktop 长时间保持 `starting`,且项目恢复入口记录 `wsl.exe` 枚举或关闭超时,根因在宿主机 WSL 服务未响应,不是项目镜像或 Kind 配置。此时 `docker-runtime.ps1` 会有界探测、终止本次探测的完整进程树并防止并发恢复,但不会删除 WSL 发行版、卷或镜像数据;如果非管理员会话仍无法执行 `wsl --shutdown`,必须由管理员重启 `WSLService` 或重启 Windows。WSL 恢复后只需重新执行 `make dev-start`;健康路径不会重复重启 Docker。
+
 上述目标都是前台一次性运维命令,完成后会返回 PowerShell 提示符,网站继续由 Docker/Kubernetes 托管,不需要保持终端命令运行。执行中可用 `Ctrl+C` 停止等待;已经提交给 Kubernetes 的幂等变更不会自动回滚,重新执行同一目标即可继续收敛。需要停止网站时使用 `make dev-stop`,不要用全局 Docker 清理命令。
 
 M2 运行时预拉取不拉取 `images/image-digests.lock` 的全部镜像。平台管理员针对一个运行时触发预拉取时,M2 只把该运行时主镜像、其基础设施组件和兼容可用工具组成的默认工作负载集合拉到每个可调度沙箱节点,并执行镜像自检;成功 DaemonSet 常驻以便新节点自动补拉。现有节点重启且 `/var` volume 未删除时,`imagePullPolicy=IfNotPresent` 会复用 digest 缓存。

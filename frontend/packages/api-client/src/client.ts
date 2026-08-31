@@ -218,6 +218,14 @@ export class ApiClient {
   }
 
   /**
+   * postBackground 发起由服务端有界执行的长任务,不让浏览器连接超时打断状态落库。
+   * 调用方应立即使用独立查询接口读取任务状态,不能等待该 Promise 更新界面。
+   */
+  async postBackground<T = unknown>(url: string, data?: unknown): Promise<T> {
+    return this.client.post<unknown, T>(url, data, { timeout: 0 }) as unknown as T
+  }
+
+  /**
    * put 发送 PUT 请求并返回后端信封中的 data 字段。
    */
   async put<T = unknown>(url: string, data?: unknown): Promise<T> {

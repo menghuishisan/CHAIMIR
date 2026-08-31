@@ -15,6 +15,7 @@ labels:
   chaimir.io/scope: sandbox
   chaimir.io/source: thin-wrapper
 description: Foundry/Anvil EVM 运行时镜像。
+genesis_baked: true
 source:
   type: thin-wrapper
 upstream:

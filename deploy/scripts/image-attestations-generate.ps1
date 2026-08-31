@@ -16,6 +16,11 @@ param(
 $ErrorActionPreference = "Stop"
 Import-Module (Join-Path $RepoRoot "images\lib\ImageMetadata.psm1") -Force
 
+# 统一拆分文档中的逗号镜像列表,保证选择性证明覆盖全部指定镜像。
+if ($Images.Count -eq 1 -and $Images[0] -match ',') {
+    $Images = @($Images[0].Split(',') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path $RepoRoot "deploy\config\chaimir.env"
 }

@@ -20,6 +20,7 @@ import (
 
 type platformRuntimeManifest struct {
 	Category, Name, Image, Description string
+	GenesisBaked                       bool `json:"genesis_baked"`
 	Runtime                            struct {
 		Eco          string `json:"eco"`
 		AdapterLevel int16  `json:"adapter_level"`
@@ -240,7 +241,9 @@ func syncPlatformRuntime(ctx context.Context, tx pgx.Tx, root string) error {
 		if status == 3 || !proven {
 			imageStatus = 2
 		}
-		if err := execJSON(ctx, tx, `INSERT INTO runtime_image (id,runtime_id,image_url,version,status,genesis_baked) VALUES ($1,$2,$3,$4,$5,false) ON CONFLICT (runtime_id,version) DO UPDATE SET image_url=EXCLUDED.image_url,status=EXCLUDED.status,genesis_baked=false`, imageID, runtimeID, imageURL, imageVersionFromURL(imageURL), imageStatus); err != nil {
+		genesisBaked := m.GenesisBaked && proven
+		// 镜像 digest 更新会改变 version,稳定主键冲突时必须整体更新原记录。
+		if err := execJSON(ctx, tx, `INSERT INTO runtime_image (id,runtime_id,image_url,version,status,genesis_baked) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO UPDATE SET runtime_id=EXCLUDED.runtime_id,image_url=EXCLUDED.image_url,version=EXCLUDED.version,status=EXCLUDED.status,genesis_baked=EXCLUDED.genesis_baked`, imageID, runtimeID, imageURL, imageVersionFromURL(imageURL), imageStatus, genesisBaked); err != nil {
 			return fmt.Errorf("同步运行时镜像 %s 失败: %w", m.Name, err)
 		}
 	}
@@ -454,13 +457,23 @@ func toolKindOrDisabled(m toolManifest) int16 {
 	return kind
 }
 
-// invalidatePlatformCompositionPrepull 目录重同步后撤销旧组合证明,避免已变更组件继续被启动。
+// invalidatePlatformCompositionPrepull 仅撤销与已发布快照闭包不一致的组合证明。
 func invalidatePlatformCompositionPrepull(ctx context.Context, tx pgx.Tx) error {
 	detail, err := json.Marshal(map[string]any{"stage": "invalidated", "reason": "platform_catalog_changed", "subject": "platform-catalog-seed"})
 	if err != nil {
 		return fmt.Errorf("编码组合预拉取失效原因失败: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE sandbox_composition_prepull SET status=1,detail=$1,completed_at=NULL,updated_at=now() WHERE status<>1`, detail); err != nil {
+	if _, err := tx.Exec(ctx, `
+UPDATE sandbox_composition_prepull AS prepull
+SET status=1, detail=$1, completed_at=NULL, updated_at=now()
+WHERE prepull.status<>1
+  AND NOT EXISTS (
+    SELECT 1
+    FROM sandbox_composition AS composition
+    WHERE composition.composition_digest=prepull.composition_digest
+      AND composition.status=1
+      AND composition.snapshot->'image_closure' = prepull.image_closure
+  )`, detail); err != nil {
 		return fmt.Errorf("撤销组合预拉取证明失败: %w", err)
 	}
 	return nil

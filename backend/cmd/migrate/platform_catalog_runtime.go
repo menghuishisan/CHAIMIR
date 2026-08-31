@@ -58,6 +58,14 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 	if err != nil {
 		return nil, err
 	}
+	studentShell := map[string]any{
+		"name": "student-shell", "image_url": workspaceImageURL, "command": []string{"sleep", "2147483647"},
+		"env":                       []map[string]any{{"name": "HOME", "value": "/runtime-state/workspace-home"}},
+		"resources":                 map[string]any{"requests": map[string]string{"cpu": "50m", "memory": "64Mi"}, "limits": map[string]string{"cpu": "250m", "memory": "256Mi"}},
+		"read_only_root_filesystem": true, "labels": map[string]string{"chaimir.io/student-access": "true"}, "mount_workspace": true,
+		"ephemeral_mounts": []map[string]any{{"name": "student-shell-tmp", "mount_path": "/tmp"}, {"name": "student-shell-home", "mount_path": "/runtime-state/workspace-home"}},
+		"prepull_command":  []string{"/usr/local/bin/chaimir-workspace", "selftest"}, "prepull_hold": true,
+	}
 	return map[string]any{
 		"workspace_dir": "/workspace",
 		"volume_domains": []map[string]any{
@@ -75,17 +83,10 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 			"labels":                    map[string]string{"chaimir.io/student-access": "false"}, "mount_workspace": false,
 			"prepull_command": selftest,
 		},
-		"infra_sidecars": []map[string]any{{
-			"name": "student-shell", "image_url": workspaceImageURL, "command": []string{"sleep", "2147483647"},
-			"env":                       []map[string]any{{"name": "HOME", "value": "/runtime-state/workspace-home"}},
-			"resources":                 map[string]any{"requests": map[string]string{"cpu": "50m", "memory": "64Mi"}, "limits": map[string]string{"cpu": "250m", "memory": "256Mi"}},
-			"read_only_root_filesystem": true, "labels": map[string]string{"chaimir.io/student-access": "true"}, "mount_workspace": true,
-			"ephemeral_mounts": []map[string]any{{"name": "student-shell-tmp", "mount_path": "/tmp"}, {"name": "student-shell-home", "mount_path": "/runtime-state/workspace-home"}},
-			"prepull_command":  []string{"/usr/local/bin/chaimir-workspace", "selftest"}, "prepull_hold": true,
-		}},
+		"infra_sidecars": []map[string]any{studentShell},
 		"pods": []map[string]any{
 			{"name": "sandbox", "containers": []map[string]any{{"name": "runtime"}}},
-			{"name": "workspace", "containers": []map[string]any{{"name": "student-shell"}}},
+			{"name": "workspace", "containers": []map[string]any{studentShell}},
 		},
 		"workspace_ops": map[string]any{
 			"exec_target": "workspace/student-shell",

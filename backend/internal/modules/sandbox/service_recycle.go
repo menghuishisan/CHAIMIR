@@ -84,12 +84,13 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 
 // recycleOne 按保存代码、快照、删除资源、写终态、审计、发布事件的顺序回收单个沙箱。
 func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) error {
+	persistWorkspace := shouldPersistBeforeRecycle(sb)
 	locked, err := s.lockRecycle(ctx, sb)
 	if err != nil {
 		return err
 	}
 	sb = locked
-	if shouldPersistBeforeRecycle(sb) {
+	if persistWorkspace {
 		plan, err := s.planForExistingSandbox(ctx, sb)
 		if err != nil {
 			s.markRecycleFailed(ctx, sb, err)
@@ -244,6 +245,9 @@ func (s *Service) drainSandboxRecycleOutboxBestEffort(ctx context.Context) {
 
 // shouldPersistBeforeRecycle 判断回收前是否必须保存工作区代码。
 func shouldPersistBeforeRecycle(sb Sandbox) bool {
+	if sb.Status == SandboxStatusFailed {
+		return false
+	}
 	return sb.Phase != SandboxPhaseAllocating || sb.CodeHash != ""
 }
 

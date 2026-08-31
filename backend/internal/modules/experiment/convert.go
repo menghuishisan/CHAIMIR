@@ -15,19 +15,19 @@ func experimentDTOFromModel(item Experiment) ExperimentDTO {
 func teacherComponentConfigDTOFromModel(cfg ComponentConfig) TeacherComponentConfigDTO {
 	out := TeacherComponentConfigDTO{
 		Envs:        make([]TeacherEnvComponentDTO, 0, len(cfg.Envs)),
-		Sims:        append([]SimComponent(nil), cfg.Sims...),
-		Checkpoints: append([]CheckpointComponent(nil), cfg.Checkpoints...),
-		Stages:      append([]StageConfig(nil), cfg.Stages...),
+		Sims:        append(make([]SimComponent, 0, len(cfg.Sims)), cfg.Sims...),
+		Checkpoints: append(make([]CheckpointComponent, 0, len(cfg.Checkpoints)), cfg.Checkpoints...),
+		Stages:      cloneStageConfigs(cfg.Stages),
 	}
 	for _, env := range cfg.Envs {
 		spec := env.CompositionSnapshot.Spec
 		out.Envs = append(out.Envs, TeacherEnvComponentDTO{
 			ID:                       env.ID,
-			Runtimes:                 append([]contracts.CompositionRuntimeRef(nil), spec.Runtimes...),
+			Runtimes:                 cloneRuntimeRefs(spec.Runtimes),
 			WorkspaceRuntimeInstance: spec.WorkspaceRuntimeInstance,
-			Infra:                    append([]contracts.CompositionComponentRef(nil), spec.Infra...),
-			Tools:                    append([]contracts.CompositionComponentRef(nil), spec.Tools...),
-			Links:                    append([]contracts.CompositionLink(nil), spec.Links...),
+			Infra:                    cloneComponentRefs(spec.Infra),
+			Tools:                    cloneComponentRefs(spec.Tools),
+			Links:                    cloneCompositionLinks(spec.Links),
 			AccessProfile:            spec.AccessProfile,
 			CompositionDigest:        env.CompositionSnapshot.Digest,
 			InitCodeRef:              env.InitCodeRef,
@@ -52,7 +52,7 @@ func studentExperimentDTOFromModel(item Experiment, myGroupID int64) StudentExpe
 	}
 	for _, env := range item.Components.Envs {
 		spec := env.CompositionSnapshot.Spec
-		components.Envs = append(components.Envs, StudentEnvComponent{ID: env.ID, Runtimes: append([]contracts.CompositionRuntimeRef(nil), spec.Runtimes...), WorkspaceRuntimeInstance: spec.WorkspaceRuntimeInstance, Infra: append([]contracts.CompositionComponentRef(nil), spec.Infra...), Tools: append([]contracts.CompositionComponentRef(nil), spec.Tools...), Links: append([]contracts.CompositionLink(nil), spec.Links...), AccessProfile: spec.AccessProfile, CompositionDigest: env.CompositionSnapshot.Digest})
+		components.Envs = append(components.Envs, StudentEnvComponent{ID: env.ID, Runtimes: cloneRuntimeRefs(spec.Runtimes), WorkspaceRuntimeInstance: spec.WorkspaceRuntimeInstance, Infra: cloneComponentRefs(spec.Infra), Tools: cloneComponentRefs(spec.Tools), Links: cloneCompositionLinks(spec.Links), AccessProfile: spec.AccessProfile, CompositionDigest: env.CompositionSnapshot.Digest})
 	}
 	for _, sim := range item.Components.Sims {
 		components.Sims = append(components.Sims, StudentSimComponent{ID: sim.ID, PackageCode: sim.PackageCode, Version: sim.Version})
@@ -61,9 +61,42 @@ func studentExperimentDTOFromModel(item Experiment, myGroupID int64) StudentExpe
 		components.Checkpoints = append(components.Checkpoints, StudentCheckpointComponent{ID: checkpoint.ID, Score: checkpoint.Score, Mode: checkpoint.Mode})
 	}
 	for _, stage := range item.Components.Stages {
-		components.Stages = append(components.Stages, StudentStageConfig{Stage: stage.Stage, Title: stage.Title, Description: stage.Description, Components: stage.Components, UnlockCondition: stage.UnlockCondition})
+		components.Stages = append(components.Stages, StudentStageConfig{Stage: stage.Stage, Title: stage.Title, Description: stage.Description, Components: cloneStageComponents(stage.Components), UnlockCondition: stage.UnlockCondition})
 	}
 	return StudentExperimentDTO{ID: ids.ID(item.ID), CourseID: ids.ID(item.CourseID), Name: item.Name, Description: item.Description, Components: components, CollabMode: item.CollabMode, GroupConfig: item.GroupConfig, MyGroupID: ids.ID(myGroupID), RequireReport: item.RequireReport, Status: item.Status, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+}
+
+// cloneRuntimeRefs 复制运行时引用并保持空集合的 JSON 数组形状。
+func cloneRuntimeRefs(items []contracts.CompositionRuntimeRef) []contracts.CompositionRuntimeRef {
+	return append(make([]contracts.CompositionRuntimeRef, 0, len(items)), items...)
+}
+
+// cloneComponentRefs 复制组合组件引用并保持空集合的 JSON 数组形状。
+func cloneComponentRefs(items []contracts.CompositionComponentRef) []contracts.CompositionComponentRef {
+	return append(make([]contracts.CompositionComponentRef, 0, len(items)), items...)
+}
+
+// cloneCompositionLinks 复制组合连接并保持空集合的 JSON 数组形状。
+func cloneCompositionLinks(items []contracts.CompositionLink) []contracts.CompositionLink {
+	return append(make([]contracts.CompositionLink, 0, len(items)), items...)
+}
+
+// cloneStageComponents 复制阶段组件引用并保持空集合的 JSON 数组形状。
+func cloneStageComponents(value StageComponents) StageComponents {
+	value.Envs = append(make([]string, 0, len(value.Envs)), value.Envs...)
+	value.Sims = append(make([]string, 0, len(value.Sims)), value.Sims...)
+	return value
+}
+
+// cloneStageConfigs 复制阶段配置并归一化阶段内的空集合。
+func cloneStageConfigs(items []StageConfig) []StageConfig {
+	out := make([]StageConfig, 0, len(items))
+	for _, item := range items {
+		item.Components = cloneStageComponents(item.Components)
+		item.ParamBindings = append(make([]ParamBinding, 0, len(item.ParamBindings)), item.ParamBindings...)
+		out = append(out, item)
+	}
+	return out
 }
 
 // instanceDTOFromModel 转换实验实例为工作台输出。

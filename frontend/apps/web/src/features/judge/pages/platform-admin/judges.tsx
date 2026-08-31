@@ -235,7 +235,7 @@ function JudgerCard({ judger, onEdit, onSelftested, onError }: JudgerCardProps) 
       base.push({
         term: '判题环境',
         description: snapshot
-          ? snapshot.runtimes.map((runtime) => `${runtime.instance_code}: ${runtime.code} · ${runtime.image_version}`).join(' / ')
+          ? (snapshot.runtimes ?? []).map((runtime) => `${runtime.instance_code}: ${runtime.code} · ${runtime.image_version}`).join(' / ')
           : '需要判题环境但还没有冻结出可执行快照',
         mono: true,
       })
@@ -249,7 +249,7 @@ function JudgerCard({ judger, onEdit, onSelftested, onError }: JudgerCardProps) 
     if (snapshot) {
       base.push({
         term: '锁定镜像',
-        description: `${snapshot.image_closure.length} 个(发布后不随目录变动)`,
+        description: `${(snapshot.image_closure ?? []).length} 个(发布后不随目录变动)`,
       })
     }
     if (spec.command && spec.command.length > 0) {

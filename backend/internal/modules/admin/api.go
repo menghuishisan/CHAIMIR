@@ -297,7 +297,7 @@ func auditLogEntryDTOs(items []contracts.AuditLogEntry) []AuditLogEntryDTO {
 		out = append(out, AuditLogEntryDTO{
 			ID:         ids.ID(item.ID),
 			TenantID:   ids.ID(item.TenantID),
-			ActorID:    ids.ID(item.ActorID),
+			ActorID:    ids.Format(item.ActorID),
 			ActorRole:  item.ActorRole,
 			Action:     item.Action,
 			TargetType: item.TargetType,

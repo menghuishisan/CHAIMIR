@@ -239,6 +239,20 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 		if len(command) == 0 {
 			return nil, fmt.Errorf("显式工具 WorkloadSpec 必须声明 selftest.commands 作为预拉取自检命令: %s", manifest.Name)
 		}
+		componentData, err := json.Marshal(spec["components"])
+		if err != nil {
+			return nil, fmt.Errorf("编码显式工具组件失败: %w", err)
+		}
+		var components []workload.ComponentSpec
+		if err := json.Unmarshal(componentData, &components); err != nil || len(components) == 0 {
+			return nil, fmt.Errorf("显式工具 WorkloadSpec 缺少可预拉取组件: %s", manifest.Name)
+		}
+		for index := range components {
+			if len(components[index].PrepullCommand) == 0 {
+				components[index].PrepullCommand = append([]string(nil), command...)
+			}
+		}
+		spec["components"] = components
 		appendManifestSecretEnv(spec, manifest.SecretsRequired)
 		spec["prepull_command"] = command
 		spec["bindings"] = append([]manifestBinding(nil), manifest.Tool.Bindings...)
@@ -384,8 +398,15 @@ func normalizeReferencedComponentImage(component map[string]any) error {
 		return err
 	}
 	component["image_url"] = imageURL
-	if _, ok := component["prepull_command"]; ok {
-		return nil
+	if rawCommand, ok := component["prepull_command"]; ok && rawCommand != nil {
+		data, err := json.Marshal(rawCommand)
+		if err != nil {
+			return fmt.Errorf("编码组件预拉取命令失败: %w", err)
+		}
+		var existing []string
+		if err := json.Unmarshal(data, &existing); err == nil && len(existing) > 0 {
+			return nil
+		}
 	}
 	manifest, err := acceptanceImageUnitManifestFor(image, parts[0])
 	if err != nil {
@@ -501,6 +522,10 @@ func toolManifestDeployable(manifest toolManifest) bool {
 // toolComponentFromManifest 构造工具容器声明。
 func toolComponentFromManifest(manifest toolManifest, imageURL string, kind int16) (workload.ComponentSpec, error) {
 	mountWorkspace := manifest.Tool.MountWorkspace
+	prepullCommand, err := toolPrepullCommandFromManifest(manifest)
+	if err != nil {
+		return workload.ComponentSpec{}, fmt.Errorf("解析工具 selftest.commands 失败: %w", err)
+	}
 	component := workload.ComponentSpec{
 		Name:                   toolComponentName(kind),
 		ImageURL:               imageURL,
@@ -513,6 +538,7 @@ func toolComponentFromManifest(manifest toolManifest, imageURL string, kind int1
 		MountWorkspace:         &mountWorkspace,
 		MountDomains:           append([]string(nil), manifest.Tool.MountDomains...),
 		EphemeralMounts:        manifest.Tool.EphemeralMounts,
+		PrepullCommand:         prepullCommand,
 	}
 	if kind == contracts.SandboxToolKindWebEmbed {
 		if len(manifest.Ports) != 1 || manifest.Ports[0].Expose != "proxy" {

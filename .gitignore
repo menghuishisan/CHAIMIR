@@ -55,6 +55,7 @@ build/
 .vite/
 **/.vite/
 .cache/
+.config/
 **/.cache/
 coverage/
 **/coverage/

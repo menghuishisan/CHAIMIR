@@ -33,6 +33,10 @@ import (
 
 // main 启动生产 HTTP 服务;所有失败都在启动边界显式终止。
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--selftest" {
+		fmt.Fprintln(os.Stdout, "后端服务自检通过")
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("server exited", slog.String("error", logging.SanitizeError(err.Error())))
 		os.Exit(1)

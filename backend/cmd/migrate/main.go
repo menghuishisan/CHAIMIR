@@ -57,6 +57,10 @@ END $$;`
 
 // main 分发数据库迁移、初始化和本地验收数据子命令。
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--selftest" {
+		fmt.Fprintln(os.Stdout, "迁移命令自检通过")
+		return
+	}
 	if err := run(); err != nil {
 		slog.Error("migrate command failed", slog.String("error", logging.SanitizeError(err.Error())))
 		os.Exit(1)

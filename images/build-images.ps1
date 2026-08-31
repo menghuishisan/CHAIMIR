@@ -17,7 +17,33 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# 从项目配置加载供应链网络参数,避免构建时遗漏代理导致依赖重复下载。
+$projectConfigPath = Join-Path (Split-Path -Parent $PSScriptRoot) "deploy\config\chaimir.env"
+if (Test-Path -LiteralPath $projectConfigPath) {
+    $projectConfig = @{}
+    foreach ($line in Get-Content -LiteralPath $projectConfigPath) {
+        if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$') {
+            $projectConfig[$Matches[1]] = $Matches[2]
+        }
+    }
+    foreach ($key in @("SUPPLY_CHAIN_REGISTRY", "SUPPLY_CHAIN_REGISTRY_ENDPOINT", "SUPPLY_CHAIN_HTTP_PROXY", "SUPPLY_CHAIN_HTTPS_PROXY", "SUPPLY_CHAIN_NO_PROXY", "GO_MODULE_PROXY")) {
+        $currentValue = [Environment]::GetEnvironmentVariable($key)
+        if ([string]::IsNullOrWhiteSpace($currentValue) -and $projectConfig.ContainsKey($key)) {
+            [Environment]::SetEnvironmentVariable($key, $projectConfig[$key], "Process")
+        }
+    }
+}
+if (-not [string]::IsNullOrWhiteSpace($env:GO_MODULE_PROXY)) {
+    $env:GO_MODULE_PROXY = $env:GO_MODULE_PROXY -replace '\|', ','
+}
+
 Import-Module (Join-Path $PSScriptRoot "lib\ImageMetadata.psm1") -Force
+
+# 兼容文档中以逗号传入多个镜像的调用方式,避免参数被 PowerShell 当成单个镜像名而静默跳过构建。
+if ($Images.Count -eq 1 -and $Images[0] -match ',') {
+    $Images = @($Images[0].Split(',') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
 
 if ([string]::IsNullOrWhiteSpace($Registry)) {
     $Registry = $env:SUPPLY_CHAIN_REGISTRY
@@ -312,6 +338,21 @@ foreach ($item in $selected) {
         if (-not (Test-Path -LiteralPath $frontendEnvPath)) {
             throw "service/frontend 构建缺少前端构建配置: $frontendEnvPath"
         }
+        # 将前端源码内容摘要作为构建参数,避免未提交改动被 BuildKit 错误复用旧的源码缓存层。
+        $frontendRoot = Join-Path $repoRoot "frontend"
+        $frontendFingerprintLines = @(
+            Get-ChildItem -LiteralPath $frontendRoot -Recurse -File |
+                Where-Object { $_.FullName -notmatch '\\(node_modules|dist|\.turbo|\.vite|\.cache)\\' } |
+                Sort-Object FullName |
+                ForEach-Object { "$($_.FullName)|$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)" }
+        )
+        $frontendFingerprintBytes = [System.Text.Encoding]::UTF8.GetBytes(($frontendFingerprintLines -join "`n"))
+        $frontendHasher = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $buildArguments["CHAIMIR_FRONTEND_SOURCE_DIGEST"] = ([BitConverter]::ToString($frontendHasher.ComputeHash($frontendFingerprintBytes)).Replace('-', '')).ToLowerInvariant()
+        } finally {
+            $frontendHasher.Dispose()
+        }
         foreach ($line in Get-Content -LiteralPath $frontendEnvPath) {
             if ($line -match '^\s*(VITE_[A-Z0-9_]+)\s*=(.*)$') {
                 $buildArguments[$Matches[1]] = $Matches[2].Trim()
@@ -320,6 +361,8 @@ foreach ($item in $selected) {
         $requiredFrontendArgs = @(
             "VITE_API_BASE_URL",
             "VITE_API_TIMEOUT_MS",
+            "VITE_RUNTIME_SELFTEST_POLL_INTERVAL_MS",
+            "VITE_RUNTIME_SELFTEST_POLL_TIMEOUT_MS",
             "VITE_SIM_WORKER_COMMAND_TIMEOUT_MS",
             "VITE_SIM_STEP_INTERVAL_MS"
         )

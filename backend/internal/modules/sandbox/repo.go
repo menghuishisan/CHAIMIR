@@ -420,18 +420,14 @@ func (s *txStore) ListCatalogRuntimes(ctx context.Context) ([]CatalogRuntime, er
 	}
 	out := make([]CatalogRuntime, 0, len(rows))
 	for _, row := range rows {
-		var capabilities CapabilityConstraints
+		var adapter AdapterSpec
 		if len(row.AdapterSpec) > 0 {
-			var envelope struct {
-				Capabilities CapabilityConstraints `json:"capabilities"`
-			}
-			if err := jsonx.DecodeStrictKnownFields(row.AdapterSpec, &envelope); err != nil {
+			if err := jsonx.DecodeStrictKnownFields(row.AdapterSpec, &adapter); err != nil {
 				return nil, err
 			}
-			capabilities = envelope.Capabilities
 		}
 		if len(out) == 0 || out[len(out)-1].Code != row.RuntimeCode {
-			out = append(out, CatalogRuntime{Code: row.RuntimeCode, Name: row.RuntimeName, Eco: row.Eco, Images: []CatalogRuntimeImage{}, Capabilities: capabilities})
+			out = append(out, CatalogRuntime{Code: row.RuntimeCode, Name: row.RuntimeName, Eco: row.Eco, Images: []CatalogRuntimeImage{}, Capabilities: adapter.Capabilities})
 		}
 		current := &out[len(out)-1]
 		current.Images = append(current.Images, CatalogRuntimeImage{Version: row.ImageVersion})

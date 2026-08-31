@@ -23,6 +23,7 @@ RUN apt-get -o Acquire::Retries=3 update \
 
 COPY entrypoint.sh /usr/local/bin/chaimir-foundry-entrypoint
 COPY chaimir-foundry-adapter /usr/local/bin/chaimir-foundry-adapter
+COPY genesis-state.json /usr/local/share/chaimir/foundry/genesis-state.json
 RUN chmod +x /usr/local/bin/chaimir-foundry-entrypoint /usr/local/bin/chaimir-foundry-adapter
 
 ENV HOME=/runtime-state/foundry-home

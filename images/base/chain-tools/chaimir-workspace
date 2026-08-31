@@ -109,17 +109,19 @@ pack_tar() {
 
 # unpack_tar 从标准输入解包到工作区指定目录,并拒绝绝对路径和上级目录条目。
 unpack_tar() {
-  local root destination archive
+  local root destination
   root="$(workspace_root "$1")"
   destination="$(workspace_path "$root" "${2:-.}")"
   mkdir -p -- "$destination"
-  archive="$(mktemp /tmp/chaimir-unpack.XXXXXX.tar)"
-  trap 'rm -f -- "$archive"' EXIT
-  cat >"$archive"
-  if tar -tf "$archive" | awk 'BEGIN { bad=0 } /(^|\/)\.\.($|\/)|^\// { bad=1 } END { exit bad ? 0 : 1 }'; then
+  chaimir_unpack_archive="$(mktemp /tmp/chaimir-unpack.XXXXXX.tar)"
+  trap 'rm -f -- "${chaimir_unpack_archive:-}"; rm -rf -- "${chaimir_selftest_root:-}" "${chaimir_selftest_archive:-}"' EXIT
+  cat >"$chaimir_unpack_archive"
+  if tar -tf "$chaimir_unpack_archive" | awk 'BEGIN { bad=0 } /(^|\/)\.\.($|\/)|^\// { bad=1 } END { exit bad ? 0 : 1 }'; then
     fail "workspace_archive_invalid_path"
   fi
-  tar -C "$destination" --no-same-owner --no-same-permissions -xf "$archive"
+  tar -C "$destination" --no-same-owner --no-same-permissions -xf "$chaimir_unpack_archive"
+  rm -f -- "$chaimir_unpack_archive"
+  chaimir_unpack_archive=""
 }
 
 # run_script 在工作区内执行指定脚本,工作目录也必须位于同一工作区。
@@ -147,15 +149,18 @@ selftest() {
   local root archive
   root="$(mktemp -d /tmp/chaimir-workspace.XXXXXX)"
   archive="$(mktemp /tmp/chaimir-workspace.XXXXXX.tar)"
-  trap 'rm -rf -- "$root" "$archive"' EXIT
+  chaimir_selftest_root="$root"
+  chaimir_selftest_archive="$archive"
+  trap 'rm -rf -- "${chaimir_selftest_root:-}" "${chaimir_selftest_archive:-}"' EXIT
   printf 'ok\n' | write_file "$root" "src/main.txt"
   [[ "$(read_file "$root" "src/main.txt")" == "ok" ]] || fail "workspace_selftest_read_failed"
   [[ "$(list_files "$root" "src" | jq -r '.[0].name')" == "main.txt" ]] || fail "workspace_selftest_list_failed"
   pack_tar "$root" "src" >"$archive"
   rm -rf -- "$root/src"
   unpack_tar "$root" "." <"$archive"
+  trap 'rm -rf -- "${chaimir_selftest_root:-}" "${chaimir_selftest_archive:-}"' EXIT
   [[ "$(read_file "$root" "src/main.txt")" == "ok" ]] || fail "workspace_selftest_unpack_failed"
-  if workspace_path "$root" "../outside" >/dev/null 2>&1; then
+  if "$0" read "$root" "../outside" >/dev/null 2>&1; then
     fail "workspace_selftest_traversal_failed"
   fi
   printf 'workspace_selftest_ok\n'

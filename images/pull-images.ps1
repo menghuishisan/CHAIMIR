@@ -15,6 +15,11 @@ param(
 $ErrorActionPreference = "Stop"
 Import-Module (Join-Path $PSScriptRoot "lib\ImageMetadata.psm1") -Force
 
+# 统一拆分文档中的逗号镜像列表,保证选择性拉取不会静默跳过目标镜像。
+if ($Images.Count -eq 1 -and $Images[0] -match ',') {
+    $Images = @($Images[0].Split(',') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+}
+
 if ([string]::IsNullOrWhiteSpace($Registry)) {
     $Registry = $env:SUPPLY_CHAIN_REGISTRY
 }

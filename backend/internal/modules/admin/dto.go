@@ -154,7 +154,9 @@ type BackupRecordDTO struct {
 type AuditLogEntryDTO struct {
 	ID         ids.ID `json:"id"`
 	TenantID   ids.ID `json:"tenant_id,omitempty"`
-	ActorID    ids.ID `json:"actor_id"`
+	// ActorID 使用文本类型，因为系统审计记录合法使用 actor_id=0，
+	// 而 0 不是有效的正雪花 ID。
+	ActorID    string `json:"actor_id"`
 	ActorRole  int16  `json:"actor_role"`
 	Action     string `json:"action"`
 	TargetType string `json:"target_type"`

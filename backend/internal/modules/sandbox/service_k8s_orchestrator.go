@@ -2348,7 +2348,7 @@ func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage, compositionDigest
 		Name:            "prepull-ready",
 		Image:           holdSpec.ImageURL,
 		ImagePullPolicy: corev1.PullIfNotPresent,
-		Command:         holdSpec.Command,
+		Command:         prepullHoldCommand(holdSpec.Command),
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullRequestCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullRequestMemory)},
 			Limits:   corev1.ResourceList{corev1.ResourceCPU: resource.MustParse(o.cfg.PrepullLimitCPU), corev1.ResourceMemory: resource.MustParse(o.cfg.PrepullLimitMemory)},
@@ -2376,6 +2376,20 @@ func (o *K8sOrchestrator) prepullDaemonSet(image RuntimeImage, compositionDigest
 			},
 		},
 	}
+}
+
+// prepullHoldCommand 先执行镜像自检,成功后让保持容器持续运行以维持节点就绪。
+func prepullHoldCommand(command []string) []string {
+	parts := make([]string, 0, len(command))
+	for _, part := range command {
+		parts = append(parts, shellQuote(part))
+	}
+	return []string{"sh", "-lc", strings.Join(parts, " ") + " && exec sleep 2147483647"}
+}
+
+// shellQuote 将受控 argv 参数编码为单引号 shell 字面量。
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 // prepullVolumeMounts 提供镜像自检所需的最小临时工作目录,并复用镜像清单声明的临时可写目录。

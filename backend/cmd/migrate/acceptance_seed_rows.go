@@ -11,6 +11,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/modules/experiment"
+	"chaimir/internal/modules/sandbox"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/crypto"
@@ -210,6 +211,31 @@ func acceptanceCompositionSnapshot(ctx context.Context, tx pgx.Tx, spec contract
 	}
 	runtimes := make([]contracts.CompiledRuntimeSnapshot, 0, len(spec.Runtimes))
 	closure := make([]contracts.ImageClosureItem, 0, len(spec.Runtimes))
+	closureSeen := map[string]struct{}{}
+	appendClosure := func(category, code, imageURL, version string, component workload.ComponentSpec) {
+		imageURL = strings.TrimSpace(imageURL)
+		if imageURL == "" {
+			return
+		}
+		item := contracts.ImageClosureItem{Category: category, Code: code, ImageURL: imageURL, Version: strings.TrimSpace(version), PrepullCommand: append([]string(nil), component.PrepullCommand...), PrepullHold: component.PrepullHold}
+		for _, mount := range component.EphemeralMounts {
+			item.EphemeralMounts = append(item.EphemeralMounts, contracts.ImageClosureMount{Name: mount.Name, MountPath: mount.MountPath})
+		}
+		keyBytes, _ := json.Marshal(struct {
+			URL             string
+			Command         []string
+			Hold            bool
+			EphemeralMounts []contracts.ImageClosureMount
+		}{URL: item.ImageURL, Command: item.PrepullCommand, Hold: item.PrepullHold, EphemeralMounts: item.EphemeralMounts})
+		if _, exists := closureSeen[string(keyBytes)]; exists {
+			return
+		}
+		closureSeen[string(keyBytes)] = struct{}{}
+		if item.Version == "" {
+			item.Version = imageVersionFromURL(item.ImageURL)
+		}
+		closure = append(closure, item)
+	}
 	for _, ref := range spec.Runtimes {
 		var runtime contracts.CompiledRuntimeSnapshot
 		var adapterSpec []byte
@@ -230,7 +256,19 @@ WHERE r.code=$1 AND ri.version=$2`, ref.Code, ref.ImageVersion).Scan(
 			return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("验收运行时组合目录不完整: %s", ref.InstanceCode)
 		}
 		runtimes = append(runtimes, runtime)
-		closure = append(closure, contracts.ImageClosureItem{Category: "runtime", Code: runtime.Code, ImageURL: runtime.ImageURL, Version: runtime.ImageVersion})
+		var adapter sandbox.AdapterSpec
+		if err := json.Unmarshal(adapterSpec, &adapter); err != nil {
+			return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("解析验收运行时 %s 适配器失败: %w", ref.InstanceCode, err)
+		}
+		appendClosure("runtime", ref.InstanceCode+"/"+runtime.Code, runtime.ImageURL, runtime.ImageVersion, adapter.RuntimeContainer)
+		for _, component := range adapter.InfraSidecars {
+			appendClosure("runtime", ref.InstanceCode+"/"+component.Name, component.ImageURL, "", component)
+		}
+		for _, pod := range adapter.Pods {
+			for _, component := range pod.Containers {
+				appendClosure("runtime", ref.InstanceCode+"/"+pod.Name+"/"+component.Name, component.ImageURL, "", component)
+			}
+		}
 	}
 	refs := append(append([]contracts.CompositionComponentRef{}, spec.Infra...), spec.Tools...)
 	components := make([]contracts.CompiledComponentSnapshot, 0, len(refs))
@@ -250,9 +288,7 @@ WHERE r.code=$1 AND ri.version=$2`, ref.Code, ref.ImageVersion).Scan(
 			return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("解析验收组件 %s 资源规格失败: %w", ref.Code, err)
 		}
 		for _, component := range resource.Components {
-			if strings.TrimSpace(component.ImageURL) != "" {
-				closure = append(closure, contracts.ImageClosureItem{Category: category, Code: ref.Code, ImageURL: component.ImageURL, Version: "manifest"})
-			}
+			appendClosure(category, ref.Code, component.ImageURL, "manifest", component)
 		}
 	}
 	snapshot := contracts.SandboxCompositionSnapshot{Spec: spec, Runtimes: runtimes, Components: components, ImageClosure: closure}
@@ -262,6 +298,19 @@ WHERE r.code=$1 AND ri.version=$2`, ref.Code, ref.ImageVersion).Scan(
 	}
 	snapshot.Digest = digest
 	return snapshot, nil
+}
+
+// seedPublishedComposition 发布验收沙箱与运行时镜像预拉取所使用的不可变组合快照。
+// 运行时流程必须从 sandbox_composition 读取快照，不能从沙箱实例行反推组合。
+func seedPublishedComposition(ctx context.Context, tx pgx.Tx, snapshot contracts.SandboxCompositionSnapshot) error {
+	encoded, err := jsonb(snapshot)
+	if err != nil {
+		return fmt.Errorf("编码已发布沙箱组合快照失败: %w", err)
+	}
+	return execJSON(ctx, tx, `
+INSERT INTO sandbox_composition (composition_digest, snapshot, status)
+VALUES ($1,$2,1)
+ON CONFLICT (composition_digest) DO UPDATE SET snapshot=EXCLUDED.snapshot, status=1, updated_at=now()`, snapshot.Digest, encoded)
 }
 
 // seedSandboxRows 写入历史沙箱和工具行,用于沙箱详情、鉴权和历史记录查询。
@@ -275,6 +324,9 @@ func seedSandboxRows(ctx context.Context, tx pgx.Tx) error {
 	compositionSnapshot, err := jsonb(composition)
 	if err != nil {
 		return fmt.Errorf("编码沙箱组合快照失败: %w", err)
+	}
+	if err := seedPublishedComposition(ctx, tx, composition); err != nil {
+		return err
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO sandbox (
@@ -318,6 +370,12 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
 	battleComposition := contracts.SandboxCompositionSpec{ID: "judge:acceptance-battle", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}
 	battleCompositionSnapshot, err := acceptanceCompositionSnapshot(ctx, tx, battleComposition)
 	if err != nil {
+		return err
+	}
+	if err := seedPublishedComposition(ctx, tx, judgeSnapshot); err != nil {
+		return err
+	}
+	if err := seedPublishedComposition(ctx, tx, battleCompositionSnapshot); err != nil {
 		return err
 	}
 	snapshot, err := jsonb(map[string]any{
@@ -687,23 +745,11 @@ ON CONFLICT (id) DO UPDATE SET chapter_id=EXCLUDED.chapter_id, title=EXCLUDED.ti
 		id, acceptanceIDs.TenantID, chapterID, title, contentType, contentRef, sort)
 }
 
-// seedExperimentRows 写入实验定义、分组、实例、检查点和报告。
-func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
-	groupConfig, err := jsonb(map[string]any{"size": 2, "roles": []string{"leader", "member"}})
-	if err != nil {
-		return fmt.Errorf("编码实验分组配置失败: %w", err)
-	}
-	envSpec := contracts.SandboxCompositionSpec{ID: "lab-foundry", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", Tools: []contracts.CompositionComponentRef{{Code: "code-server", Selection: "explicit"}}, AccessProfile: contracts.SandboxAccessExperiment}
-	envComposition, err := acceptanceCompositionSnapshot(ctx, tx, envSpec)
-	if err != nil {
-		return err
-	}
-	components, err := jsonb(map[string]any{
+// acceptanceExperimentComponents 构造与 M7 最终领域模型一致的验收组件 JSON。
+func acceptanceExperimentComponents(envComposition contracts.SandboxCompositionSnapshot) ([]byte, error) {
+	return jsonb(map[string]any{
 		"envs": []map[string]any{{
 			"id":                         "lab-foundry",
-			"runtimes":                   []map[string]any{{"instance_code": "source-chain", "runtime_code": "evm-foundry", "image_version": platformRuntimeImageVersion("evm-foundry")}},
-			"tools":                      []map[string]any{{"code": "code-server", "selection": "explicit"}},
-			"access_profile":             "experiment",
 			"composition_snapshot":       envComposition,
 			"init_code_ref":              acceptanceInitCodeRef,
 			"init_script_ref":            acceptanceInitScriptRef,
@@ -720,6 +766,23 @@ func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
 			{"stage": 1, "title": "漏洞复现与修复", "description": "使用 Foundry 复现可重入攻击并完成修复。", "components": map[string]any{"envs": []string{"lab-foundry"}}},
 		},
 	})
+}
+
+// seedExperimentRows 写入实验定义、分组、实例、检查点和报告。
+func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
+	groupConfig, err := jsonb(map[string]any{"size": 2, "roles": []string{"leader", "member"}})
+	if err != nil {
+		return fmt.Errorf("编码实验分组配置失败: %w", err)
+	}
+	envSpec := contracts.SandboxCompositionSpec{ID: "lab-foundry", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", Tools: []contracts.CompositionComponentRef{{Code: "code-server", Selection: "explicit"}}, AccessProfile: contracts.SandboxAccessExperiment}
+	envComposition, err := acceptanceCompositionSnapshot(ctx, tx, envSpec)
+	if err != nil {
+		return err
+	}
+	if err := seedPublishedComposition(ctx, tx, envComposition); err != nil {
+		return err
+	}
+	components, err := acceptanceExperimentComponents(envComposition)
 	if err != nil {
 		return fmt.Errorf("编码实验组件配置失败: %w", err)
 	}

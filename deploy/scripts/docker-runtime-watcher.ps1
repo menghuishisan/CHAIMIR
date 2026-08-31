@@ -16,11 +16,27 @@ $clusterContext = "kind-chaimir-cilium"
 $scriptPath = $PSCommandPath
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 
+# Stop-ProcessTree 在外部命令超时时终止整个进程树，避免探测子进程长期残留。
+function Stop-ProcessTree {
+    param([Parameter(Mandatory = $true)][Diagnostics.Process]$Process)
+
+    try {
+        & taskkill.exe /PID $Process.Id /T /F | Out-Null
+    } catch {
+        Write-WatcherLog "终止进程树失败，进程可能已退出或当前账户无权限: $($_.Exception.Message)"
+    }
+    try {
+        if (-not $Process.HasExited) { $Process.Kill() }
+    } catch {
+        Write-WatcherLog "终止超时进程失败，进程可能已退出或当前账户无权限: $($_.Exception.Message)"
+    }
+}
+
 function Write-WatcherLog {
     param([Parameter(Mandatory = $true)][string]$Message)
     $line = "[$(Get-Date -Format o)] $Message"
     Add-Content -LiteralPath $logPath -Value $line -Encoding UTF8
-    Write-Output $line
+    Write-Host $line
 }
 
 function Invoke-ProcessWithTimeout {
@@ -44,7 +60,7 @@ function Invoke-ProcessWithTimeout {
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            try { $process.Kill() } catch { }
+            Stop-ProcessTree -Process $process
             return [pscustomobject]@{ ExitCode = $null; TimedOut = $true; Stdout = ""; Stderr = "timeout" }
         }
         $stdoutTask.Wait()

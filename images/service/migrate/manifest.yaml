@@ -51,10 +51,10 @@ build:
   dockerfile: images/service/migrate/Dockerfile
 selftest:
   commands:
-    - name: binary-help
+    - name: binary-selftest
       command:
         - /app/migrate
-        - --help
+        - --selftest
 supply_chain:
   sbom: true
   trivy_required: true

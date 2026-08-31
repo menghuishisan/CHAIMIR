@@ -27,6 +27,7 @@ import {
   RuntimeStatus,
   type SandboxRuntime,
   type SandboxRuntimeImage,
+  type SandboxRuntimeSelftestStatus,
   type SandboxPrepullStatus,
   type SandboxRuntimeSelftestDetail,
 } from '@chaimir/api-client'
@@ -58,6 +59,7 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { appConfig } from '../../../../app/config'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import {
@@ -751,24 +753,65 @@ function SelftestSection({ runtime, images, onDone }: SelftestSectionProps) {
     return out
   }, [runtime.adapter_spec, selftestImage])
 
+  const showSelftestResult = useCallback((status: RuntimeSelftestStatus) => {
+    toast.success(status === RuntimeSelftestStatus.PASSED ? '自检通过,运行时已开放给学校' : '自检没有通过,详情见下方')
+    onDone()
+  }, [onDone])
+
   const runSelftest = useCallback(async () => {
     setWorking(true)
     setActionError(undefined)
+    let started = false
+    let triggerError: unknown
     try {
-      const result = await api.sandbox.runRuntimeSelftest(runtime.id)
-      setDetail(result.detail)
-      toast.success(
-        result.selftest_status === RuntimeSelftestStatus.PASSED
-          ? '自检通过,运行时已开放给学校'
-          : '自检没有通过,详情见下方'
-      )
-      onDone()
+      const triggerPromise = api.sandbox.runRuntimeSelftest(runtime.id)
+      const quickResult = await Promise.race([
+        triggerPromise.then((result) => ({ result })),
+        new Promise<{ result?: undefined }>((resolve) => window.setTimeout(() => resolve({}), 500)),
+      ])
+      if (quickResult.result) {
+        started = true
+        setDetail(quickResult.result.detail)
+        if (quickResult.result.selftest_status !== RuntimeSelftestStatus.PENDING) {
+          showSelftestResult(quickResult.result.selftest_status)
+          return
+        }
+      }
+      if (!quickResult.result) {
+        triggerPromise.catch((error) => {
+          triggerError = error
+        })
+      }
+
+      const deadline = Date.now() + appConfig.runtimeSelftestPollTimeoutMs
+      while (Date.now() < deadline) {
+        let result: SandboxRuntimeSelftestStatus
+        try {
+          result = await api.sandbox.getRuntimeSelftest(runtime.id)
+        } catch (error) {
+          if (triggerError) throw triggerError
+          triggerError = error
+          await wait(appConfig.runtimeSelftestPollIntervalMs)
+          continue
+        }
+        setDetail(result.detail)
+        if (result.selftest_status === RuntimeSelftestStatus.PENDING) {
+          started = true
+        } else if (started) {
+          showSelftestResult(result.selftest_status)
+          return
+        } else if (triggerError) {
+          throw triggerError
+        }
+        await wait(appConfig.runtimeSelftestPollIntervalMs)
+      }
+      throw new Error('自检仍在进行,请稍后读取结果')
     } catch (error) {
       setActionError(userFacingErrorMessage(error, '自检没有跑完,请稍后重试。'))
     } finally {
       setWorking(false)
     }
-  }, [onDone, runtime.id])
+  }, [runtime.id, showSelftestResult])
 
   const loadSelftest = useCallback(async () => {
     setWorking(true)
@@ -856,10 +899,14 @@ function SelftestSection({ runtime, images, onDone }: SelftestSectionProps) {
   )
 }
 
+/** wait 等待下一次状态查询,避免高频请求占用平台接口。 */
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
 /** digestFromImageUrl 从带摘要的镜像地址里取出摘要,规则与后端 digestFromImageURL 一致。 */
 function digestFromImageUrl(imageUrl: string): string {
   const parts = imageUrl.trim().split('@')
   if (parts.length !== 2 || !parts[1].startsWith('sha256:')) return ''
   return parts[1]
 }
-

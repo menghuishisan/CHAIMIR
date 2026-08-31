@@ -78,7 +78,7 @@ selftest:
   commands:
     - name: help
       command:
-        - /ko-app/kube-webhook-certgen
+        - /kube-webhook-certgen
         - --help
 supply_chain:
   sbom: true

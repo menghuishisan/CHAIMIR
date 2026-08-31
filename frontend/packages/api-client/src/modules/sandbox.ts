@@ -82,7 +82,7 @@ export class SandboxApi {
    * 触发运行时接入即测。
    */
   async runRuntimeSelftest(runtimeId: string): Promise<SandboxRuntimeSelftestStatus> {
-    return this.client.post(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/selftest`)
+    return this.client.postBackground(`/sandbox/runtimes/${encodePathSegment(runtimeId)}/selftest`)
   }
 
   /**

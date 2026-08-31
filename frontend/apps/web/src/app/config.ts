@@ -115,6 +115,14 @@ export const appConfig = {
   wsBaseURL: parseWebSocketBaseURL(import.meta.env.VITE_WS_BASE_URL, 'VITE_WS_BASE_URL'),
   sandboxToolOrigin: parseHttpsOrigin(window.__CHAIMIR_RUNTIME_CONFIG__?.sandboxToolOrigin, '沙箱工具 origin'),
   apiTimeoutMs: parsePositiveInteger(import.meta.env.VITE_API_TIMEOUT_MS, 'VITE_API_TIMEOUT_MS'),
+  runtimeSelftestPollIntervalMs: parsePositiveInteger(
+    import.meta.env.VITE_RUNTIME_SELFTEST_POLL_INTERVAL_MS,
+    'VITE_RUNTIME_SELFTEST_POLL_INTERVAL_MS',
+  ),
+  runtimeSelftestPollTimeoutMs: parsePositiveInteger(
+    import.meta.env.VITE_RUNTIME_SELFTEST_POLL_TIMEOUT_MS,
+    'VITE_RUNTIME_SELFTEST_POLL_TIMEOUT_MS',
+  ),
   deploymentMode: parseDeploymentMode(window.__CHAIMIR_RUNTIME_CONFIG__?.deploymentMode),
   // 仿真 Worker 单条指令超时:阈值由部署层注入(deploy/config/chaimir.env 同名键),
   // 由装配层读出后传给 sim-sdk 的 SimWorkerClient,不在仿真页里写死数字。

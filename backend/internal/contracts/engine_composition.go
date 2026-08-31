@@ -2,10 +2,12 @@
 package contracts
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 )
@@ -197,6 +199,20 @@ func CanonicalSnapshotDigest(snapshot SandboxCompositionSnapshot) (string, error
 	canonical.Components = append([]CompiledComponentSnapshot(nil), snapshot.Components...)
 	canonical.Runtimes = append([]CompiledRuntimeSnapshot(nil), snapshot.Runtimes...)
 	canonical.ImageClosure = append([]ImageClosureItem(nil), snapshot.ImageClosure...)
+	for index := range canonical.Runtimes {
+		normalized, normalizeErr := canonicalRawJSON(canonical.Runtimes[index].AdapterSpec)
+		if normalizeErr != nil {
+			return "", fmt.Errorf("运行时适配器规范化失败: %w", normalizeErr)
+		}
+		canonical.Runtimes[index].AdapterSpec = normalized
+	}
+	for index := range canonical.Components {
+		normalized, normalizeErr := canonicalRawJSON(canonical.Components[index].ResourceSpec)
+		if normalizeErr != nil {
+			return "", fmt.Errorf("组件资源规范化失败: %w", normalizeErr)
+		}
+		canonical.Components[index].ResourceSpec = normalized
+	}
 	sort.Slice(canonical.Runtimes, func(i, j int) bool { return canonical.Runtimes[i].InstanceCode < canonical.Runtimes[j].InstanceCode })
 	sort.Slice(canonical.Components, func(i, j int) bool {
 		left := canonical.Components[i].Category + "\x00" + canonical.Components[i].Code
@@ -214,6 +230,27 @@ func CanonicalSnapshotDigest(snapshot SandboxCompositionSnapshot) (string, error
 	}
 	h := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(h[:]), nil
+}
+
+// canonicalRawJSON 将 JSONB 往返可能改变的对象键顺序归一化,保证摘要不依赖存储层文本布局。
+func canonicalRawJSON(raw json.RawMessage) (json.RawMessage, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil, nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("JSON 包含多个文档")
+		}
+		return nil, err
+	}
+	return json.Marshal(value)
 }
 
 // imageClosureSortKey 为可能共享同一镜像但使用不同自检命令的组件提供稳定排序。
