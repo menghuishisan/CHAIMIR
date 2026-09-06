@@ -34,6 +34,7 @@ env_keys:
     - CHAIMIR_EVENT_LISTENER_SERVICE_AUTH_SECRET
 secrets_required:
   - env: CHAIMIR_EVENT_LISTENER_SERVICE_AUTH_SECRET
+    secret_key: CHAIMIR_EVENT_LISTENER_SERVICE_AUTH_SECRET
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
 data_driven: true
@@ -62,6 +63,46 @@ capabilities:
 infra:
   eco_tags:
     - evm
+  resource_spec:
+    components:
+      - name: infra
+        image_url: "@self"
+        env:
+          - name: CHAIMIR_IMAGE_PORT
+            value: "8080"
+          - name: CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
+            value: "300"
+        ports:
+          - name: http
+            container_port: 8080
+            service_port: 8080
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+        readiness_probe:
+          type: http
+          path: /healthz
+          port: http
+          period_seconds: 2
+          failure_threshold: 30
+        read_only_root_filesystem: true
+        mount_workspace: false
+        ephemeral_mounts:
+          - name: listener-tmp
+            mount_path: /tmp
+    services:
+      - name: infra-event-listener-http
+        component: infra
+        ports:
+          - name: http
+            port: 8080
+            target_port: http
+            protocol: TCP
   bindings:
     - name: chain
       capability: evm-json-rpc

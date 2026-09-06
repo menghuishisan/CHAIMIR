@@ -210,6 +210,20 @@ function Patch-HarborChart {
         [System.IO.File]::WriteAllText($path, $text, [System.Text.UTF8Encoding]::new($false))
     }
 
+    # Harbor registry 的 canonical 入口同时服务 Docker/OCI 客户端和 Harbor core。
+    # 官方模板的空地址在当前 Docker Desktop 内核下可能只创建 IPv6 listener，
+    # 使 IPv4 Service/Ingress 请求收到 connection refused；显式绑定 IPv4，
+    # 不改变端口、TLS 终止或 registry 数据路径。
+    $registryConfigPath = Join-Path $ChartDirectory "templates\registry\registry-cm.yaml"
+    $registryConfigText = Get-Content -LiteralPath $registryConfigPath -Raw
+    $registryAddrSource = '      addr: :{{ template "harbor.registry.containerPort" . }}'
+    $registryAddrTarget = '      addr: 0.0.0.0:{{ template "harbor.registry.containerPort" . }}'
+    if ([regex]::Matches($registryConfigText, [regex]::Escape($registryAddrSource)).Count -ne 1) {
+        throw "registry IPv4 绑定补丁目标数量错误"
+    }
+    $registryConfigText = $registryConfigText.Replace($registryAddrSource, $registryAddrTarget)
+    [System.IO.File]::WriteAllText($registryConfigPath, $registryConfigText, [System.Text.UTF8Encoding]::new($false))
+
     $databasePath = Join-Path $ChartDirectory "templates\database\database-ss.yaml"
     $databaseText = Get-Content -LiteralPath $databasePath -Raw
     $unsafeCommand = 'args: ["-c", "chmod -R 700 /var/lib/postgresql/data/pgdata || true"]'

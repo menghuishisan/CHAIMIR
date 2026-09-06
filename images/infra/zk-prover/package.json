@@ -1,6 +1,6 @@
 {
   "dependencies": {
-    "circom_tester": "0.0.24",
+    "circom2": "0.2.23",
     "snarkjs": "0.7.6"
   },
   "overrides": {

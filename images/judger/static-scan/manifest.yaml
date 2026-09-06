@@ -21,11 +21,27 @@ upstream:
   packages:
     - slither-analyzer==0.11.3
   binaries:
-    - solc 0.8.26
+    - solc 0.8.20 at /usr/local/bin/solc-0.8.20
+    - solc 0.8.24 at /usr/local/bin/solc-0.8.24
+    - solc 0.8.26 at /usr/local/bin/solc-0.8.26
+  foundry_image: ghcr.io/foundry-rs/foundry:v1.7.1
+  foundry_digest: sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
+  solc_source_image: tool/slither
   runtime: alpine:3.23
   runtime_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: mature-security-toolchain-wrapper
 data_driven: true
+toolchain:
+  language: solidity
+  selection_env: CHAIMIR_SOLIDITY_VERSION
+  offline: true
+  compiler_versions:
+    - version: 0.8.20
+      executable: /usr/local/bin/solc-0.8.20
+    - version: 0.8.24
+      executable: /usr/local/bin/solc-0.8.24
+    - version: 0.8.26
+      executable: /usr/local/bin/solc-0.8.26
 capabilities:
   provides:
     - judger
@@ -34,7 +50,19 @@ capabilities:
   conflicts: []
   cardinality: one
   placement: sandbox
-  config_schema: {}
+  config_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      solidity_version:
+        type: string
+        enum:
+          - 0.8.20
+          - 0.8.24
+          - 0.8.26
+        x-chaimir-env: CHAIMIR_SOLIDITY_VERSION
+    required:
+      - solidity_version
   student_access: private
 judger:
   type: static-scan
@@ -93,7 +121,7 @@ selftest:
       command:
         - sh
         - -lc
-        - slither --version && solc --version
+        - 'set -eu; /opt/slither/bin/slither --version; for version in 0.8.20 0.8.24 0.8.26; do case "$(/usr/local/bin/solc-${version} --version)" in *"Version: ${version}"*) ;; *) exit 1 ;; esac; done'
 supply_chain:
   sbom: true
   trivy_required: true

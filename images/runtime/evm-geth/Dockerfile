@@ -18,14 +18,19 @@ RUN set -eux; \
     rm -f "${archive}"
 WORKDIR /src/geth
 RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}"; fi \
-    && go get \
-        golang.org/x/crypto@v0.53.0 \
-        golang.org/x/net@v0.56.0 \
-        google.golang.org/grpc@v1.82.1 \
-        golang.org/x/text@v0.39.0 \
-        go.opentelemetry.io/otel/sdk@v1.43.0 \
-    && go mod tidy \
-    && go build -trimpath -ldflags "-s -w" -o /out/geth ./cmd/geth
+    && for attempt in 1 2 3 4 5; do \
+        go get \
+          golang.org/x/crypto@v0.55.0 \
+          golang.org/x/net@v0.57.0 \
+          google.golang.org/grpc@v1.83.1 \
+          golang.org/x/text@v0.41.0 \
+          go.opentelemetry.io/otel/sdk@v1.44.0 \
+        && go mod tidy \
+        && go build -trimpath -ldflags "-s -w" -o /out/geth ./cmd/geth \
+        && break; \
+        if [ "${attempt}" -eq 5 ]; then exit 1; fi; \
+        sleep $((attempt * 5)); \
+      done
 
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 

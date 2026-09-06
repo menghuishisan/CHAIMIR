@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"syscall"
@@ -37,7 +38,13 @@ func main() {
 	if configDir == "" {
 		configDir = "/runtime-state/ipfs-cluster"
 	}
+	if err := os.MkdirAll(configDir, 0700); err != nil {
+		fail("initialize IPFS Cluster config directory: " + err.Error())
+	}
 	configPath := filepath.Join(configDir, "service.json")
+	if err := ensureServiceConfig(configPath); err != nil {
+		fail("initialize IPFS Cluster service.json: " + err.Error())
+	}
 	contents, err := os.ReadFile(configPath)
 	if err != nil {
 		fail("read IPFS Cluster service.json: " + err.Error())
@@ -47,6 +54,10 @@ func main() {
 		fail("parse IPFS Cluster service.json: " + err.Error())
 	}
 	setString(config, "api", "ipfsproxy", "node_multiaddress", multiaddress)
+	// REST、proxy 和 pinning API 都是跨容器 provider endpoint，不能只绑定 loopback。
+	setString(config, "api", "restapi", "http_listen_multiaddress", "/ip4/0.0.0.0/tcp/9094")
+	setString(config, "api", "ipfsproxy", "listen_multiaddress", "/ip4/0.0.0.0/tcp/9095")
+	setString(config, "api", "pinsvcapi", "http_listen_multiaddress", "/ip4/0.0.0.0/tcp/9097")
 	setString(config, "ipfs_connector", "ipfshttp", "node_multiaddress", multiaddress)
 	updated, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
@@ -59,6 +70,26 @@ func main() {
 	if err := syscall.Exec("/usr/local/bin/ipfs-cluster-service", args, os.Environ()); err != nil {
 		fail("exec IPFS Cluster: " + err.Error())
 	}
+}
+
+// ensureServiceConfig 用官方初始化命令在空 runtime-state 卷生成完整 service.json。
+func ensureServiceConfig(configPath string) error {
+	if _, err := os.Stat(configPath); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("stat service.json: %w", err)
+	}
+	command := exec.Command("/usr/local/bin/ipfs-cluster-service", "init")
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	command.Env = os.Environ()
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("ipfs-cluster-service init: %w", err)
+	}
+	if _, err := os.Stat(configPath); err != nil {
+		return fmt.Errorf("initialized service.json is unavailable: %w", err)
+	}
+	return nil
 }
 
 func setString(root map[string]any, first, second, key, value string) {

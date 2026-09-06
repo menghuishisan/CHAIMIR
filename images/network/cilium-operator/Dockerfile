@@ -11,8 +11,7 @@ RUN --mount=type=cache,target=/go/pkg \
     make GOARCH="${TARGETARCH}" DESTDIR="/out/${TARGETOS}/${TARGETARCH}" \
         build-container-operator-generic install-container-binary-operator-generic licenses-all \
     && mv LICENSE.all "/out/${TARGETOS}/${TARGETARCH}/LICENSE.all" \
-    && mkdir -p /home/gops \
-    && chmod 0777 /home/gops
+    && true
 
 FROM scratch
 ARG TARGETOS
@@ -24,8 +23,7 @@ COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certifi
 COPY --from=builder /usr/bin/gops /usr/bin/gops
 COPY --from=builder /out/${TARGETOS}/${TARGETARCH}/usr/bin/cilium-operator-generic /usr/bin/cilium-operator-generic
 COPY --from=builder /out/${TARGETOS}/${TARGETARCH}/LICENSE.all /LICENSE.all
-COPY --from=builder /home/gops /home/gops
-
-ENV GOPS_CONFIG_DIR=/home/gops
+ENV GOPS_CONFIG_DIR=/dev/shm
 WORKDIR /
+USER 1000:1000
 CMD ["/usr/bin/cilium-operator-generic"]

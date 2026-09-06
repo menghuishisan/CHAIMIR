@@ -10,6 +10,8 @@ ROOT=/runtime-state/fabric
 CRYPTO_ROOT=${ROOT}/crypto
 CONFIG_ROOT=${ROOT}/config
 LEDGER_ROOT=${ROOT}/ledger
+CHANNEL_CREATE_LOG=${ROOT}/channel-create.log
+CHANNEL_JOIN_LOG=${ROOT}/channel-join.log
 CHANNEL_NAME=${CHAIMIR_FABRIC_CHANNEL:-chaimir}
 mkdir -p "${ROOT}" "${CONFIG_ROOT}" "${LEDGER_ROOT}" "${LEDGER_ROOT}/orderer/etcdraft/wal" "${LEDGER_ROOT}/orderer/etcdraft/snapshot"
 cp /etc/hyperledger/fabric/core.yaml /etc/hyperledger/fabric/orderer.yaml "${CONFIG_ROOT}/"
@@ -181,19 +183,20 @@ peer_pid=$!
 trap 'kill "${peer_pid}" "${orderer_pid}" 2>/dev/null || true' EXIT INT TERM
 
 for attempt in $(seq 1 30); do
-  if peer channel create -o 127.0.0.1:7050 -c "${CHANNEL_NAME}" -f "${ROOT}/channel.tx" --outputBlock "${ROOT}/channel.block" >/dev/null 2>&1; then
-    break
+  # Channel creation may finish as soon as the orderer is ready, while the
+  # peer is still opening its ledger. Keep creation and joining in the same
+  # bounded state machine, and retry only the operation that is not ready.
+  if [[ ! -s "${ROOT}/channel.block" ]]; then
+    peer channel create -o 127.0.0.1:7050 -c "${CHANNEL_NAME}" -f "${ROOT}/channel.tx" --outputBlock "${ROOT}/channel.block" >>"${CHANNEL_CREATE_LOG}" 2>&1 || true
   fi
-  if ! kill -0 "${orderer_pid}" 2>/dev/null || ! kill -0 "${peer_pid}" 2>/dev/null; then
-    cat "${ROOT}/orderer.log" "${ROOT}/peer.log" >&2
-    exit 1
+  if [[ -s "${ROOT}/channel.block" ]] && peer channel join -b "${ROOT}/channel.block" >>"${CHANNEL_JOIN_LOG}" 2>&1; then
+    break
   fi
   sleep 1
 done
 
-if [[ ! -s "${ROOT}/channel.block" ]]; then
-  cat "${ROOT}/orderer.log" "${ROOT}/peer.log" >&2
+if [[ ! -s "${ROOT}/channel.block" ]] || ! kill -0 "${orderer_pid}" 2>/dev/null || ! kill -0 "${peer_pid}" 2>/dev/null; then
+  cat "${CHANNEL_CREATE_LOG}" "${CHANNEL_JOIN_LOG}" "${ROOT}/orderer.log" "${ROOT}/peer.log" >&2
   exit 1
 fi
-peer channel join -b "${ROOT}/channel.block" >/dev/null
 wait "${peer_pid}"

@@ -117,11 +117,91 @@ type CompiledComponentSnapshot struct {
 
 // SandboxCompositionSnapshot 是发布后不可变的组合事实来源。
 type SandboxCompositionSnapshot struct {
-	Digest       string                      `json:"composition_digest"`
-	Spec         SandboxCompositionSpec      `json:"spec"`
-	Runtimes     []CompiledRuntimeSnapshot   `json:"runtimes"`
-	Components   []CompiledComponentSnapshot `json:"components,omitempty"`
-	ImageClosure []ImageClosureItem          `json:"image_closure"`
+	Digest          string                      `json:"composition_digest"`
+	Spec            SandboxCompositionSpec      `json:"spec"`
+	Runtimes        []CompiledRuntimeSnapshot   `json:"runtimes"`
+	Components      []CompiledComponentSnapshot `json:"components,omitempty"`
+	PrivateSidecars []SandboxPrivateSidecarSpec `json:"private_sidecars,omitempty"`
+	ImageClosure    []ImageClosureItem          `json:"image_closure"`
+}
+
+// AppendPrivateSidecarImageClosure 将服务端私有执行 sidecar 投影进不可变镜像闭包。
+// 判题 sidecar 不属于教师 CompositionSpec 的公开组件,但它仍必须与快照摘要、预拉取和运行期使用同一份镜像事实。
+func AppendPrivateSidecarImageClosure(snapshot *SandboxCompositionSnapshot) error {
+	if snapshot == nil {
+		return fmt.Errorf("组合快照不能为空")
+	}
+	for _, sidecar := range snapshot.PrivateSidecars {
+		name := strings.TrimSpace(sidecar.Name)
+		imageURL := strings.TrimSpace(sidecar.ImageURL)
+		if name == "" || imageURL == "" {
+			return fmt.Errorf("判题私有 sidecar 必须声明名称和镜像地址")
+		}
+		if len(sidecar.PrepullCommand) == 0 {
+			return fmt.Errorf("判题私有 sidecar %s 缺少预拉取命令", name)
+		}
+		item := ImageClosureItem{
+			Category:       "judger",
+			Code:           name,
+			ImageURL:       imageURL,
+			Version:        imageVersionFromURL(imageURL),
+			PrepullCommand: append([]string(nil), sidecar.PrepullCommand...),
+			PrepullHold:    sidecar.PrepullHold,
+		}
+		for _, mount := range sidecar.EphemeralMounts {
+			item.EphemeralMounts = append(item.EphemeralMounts, ImageClosureMount{Name: mount.Name, MountPath: mount.MountPath})
+		}
+		if mergeImageClosureItem(snapshot.ImageClosure, item) {
+			continue
+		}
+		snapshot.ImageClosure = append(snapshot.ImageClosure, item)
+	}
+	return nil
+}
+
+// imageVersionFromURL 提取不可变镜像引用中的摘要版本,供私有 sidecar 闭包使用。
+func imageVersionFromURL(imageURL string) string {
+	if index := strings.LastIndex(imageURL, "@"); index >= 0 && index+1 < len(imageURL) {
+		return imageURL[index+1:]
+	}
+	return ""
+}
+
+// mergeImageClosureItem 合并相同镜像、自检命令、保持用途的临时挂载,返回是否已存在。
+func mergeImageClosureItem(items []ImageClosureItem, incoming ImageClosureItem) bool {
+	for index := range items {
+		current := &items[index]
+		if current.ImageURL != incoming.ImageURL || current.PrepullHold != incoming.PrepullHold || !slicesEqual(current.PrepullCommand, incoming.PrepullCommand) {
+			continue
+		}
+		for _, mount := range incoming.EphemeralMounts {
+			seen := false
+			for _, existing := range current.EphemeralMounts {
+				if existing == mount {
+					seen = true
+					break
+				}
+			}
+			if !seen {
+				current.EphemeralMounts = append(current.EphemeralMounts, mount)
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// slicesEqual 比较私有 sidecar 的受控命令序列,避免把不同自检语义错误合并。
+func slicesEqual(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 // CanonicalDigest 对规范化组合生成稳定摘要，保证相同声明在不同调用方得到同一 digest。
@@ -197,6 +277,7 @@ func CanonicalSnapshotDigest(snapshot SandboxCompositionSnapshot) (string, error
 	canonical.Digest = ""
 	canonical.Spec = normalizeComposition(snapshot.Spec)
 	canonical.Components = append([]CompiledComponentSnapshot(nil), snapshot.Components...)
+	canonical.PrivateSidecars = append([]SandboxPrivateSidecarSpec(nil), snapshot.PrivateSidecars...)
 	canonical.Runtimes = append([]CompiledRuntimeSnapshot(nil), snapshot.Runtimes...)
 	canonical.ImageClosure = append([]ImageClosureItem(nil), snapshot.ImageClosure...)
 	for index := range canonical.Runtimes {
@@ -218,6 +299,9 @@ func CanonicalSnapshotDigest(snapshot SandboxCompositionSnapshot) (string, error
 		left := canonical.Components[i].Category + "\x00" + canonical.Components[i].Code
 		right := canonical.Components[j].Category + "\x00" + canonical.Components[j].Code
 		return left < right
+	})
+	sort.Slice(canonical.PrivateSidecars, func(i, j int) bool {
+		return canonical.PrivateSidecars[i].Name < canonical.PrivateSidecars[j].Name
 	})
 	sort.Slice(canonical.ImageClosure, func(i, j int) bool {
 		left := imageClosureSortKey(canonical.ImageClosure[i])

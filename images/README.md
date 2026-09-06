@@ -86,6 +86,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
 - 仅修改某个 `images/service/<name>` Dockerfile 或 manifest: 只选择对应的 `service/<name>`。
 - `base/go-builder`、`base/runtime-min`、`middleware/postgres` 变化: 根据 Dockerfile 的真实 `FROM` 依赖扩展到实际消费者,不受影响镜像不重复处理。
 
+前端镜像的日常构建还复用正式 BuildKit builder 上的两级缓存:依赖层使用 pnpm store cache,任务层使用挂载到 `/src/frontend/.turbo` 的 Turbo cache。`frontend/turbo.json` 只缓存各工作区真实产物 `dist/**`,并把构建期 `VITE_*` 配置纳入任务摘要;因此源码改动不会重新安装未变化的依赖,环境配置变化也不会恢复错误的旧静态资源。正式流水线必须复用持久化的项目 BuildKit builder,不得把缓存导出为运行镜像、临时 tag 或本地替代镜像;首次冷构建仍需完整执行 Vite 打包。
+
+构建资源必须与验收集群隔离:正式流水线使用独立的 Linux BuildKit runner 或独立 builder 节点,持久化 builder 本身的缓存和受控生命周期,不得让冷 Vite 打包与 Kind/Cilium 节点共享受限的 WSL 内存。Windows 本地仅用于复现项目入口和缓存命中,不能把暂停节点、临时提高 WSL 配额或宿主机工具链当作生产构建依赖;资源不足时应把同一不可变 Dockerfile 和 digest 锁交给正式 runner,不改变镜像来源或部署输入。
+
 选择性证明命令必须带 `-Images`、`-NoEnvWrite` 和 `-DigestFragmentsDir`;脚本只有在选定集合全部通过时才生成 `verified-images.lock`。再用 `images/sync-image-metadata.ps1 -FragmentsPath` 增量晋升正式锁、`deploy/base` 与资源所属 component 的镜像引用、`deploy/config/chaimir.env` 和存在时的环境 `backend/.env` 准入证明。未选镜像继续使用正式锁中的原 digest,不重复构建、拉取、扫描或签名。完成晋升后执行 `make dev-refresh`,检查只有受影响的工作负载滚动更新。
 
 `images/build-images.ps1` 成功后会自动调用 `images/cleanup-local-images.ps1 -Apply`:只清理 `e2e-*`、`candidate-*`、`refresh-*`、`local-*`、`refactor-*`、`prepull-*` 临时标签和没有正式/候选 digest、没有容器引用的悬空层。正式锁、当前候选锁、运行中或已保留容器、Harbor/Trivy/Cosign 状态不会删除;清理器不会自动下载恢复引用。

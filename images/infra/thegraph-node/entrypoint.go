@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strings"
 	"syscall"
 )
 
@@ -30,14 +31,15 @@ func main() {
 	if parsed, err := url.Parse(rpc); err != nil || parsed.Host == "" {
 		fail("CHAIMIR_GRAPH_RPC_URL is invalid")
 	}
-	if parsed, err := url.Parse(databaseAddress); err != nil || parsed.Host == "" {
+	databaseHostPort, ok := normalizeDatabaseAddress(databaseAddress)
+	if !ok {
 		fail("CHAIMIR_GRAPH_POSTGRES_ADDRESS is invalid")
 	}
 	if parsed, err := url.Parse(ipfs); err != nil || parsed.Host == "" {
 		fail("CHAIMIR_GRAPH_IPFS_ADDRESS is invalid")
 	}
 	env := append(os.Environ(),
-		"POSTGRES_URL=postgresql://"+user+":"+password+"@"+databaseAddress+"/"+database,
+		"POSTGRES_URL=postgresql://"+user+":"+password+"@"+databaseHostPort+"/"+database,
 		"ETHEREUM_RPC="+network+":"+rpc,
 		"IPFS="+ipfs,
 	)
@@ -45,6 +47,23 @@ func main() {
 	if err := syscall.Exec(args[0], args, env); err != nil {
 		fail("exec graph-node: " + err.Error())
 	}
+}
+
+// normalizeDatabaseAddress accepts the TCP endpoint emitted by a binding and
+// rejects credentials, paths, and alternate schemes before building the URL.
+func normalizeDatabaseAddress(raw string) (string, bool) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", false
+	}
+	if !strings.Contains(value, "://") {
+		value = "postgresql://" + value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "postgresql" || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		return "", false
+	}
+	return parsed.Host, true
 }
 
 func required(name string) string {

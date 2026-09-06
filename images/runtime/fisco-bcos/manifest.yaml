@@ -18,12 +18,19 @@ description: FISCO BCOS 联盟链教学运行时镜像。
 source:
   type: thin-wrapper
 upstream:
+  base_image: registry.chaimir.io/runtime/fisco-bcos
+  base_digest: sha256:fb4f78010f1088d00f6b921e1f63203ed637e4e0b56f820e29bf2c26d30ccfe3
   image: fiscoorg/fiscobcos:v3.12.1
   version: v3.12.1
   digest: sha256:93db5277a5c896fde402f2165d133cc3d346effef4165ec417ef098eb2ede74b
   runtime: alpine:3.23
   runtime_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: official-static-binary-on-supported-base
+  config_assets:
+    - url: https://github.com/FISCO-BCOS/FISCO-BCOS/releases/download/v3.11.0/build_chain.sh
+      sha256: 288efe6154b3bf40e6849448b496bee92517c917f3dd8a82a47dfcbabbd30364
+    - url: https://github.com/FISCO-BCOS/TASSL/releases/download/V_1.4/tassl-1.1.1b-linux-x86_64.tar.gz
+      sha256: 97700126df491b4ae15afae1bad99979390ded5d7d1655632e00b40003a9a9e8
 data_driven: true
 env_keys:
   config:
@@ -43,14 +50,34 @@ runtime:
   eco: fisco
   adapter_level: 1
   runtime_config_required: true
+  workload:
+    env:
+      - name: CHAIMIR_FISCO_CONFIG
+        value: /runtime-state/fisco/nodes/127.0.0.1/node0/config.ini
+    init_containers:
+      - name: fisco-config
+        image_url: "@self"
+        command:
+          - /usr/local/bin/chaimir-fisco-config-init
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        read_only_root_filesystem: true
+        mount_workspace: false
+        prepull_command:
+          - /usr/local/bin/chaimir-fisco-config-init
 ports:
   - name: p2p
-    container_port: 20200
+    container_port: 30300
     protocol: TCP
     expose: internal
     purpose: FISCO BCOS P2P
   - name: rpc
-    container_port: 8545
+    container_port: 20200
     protocol: TCP
     expose: proxy
     purpose: FISCO BCOS RPC

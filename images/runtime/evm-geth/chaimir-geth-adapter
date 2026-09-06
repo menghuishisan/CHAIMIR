@@ -47,8 +47,10 @@ send_transaction() {
   address="$(jq -r '.contractAddress // empty' <<<"$receipt")"
   if [ -n "$address" ]; then
     mkdir -p "$state_dir"; printf '%s' "$address" > "$last_contract_file"
+    jq -cn --arg tx_hash "$tx_hash" --arg contract_address "$address" --argjson receipt "$receipt" '{tx_hash:$tx_hash,contract_address:$contract_address,receipt:$receipt}'
+  else
+    jq -cn --arg tx_hash "$tx_hash" --argjson receipt "$receipt" '{tx_hash:$tx_hash,receipt:$receipt}'
   fi
-  jq -cn --arg tx_hash "$tx_hash" --argjson receipt "$receipt" '{tx_hash:$tx_hash,receipt:$receipt}'
 }
 
 case "$action" in

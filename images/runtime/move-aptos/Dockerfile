@@ -23,8 +23,9 @@ COPY --from=runtime-dirs --chown=1000:1000 /runtime-state /runtime-state
 COPY --from=aptos-tools /usr/local/bin/aptos /usr/local/bin/aptos
 COPY --from=aptos-tools /aptos /aptos
 
-ENV HOME=/workspace
-ENV TMPDIR=/workspace
+# runtime 容器不挂载学生 workspace；Aptos CLI 的配置、缓存和临时文件必须落在 runtime-state 安全域。
+ENV HOME=/runtime-state/aptos
+ENV TMPDIR=/runtime-state/aptos
 USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8080

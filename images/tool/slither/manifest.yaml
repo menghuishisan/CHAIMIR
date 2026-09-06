@@ -21,11 +21,23 @@ upstream:
   packages:
     - slither-analyzer==0.11.3
   binaries:
-    - solc 0.8.26
+    - solc 0.8.20 at /usr/local/bin/solc-0.8.20
+    - solc 0.8.24 at /usr/local/bin/solc-0.8.24
+    - solc 0.8.26 at /usr/local/bin/solc-0.8.26
   runtime: alpine:3.23
   runtime_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: minimal-official-package-build
 data_driven: true
+toolchain:
+  language: solidity
+  offline: true
+  compiler_versions:
+    - version: 0.8.20
+      executable: /usr/local/bin/solc-0.8.20
+    - version: 0.8.24
+      executable: /usr/local/bin/solc-0.8.24
+    - version: 0.8.26
+      executable: /usr/local/bin/solc-0.8.26
 capabilities:
   provides:
     - security-scan
@@ -34,7 +46,19 @@ capabilities:
   conflicts: []
   cardinality: one
   placement: sandbox
-  config_schema: {}
+  config_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      solidity_version:
+        type: string
+        enum:
+          - 0.8.20
+          - 0.8.24
+          - 0.8.26
+        x-chaimir-env: SOLIDITY_VERSION
+    required:
+      - solidity_version
   student_access: public
 tool:
   kind: command-tool
@@ -46,7 +70,7 @@ tool:
     - "2147483647"
   command_policy:
     allowed_argv:
-      - ["slither"]
+      - ["chaimir-slither"]
     default_timeout_seconds: 60
     max_timeout_seconds: 180
 ports: []
@@ -85,8 +109,13 @@ selftest:
   commands:
     - name: slither-version
       command:
-        - slither
+        - /opt/slither/bin/slither
         - --version
+    - name: solidity-compilers
+      command:
+        - sh
+        - -lc
+        - 'set -eu; for version in 0.8.20 0.8.24 0.8.26; do case "$(/usr/local/bin/solc-${version} --version)" in *"Version: ${version}"*) ;; *) exit 1 ;; esac; done'
 supply_chain:
   sbom: true
   trivy_required: true

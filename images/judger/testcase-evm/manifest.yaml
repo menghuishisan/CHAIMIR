@@ -19,6 +19,9 @@ source:
   type: platform-built
 upstream:
   components:
+    - image: registry.chaimir.io/judger/testcase-evm
+      digest: sha256:e80b8fc8ef1ac54616ec2d7508c94047c4378aec1d35f009302349c1c776d54c
+      role: verified-offline-toolchain
     - image: ghcr.io/foundry-rs/foundry:v1.7.1
       digest: sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
       role: foundry-toolchain
@@ -30,6 +33,17 @@ upstream:
       role: runtime-shell
   reuse_policy: self-developed-judger
 data_driven: true
+toolchain:
+  language: solidity
+  selection: project-config
+  offline: true
+  compiler_versions:
+    - version: 0.8.20
+      executable: /usr/local/bin/solc-0.8.20
+    - version: 0.8.24
+      executable: /usr/local/bin/solc-0.8.24
+    - version: 0.8.26
+      executable: /usr/local/bin/solc-0.8.26
 capabilities:
   provides:
     - judger
@@ -90,7 +104,7 @@ selftest:
       command:
         - sh
         - -lc
-        - "hardhat --version && forge --version"
+        - 'set -eu; hardhat --version; forge --version; for version in 0.8.20 0.8.24 0.8.26; do case "$(/usr/local/bin/solc-${version} --version)" in *"Version: ${version}"*) ;; *) exit 1 ;; esac; done'
 supply_chain:
   sbom: true
   trivy_required: true

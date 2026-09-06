@@ -5,10 +5,12 @@ ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
 
-ARG SOLC_VERSION=0.8.26
-ARG SOLC_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
-ARG SOLC_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
-ARG SOLC_URL=https://binaries.soliditylang.org/linux-amd64/solc-linux-amd64-v0.8.26+commit.8a97fa7a
+ARG SOLC_0_8_20_PATH=solc-linux-amd64-v0.8.20+commit.a1b79de6
+ARG SOLC_0_8_20_SHA256=0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782
+ARG SOLC_0_8_24_PATH=solc-linux-amd64-v0.8.24+commit.e11b9ed9
+ARG SOLC_0_8_24_SHA256=fb03a29a517452b9f12bcf459ef37d0a543765bb3bbc911e70a87d6a37c30d5f
+ARG SOLC_0_8_26_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
+ARG SOLC_0_8_26_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
@@ -19,14 +21,20 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 3)); \
     done \
-    && for attempt in 1 2 3 4 5 6 7 8; do \
-        if curl --fail --location --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 --user-agent 'chaimir-image-builder/1.0' --output "/tmp/solc-${SOLC_VERSION}" "${SOLC_URL}" \
-            && echo "${SOLC_SHA256}  /tmp/solc-${SOLC_VERSION}" | sha256sum -c -; then \
-            break; \
-        fi; \
-        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
-        rm -f "/tmp/solc-${SOLC_VERSION}"; \
-        sleep $((attempt * 3)); \
+    && for spec in \
+        "0.8.20|${SOLC_0_8_20_PATH}|${SOLC_0_8_20_SHA256}" \
+        "0.8.24|${SOLC_0_8_24_PATH}|${SOLC_0_8_24_SHA256}" \
+        "0.8.26|${SOLC_0_8_26_PATH}|${SOLC_0_8_26_SHA256}"; do \
+        version="${spec%%|*}"; rest="${spec#*|}"; path="${rest%%|*}"; sha="${rest#*|}"; \
+        for attempt in 1 2 3 4 5 6 7 8; do \
+            if curl --fail --location --retry 3 --retry-delay 5 --connect-timeout 30 --max-time 300 --user-agent 'chaimir-image-builder/1.0' --output "/tmp/solc-${version}" "https://binaries.soliditylang.org/linux-amd64/${path}" \
+                && echo "${sha}  /tmp/solc-${version}" | sha256sum -c -; then \
+                break; \
+            fi; \
+            if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+            rm -f "/tmp/solc-${version}"; \
+            sleep $((attempt * 3)); \
+        done; \
     done \
     && python3.10 -m venv /opt/mythril \
     && /opt/mythril/bin/pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" --upgrade pip \
@@ -40,6 +48,12 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         /opt/mythril/lib/python3.10/site-packages/setuptools/_vendor/wheel \
         /opt/mythril/lib/python3.10/site-packages/setuptools/_vendor/wheel-*.dist-info \
         /opt/mythril/lib/python3.10/site-packages/setuptools/_vendor/jaraco.context-*.dist-info \
+    && mkdir -p /opt/solcx \
+    && for version in 0.8.20 0.8.24 0.8.26; do \
+        cp "/tmp/solc-${version}" "/opt/solcx/solc-v${version}"; \
+        chmod 0755 "/opt/solcx/solc-v${version}"; \
+    done \
+    && SOLCX_BINARY_PATH=/opt/solcx /opt/mythril/bin/python -c "import solcx; expected={'0.8.20','0.8.24','0.8.26'}; actual={str(v) for v in solcx.get_installed_solc_versions()}; assert actual == expected, (actual, expected)" \
     && /opt/mythril/bin/myth version
 
 FROM cgr.dev/chainguard/wolfi-base@sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
@@ -47,10 +61,6 @@ FROM cgr.dev/chainguard/wolfi-base@sha256:6677ae802613d558c16d8bbb2ef2ec89e2e330
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
-
-ARG SOLC_VERSION=0.8.26
-ARG SOLC_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
-ARG SOLC_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
 
 LABEL org.opencontainers.image.title="tool/mythril"
 LABEL org.opencontainers.image.description="Chaimir Mythril symbolic execution tool image"
@@ -63,21 +73,25 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 3)); \
     done
-COPY --from=build /tmp/solc-${SOLC_VERSION} /usr/local/bin/solc-${SOLC_VERSION}
+COPY --from=build /tmp/solc-0.8.20 /usr/local/bin/solc-0.8.20
+COPY --from=build /tmp/solc-0.8.24 /usr/local/bin/solc-0.8.24
+COPY --from=build /tmp/solc-0.8.26 /usr/local/bin/solc-0.8.26
+COPY --from=build /opt/solcx /opt/solcx
 COPY --from=build /opt/mythril /opt/mythril
+COPY chaimir_mythril.py /usr/local/bin/chaimir-mythril
 RUN rm -rf /opt/mythril/lib/python3.10/site-packages/pip /opt/mythril/lib/python3.10/site-packages/pip-*.dist-info /opt/mythril/lib/python3.10/site-packages/setuptools-*.dist-info
 RUN addgroup -g 1000 chaimir \
     && adduser -D -u 1000 -G chaimir -h /workspace -s /sbin/nologin chaimir \
-    && mkdir -p /usr/local/bin /opt/solcx \
-    && echo "${SOLC_SHA256}  /usr/local/bin/solc-${SOLC_VERSION}" | sha256sum -c - \
-    && chmod 0755 /usr/local/bin/solc-${SOLC_VERSION} \
-    && ln -sf /usr/local/bin/solc-${SOLC_VERSION} /usr/local/bin/solc \
-    && ln -sf /opt/mythril/bin/myth /usr/local/bin/myth \
-    && SOLCX_BINARY_PATH=/opt/solcx /opt/mythril/bin/python -c "import solcx; solcx.import_installed_solc()" \
+    && echo "0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782  /usr/local/bin/solc-0.8.20" | sha256sum -c - \
+    && echo "fb03a29a517452b9f12bcf459ef37d0a543765bb3bbc911e70a87d6a37c30d5f  /usr/local/bin/solc-0.8.24" | sha256sum -c - \
+    && echo "d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef  /usr/local/bin/solc-0.8.26" | sha256sum -c - \
+    && for version in 0.8.20 0.8.24 0.8.26; do chmod 0755 "/usr/local/bin/solc-${version}" "/opt/solcx/solc-v${version}"; done \
+    && chmod 0755 /usr/local/bin/chaimir-mythril \
     && chown -R 1000:1000 /workspace \
     && chmod -R a+rX /opt/solcx \
-    && solc --version >/dev/null \
-    && myth version
+    && SOLCX_BINARY_PATH=/opt/solcx /opt/mythril/bin/python -c "import solcx; expected={'0.8.20','0.8.24','0.8.26'}; actual={str(v) for v in solcx.get_installed_solc_versions()}; assert actual == expected, (actual, expected)" \
+    && for version in 0.8.20 0.8.24 0.8.26; do /usr/local/bin/solc-${version} --version >/dev/null; done \
+    && /opt/mythril/bin/myth version
 
 USER 1000:1000
 ENV HOME=/workspace
@@ -86,4 +100,4 @@ ENV MPLCONFIGDIR=/tmp/matplotlib
 ENV XDG_CONFIG_HOME=/tmp
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/mythril/bin
 WORKDIR /workspace
-ENTRYPOINT ["/opt/mythril/bin/myth"]
+ENTRYPOINT ["/usr/local/bin/chaimir-mythril"]

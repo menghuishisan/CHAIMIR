@@ -83,7 +83,6 @@ COPY --from=patched-besu /opt/besu /opt/besu
 
 COPY entrypoint.sh /usr/local/bin/chaimir-besu-entrypoint
 RUN chmod +x /usr/local/bin/chaimir-besu-entrypoint \
-    && ln -s /opt/besu/bin/besu /usr/local/bin/besu \
     && chown -R 1000:1000 /opt/besu
 
 ENV HOME=/workspace

@@ -84,6 +84,24 @@ type toolManifest struct {
 	EnvKeys            map[string]any              `json:"env_keys"`
 	Labels             map[string]string           `json:"labels"`
 	Capabilities       manifestCapabilities        `json:"capabilities"`
+	Toolchain          manifestToolchain           `json:"toolchain"`
+}
+
+// manifestToolchain 描述镜像内可离线选择的固定语言工具链,供严格 manifest 解析和验收使用。
+// 版本选择必须落到明确的可执行路径,不能由迁移层推断默认版本或创建无版本别名。
+type manifestToolchain struct {
+	Language         string                    `json:"language"`
+	Manager          string                    `json:"manager"`
+	Selection        string                    `json:"selection"`
+	SelectionEnv     string                    `json:"selection_env"`
+	Offline          bool                      `json:"offline"`
+	CompilerVersions []manifestCompilerVersion `json:"compiler_versions"`
+}
+
+type manifestCompilerVersion struct {
+	Version           string `json:"version"`
+	Executable        string `json:"executable"`
+	ManagedExecutable string `json:"managed_executable"`
 }
 
 type manifestCapabilities struct {
@@ -117,6 +135,7 @@ type toolManifestTool struct {
 type manifestBinding struct {
 	Name            string `json:"name"`
 	Capability      string `json:"capability"`
+	SourceEndpoint  string `json:"source_endpoint,omitempty"`
 	Endpoint        string `json:"endpoint"`
 	Protocol        string `json:"protocol"`
 	RequiredAtStart bool   `json:"required_at_start"`
@@ -239,6 +258,9 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 		if len(command) == 0 {
 			return nil, fmt.Errorf("显式工具 WorkloadSpec 必须声明 selftest.commands 作为预拉取自检命令: %s", manifest.Name)
 		}
+		if err := appendManifestSecretEnv(spec, manifest.SecretsRequired); err != nil {
+			return nil, err
+		}
 		componentData, err := json.Marshal(spec["components"])
 		if err != nil {
 			return nil, fmt.Errorf("编码显式工具组件失败: %w", err)
@@ -253,7 +275,6 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 			}
 		}
 		spec["components"] = components
-		appendManifestSecretEnv(spec, manifest.SecretsRequired)
 		spec["prepull_command"] = command
 		spec["bindings"] = append([]manifestBinding(nil), manifest.Tool.Bindings...)
 		if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
@@ -295,29 +316,36 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 }
 
 // appendManifestSecretEnv 将显式 WorkloadSpec 的敏感环境变量统一绑定到平台 Secret。
-func appendManifestSecretEnv(spec map[string]any, requirements []manifestSecretRequirement) {
+func appendManifestSecretEnv(spec map[string]any, requirements []manifestSecretRequirement) error {
 	if len(requirements) == 0 {
-		return
+		return nil
 	}
 	components, ok := spec["components"].([]any)
 	if !ok || len(components) == 0 {
-		return
+		return fmt.Errorf("显式 WorkloadSpec 缺少 Secret 注入目标组件")
 	}
 	component, ok := components[0].(map[string]any)
 	if !ok {
-		return
+		return fmt.Errorf("显式 WorkloadSpec 首个组件格式非法")
 	}
 	secretEnv := make([]any, 0, len(requirements))
+	seen := map[string]struct{}{}
 	for _, requirement := range requirements {
 		name := strings.TrimSpace(requirement.Env)
-		if name == "" {
-			continue
+		secretKey := strings.TrimSpace(requirement.SecretKey)
+		if name == "" || secretKey == "" {
+			return fmt.Errorf("Secret 引用必须同时声明 env 和 secret_key")
 		}
-		secretEnv = append(secretEnv, map[string]any{"name": name, "secret_name": "chaimir-secret", "secret_key": name})
+		if _, exists := seen[name]; exists {
+			return fmt.Errorf("Secret 环境变量重复声明: %s", name)
+		}
+		seen[name] = struct{}{}
+		secretEnv = append(secretEnv, map[string]any{"name": name, "secret_name": "chaimir-secret", "secret_key": secretKey})
 	}
 	if len(secretEnv) > 0 {
 		component["secret_env"] = secretEnv
 	}
+	return nil
 }
 
 // applyManifestCapabilities 将镜像清单的原子能力写入唯一的工具资源声明。
@@ -526,13 +554,17 @@ func toolComponentFromManifest(manifest toolManifest, imageURL string, kind int1
 	if err != nil {
 		return workload.ComponentSpec{}, fmt.Errorf("解析工具 selftest.commands 失败: %w", err)
 	}
+	secretEnv, err := secretEnvFromManifest(manifest.SecretsRequired)
+	if err != nil {
+		return workload.ComponentSpec{}, err
+	}
 	component := workload.ComponentSpec{
 		Name:                   toolComponentName(kind),
 		ImageURL:               imageURL,
 		Command:                manifest.Tool.Command,
 		Args:                   manifest.Tool.Args,
 		Env:                    manifest.Tool.Env,
-		SecretEnv:              secretEnvFromManifest(manifest.SecretsRequired),
+		SecretEnv:              secretEnv,
 		Resources:              workload.ResourceSpec{Requests: map[string]string{"cpu": manifest.Resources.CPURequest, "memory": manifest.Resources.MemoryRequest}, Limits: map[string]string{"cpu": manifest.Resources.CPULimit, "memory": manifest.Resources.MemoryLimit}},
 		ReadOnlyRootFilesystem: &manifest.Security.ReadOnlyRootFilesystem,
 		MountWorkspace:         &mountWorkspace,

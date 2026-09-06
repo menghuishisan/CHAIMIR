@@ -20,12 +20,31 @@ source:
 upstream:
   package: mythril
   version: "0.24.8"
+  binaries:
+    - solc 0.8.20 at /usr/local/bin/solc-0.8.20
+    - solc 0.8.24 at /usr/local/bin/solc-0.8.24
+    - solc 0.8.26 at /usr/local/bin/solc-0.8.26
   source_repository: https://github.com/ConsenSysDiligence/mythril
   runtime: cgr.dev/chainguard/wolfi-base
   runtime_version: "2026-08-26"
   runtime_digest: sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
   reuse_policy: pypi-source-build
 data_driven: true
+toolchain:
+  language: solidity
+  manager: py-solc-x
+  selection_env: SOLCX_BINARY_PATH
+  offline: true
+  compiler_versions:
+    - version: 0.8.20
+      executable: /usr/local/bin/solc-0.8.20
+      managed_executable: /opt/solcx/solc-v0.8.20
+    - version: 0.8.24
+      executable: /usr/local/bin/solc-0.8.24
+      managed_executable: /opt/solcx/solc-v0.8.24
+    - version: 0.8.26
+      executable: /usr/local/bin/solc-0.8.26
+      managed_executable: /opt/solcx/solc-v0.8.26
 capabilities:
   provides:
     - security-scan
@@ -35,7 +54,19 @@ capabilities:
   conflicts: []
   cardinality: one
   placement: sandbox
-  config_schema: {}
+  config_schema:
+    type: object
+    additionalProperties: false
+    properties:
+      solidity_version:
+        type: string
+        enum:
+          - 0.8.20
+          - 0.8.24
+          - 0.8.26
+        x-chaimir-env: SOLIDITY_VERSION
+    required:
+      - solidity_version
   student_access: public
 tool:
   kind: command-tool
@@ -47,7 +78,7 @@ tool:
     - "2147483647"
   command_policy:
     allowed_argv:
-      - ["myth"]
+      - ["chaimir-mythril"]
     default_timeout_seconds: 120
     max_timeout_seconds: 300
 ports: []
@@ -88,7 +119,7 @@ selftest:
       command:
         - sh
         - -lc
-        - solc --version >/dev/null && myth version
+        - 'set -eu; for version in 0.8.20 0.8.24 0.8.26; do case "$(/usr/local/bin/solc-${version} --version)" in *"Version: ${version}"*) ;; *) exit 1 ;; esac; done; SOLCX_BINARY_PATH=/opt/solcx /opt/mythril/bin/python -c "import solcx; assert {str(v) for v in solcx.get_installed_solc_versions()} == {\"0.8.20\",\"0.8.24\",\"0.8.26\"}"; /opt/mythril/bin/myth version; test -x /usr/local/bin/chaimir-mythril'
 supply_chain:
   sbom: true
   trivy_required: true

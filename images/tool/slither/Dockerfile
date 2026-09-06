@@ -5,13 +5,18 @@ ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
 
-ARG SOLC_VERSION=0.8.26
-ARG SOLC_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
-ARG SOLC_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
+ARG SOLC_0_8_20_PATH=solc-linux-amd64-v0.8.20+commit.a1b79de6
+ARG SOLC_0_8_20_SHA256=0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782
+ARG SOLC_0_8_24_PATH=solc-linux-amd64-v0.8.24+commit.e11b9ed9
+ARG SOLC_0_8_24_SHA256=fb03a29a517452b9f12bcf459ef37d0a543765bb3bbc911e70a87d6a37c30d5f
+ARG SOLC_0_8_26_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
+ARG SOLC_0_8_26_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 LABEL org.opencontainers.image.title="tool/slither"
 LABEL org.opencontainers.image.description="Chaimir Slither security scanner image"
+
+COPY chaimir_slither.py /usr/local/bin/chaimir-slither
 
 USER root
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
@@ -28,15 +33,20 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 3)); \
     done \
-    && for attempt in 1 2 3 4 5 6 7 8; do \
-        if wget -q --timeout=300 --tries=3 -O "/usr/local/bin/solc-${SOLC_VERSION}" "https://binaries.soliditylang.org/linux-amd64/${SOLC_PATH}"; then break; fi; \
-        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
-        rm -f "/usr/local/bin/solc-${SOLC_VERSION}"; \
-        sleep $((attempt * 3)); \
+    && for spec in \
+        "0.8.20|${SOLC_0_8_20_PATH}|${SOLC_0_8_20_SHA256}" \
+        "0.8.24|${SOLC_0_8_24_PATH}|${SOLC_0_8_24_SHA256}" \
+        "0.8.26|${SOLC_0_8_26_PATH}|${SOLC_0_8_26_SHA256}"; do \
+        version="${spec%%|*}"; rest="${spec#*|}"; path="${rest%%|*}"; sha="${rest#*|}"; \
+        for attempt in 1 2 3 4 5 6 7 8; do \
+            if wget -q --timeout=300 --tries=3 -O "/usr/local/bin/solc-${version}" "https://binaries.soliditylang.org/linux-amd64/${path}"; then break; fi; \
+            if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+            rm -f "/usr/local/bin/solc-${version}"; \
+            sleep $((attempt * 3)); \
+        done; \
+        echo "${sha}  /usr/local/bin/solc-${version}" | sha256sum -c -; \
+        chmod 0755 "/usr/local/bin/solc-${version}"; \
     done \
-    && echo "${SOLC_SHA256}  /usr/local/bin/solc-${SOLC_VERSION}" | sha256sum -c - \
-    && chmod 0755 /usr/local/bin/solc-${SOLC_VERSION} \
-    && ln -s /usr/local/bin/solc-${SOLC_VERSION} /usr/local/bin/solc \
     && python3 -m venv /opt/slither \
     && /opt/slither/bin/pip install --no-cache-dir --upgrade --index-url "${PIP_INDEX_URL}" \
         "pip>=25.3" \
@@ -46,9 +56,11 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         "aiohttp>=3.14.3" \
     && rm -rf /opt/slither/lib/python3.12/site-packages/pip /opt/slither/lib/python3.12/site-packages/pip-*.dist-info \
     && apk del py3-pip \
-    && ln -s /opt/slither/bin/slither /usr/local/bin/slither \
-    && slither --version >/dev/null \
-    && solc --version >/dev/null \
+    && /opt/slither/bin/slither --version >/dev/null \
+    && for version in 0.8.20 0.8.24 0.8.26; do \
+        "/usr/local/bin/solc-${version}" --version >/dev/null; \
+    done \
+    && chmod 0755 /usr/local/bin/chaimir-slither \
     && addgroup -S -g 1000 chaimir \
     && adduser -S -u 1000 -G chaimir -h /workspace -s /sbin/nologin chaimir \
     && mkdir -p /workspace /tmp/slither \
@@ -59,4 +71,4 @@ ENV HOME=/workspace
 ENV TMPDIR=/tmp/slither
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/slither/bin
 WORKDIR /workspace
-CMD ["slither", "--version"]
+CMD ["chaimir-slither"]

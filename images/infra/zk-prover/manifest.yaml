@@ -36,6 +36,26 @@ capabilities:
 infra:
   eco_tags:
     - evm
+  resource_spec:
+    components:
+      - name: infra
+        image_url: "@self"
+        command:
+          - sleep
+          - "2147483647"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        read_only_root_filesystem: true
+        mount_workspace: false
+        mount_domains:
+          - runtime-state
+        writable_mount_domains:
+          - runtime-state
   roles:
     - zk
     - prover
@@ -63,11 +83,15 @@ build:
   dockerfile: Dockerfile
 selftest:
   commands:
+    - name: circom-version
+      command:
+        - /opt/chaimir/zk-prover/node_modules/.bin/circom2
+        - --version
     - name: snarkjs-powersoftau
       command:
         - sh
         - -lc
-        - tmp=$(mktemp -d); cd "$tmp"; snarkjs powersoftau new bn128 2 pot.ptau
+        - tmp=$(mktemp -d); cd "$tmp"; /opt/chaimir/zk-prover/node_modules/.bin/snarkjs powersoftau new bn128 2 pot.ptau
     - name: entrypoint-syntax
       command:
         - sh

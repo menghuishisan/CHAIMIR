@@ -64,6 +64,11 @@ func RuntimeImageSpecs(imageURL string, definition RuntimeDefinition) ([]ImageSp
 		}
 	}
 	for _, pod := range definition.Pods {
+		for _, component := range pod.InitContainers {
+			if err := collector.add(component.ImageURL, component.PrepullCommand, component.PrepullHold, component.EphemeralMounts); err != nil {
+				return nil, err
+			}
+		}
 		for _, component := range pod.Containers {
 			if strings.TrimSpace(component.Name) == strings.TrimSpace(definition.RuntimeContainerName) {
 				continue

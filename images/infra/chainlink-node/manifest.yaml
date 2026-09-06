@@ -33,7 +33,32 @@ upstream:
 env_keys:
   config:
     - ETH_URL
-  secret: []
+    - CHAIMIR_CHAINLINK_DATABASE_ADDRESS
+    - CHAIMIR_CHAINLINK_DATABASE_NAME
+    - CHAIMIR_CHAINLINK_DATABASE_USER
+    - CHAINLINK_CHAIN_ID
+  secret:
+    - POSTGRES_PASSWORD
+    - CHAINLINK_KEYSTORE_PASSWORD
+    - CHAINLINK_API_EMAIL
+    - CHAINLINK_API_PASSWORD
+secrets_required:
+  - env: POSTGRES_PASSWORD
+    secret_key: PG_PASSWORD
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
+  - env: CHAINLINK_KEYSTORE_PASSWORD
+    secret_key: CHAINLINK_KEYSTORE_PASSWORD
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
+  - env: CHAINLINK_API_EMAIL
+    secret_key: CHAINLINK_API_EMAIL
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
+  - env: CHAINLINK_API_PASSWORD
+    secret_key: CHAINLINK_API_PASSWORD
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
 data_driven: true
 capabilities:
   provides:
@@ -41,14 +66,64 @@ capabilities:
     - chainlink-node
   requires:
     - evm-json-rpc
+    - postgres-compatible
   conflicts: []
   cardinality: one
   placement: sandbox
-  config_schema: {}
+  config_schema:
+    type: object
+    additionalProperties: false
+    required: [chain_id]
+    properties:
+      chain_id:
+        type: integer
+        x-chaimir-env: infra/CHAINLINK_CHAIN_ID
   student_access: private
 infra:
   eco_tags:
     - evm
+  resource_spec:
+    components:
+      - name: infra
+        image_url: "@self"
+        command:
+          - /usr/local/bin/chaimir-chainlink-entrypoint
+        env:
+          - name: CHAIMIR_CHAINLINK_DATABASE_NAME
+            value: chainlink
+          - name: CHAIMIR_CHAINLINK_DATABASE_USER
+            value: chainlink
+        ports:
+          - name: http
+            container_port: 6688
+            service_port: 6688
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: "2"
+            memory: 3Gi
+        read_only_root_filesystem: false
+        mount_workspace: false
+        mount_domains:
+          - runtime-state
+        writable_mount_domains:
+          - runtime-state
+        readiness_probe:
+          type: tcp
+          port: http
+          period_seconds: 2
+          failure_threshold: 30
+    services:
+      - name: infra-chainlink-node-http
+        component: infra
+        ports:
+          - name: http
+            port: 6688
+            target_port: http
+            protocol: TCP
   bindings:
     - name: execution_chain
       capability: evm-json-rpc
@@ -56,6 +131,12 @@ infra:
       protocol: HTTP
       required_at_start: true
       config_binding: env:ETH_URL
+    - name: database
+      capability: postgres-compatible
+      endpoint: postgres
+      protocol: TCP
+      required_at_start: true
+      config_binding: env:CHAIMIR_CHAINLINK_DATABASE_ADDRESS
   roles:
     - oracle
     - vrf

@@ -61,6 +61,7 @@ type ComponentSpec struct {
 	Labels                 map[string]string    `json:"labels"`
 	MountWorkspace         *bool                `json:"mount_workspace"`
 	MountDomains           []string             `json:"mount_domains,omitempty"`
+	WritableMountDomains   []string             `json:"writable_mount_domains,omitempty"`
 	EphemeralMounts        []EphemeralMountSpec `json:"ephemeral_mounts"`
 	PrepullCommand         []string             `json:"prepull_command"`
 	PrepullHold            bool                 `json:"prepull_hold"`
@@ -70,9 +71,10 @@ type ComponentSpec struct {
 
 // PodSpec 描述一个工作负载 Pod 及其组件组。
 type PodSpec struct {
-	Name       string            `json:"name"`
-	Labels     map[string]string `json:"labels"`
-	Containers []ComponentSpec   `json:"containers"`
+	Name           string            `json:"name"`
+	Labels         map[string]string `json:"labels"`
+	InitContainers []ComponentSpec   `json:"init_containers,omitempty"`
+	Containers     []ComponentSpec   `json:"containers"`
 }
 
 // NetworkPortRef 描述网络策略放行的目标端口,优先使用端口名称。

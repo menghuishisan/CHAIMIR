@@ -16,6 +16,16 @@ labels:
   chaimir.io/source: thin-wrapper
 description: Foundry/Anvil EVM 运行时镜像。
 genesis_baked: true
+toolchain:
+  language: solidity
+  offline: true
+  compiler_versions:
+    - version: 0.8.20
+      executable: /usr/local/bin/solc-0.8.20
+    - version: 0.8.24
+      executable: /usr/local/bin/solc-0.8.24
+    - version: 0.8.26
+      executable: /usr/local/bin/solc-0.8.26
 source:
   type: thin-wrapper
 upstream:
@@ -32,6 +42,7 @@ env_keys:
     - CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
 secrets_required:
   - env: CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
+    secret_key: CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
     source: deploy/config/chaimir.env
     runtime_value: secret-or-payload
 data_driven: true
@@ -96,6 +107,11 @@ selftest:
         - sh
         - -lc
         - "forge --version && anvil --version && cast --version"
+    - name: solidity-compilers
+      command:
+        - sh
+        - -lc
+        - 'set -eu; for version in 0.8.20 0.8.24 0.8.26; do case "$(/usr/local/bin/solc-${version} --version)" in *"Version: ${version}"*) ;; *) exit 1 ;; esac; done'
 capability_selftest:
   deploy_payload:
     bytecode: "0x6005600c60003960056000f3600060005500"

@@ -19,11 +19,10 @@ func envOrDefault(key, fallback string) string {
 // main 校验持久化账本并把信号直接交给 Solana 验证器进程。
 func main() {
 	ledgerDir := envOrDefault("CHAIMIR_SOLANA_LEDGER_DIR", "/runtime-state/solana/ledger")
-	if info, err := os.Stat(ledgerDir); err != nil || !info.IsDir() {
-		if err == nil {
-			err = fmt.Errorf("path is not a directory")
-		}
-		fmt.Fprintf(os.Stderr, "Solana ledger directory is unavailable: %v\n", err)
+	// runtime-state is an empty PVC on first start; the runtime owns creation of
+	// its ledger directory so platform selftest does not require a host-side seed.
+	if err := os.MkdirAll(ledgerDir, 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "创建 Solana ledger 目录失败: %v\n", err)
 		os.Exit(1)
 	}
 

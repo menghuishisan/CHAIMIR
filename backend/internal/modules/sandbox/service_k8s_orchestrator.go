@@ -39,6 +39,8 @@ var errMetricsUnavailable = errors.New("kubernetes metrics api unavailable")
 
 const sandboxWorkloadServiceAccount = "sandbox-workload"
 
+const runtimeSelftestNamespacePrefix = "sbx-selftest-"
+
 // K8sOrchestrator 使用 client-go 创建、回收和预拉取沙箱资源。
 type K8sOrchestrator struct {
 	client *platformk8s.Client
@@ -197,6 +199,55 @@ func (o *K8sOrchestrator) DestroySandboxResources(ctx context.Context, sb Sandbo
 		return fmt.Errorf("删除沙箱 Namespace 失败: %w", err)
 	}
 	return waitNamespaceDeleted(ctx, o.client.Clientset(), sb.Namespace, o.cfg.ReadyPollIntervalSeconds)
+}
+
+// CleanupExpiredRuntimeSelftests 清理请求中断后遗留的运行时自检 Namespace。
+// 仅接受后端创建的 tenant=0 自检命名空间，不能把普通租户沙箱作为补偿目标。
+func (o *K8sOrchestrator) CleanupExpiredRuntimeSelftests(ctx context.Context, maxAge time.Duration) error {
+	return cleanupExpiredRuntimeSelftestNamespaces(ctx, o.client.Clientset(), maxAge, o.cfg.ReadyPollIntervalSeconds, time.Now())
+}
+
+// cleanupExpiredRuntimeSelftestNamespaces 按受限标签、名称和创建时间删除过期自检命名空间。
+func cleanupExpiredRuntimeSelftestNamespaces(ctx context.Context, cs kubernetes.Interface, maxAge time.Duration, pollSeconds int, now time.Time) error {
+	if cs == nil || maxAge <= 0 || pollSeconds <= 0 {
+		return fmt.Errorf("运行时自检补偿清理配置不正确")
+	}
+	namespaces, err := cs.CoreV1().Namespaces().List(ctx, metav1.ListOptions{LabelSelector: "app=chaimir,module=sandbox,chaimir.io/managed-by=chaimir-backend,chaimir.io/sandbox=true,chaimir.io/tenant-id=0"})
+	if err != nil {
+		return fmt.Errorf("列出运行时自检 Namespace 失败: %w", err)
+	}
+	var cleanupErrs []error
+	for index := range namespaces.Items {
+		namespace := &namespaces.Items[index]
+		if !runtimeSelftestNamespaceExpired(namespace, maxAge, now) {
+			continue
+		}
+		if err := cs.CoreV1().Namespaces().Delete(ctx, namespace.Name, namespaceDeleteOptions()); err != nil && !apierrors.IsNotFound(err) {
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("删除过期运行时自检 Namespace(%s)失败: %w", namespace.Name, err))
+			continue
+		}
+		if err := waitNamespaceDeleted(ctx, cs, namespace.Name, pollSeconds); err != nil {
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("等待过期运行时自检 Namespace(%s)删除失败: %w", namespace.Name, err))
+		}
+	}
+	return errors.Join(cleanupErrs...)
+}
+
+// runtimeSelftestNamespaceExpired 严格匹配平台自检资源，防止后台任务清理到普通租户沙箱。
+func runtimeSelftestNamespaceExpired(namespace *corev1.Namespace, maxAge time.Duration, now time.Time) bool {
+	if namespace == nil || maxAge <= 0 || namespace.CreationTimestamp.IsZero() || namespace.DeletionTimestamp != nil {
+		return false
+	}
+	name := strings.TrimSpace(namespace.Name)
+	if !strings.HasPrefix(name, runtimeSelftestNamespacePrefix) {
+		return false
+	}
+	sandboxID := strings.TrimPrefix(name, runtimeSelftestNamespacePrefix)
+	labels := namespace.Labels
+	if sandboxID == "" || labels["app"] != "chaimir" || labels["module"] != "sandbox" || labels["chaimir.io/managed-by"] != "chaimir-backend" || labels["chaimir.io/sandbox"] != "true" || labels["chaimir.io/tenant-id"] != "0" || labels["chaimir.io/sandbox-id"] != sandboxID {
+		return false
+	}
+	return !namespace.CreationTimestamp.Add(maxAge).After(now)
 }
 
 // namespaceDeleteOptions 使用后台级联触发命名空间回收;调用方仍需等待对象消失,保证业务状态不先行。
@@ -1031,8 +1082,8 @@ func (o *K8sOrchestrator) ensureRuntimeSecrets(ctx context.Context, plan CreateS
 			if name == "" || secretName == "" || secretKey == "" {
 				return fmt.Errorf("组件 %s 的 Secret 环境声明不完整", component.Name)
 			}
-			if secretName != "chaimir-secret" || secretKey != name {
-				return fmt.Errorf("组件 %s 的 Secret 只能引用平台受控键 %s", component.Name, name)
+			if secretName != "chaimir-secret" {
+				return fmt.Errorf("组件 %s 的 Secret 只能引用平台受控 Secret", component.Name)
 			}
 			keys[secretKey] = struct{}{}
 		}
@@ -1048,6 +1099,11 @@ func (o *K8sOrchestrator) ensureRuntimeSecrets(ctx context.Context, plan CreateS
 			}
 		}
 		for _, pod := range runtimePlan.Runtime.AdapterSpec.Pods {
+			for _, component := range pod.InitContainers {
+				if err := collect(component); err != nil {
+					return err
+				}
+			}
 			for _, component := range pod.Containers {
 				if err := collect(component); err != nil {
 					return err
@@ -1521,9 +1577,17 @@ func podGroupForPlan(plan CreateSandboxPlan) []workload.PodSpec {
 func runtimePodSpecs(plan RuntimePlan) []workload.PodSpec {
 	if len(plan.Runtime.AdapterSpec.Pods) > 0 {
 		pods := append([]workload.PodSpec(nil), plan.Runtime.AdapterSpec.Pods...)
+		declared := declaredContainerMap(plan.Runtime.AdapterSpec)
 		seen := map[string]struct{}{}
-		for _, pod := range pods {
-			for _, container := range pod.Containers {
+		for podIndex := range pods {
+			for containerIndex := range pods[podIndex].Containers {
+				container := &pods[podIndex].Containers[containerIndex]
+				// Explicit pod topology stores reference-only containers; resolve each
+				// reference to the single declared component so env, mounts, ports and
+				// security settings are preserved in the real Kubernetes Pod.
+				if definition, ok := declared[container.Name]; ok && podContainerIsReferenceOnly(*container) {
+					*container = definition
+				}
 				seen[container.Name] = struct{}{}
 			}
 		}
@@ -1599,6 +1663,10 @@ func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec workload.PodS
 		}
 		containers = append(containers, o.containerFromRuntime(container, image, runtimePlan.Runtime.AdapterSpec))
 	}
+	initContainers := make([]corev1.Container, 0, len(spec.InitContainers))
+	for _, container := range spec.InitContainers {
+		initContainers = append(initContainers, o.containerFromRuntime(container, container.ImageURL, runtimePlan.Runtime.AdapterSpec))
+	}
 	automount := false
 	enableServiceLinks := false
 	return &corev1.Pod{
@@ -1619,6 +1687,7 @@ func (o *K8sOrchestrator) podFromSpec(plan CreateSandboxPlan, spec workload.PodS
 			ServiceAccountName:           sandboxWorkloadServiceAccount,
 			RestartPolicy:                corev1.RestartPolicyNever,
 			SecurityContext:              podSecurityContext(),
+			InitContainers:               initContainers,
 			Containers:                   containers,
 			NodeSelector:                 copyStringMap(o.cfg.SandboxNodeSelector),
 			Tolerations:                  sandboxTolerations(o.cfg.SandboxNodeTolerations),
@@ -1669,6 +1738,14 @@ func affinityForSharedRuntime(plan CreateSandboxPlan, spec workload.PodSpec) *co
 		if shouldMountWorkspace(component) || len(component.MountDomains) > 0 {
 			needsSharedVolume = true
 			break
+		}
+	}
+	if !needsSharedVolume {
+		for _, component := range spec.InitContainers {
+			if shouldMountWorkspace(component) || len(component.MountDomains) > 0 {
+				needsSharedVolume = true
+				break
+			}
 		}
 	}
 	if !needsSharedVolume {
@@ -1774,6 +1851,19 @@ func podVolumesForPlan(plan CreateSandboxPlan) []corev1.Volume {
 		seen[volume.Name] = struct{}{}
 	}
 	for _, pod := range podGroupForPlan(plan) {
+		for _, container := range pod.InitContainers {
+			for _, mount := range container.EphemeralMounts {
+				name := runtimeEphemeralVolumeName(container.Name, mount.Name)
+				if _, ok := seen[name]; ok {
+					continue
+				}
+				seen[name] = struct{}{}
+				volumes = append(volumes, corev1.Volume{
+					Name:         name,
+					VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+				})
+			}
+		}
 		for _, container := range pod.Containers {
 			for _, mount := range container.EphemeralMounts {
 				name := runtimeEphemeralVolumeName(container.Name, mount.Name)
@@ -1835,13 +1925,18 @@ func toolDomainVolumeMounts(adapter AdapterSpec, component workload.ComponentSpe
 		domains[domain.Name] = domain
 	}
 	mounts := make([]corev1.VolumeMount, 0, len(component.MountDomains))
+	writable := make(map[string]struct{}, len(component.WritableMountDomains))
+	for _, raw := range component.WritableMountDomains {
+		writable[strings.TrimSpace(raw)] = struct{}{}
+	}
 	for _, raw := range component.MountDomains {
 		name := strings.TrimSpace(raw)
 		domain, ok := domains[name]
 		if !ok {
 			continue
 		}
-		mounts = append(mounts, corev1.VolumeMount{Name: domain.Name, MountPath: domain.MountPath, ReadOnly: true})
+		_, writableDomain := writable[name]
+		mounts = append(mounts, corev1.VolumeMount{Name: domain.Name, MountPath: domain.MountPath, ReadOnly: !writableDomain})
 	}
 	return mounts
 }

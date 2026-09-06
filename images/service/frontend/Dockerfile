@@ -31,9 +31,6 @@ USER root
 
 WORKDIR /src/frontend
 
-# 源码摘要必须参与复制层之前的命令,确保未提交改动不会复用旧的源码层。
-RUN test -n "${CHAIMIR_FRONTEND_SOURCE_DIGEST}"
-
 # 使用仓库声明的 pnpm 版本构建唯一 Web 应用,避免 CI 与本地工具链分叉。
 RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && corepack enable \
@@ -53,6 +50,14 @@ COPY frontend/apps/web/package.json ./apps/web/package.json
 # Vite 与 Nginx 共同读取同一份生产安全头配置,构建阶段只复制该真相源供 Vite 解析。
 COPY images/service/frontend/security-headers.conf /src/images/service/frontend/security-headers.conf
 
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && pnpm config set fetch-retries 3 \
+    && pnpm config set fetch-timeout 60000 \
+    && pnpm config set network-concurrency 8 \
+    && pnpm install --frozen-lockfile
+COPY frontend/packages ./packages
+COPY frontend/apps ./apps
 # Vite 只在构建期读取客户端变量;所有部署形态通过构建参数显式注入同一组值。
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
     VITE_WS_BASE_URL=${VITE_WS_BASE_URL} \
@@ -62,17 +67,11 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
     VITE_SIM_WORKER_COMMAND_TIMEOUT_MS=${VITE_SIM_WORKER_COMMAND_TIMEOUT_MS} \
     VITE_SIM_STEP_INTERVAL_MS=${VITE_SIM_STEP_INTERVAL_MS} \
     TURBO_CONCURRENCY=${TURBO_CONCURRENCY} \
+    TURBO_TELEMETRY_DISABLED=1 \
     NODE_OPTIONS=--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE}
-
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
-    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
-    && pnpm config set fetch-retries 3 \
-    && pnpm config set fetch-timeout 60000 \
-    && pnpm config set network-concurrency 8 \
-    && pnpm install --frozen-lockfile
-COPY frontend/packages ./packages
-COPY frontend/apps ./apps
-RUN test -n "${CHAIMIR_FRONTEND_SOURCE_DIGEST}" && pnpm build && \
+# 源码摘要只参与真正的源码构建层,避免每次前端改动都使依赖安装层失效。
+RUN --mount=type=cache,target=/src/frontend/.turbo,sharing=locked \
+    test -n "${CHAIMIR_FRONTEND_SOURCE_DIGEST}" && pnpm exec turbo run build --cache-dir=/src/frontend/.turbo && \
     mkdir -p /out && \
     cp -a apps/web/dist/. /out/
 

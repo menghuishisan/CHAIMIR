@@ -15,6 +15,7 @@ labels:
   chaimir.io/scope: sandbox
   chaimir.io/source: platform-built
 description: Optimism OP Labs 官方 OP Geth 源码重建执行层镜像。
+genesis_baked: true
 source:
   type: platform-built
 upstream:
@@ -22,7 +23,7 @@ upstream:
   image: oplabs-tools-artifacts/images/op-geth
   version: v1.101702.2
   digest: sha256:40c7bf1e70cd6022e26bcff6a437eceb47b55f61e49572b0f792ae2461fdaab1
-  upstream_tag: latest
+  upstream_tag: v1.101702.2
   source_repository: https://github.com/ethereum-optimism/op-geth
   source_commit: e8800cffe53d459cde8a07c8e8f1de9d86e79e07
   source_archive: https://github.com/ethereum-optimism/op-geth/archive/e8800cffe53d459cde8a07c8e8f1de9d86e79e07.tar.gz
@@ -74,6 +75,16 @@ capabilities:
 runtime:
   eco: evm
   adapter_level: 1
+  workload:
+    env:
+      - name: OP_GETH_DATA_DIR
+        value: /runtime-state/op-geth
+      - name: OP_GETH_GENESIS_PATH
+        value: /opt/chaimir/genesis/op-geth.json
+      - name: OP_GETH_RPC_PORT
+        value: "8545"
+      - name: OP_GETH_ENGINE_PORT
+        value: "8551"
   command_schema:
     executable: geth
     required_args:
@@ -101,6 +112,7 @@ env_keys:
     - OP_GETH_JWT_SECRET
 secrets_required:
   - env: OP_GETH_JWT_SECRET
+    secret_key: OP_GETH_JWT_SECRET
 ports:
   - name: rpc
     container_port: 8545

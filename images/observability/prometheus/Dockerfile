@@ -15,7 +15,7 @@ USER root
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && for attempt in 1 2 3 4 5 6 7 8; do \
-        apk add --cache-dir /var/cache/apk --update-cache bash=5.3.3-r1 gzip=1.14-r2 && break; \
+        apk add --cache-dir /var/cache/apk --update-cache bash=5.3.3-r1 gzip=1.14-r3 && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 3)); \
     done
@@ -79,7 +79,7 @@ RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 \
     --mount=type=cache,target=/tmp/go-cache,uid=1000,gid=1000 \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && for attempt in 1 2 3 4 5 6 7 8; do \
-        if timeout 900 go get golang.org/x/crypto@v0.53.0 golang.org/x/text@v0.39.0 google.golang.org/grpc@v1.82.1; then \
+        if timeout 900 go get golang.org/x/crypto@v0.55.0 golang.org/x/text@v0.41.0 google.golang.org/grpc@v1.82.1; then \
             break; \
         fi; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \

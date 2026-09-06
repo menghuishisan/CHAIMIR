@@ -45,7 +45,9 @@ ENV GOROOT=/usr/local/go \
 
 ADD --checksum=sha256:6b133c7b5a6a037a15c8b5ce02d7fcf94e98d90d121fb76b712c79eda9d36731 ${CILIUM_SOURCE_URL} /tmp/cilium-source.tar.gz
 ADD --checksum=sha256:c4637684ac8efbcc0bc55faf64e3920a7764a9ae8f4580945084c1a5b8b2d051 ${GOPS_SOURCE_URL} /tmp/gops-source.tar.gz
-RUN mkdir -p /src/cilium /go /tmp/go-cache \
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    --mount=type=cache,target=/tmp/go-cache,sharing=locked \
+    mkdir -p /src/cilium /go /tmp/go-cache \
     && tar -xzf /tmp/cilium-source.tar.gz -C /src/cilium --strip-components=1 \
     && rm -f /tmp/cilium-source.tar.gz \
     && chmod 0755 /usr/local/bin/prepare-cilium-source \
@@ -57,8 +59,8 @@ RUN mkdir -p /src/cilium /go /tmp/go-cache \
     && cd /src/cilium \
     && mkdir -p /.cache /go/bin \
     && chmod 0777 /.cache /go /go/bin /tmp/go-cache \
-    && rm -rf /go/pkg/mod /root/.cache /tmp/gops /tmp/gops-source.tar.gz
+    && rm -rf /root/.cache /tmp/gops /tmp/gops-source.tar.gz
 
 WORKDIR /src/cilium
 LABEL org.opencontainers.image.title="network/cilium-builder"
-LABEL org.opencontainers.image.description="Cilium v1.20.1 Alpine build base with x/text v0.39.0 vendored"
+LABEL org.opencontainers.image.description="Cilium v1.20.1 Alpine build base with security-fixed Go dependencies vendored"

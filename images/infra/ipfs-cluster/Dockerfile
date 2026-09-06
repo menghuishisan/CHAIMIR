@@ -28,9 +28,9 @@ RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${N
     && test "$(git rev-parse HEAD)" = "${IPFS_CLUSTER_COMMIT}" \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         if go get \
-            golang.org/x/crypto@v0.53.0 \
-            golang.org/x/net@v0.56.0 \
-            golang.org/x/text@v0.39.0 \
+            golang.org/x/crypto@v0.55.0 \
+            golang.org/x/net@v0.57.0 \
+            golang.org/x/text@v0.41.0 \
             google.golang.org/grpc@v1.82.1; then break; fi; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 5)); \
@@ -48,11 +48,11 @@ LABEL org.opencontainers.image.description="Chaimir IPFS Cluster coordination im
 # 集群配置和密钥由运行期注入,镜像只准备非 root 运行目录。
 COPY --from=cluster-build /out/ipfs-cluster-service /usr/local/bin/ipfs-cluster-service
 COPY --from=cluster-build /out/chaimir-ipfs-cluster-entrypoint /usr/local/bin/chaimir-ipfs-cluster-entrypoint
-COPY --chown=65532:65532 --from=cluster-build /tmp/chaimir-ipfs-cluster/runtime-state /runtime-state
-COPY --chown=65532:65532 --from=cluster-build /tmp/chaimir-ipfs-cluster/workspace /workspace
+COPY --chown=1000:1000 --from=cluster-build /tmp/chaimir-ipfs-cluster/runtime-state /runtime-state
+COPY --chown=1000:1000 --from=cluster-build /tmp/chaimir-ipfs-cluster/workspace /workspace
 
 ENV IPFS_CLUSTER_PATH=/runtime-state/ipfs-cluster
-USER nonroot:nonroot
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 9094 9095 9096
 ENTRYPOINT ["/usr/local/bin/chaimir-ipfs-cluster-entrypoint"]

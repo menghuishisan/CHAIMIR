@@ -3,7 +3,7 @@
 set -eu
 
 # RPC 只监听容器端口,外部入口由 M2 控制面生成的 Service/Gateway 代理。
-exec besu \
+exec /opt/besu/bin/besu \
   --data-path=/runtime-state/besu \
   --network=dev \
   --rpc-http-enabled=true \

@@ -20,10 +20,9 @@ LABEL org.opencontainers.image.description="Chaimir The Graph indexing node imag
 
 COPY --from=upstream /usr/local/bin/graph-node /usr/local/bin/graph-node
 COPY --from=entrypoint-build /out/chaimir-thegraph-entrypoint /usr/local/bin/chaimir-thegraph-entrypoint
-COPY --chown=65532:65532 --from=dirs /out/workspace /workspace
+COPY --chown=1000:1000 --from=dirs /out/workspace /workspace
 
-USER nonroot:nonroot
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8000 8020 8030 8040
-CMD ["graph-node"]
 ENTRYPOINT ["/usr/local/bin/chaimir-thegraph-entrypoint"]

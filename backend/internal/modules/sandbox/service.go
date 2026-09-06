@@ -36,6 +36,8 @@ type Orchestrator interface {
 	CreateSandboxResources(ctx context.Context, plan CreateSandboxPlan) error
 	// DestroySandboxResources 删除普通沙箱资源。
 	DestroySandboxResources(ctx context.Context, sb Sandbox) error
+	// CleanupExpiredRuntimeSelftests 补偿请求内清理失败的无持久化运行时自检资源。
+	CleanupExpiredRuntimeSelftests(ctx context.Context, maxAge time.Duration) error
 	// StopComputeKeepSnapshot 释放计算工作负载但保留快照命名空间。
 	StopComputeKeepSnapshot(ctx context.Context, sb Sandbox) error
 	// CreateSnapshot 创建 CSI VolumeSnapshot 并返回 namespaced 引用与实际覆盖卷域。
@@ -353,7 +355,7 @@ func (s *Service) resolveSandboxCreateDependencies(ctx context.Context, tx TxSto
 		if err != nil {
 			return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
 		}
-		if image.Version != frozen.ImageVersion || image.ImageURL != frozen.ImageURL || image.RuntimeID != frozen.RuntimeID || !image.GenesisBaked {
+		if image.Version != frozen.ImageVersion || image.ImageURL != frozen.ImageURL || image.RuntimeID != frozen.RuntimeID {
 			return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxRuntimeImageNotFound
 		}
 		prepull, err := tx.GetCompositionPrepullForUpdate(ctx, image.ID, input.CompositionSnapshot.Digest)
@@ -758,7 +760,7 @@ func (s *Service) planForExistingSandbox(ctx context.Context, sb Sandbox) (Creat
 				return apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
 			}
 			prepull, prepullErr := tx.GetCompositionPrepullForUpdate(ctx, image.ID, snapshot.Digest)
-			if image.ImageURL != frozen.ImageURL || image.Version != frozen.ImageVersion || prepullErr != nil || prepull.Status != ImagePrepullSucceeded || !image.GenesisBaked {
+			if image.ImageURL != frozen.ImageURL || image.Version != frozen.ImageVersion || prepullErr != nil || prepull.Status != ImagePrepullSucceeded {
 				return apperr.ErrSandboxRuntimeUnavailable
 			}
 			runtimePlans = append(runtimePlans, RuntimePlan{InstanceCode: frozen.InstanceCode, Runtime: runtime, Image: image})
@@ -1077,7 +1079,7 @@ func (s *Service) workspaceRuntimeForSandbox(ctx context.Context, sb Sandbox) (R
 	}); err != nil {
 		return Runtime{}, RuntimeImage{}, err
 	}
-	if runtime.Code != frozen.Code || runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed || image.Version != frozen.ImageVersion || image.ImageURL != frozen.ImageURL || !image.GenesisBaked {
+	if runtime.Code != frozen.Code || runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed || image.Version != frozen.ImageVersion || image.ImageURL != frozen.ImageURL {
 		return Runtime{}, RuntimeImage{}, fmt.Errorf("工作区运行时当前不可用")
 	}
 	if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &runtime.AdapterSpec); err != nil {

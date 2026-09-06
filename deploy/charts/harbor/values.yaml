@@ -19,9 +19,11 @@ expose:
       core: registry.chaimir.io
     className: nginx
     annotations:
-      ingress.kubernetes.io/ssl-redirect: "true"
-      nginx.ingress.kubernetes.io/ssl-redirect: "true"
-      nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+      # Docker Desktop 的 canonical 443 入口已完成 TLS 终止；在此处再次强制
+      # 重定向会让 registry blob HEAD 回到同一 HTTPS URL，导致 BuildKit 重定向循环。
+      ingress.kubernetes.io/ssl-redirect: "false"
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+      nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
 
 persistence:
   enabled: true

@@ -34,13 +34,47 @@ capabilities:
   requires:
     - evm-json-rpc
   conflicts: []
-  cardinality: one
+  cardinality: many
   placement: sandbox
   config_schema: {}
   student_access: private
 infra:
   eco_tags:
     - evm
+  resource_spec:
+    components:
+      - name: infra
+        image_url: "@self"
+        ports:
+          - name: http
+            container_port: 8080
+            service_port: 8080
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+        readiness_probe:
+          type: tcp
+          port: http
+          period_seconds: 2
+          failure_threshold: 30
+        read_only_root_filesystem: true
+        mount_workspace: false
+        ephemeral_mounts:
+          - name: gateway-tmp
+            mount_path: /tmp
+    services:
+      - name: infra-rpc-gateway-http
+        component: infra
+        ports:
+          - name: http
+            port: 8080
+            target_port: http
+            protocol: TCP
   bindings:
     - name: upstream
       capability: evm-json-rpc

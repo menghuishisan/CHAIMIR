@@ -37,9 +37,9 @@ POLICY_CONTROLLER_WEBHOOK_CPU_LIMIT := 500m
 # 真实快照能力仍取决于生产集群的 CSI 驱动和 VolumeSnapshotClass。
 SNAPSHOTTER_VERSION := v8.6.0
 # gVisor 节点运行时使用对象版本与 SHA512 双重固定,禁止跟随 latest 内容漂移。
-GVISOR_RUNSC_URL := https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/runsc?generation=1787184196516323
+GVISOR_RUNSC_URL := https://storage.googleapis.com/gvisor/releases/release/20260817.0/x86_64/runsc?generation=1787184197271930
 GVISOR_RUNSC_SHA512 := 84936438d583ec976800f464e75a83e1515f0890b451b9b4db219c4472b54ca9b106a6772ee683f1e64cce2128871d7637b14d800591f8451b8137f6c39fb2ef
-GVISOR_SHIM_URL := https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/containerd-shim-runsc-v1?generation=1787184195226077
+GVISOR_SHIM_URL := https://storage.googleapis.com/gvisor/releases/release/20260817.0/x86_64/containerd-shim-runsc-v1?generation=1787184196456562
 GVISOR_SHIM_SHA512 := b60d1c418b841ab046951cc7a91f490a221198fbe81ec55dc364432578fddd44e97063793ce6651be397af2f64ec47170dff77a45db277819c3fb08fec9f3ced
 
 .NOTPARALLEL: dev-up dev-start dev-refresh dev-stop
@@ -424,13 +424,14 @@ harbor-up: supply-chain-secret-check ## 验证已签名 bootstrap bundle 后经�
 	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_KUBECONFIG_HOST_PATH=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_HARBOR_KUBECONFIG_HOST_PATH"; exit 1; }
 	@test -n "$$(sed -n 's/^HARBOR_ADMIN_PASSWORD=//p' $(SUPPLY_CHAIN_SECRET_FILE))" || { echo "请先在 $(SUPPLY_CHAIN_SECRET_FILE) 填写 HARBOR_ADMIN_PASSWORD"; exit 1; }
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-harbor-chart.ps1 -RepoRoot "$$(cd .. && pwd)" -ConfigPath "$(SUPPLY_CHAIN_CONFIG)"
+	# Harbor release 字段若被历史 kubectl-patch 占用，必须由容器化 Helm 的 SSA 收回，禁止手工 patch 或资源替换。
 	SUPPLY_CHAIN_KUBECONFIG_HOST_PATH="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_KUBECONFIG_HOST_PATH=//p' $(SUPPLY_CHAIN_CONFIG))" \
 	SUPPLY_CHAIN_HARBOR_RELEASE_NAME="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_RELEASE_NAME=//p' $(SUPPLY_CHAIN_CONFIG))" \
 	SUPPLY_CHAIN_HARBOR_NAMESPACE="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_NAMESPACE=//p' $(SUPPLY_CHAIN_CONFIG))" \
 	SUPPLY_CHAIN_HARBOR_VALUES_PATH="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_VALUES_PATH=//p' $(SUPPLY_CHAIN_CONFIG))" \
 	SUPPLY_CHAIN_HARBOR_EXTERNAL_URL="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_EXTERNAL_URL=//p' $(SUPPLY_CHAIN_CONFIG))" \
 	HARBOR_ADMIN_PASSWORD="$$(sed -n 's/^HARBOR_ADMIN_PASSWORD=//p' $(SUPPLY_CHAIN_SECRET_FILE))" \
-		docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm --entrypoint sh helm -lc 'helm upgrade --install "$$SUPPLY_CHAIN_HARBOR_RELEASE_NAME" /workspace/.tmp/harbor-bootstrap/chart/harbor --namespace "$$SUPPLY_CHAIN_HARBOR_NAMESPACE" --create-namespace -f "/workspace/$$SUPPLY_CHAIN_HARBOR_VALUES_PATH" -f /workspace/.tmp/harbor-bootstrap/chart/bootstrap-images.values.yaml --set-string externalURL="$$SUPPLY_CHAIN_HARBOR_EXTERNAL_URL" --set-string harborAdminPassword="$$HARBOR_ADMIN_PASSWORD"'
+		docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm --entrypoint sh helm -lc 'helm upgrade --install --server-side=true --force-conflicts "$$SUPPLY_CHAIN_HARBOR_RELEASE_NAME" /workspace/.tmp/harbor-bootstrap/chart/harbor --namespace "$$SUPPLY_CHAIN_HARBOR_NAMESPACE" --create-namespace -f "/workspace/$$SUPPLY_CHAIN_HARBOR_VALUES_PATH" -f /workspace/.tmp/harbor-bootstrap/chart/bootstrap-images.values.yaml --set-string externalURL="$$SUPPLY_CHAIN_HARBOR_EXTERNAL_URL" --set-string harborAdminPassword="$$HARBOR_ADMIN_PASSWORD"'
 
 .PHONY: harbor-projects-ensure
 harbor-projects-ensure: supply-chain-secret-check ## 按镜像分类创建 Harbor project 和供应链 robot

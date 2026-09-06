@@ -13,15 +13,21 @@ labels:
   chaimir.io/student-access: "true"
   chaimir.io/sensitivity: student-tool
   chaimir.io/scope: sandbox
-  chaimir.io/source: thin-wrapper
+  chaimir.io/source: platform-built
 description: EVM 区块链浏览器镜像。
 source:
-  type: thin-wrapper
+  type: platform-built
 upstream:
-  image: blockscout/blockscout:6.9.2
-  version: 6.9.2
-  digest: sha256:1d3f8fc81c5719e5b1ce37427ebb04082d9d6a57f8c49d0c693a21fbcfecc34d
-  reuse_policy: thin-wrapper
+  repository: https://github.com/blockscout/blockscout
+  version: v11.2.8
+  source_commit: 01a56de270dfbbdf4584262a3824ae6f8a30da82
+  source_archive: https://github.com/blockscout/blockscout/archive/refs/tags/v11.2.8.tar.gz
+  source_sha256: 223e504a3fd48157b90e0a6fb4ac6dc6432b7acfb19cbf7e0e99d7798413cf5e
+  assets_builder_arg: NODE_BUILDER_IMAGE
+  rebuild_policy: source-rebuild
+  build_base_image: hexpm/elixir
+  build_base_version: 1.19.4-erlang-27.3.4.6-alpine-3.22.2
+  build_base_digest: sha256:31a23456941cff0f9b2aa5083e42d3371538e6e7032fc49185f6f4e87bcaacdd
 env_keys:
   config:
     - CHAIMIR_BLOCKSCOUT_DATABASE_ADDRESS
@@ -33,9 +39,11 @@ env_keys:
     - POSTGRES_PASSWORD
 secrets_required:
   - env: SECRET_KEY_BASE
+    secret_key: SECRET_KEY_BASE
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
   - env: POSTGRES_PASSWORD
+    secret_key: PG_PASSWORD
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
 data_driven: true
@@ -77,10 +85,12 @@ tool:
         command:
           - /usr/local/bin/chaimir-blockscout-entrypoint
         env:
+          - name: DISABLE_WEBAPP
+            value: "false"
           - name: ETHEREUM_JSONRPC_VARIANT
             value: geth
-          - name: ECTO_USE_SSL
-            value: "false"
+          - name: ECTO_SSL_MODE
+            value: disable
           - name: PORT
             value: "4000"
           - name: DISABLE_EXCHANGE_RATES

@@ -58,7 +58,7 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 		if problem.ContestID != contestID {
 			return apperr.ErrContestProblemInvalid
 		}
-		team, err := s.currentAccountTeam(ctx, tx, organizerTenantID, contestID, id.AccountID)
+		team, err := s.currentAccountTeam(ctx, tx, organizerTenantID, id.TenantID, contestID, id.AccountID)
 		if err != nil {
 			return err
 		}
@@ -110,7 +110,7 @@ func (s *Service) ListBattleEntries(ctx context.Context, contestID int64, page, 
 	var entries []BattleEntry
 	var total int64
 	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
-		team, err := s.currentAccountTeam(ctx, tx, organizerTenantID, contestID, id.AccountID)
+		team, err := s.currentAccountTeam(ctx, tx, organizerTenantID, id.TenantID, contestID, id.AccountID)
 		if err != nil {
 			return err
 		}
@@ -155,7 +155,7 @@ func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, page, 
 			return err
 		}
 		if canManageContest(id.AccountID, isSchoolAdmin, contest) != nil {
-			team, err := s.currentAccountTeam(ctx, tx, organizerTenantID, contestID, id.AccountID)
+			team, err := s.currentAccountTeam(ctx, tx, organizerTenantID, id.TenantID, contestID, id.AccountID)
 			if err != nil {
 				return err
 			}
@@ -189,7 +189,7 @@ func (s *Service) GetBattleReplayWindow(ctx context.Context, contestID int64, pa
 	var total, pending int64
 	var checkpoint BattleReplayCheckpoint
 	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
-		team, err := s.currentAccountTeam(ctx, tx, organizerTenantID, contestID, id.AccountID)
+		team, err := s.currentAccountTeam(ctx, tx, organizerTenantID, id.TenantID, contestID, id.AccountID)
 		if err != nil {
 			return err
 		}

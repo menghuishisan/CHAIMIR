@@ -2,6 +2,7 @@
 package judge
 
 import (
+	"encoding/json"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -28,6 +29,9 @@ type JudgerExecutionSpec struct {
 
 // JudgerResourceSpec 描述数据库中唯一持久化的判题执行事实。
 type JudgerResourceSpec struct {
+	// DisabledReason records why a runtime-backed judger has no frozen composition yet.
+	// It keeps the directory fail-closed without serializing an empty snapshot as if it were usable.
+	DisabledReason      string                               `json:"disabled_reason,omitempty"`
 	CompositionSnapshot contracts.SandboxCompositionSnapshot `json:"composition_snapshot,omitempty"`
 	GenesisRef          string                               `json:"genesis_ref,omitempty"`
 	InitScriptRef       string                               `json:"init_script_ref,omitempty"`
@@ -38,6 +42,25 @@ type JudgerResourceSpec struct {
 	MaxRetries          int32                                `json:"max_retries,omitempty"`
 	SuiteArchiveName    string                               `json:"suite_archive_name,omitempty"`
 	Selftest            map[string]any                       `json:"selftest,omitempty"`
+}
+
+// MarshalJSON omits the zero composition snapshot so a disabled judger cannot
+// be mistaken for one with a compiled, executable sandbox closure.
+func (s JudgerResourceSpec) MarshalJSON() ([]byte, error) {
+	type alias JudgerResourceSpec
+	payload, err := json.Marshal(alias(s))
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(s.CompositionSnapshot.Digest) != "" {
+		return payload, nil
+	}
+	fields := map[string]json.RawMessage{}
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return nil, err
+	}
+	delete(fields, "composition_snapshot")
+	return json.Marshal(fields)
 }
 
 // parseJudgerExecutionSpec 解析并校验平台管理员提交的执行策略。

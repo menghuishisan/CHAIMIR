@@ -6,8 +6,9 @@ LABEL org.opencontainers.image.description="Chaimir PostgreSQL instance for The 
 
 # The Graph 索引库运行在沙箱协同容器中,需满足 M2 统一 1000:1000 身份契约。
 RUN apk upgrade --no-cache \
-    && mkdir -p /var/lib/postgresql/data /var/run/postgresql /workspace \
+    && mkdir -p /var/lib/postgresql/data /var/run/postgresql /runtime-state/postgres /workspace \
     && chown -R 1000:1000 /var/lib/postgresql /var/run/postgresql /workspace \
+    && chown -R 1000:1000 /runtime-state/postgres \
     && rm -f /usr/local/bin/gosu
 
 USER 1000:1000

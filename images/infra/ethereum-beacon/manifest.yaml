@@ -13,10 +13,10 @@ labels:
   chaimir.io/student-access: "false"
   chaimir.io/sensitivity: sandbox-infra
   chaimir.io/scope: sandbox
-  chaimir.io/source: upstream-pinned
+  chaimir.io/source: thin-wrapper
 description: Sigma Prime Lighthouse 官方 Beacon Node 镜像。
 source:
-  type: upstream-pinned
+  type: thin-wrapper
 upstream:
   registry: docker.io
   image: sigp/lighthouse
@@ -24,41 +24,106 @@ upstream:
   digest: sha256:cdb2a6e5eb6197091896b4dac5e607ce696e09355614b56cbe5fb40b1a4dac29
   source_repository: https://github.com/sigp/lighthouse
   license: Apache-2.0
-  reuse_policy: upstream-pinned
+  reuse_policy: thin-wrapper
 data_driven: true
 capabilities:
   provides:
     - ethereum-beacon-api
     - beacon-node
     - consensus-state
-  requires: []
+  requires:
+    - evm-engine-api
   conflicts: []
   cardinality: one
   placement: sandbox
   config_schema:
     type: object
     additionalProperties: false
-    required: [network, data_dir]
+    required: [network, data_dir, checkpoint_sync_url]
     properties:
       network:
         type: string
+        x-chaimir-env: infra/BEACON_NETWORK
       data_dir:
         type: string
-        x-chaimir-mount-domain: runtime-state
+        x-chaimir-env: infra/BEACON_DATA_DIR
+      checkpoint_sync_url:
+        type: string
+        x-chaimir-env: infra/BEACON_CHECKPOINT_SYNC_URL
   student_access: private
 infra:
   eco_tags: [evm]
+  resource_spec:
+    components:
+      - name: infra
+        image_url: "@self"
+        env:
+          - name: BEACON_NETWORK
+            value: mainnet
+          - name: BEACON_DATA_DIR
+            value: /runtime-state/lighthouse
+          - name: BEACON_CHECKPOINT_SYNC_URL
+            value: ""
+          - name: BEACON_HTTP_PORT
+            value: "5052"
+        ports:
+          - name: http
+            container_port: 5052
+            service_port: 5052
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: "2"
+            memory: 4Gi
+        read_only_root_filesystem: false
+        mount_workspace: false
+        mount_domains:
+          - runtime-state
+        writable_mount_domains:
+          - runtime-state
+        readiness_probe:
+          type: http
+          path: /eth/v1/node/health
+          port: http
+          period_seconds: 2
+          failure_threshold: 30
+    services:
+      - name: infra-ethereum-beacon-http
+        component: infra
+        ports:
+          - name: http
+            port: 5052
+            target_port: http
+            protocol: TCP
+  bindings:
+    - name: execution_chain
+      capability: evm-engine-api
+      endpoint: engine
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:BEACON_EXECUTION_ENDPOINT
   roles: [beacon, consensus-api-provider]
   command_schema:
     executable: lighthouse
-    required_args: [beacon, --http, --http-address, --http-port]
+    required_args: [beacon_node, --execution-endpoint, --http, --http-address, --http-port]
     forbidden_args: [validator, account]
 env_keys:
   config:
+    - BEACON_EXECUTION_ENDPOINT
     - BEACON_NETWORK
     - BEACON_DATA_DIR
+    - BEACON_CHECKPOINT_SYNC_URL
     - BEACON_HTTP_PORT
-  secret: []
+  secret:
+    - BEACON_EXECUTION_JWT
+secrets_required:
+  - env: BEACON_EXECUTION_JWT
+    secret_key: OP_GETH_JWT_SECRET
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
 ports:
   - name: http
     container_port: 5052
@@ -99,3 +164,6 @@ supply_chain:
   trivy_required: true
   cosign_required: true
   pull_by_digest: true
+build:
+  context: images/infra/ethereum-beacon
+  dockerfile: Dockerfile

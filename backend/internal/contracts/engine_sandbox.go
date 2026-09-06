@@ -101,6 +101,8 @@ type SandboxPrivateSidecarSpec struct {
 	ImageURL               string                      `json:"image_url"`
 	Command                []string                    `json:"command"`
 	Args                   []string                    `json:"args"`
+	PrepullCommand         []string                    `json:"prepull_command"`
+	PrepullHold            bool                        `json:"prepull_hold"`
 	Env                    []SandboxEnvVarSpec         `json:"env"`
 	Resources              SandboxResourceSpec         `json:"resources"`
 	Workdir                string                      `json:"workdir"`

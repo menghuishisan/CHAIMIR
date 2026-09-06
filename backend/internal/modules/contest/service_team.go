@@ -178,15 +178,15 @@ func (s *Service) LockTeam(ctx context.Context, teamID int64) (TeamDTO, error) {
 }
 
 // currentAccountTeam 读取当前账号在竞赛内的队伍并带成员列表。
-func (s *Service) currentAccountTeam(ctx context.Context, tx TxStore, tenantID, contestID, accountID int64) (Team, error) {
-	team, err := tx.GetTeamForAccount(ctx, tenantID, contestID, tenantID, accountID)
+func (s *Service) currentAccountTeam(ctx context.Context, tx TxStore, organizerTenantID, memberTenantID, contestID, accountID int64) (Team, error) {
+	team, err := tx.GetTeamForAccount(ctx, organizerTenantID, contestID, memberTenantID, accountID)
 	if err != nil {
 		if isNoRows(err) {
 			return Team{}, apperr.ErrContestTeamNotFound
 		}
 		return Team{}, err
 	}
-	return tx.GetTeam(ctx, tenantID, team.ID)
+	return tx.GetTeam(ctx, organizerTenantID, team.ID)
 }
 
 // ensureTeamAccess 校验当前账号是队伍成员。

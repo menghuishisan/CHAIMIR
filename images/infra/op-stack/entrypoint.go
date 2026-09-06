@@ -13,7 +13,7 @@ import (
 )
 
 func main() {
-	for _, name := range []string{"OP_NODE_L1_ETH_RPC", "OP_NODE_L2_ENGINE_RPC", "OP_NODE_L1_BEACON", "OP_NODE_ROLLUP_CONFIG", "CHAIMIR_OP_NODE_L2_ENGINE_JWT"} {
+	for _, name := range []string{"OP_NODE_L1_ETH_RPC", "OP_NODE_L2_ENGINE_RPC", "OP_NODE_L1_BEACON", "OP_NODE_ROLLUP_CONFIG", "OP_GETH_JWT_SECRET"} {
 		requiredEnv(name)
 	}
 	validateURL("OP_NODE_L1_ETH_RPC", os.Getenv("OP_NODE_L1_ETH_RPC"), "http", "https", "ws", "wss")
@@ -25,12 +25,12 @@ func main() {
 		fail("OP_NODE_ROLLUP_CONFIG must point to a mounted rollup config file")
 	}
 	validateRollupConfig(rollupConfig)
-	jwt := strings.TrimSpace(os.Getenv("CHAIMIR_OP_NODE_L2_ENGINE_JWT"))
+	jwt := strings.TrimSpace(os.Getenv("OP_GETH_JWT_SECRET"))
 	if len(jwt) != 64 {
-		fail("CHAIMIR_OP_NODE_L2_ENGINE_JWT must contain 32 bytes as 64 hexadecimal characters")
+		fail("OP_GETH_JWT_SECRET must contain 32 bytes as 64 hexadecimal characters")
 	}
 	if _, err := hex.DecodeString(jwt); err != nil {
-		fail("CHAIMIR_OP_NODE_L2_ENGINE_JWT is not valid hexadecimal")
+		fail("OP_GETH_JWT_SECRET is not valid hexadecimal")
 	}
 	secretPath := "/runtime-state/op-node/jwt.hex"
 	if err := os.MkdirAll(filepath.Dir(secretPath), 0700); err != nil {

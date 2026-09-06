@@ -62,9 +62,8 @@ selftest:
     - name: syntax
       command:
         - python
-        - -m
-        - py_compile
-        - /collector/collector.py
+        - -c
+        - "import ast,pathlib; ast.parse(pathlib.Path('/collector/collector.py').read_text())"
 supply_chain:
   sbom: true
   trivy_required: true

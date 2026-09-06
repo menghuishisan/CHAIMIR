@@ -11,9 +11,8 @@
  *
  * 三者都用分片版(带 unicode-range 的 @font-face):浏览器只下载页面实际用到的
  * 汉字分片。整体子集版(chinese-simplified)只有一条声明,但任一汉字都会触发
- * 1–2 MB 的整包下载,对首屏更差。
+ * 1–2 MB 的整包下载,对首屏更差。字体 CSS 与二进制由 Web 构建插件作为同源
+ * 静态资源输出,由 apps/web/index.html 的 stylesheet link 加载,避免每次应用
+ * 源码构建都让 Rollup 重新解析全部分片。
  * @fontsource 自带 font-display: swap。
  */
-@import "@fontsource-variable/noto-sans-sc/index.css";
-@import "@fontsource-variable/jetbrains-mono/index.css";
-@import "@fontsource/zcool-qingke-huangyou/400.css";

@@ -33,7 +33,7 @@ function pruneNonces(now) {
   }
 }
 
-function verifyServiceSignature(request, reply) {
+async function verifyServiceSignature(request, reply) {
   const timestamp = Number(request.headers["x-chaimir-timestamp"]);
   const nonce = String(request.headers["x-chaimir-nonce"] || "");
   const signature = String(request.headers["x-chaimir-signature"] || "");

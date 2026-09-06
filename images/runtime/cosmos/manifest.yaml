@@ -43,6 +43,16 @@ capabilities:
 runtime:
   eco: cosmos
   adapter_level: 1
+  workload:
+    env:
+      - name: CHAIMIR_COSMOS_HOME
+        value: /runtime-state/cosmos
+      - name: CHAIMIR_COSMOS_RPC_LADDR
+        value: tcp://0.0.0.0:26657
+      - name: CHAIMIR_COSMOS_REST_ADDRESS
+        value: tcp://0.0.0.0:1317
+      - name: CHAIMIR_COSMOS_GRPC_ADDRESS
+        value: 0.0.0.0:9090
 env_keys:
   config:
     - CHAIMIR_COSMOS_HOME

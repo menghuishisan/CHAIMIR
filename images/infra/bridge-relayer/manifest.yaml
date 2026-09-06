@@ -32,20 +32,59 @@ capabilities:
   conflicts: []
   cardinality: one
   placement: sandbox
-  config_schema: {}
+  config_schema:
+    type: object
+    additionalProperties: false
+    required:
+      - base_config
+      - relay_chains
+    properties:
+      base_config:
+        type: string
+        minLength: 1
+        x-chaimir-env: infra/HYP_BASE_CONFIG
+      relay_chains:
+        type: string
+        minLength: 1
+        x-chaimir-env: infra/HYP_RELAYCHAINS
   student_access: private
 infra:
   eco_tags:
     - evm
+  resource_spec:
+    components:
+      - name: infra
+        image_url: "@self"
+        env:
+          - name: HYP_DB
+            value: /runtime-state/hyperlane/db
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+        read_only_root_filesystem: true
+        mount_workspace: false
+        mount_domains:
+          - runtime-state
+        writable_mount_domains:
+          - runtime-state
+        ephemeral_mounts:
+          - name: relayer-tmp
+            mount_path: /tmp
   bindings:
     - name: source_chain
       capability: evm-json-rpc
+      source_endpoint: component
       endpoint: rpc
       protocol: HTTP
       required_at_start: true
       config_binding: env:HYP_SOURCE_RPC
     - name: destination_chain
       capability: evm-json-rpc
+      source_endpoint: component
       endpoint: rpc
       protocol: HTTP
       required_at_start: true
@@ -63,6 +102,11 @@ env_keys:
     - HYP_DESTINATION_RPC
   secret:
     - HYP_CHAINS
+secrets_required:
+  - env: HYP_CHAINS
+    secret_key: HYP_CHAINS
+    source: external-kms
+    runtime_value: secret-or-kms
 ports: []
 security:
   run_as_non_root: true

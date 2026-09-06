@@ -32,6 +32,9 @@ env_keys:
     - CHAIMIR_RUNTIME_RPC_PORT
     - CHAIMIR_CHAIN_STATE_DIR
   secret: []
+secrets_required:
+  - env: CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
+    secret_key: CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
 capabilities:
   provides:
     - chain-runtime

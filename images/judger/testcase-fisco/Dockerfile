@@ -12,6 +12,7 @@ LABEL org.opencontainers.image.title="judger/testcase-fisco"
 LABEL org.opencontainers.image.description="Chaimir FISCO BCOS testcase judger image"
 
 USER root
+RUN apk add --no-cache curl openssl
 RUN mkdir -p /judge \
     && chown -R 1000:1000 /judge
 

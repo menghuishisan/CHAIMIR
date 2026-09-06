@@ -52,6 +52,11 @@ func prepareRepo() error {
 	settings := [][]string{
 		{"config", "Addresses.API", "/ip4/0.0.0.0/tcp/5001"},
 		{"config", "Addresses.Gateway", "/ip4/0.0.0.0/tcp/8080"},
+		{"config", "--json", "AutoConf.Enabled", "false"},
+		{"config", "--json", "Bootstrap", "[]"},
+		{"config", "--json", "Routing.DelegatedRouters", "[]"},
+		{"config", "--json", "Ipns.DelegatedPublishers", "[]"},
+		{"config", "--json", "DNS.Resolvers", "{}"},
 		{"config", "Plugins.Plugins.telemetry.Config.Mode", "off"},
 	}
 	for _, setting := range settings {

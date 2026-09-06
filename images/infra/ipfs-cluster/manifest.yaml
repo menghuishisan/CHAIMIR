@@ -37,7 +37,7 @@ capabilities:
   requires:
     - ipfs-node
   conflicts: []
-  cardinality: one
+  cardinality: many
   placement: sandbox
   config_schema: {}
   student_access: private
@@ -65,6 +65,59 @@ infra:
       protocol: HTTP
       required_at_start: true
       config_binding: env:CHAIMIR_IPFS_API_URL
+  resource_spec:
+    components:
+      - name: infra
+        image_url: "@self"
+        env:
+          - name: IPFS_CLUSTER_PATH
+            value: /runtime-state/ipfs-cluster
+        ports:
+          - name: cluster-api
+            container_port: 9094
+            service_port: 9094
+            protocol: TCP
+          - name: api
+            container_port: 9095
+            service_port: 9095
+            protocol: TCP
+          - name: cluster
+            container_port: 9096
+            service_port: 9096
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi
+        readiness_probe:
+          type: tcp
+          port: cluster-api
+          period_seconds: 2
+          failure_threshold: 30
+        read_only_root_filesystem: false
+        mount_workspace: false
+        mount_domains:
+          - runtime-state
+        writable_mount_domains:
+          - runtime-state
+    services:
+      - name: infra-ipfs-cluster-api
+        component: infra
+        ports:
+          - name: cluster-api
+            port: 9094
+            target_port: cluster-api
+            protocol: TCP
+      - name: infra-ipfs-cluster-ipfs-api
+        component: infra
+        ports:
+          - name: api
+            port: 9095
+            target_port: api
+            protocol: TCP
 ports:
   - name: cluster-api
     container_port: 9094

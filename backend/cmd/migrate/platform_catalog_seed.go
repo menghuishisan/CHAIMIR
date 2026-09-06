@@ -24,7 +24,11 @@ type platformRuntimeManifest struct {
 	Runtime                            struct {
 		Eco          string `json:"eco"`
 		AdapterLevel int16  `json:"adapter_level"`
-		Native       struct {
+		Workload     struct {
+			Env            []workload.EnvVarSpec    `json:"env"`
+			InitContainers []workload.ComponentSpec `json:"init_containers"`
+		} `json:"workload"`
+		Native struct {
 			Helper        string              `json:"helper"`
 			Profile       string              `json:"profile"`
 			ExecTarget    string              `json:"exec_target"`
@@ -64,8 +68,9 @@ type platformInfraManifest struct {
 	Labels                             map[string]string    `json:"labels"`
 	Capabilities                       manifestCapabilities `json:"capabilities"`
 	Infra                              struct {
-		EcoTags  []string          `json:"eco_tags"`
-		Bindings []manifestBinding `json:"bindings"`
+		EcoTags      []string          `json:"eco_tags"`
+		Bindings     []manifestBinding `json:"bindings"`
+		ResourceSpec map[string]any    `json:"resource_spec"`
 	} `json:"infra"`
 	Ports           []toolManifestPort          `json:"ports"`
 	Security        toolManifestSecurity        `json:"security"`
@@ -78,6 +83,7 @@ type platformInfraManifest struct {
 // manifestSecretRequirement 描述 manifest 对平台 Secret 键的最小运行期引用。
 type manifestSecretRequirement struct {
 	Env          string `json:"env"`
+	SecretKey    string `json:"secret_key"`
 	Source       string `json:"source"`
 	RuntimeValue string `json:"runtime_value"`
 }
@@ -231,7 +237,8 @@ func syncPlatformRuntime(ctx context.Context, tx pgx.Tx, root string) error {
 		}
 		runtimeID := platformCatalogRuntimeID(m.Name)
 		imageID := platformCatalogRuntimeImageID(m.Name)
-		if err := execJSON(ctx, tx, `INSERT INTO runtime (id,code,name,eco,adapter_level,adapter_spec,capability_impl,selftest_status,selftest_detail,status) VALUES ($1,$2,$3,$4,$5,$6,'sandbox-exec',$7,$8,$9) ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name,eco=EXCLUDED.eco,adapter_level=EXCLUDED.adapter_level,adapter_spec=EXCLUDED.adapter_spec,selftest_status=CASE WHEN runtime.adapter_spec IS DISTINCT FROM EXCLUDED.adapter_spec OR runtime.adapter_level IS DISTINCT FROM EXCLUDED.adapter_level THEN EXCLUDED.selftest_status ELSE runtime.selftest_status END,selftest_detail=CASE WHEN runtime.adapter_spec IS DISTINCT FROM EXCLUDED.adapter_spec OR runtime.adapter_level IS DISTINCT FROM EXCLUDED.adapter_level THEN EXCLUDED.selftest_detail ELSE runtime.selftest_detail END,status=CASE WHEN runtime.adapter_spec IS DISTINCT FROM EXCLUDED.adapter_spec OR runtime.adapter_level IS DISTINCT FROM EXCLUDED.adapter_level THEN EXCLUDED.status ELSE runtime.status END,updated_at=now()`, runtimeID, m.Name, m.Description, m.Runtime.Eco, m.Runtime.AdapterLevel, spec, selftestStatus, detail, status); err != nil {
+		capabilityImpl := runtimeCapabilityImpl(m)
+		if err := execJSON(ctx, tx, `INSERT INTO runtime (id,code,name,eco,adapter_level,adapter_spec,capability_impl,selftest_status,selftest_detail,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name,eco=EXCLUDED.eco,adapter_level=EXCLUDED.adapter_level,adapter_spec=EXCLUDED.adapter_spec,capability_impl=EXCLUDED.capability_impl,selftest_status=CASE WHEN runtime.adapter_spec IS DISTINCT FROM EXCLUDED.adapter_spec OR runtime.adapter_level IS DISTINCT FROM EXCLUDED.adapter_level OR runtime.capability_impl IS DISTINCT FROM EXCLUDED.capability_impl THEN EXCLUDED.selftest_status ELSE runtime.selftest_status END,selftest_detail=CASE WHEN runtime.adapter_spec IS DISTINCT FROM EXCLUDED.adapter_spec OR runtime.adapter_level IS DISTINCT FROM EXCLUDED.adapter_level OR runtime.capability_impl IS DISTINCT FROM EXCLUDED.capability_impl THEN EXCLUDED.selftest_detail ELSE runtime.selftest_detail END,status=CASE WHEN runtime.adapter_spec IS DISTINCT FROM EXCLUDED.adapter_spec OR runtime.adapter_level IS DISTINCT FROM EXCLUDED.adapter_level OR runtime.capability_impl IS DISTINCT FROM EXCLUDED.capability_impl THEN EXCLUDED.status ELSE runtime.status END,updated_at=now()`, runtimeID, m.Name, m.Description, m.Runtime.Eco, m.Runtime.AdapterLevel, spec, capabilityImpl, selftestStatus, detail, status); err != nil {
 			return fmt.Errorf("同步运行时 %s 失败: %w", m.Name, err)
 		}
 		if strings.TrimSpace(imageURL) == "" {
@@ -342,8 +349,16 @@ func syncPlatformInfra(ctx context.Context, tx pgx.Tx, root string) error {
 	return nil
 }
 
-// infraResourceSpecFromManifest 生成基础设施组件的唯一 WorkloadSpec。
+// infraResourceSpecFromManifest 规范化 manifest 明确声明的基础设施 WorkloadSpec。
+// 基础设施启动命令、环境、挂载和探针都属于镜像契约，不能由 seed 隐式合成。
 func infraResourceSpecFromManifest(manifest platformInfraManifest, imageURL string) (map[string]any, error) {
+	if len(manifest.Infra.ResourceSpec) == 0 {
+		return nil, fmt.Errorf("基础设施必须声明 infra.resource_spec")
+	}
+	spec, err := normalizeExplicitToolResourceSpec(manifest.Infra.ResourceSpec, imageURL, contracts.SandboxToolKindInfra)
+	if err != nil {
+		return nil, err
+	}
 	command, err := platformManifestSelftestCommand(manifest.Selftest)
 	if err != nil {
 		return nil, err
@@ -351,45 +366,33 @@ func infraResourceSpecFromManifest(manifest platformInfraManifest, imageURL stri
 	if len(command) == 0 {
 		return nil, fmt.Errorf("基础设施必须声明 selftest.commands")
 	}
-	readOnly := manifest.Security.ReadOnlyRootFilesystem
-	component := workload.ComponentSpec{
-		Name:                   "infra",
-		ImageURL:               imageURL,
-		Resources:              workload.ResourceSpec{Requests: map[string]string{"cpu": manifest.Resources.CPURequest, "memory": manifest.Resources.MemoryRequest}, Limits: map[string]string{"cpu": manifest.Resources.CPULimit, "memory": manifest.Resources.MemoryLimit}},
-		ReadOnlyRootFilesystem: &readOnly,
-		MountWorkspace:         func() *bool { value := false; return &value }(),
-		PrepullCommand:         command,
-		SecretEnv:              secretEnvFromManifest(manifest.SecretsRequired),
+	if err := appendManifestSecretEnv(spec, manifest.SecretsRequired); err != nil {
+		return nil, err
 	}
-	for _, port := range manifest.Ports {
-		if port.ContainerPort <= 0 || strings.TrimSpace(port.Name) == "" {
-			return nil, fmt.Errorf("基础设施端口声明无效")
+	componentData, err := json.Marshal(spec["components"])
+	if err != nil {
+		return nil, fmt.Errorf("编码基础设施组件失败: %w", err)
+	}
+	var components []workload.ComponentSpec
+	if err := json.Unmarshal(componentData, &components); err != nil || len(components) == 0 {
+		return nil, fmt.Errorf("基础设施 WorkloadSpec 缺少组件: %s", manifest.Name)
+	}
+	for index := range components {
+		if len(components[index].PrepullCommand) == 0 {
+			components[index].PrepullCommand = append([]string(nil), command...)
 		}
-		component.Ports = append(component.Ports, workload.PortSpec{Name: port.Name, ContainerPort: port.ContainerPort, ServicePort: port.ContainerPort, Protocol: defaultProtocol(port.Protocol)})
 	}
-	for _, writable := range infraWritableMounts(manifest) {
-		component.EphemeralMounts = append(component.EphemeralMounts, workload.EphemeralMountSpec{Name: writable, MountPath: "/" + writable})
-	}
-	spec := map[string]any{
-		"components":      []workload.ComponentSpec{component},
-		"prepull_command": command,
-		"bindings":        append([]manifestBinding(nil), manifest.Infra.Bindings...),
-		"capabilities": map[string]any{
-			"provides":       append([]string(nil), manifest.Capabilities.Provides...),
-			"requires":       append([]string(nil), manifest.Capabilities.Requires...),
-			"conflicts":      append([]string(nil), manifest.Capabilities.Conflicts...),
-			"cardinality":    manifest.Capabilities.Cardinality,
-			"placement":      manifest.Capabilities.Placement,
-			"config_schema":  manifest.Capabilities.ConfigSchema,
-			"student_access": manifest.Capabilities.StudentAccess,
-		},
-	}
-	services := make([]workload.ServiceSpec, 0, len(component.Ports))
-	for _, port := range component.Ports {
-		services = append(services, workload.ServiceSpec{Name: "infra-" + manifest.Name + "-" + port.Name, Component: component.Name, Ports: []workload.ServicePortSpec{{Name: port.Name, Port: port.ServicePort, TargetPort: port.Name, Protocol: port.Protocol}}})
-	}
-	if len(services) > 0 {
-		spec["services"] = services
+	spec["components"] = components
+	spec["prepull_command"] = command
+	spec["bindings"] = append([]manifestBinding(nil), manifest.Infra.Bindings...)
+	spec["capabilities"] = map[string]any{
+		"provides":       append([]string(nil), manifest.Capabilities.Provides...),
+		"requires":       append([]string(nil), manifest.Capabilities.Requires...),
+		"conflicts":      append([]string(nil), manifest.Capabilities.Conflicts...),
+		"cardinality":    manifest.Capabilities.Cardinality,
+		"placement":      manifest.Capabilities.Placement,
+		"config_schema":  manifest.Capabilities.ConfigSchema,
+		"student_access": manifest.Capabilities.StudentAccess,
 	}
 	if err := validateGeneratedToolResourceSpec(spec, contracts.SandboxToolKindInfra); err != nil {
 		return nil, err
@@ -424,29 +427,23 @@ func platformManifestSelftestCommand(raw map[string]any) ([]string, error) {
 	return out, nil
 }
 
-func infraWritableMounts(manifest platformInfraManifest) []string {
-	if manifest.Security.ReadOnlyRootFilesystem {
-		return []string{"runtime-state"}
-	}
-	return []string{"runtime-state"}
-}
-
 // secretEnvFromManifest 将 manifest 的密钥需求转换为受控 SecretKeyRef 声明。
-func secretEnvFromManifest(requirements []manifestSecretRequirement) []workload.SecretEnvVarSpec {
+func secretEnvFromManifest(requirements []manifestSecretRequirement) ([]workload.SecretEnvVarSpec, error) {
 	out := make([]workload.SecretEnvVarSpec, 0, len(requirements))
 	seen := map[string]struct{}{}
 	for _, requirement := range requirements {
 		name := strings.TrimSpace(requirement.Env)
-		if name == "" {
-			continue
+		secretKey := strings.TrimSpace(requirement.SecretKey)
+		if name == "" || secretKey == "" {
+			return nil, fmt.Errorf("Secret 引用必须同时声明 env 和 secret_key")
 		}
 		if _, exists := seen[name]; exists {
-			continue
+			return nil, fmt.Errorf("Secret 环境变量重复声明: %s", name)
 		}
 		seen[name] = struct{}{}
-		out = append(out, workload.SecretEnvVarSpec{Name: name, SecretName: "chaimir-secret", SecretKey: name})
+		out = append(out, workload.SecretEnvVarSpec{Name: name, SecretName: "chaimir-secret", SecretKey: secretKey})
 	}
-	return out
+	return out, nil
 }
 
 func toolKindOrDisabled(m toolManifest) int16 {
@@ -530,6 +527,10 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 		if resourceErr != nil {
 			return fmt.Errorf("生成判题器 %s 执行契约失败: %w", m.Name, resourceErr)
 		}
+		// Persist the manifest execution contract even while its runtime is not ready.
+		// The missing composition is then explicit and fail-closed instead of looking like
+		// a successfully compiled but empty snapshot.
+		resource = execution
 		if proven {
 			ready, readyErr := platformRuntimeReadyForJudger(ctx, database, composition.Runtimes[0].Code)
 			if readyErr != nil {
@@ -540,9 +541,22 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 				if compileErr != nil {
 					return fmt.Errorf("编译判题器 %s 组合快照失败: %w", m.Name, compileErr)
 				}
+				snapshot.PrivateSidecars = platformPrivateSidecars(execution.ExecutionSidecars)
+				if err := contracts.AppendPrivateSidecarImageClosure(&snapshot); err != nil {
+					return fmt.Errorf("补齐判题器 %s 私有 sidecar 镜像闭包失败: %w", m.Name, err)
+				}
+				digest, digestErr := contracts.CanonicalSnapshotDigest(snapshot)
+				if digestErr != nil {
+					return fmt.Errorf("计算判题器 %s 私有 sidecar 组合摘要失败: %w", m.Name, digestErr)
+				}
+				snapshot.Digest = digest
 				execution.CompositionSnapshot = snapshot
 				resource = execution
+			} else {
+				resource.DisabledReason = fmt.Sprintf("运行时 %s 尚未完成平台自检", composition.Runtimes[0].Code)
 			}
+		} else {
+			resource.DisabledReason = "判题器镜像缺少当前环境不可变证明"
 		}
 		items = append(items, catalogJudger{id: platformJudgerID(m.Name), code: m.Name, name: m.Description, typ: platformJudgerType(m.Judger.Type), executorRef: m.Name, runtimeNeeded: strings.TrimSpace(m.Judger.RuntimeCode) != "", defaultTimeout: m.Resources.TimeoutSeconds, resource: resource})
 	}
@@ -626,6 +640,7 @@ func platformJudgerResourceSpec(manifest platformJudgerManifest, imageURL string
 		Labels:                 map[string]string{"chaimir.io/student-access": "false", "chaimir.io/sensitivity": "judge-private"},
 		MountWorkspace:         func() *bool { value := true; return &value }(),
 		EphemeralMounts:        []workload.EphemeralMountSpec{{Name: "judge-workdir", MountPath: "/judge-private"}, {Name: "judge-tmp", MountPath: "/tmp"}},
+		PrepullCommand:         []string{"sleep", "1"},
 	}
 	return contracts.SandboxCompositionSpec{ID: "judge:" + manifest.Name, Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: runtimeCode, ImageVersion: platformRuntimeImageVersion(runtimeCode)}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}, judge.JudgerResourceSpec{
 		GenesisRef:        genesisRef,
@@ -637,6 +652,40 @@ func platformJudgerResourceSpec(manifest platformJudgerManifest, imageURL string
 		SuiteArchiveName:  suiteName,
 		Selftest:          manifest.Selftest,
 	}, nil
+}
+
+// platformPrivateSidecars 将迁移生成的判题 workload 固化到组合快照,使镜像闭包和运行时创建使用同一事实源。
+func platformPrivateSidecars(items []workload.ComponentSpec) []contracts.SandboxPrivateSidecarSpec {
+	out := make([]contracts.SandboxPrivateSidecarSpec, 0, len(items))
+	for _, item := range items {
+		env := make([]contracts.SandboxEnvVarSpec, 0, len(item.Env))
+		for _, value := range item.Env {
+			env = append(env, contracts.SandboxEnvVarSpec{Name: value.Name, Value: value.Value})
+		}
+		mounts := make([]contracts.SandboxEphemeralMountSpec, 0, len(item.EphemeralMounts))
+		for _, mount := range item.EphemeralMounts {
+			mounts = append(mounts, contracts.SandboxEphemeralMountSpec{Name: mount.Name, MountPath: mount.MountPath})
+		}
+		out = append(out, contracts.SandboxPrivateSidecarSpec{
+			Name: item.Name, ImageURL: item.ImageURL, Command: append([]string(nil), item.Command...), Args: append([]string(nil), item.Args...),
+			PrepullCommand: append([]string(nil), item.PrepullCommand...), PrepullHold: item.PrepullHold, Env: env,
+			Resources: contracts.SandboxResourceSpec{Requests: clonePlatformStringMap(item.Resources.Requests), Limits: clonePlatformStringMap(item.Resources.Limits)},
+			Workdir:   item.Workdir, ReadOnlyRootFilesystem: item.ReadOnlyRootFilesystem, Labels: clonePlatformStringMap(item.Labels),
+			MountWorkspace: item.MountWorkspace, MountDomains: append([]string(nil), item.MountDomains...), EphemeralMounts: mounts,
+		})
+	}
+	return out
+}
+
+func clonePlatformStringMap(input map[string]string) map[string]string {
+	if input == nil {
+		return nil
+	}
+	out := make(map[string]string, len(input))
+	for key, value := range input {
+		out[key] = value
+	}
+	return out
 }
 
 func platformJudgerType(raw string) int16 {

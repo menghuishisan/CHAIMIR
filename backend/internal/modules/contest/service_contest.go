@@ -86,7 +86,8 @@ func (s *Service) ListStudentContests(ctx context.Context, status int16, page, s
 // 门槛与 ListStudentContests 一致(非草稿态):学生竞赛详情页需支持深链与刷新,
 // 且竞赛答题与对局回放两条沉浸路由退出后都回落到该页,不能依赖列表态。
 func (s *Service) GetStudentContest(ctx context.Context, contestID int64) (ContestDTO, error) {
-	if _, err := currentIdentity(ctx); err != nil {
+	id, err := currentIdentity(ctx)
+	if err != nil {
 		return ContestDTO{}, err
 	}
 	organizerTenantID, err := s.resolvePublishedContestTenant(ctx, contestID)
@@ -95,6 +96,9 @@ func (s *Service) GetStudentContest(ctx context.Context, contestID int64) (Conte
 	}
 	var item Contest
 	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
+		if err := s.ensurePublishedContestReadAccess(ctx, tx, organizerTenantID, contestID, id); err != nil {
+			return err
+		}
 		item, err = tx.GetContest(ctx, organizerTenantID, contestID)
 		if err != nil {
 			return err
@@ -250,6 +254,9 @@ func (s *Service) ListProblems(ctx context.Context, contestID int64) ([]ProblemD
 	}
 	var items []ContestProblem
 	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
+		if err := s.ensurePublishedContestReadAccess(ctx, tx, organizerTenantID, contestID, id); err != nil {
+			return err
+		}
 		if _, err := s.loadContestForRead(ctx, tx, organizerTenantID, id.AccountID, contestID); err != nil {
 			return err
 		}

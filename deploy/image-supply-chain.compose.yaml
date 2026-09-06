@@ -4,8 +4,8 @@ services:
   trivy:
     image: ${SUPPLY_CHAIN_TRIVY_IMAGE:?SUPPLY_CHAIN_TRIVY_IMAGE is required}
     entrypoint: ["trivy"]
-    extra_hosts:
-      - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-registry.chaimir.io}:host-gateway"
+    # Docker Desktop 的 host 网络直接复用受控 Harbor 443 入口，避免 host-gateway 转发握手抖动。
+    network_mode: host
     environment:
       DOCKER_CONFIG: /docker-config
       SSL_CERT_FILE: /registry-ca/ca.crt
@@ -18,6 +18,9 @@ services:
       no_proxy: ${SUPPLY_CHAIN_NO_PROXY:-}
       TRIVY_DB_REPOSITORY: ${SUPPLY_CHAIN_TRIVY_DB_REPOSITORY:-ghcr.io/aquasecurity/trivy-db:2}
       TRIVY_JAVA_DB_REPOSITORY: ${SUPPLY_CHAIN_TRIVY_JAVA_DB_REPOSITORY:-ghcr.io/aquasecurity/trivy-java-db:1}
+      # 验收使用已校验的项目缓存时跳过重复下载，CI 未设置该变量则按默认行为更新。
+      TRIVY_SKIP_DB_UPDATE: ${SUPPLY_CHAIN_TRIVY_SKIP_DB_UPDATE:-}
+      TRIVY_SKIP_JAVA_DB_UPDATE: ${SUPPLY_CHAIN_TRIVY_SKIP_JAVA_DB_UPDATE:-}
     volumes:
       - type: bind
         source: ${SUPPLY_CHAIN_REPO_HOST_PATH:?SUPPLY_CHAIN_REPO_HOST_PATH is required}
@@ -47,8 +50,8 @@ services:
     image: ${SUPPLY_CHAIN_COSIGN_IMAGE:?SUPPLY_CHAIN_COSIGN_IMAGE is required}
     entrypoint: ["cosign"]
     working_dir: /workspace
-    extra_hosts:
-      - "${SUPPLY_CHAIN_REGISTRY_HOST_ALIAS:-registry.chaimir.io}:host-gateway"
+    # Docker Desktop 的 host 网络直接复用受控 Harbor 443 入口，避免 host-gateway 转发握手抖动。
+    network_mode: host
     environment:
       COSIGN_PASSWORD: ${COSIGN_PRIVATE_KEY_PASSWORD:-}
       DOCKER_CONFIG: /docker-config

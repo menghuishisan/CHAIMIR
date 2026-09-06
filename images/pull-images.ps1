@@ -9,7 +9,8 @@ param(
     [string[]]$Images = @(),
     [switch]$PrintBuildArgs,
     [int]$MaxAttempts = 3,
-    [int]$RetryDelaySeconds = 5
+    [int]$RetryDelaySeconds = 5,
+    [int]$PullTimeoutSeconds = 120
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,6 +38,9 @@ if ($MaxAttempts -lt 1) {
 }
 if ($RetryDelaySeconds -lt 0) {
     throw "RetryDelaySeconds 不能小于 0"
+}
+if ($PullTimeoutSeconds -lt 1) {
+    throw "PullTimeoutSeconds 必须大于等于 1"
 }
 if ($PrintBuildArgs -and $Scope -eq "upstream-pinned") {
     throw "PrintBuildArgs 只能与 Scope=all 或 Scope=built 一起使用"
@@ -217,6 +221,42 @@ function Invoke-DockerCli {
     & docker @baseArguments @Arguments
 }
 
+# Invoke-DockerPullCli 为网络拉取设置有界超时，避免 Harbor/代理无响应时卡住整个闭包。
+# 超时只作为本次尝试失败返回，调用方仍会按 MaxAttempts 重试并继续收集其他镜像。
+function Invoke-DockerPullCli {
+    param(
+        [string[]]$Arguments,
+        [int]$TimeoutSeconds
+    )
+    $baseArguments = @()
+    if (-not [string]::IsNullOrWhiteSpace($DockerConfig)) {
+        $baseArguments += @('--config', $DockerConfig)
+    }
+    $allArguments = @($baseArguments + $Arguments)
+    $psi = [Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = 'docker'
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.Arguments = (($allArguments | ForEach-Object {
+        '"' + ([string]$_).Replace('\', '\\').Replace('"', '\"') + '"'
+    }) -join ' ')
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $psi
+    [void]$process.Start()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        try { $process.Kill() } catch { }
+        try { $process.WaitForExit(5000) } catch { }
+        return [pscustomobject]@{ ExitCode = 124; Output = '镜像拉取超过有界时限' }
+    }
+    return [pscustomobject]@{
+        ExitCode = $process.ExitCode
+        Output = ($stdoutTask.GetAwaiter().GetResult() + "`n" + $stderrTask.GetAwaiter().GetResult()).Trim()
+    }
+}
+
 # Get-LocalImageRefSet 一次性读取本地不可变引用,避免为每个镜像重复启动 Docker CLI。
 function Get-LocalImageRefSet {
     $previousErrorActionPreference = $ErrorActionPreference
@@ -266,8 +306,9 @@ function Invoke-DockerPullWithRetry {
         $previousErrorActionPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
         try {
-            $pullOutput = Invoke-DockerCli -Arguments @("pull", $Item.Ref) 2>&1
-            $pullExitCode = $LASTEXITCODE
+            $pullResult = Invoke-DockerPullCli -Arguments @('pull', $Item.Ref) -TimeoutSeconds $PullTimeoutSeconds
+            $pullOutput = @($pullResult.Output -split "`r?`n")
+            $pullExitCode = $pullResult.ExitCode
         } finally {
             $ErrorActionPreference = $previousErrorActionPreference
         }
@@ -283,6 +324,10 @@ function Invoke-DockerPullWithRetry {
             Write-Warning $line
         }
         Write-Warning "镜像拉取失败: $($Item.Ref), attempt=$attempt, exit=$pullExitCode"
+        # 远端明确返回 manifest 不存在时属于确定性清单错误，不重复消耗网络重试窗口；
+        # 其余 502、TLS、超时等暂态错误继续按 MaxAttempts 重试。
+        $pullFailureText = ($pullOutput -join " ")
+        $deterministicMissing = $pullFailureText -match '(?i)(manifest unknown|not found|name unknown|repository does not exist)'
         if (-not $hadImageBeforePull) {
             $previousErrorActionPreference = $ErrorActionPreference
             $ErrorActionPreference = "Continue"
@@ -297,6 +342,10 @@ function Invoke-DockerPullWithRetry {
             }
         } elseif ($hadImageBeforePull) {
             Write-Warning "保留本地已有 digest 镜像: $($Item.Ref)"
+        }
+        if ($deterministicMissing) {
+            Write-Warning "远端未找到精确 digest，停止该镜像重试并继续收集其他镜像: $($Item.Ref)"
+            break
         }
         if ($attempt -lt $MaxAttempts -and $RetryDelaySeconds -gt 0) {
             Start-Sleep -Seconds $RetryDelaySeconds
@@ -369,7 +418,8 @@ foreach ($item in $items) {
     }
     if (-not (Invoke-DockerPullWithRetry -Item $item)) {
         $failures.Add("$($item.Ref) ($($item.Manifest))")
-        break
+        # 网络或仓库瞬态失败只记录当前镜像，继续处理剩余闭包，避免首个失败掩盖后续问题。
+        continue
     }
     $pulledCount++
 }

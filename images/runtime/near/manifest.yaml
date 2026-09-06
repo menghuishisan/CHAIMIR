@@ -40,6 +40,10 @@ capabilities:
 runtime:
   eco: near
   adapter_level: 1
+  workload:
+    env:
+      - name: CHAIMIR_NEAR_HOME
+        value: /runtime-state/near
 ports:
   - name: rpc
     container_port: 3030

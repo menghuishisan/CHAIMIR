@@ -31,6 +31,7 @@ func main() {
 		"pgweb",
 		"--bind=0.0.0.0",
 		"--listen=8081",
+		"--ssl=disable",
 		"--url=" + databaseURL.String(),
 		"--open-retry=60",
 		"--open-retry-delay=2",

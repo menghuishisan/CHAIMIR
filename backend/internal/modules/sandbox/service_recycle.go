@@ -23,6 +23,11 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 	if !ok || batchSize <= 0 {
 		return apperr.ErrSandboxRecycleConfigInvalid
 	}
+	var firstErr error
+	if err := s.cleanupExpiredRuntimeSelftests(ctx); err != nil {
+		logging.ErrorContext(ctx, "expired runtime selftest cleanup failed", err.Error())
+		firstErr = err
+	}
 	readyDeadline := timex.Now().Add(-time.Duration(s.cfg.ReadyIdleTimeoutSeconds) * time.Second)
 	var candidates []Sandbox
 	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
@@ -38,7 +43,6 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	var firstErr error
 	for _, candidate := range candidates {
 		if err := s.recycleOne(ctx, candidate, "scheduled"); err != nil {
 			logging.ErrorContext(ctx, "sandbox scheduled recycle failed", err.Error(), slog.Int64("tenant_id", candidate.TenantID), slog.Int64("sandbox_id", candidate.ID))
@@ -80,6 +84,19 @@ func (s *Service) RunRecycleOnce(ctx context.Context) error {
 		}
 	}
 	return firstErr
+}
+
+// cleanupExpiredRuntimeSelftests 补偿请求内清理失败的无持久化运行时自检资源。
+func (s *Service) cleanupExpiredRuntimeSelftests(ctx context.Context) error {
+	if s.cfg.SelftestRecycleTimeoutSeconds <= 0 {
+		return apperr.ErrSandboxSelftestRecycleConfigInvalid
+	}
+	window := timeDurationSeconds(s.cfg.SelftestRecycleTimeoutSeconds)
+	// 请求执行和请求内删除各自持有一个受限窗口；补偿任务必须等两者都过去，
+	// 才能把没有持久化记录的 Namespace 判定为遗留资源。
+	cleanupCtx, cancel := context.WithTimeout(ctx, window)
+	defer cancel()
+	return s.orchestrator.CleanupExpiredRuntimeSelftests(cleanupCtx, 2*window)
 }
 
 // recycleOne 按保存代码、快照、删除资源、写终态、审计、发布事件的顺序回收单个沙箱。
@@ -246,6 +263,10 @@ func (s *Service) drainSandboxRecycleOutboxBestEffort(ctx context.Context) {
 // shouldPersistBeforeRecycle 判断回收前是否必须保存工作区代码。
 func shouldPersistBeforeRecycle(sb Sandbox) bool {
 	if sb.Status == SandboxStatusFailed {
+		return false
+	}
+	// 回收重试时若代码归档引用和哈希都已落库,说明保存步骤已经完成,不再重复解析组合快照。
+	if sb.Status == SandboxStatusRecycling && sb.CodeStorageKey != "" && sb.CodeHash != "" {
 		return false
 	}
 	return sb.Phase != SandboxPhaseAllocating || sb.CodeHash != ""

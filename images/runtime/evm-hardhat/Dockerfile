@@ -5,8 +5,10 @@ FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3e
 
 LABEL org.opencontainers.image.title="runtime/evm-hardhat"
 LABEL org.opencontainers.image.description="Chaimir Hardhat EVM teaching runtime"
-ENV HOME=/workspace
+ENV HOME=/runtime-state/hardhat-home
 ARG SOLC_0_8_20_SHA256=0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782
+ARG SOLC_0_8_24_SHA256=fb03a29a517452b9f12bcf459ef37d0a543765bb3bbc911e70a87d6a37c30d5f
+ARG SOLC_0_8_26_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
 ARG JQ_SHA256=5942c9b0934e510ee61eb3e30273f1b3fe2590df93933a93d7c58b81d19c8ff5
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 
@@ -19,17 +21,22 @@ COPY --from=foundry /usr/local/bin/cast /usr/local/bin/cast
 COPY --from=foundry /usr/local/bin/chisel /usr/local/bin/chisel
 COPY package.json package-lock.json /opt/chaimir/evm-hardhat/
 ADD --checksum=sha256:0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782 https://github.com/ethereum/solidity/releases/download/v0.8.20/solc-static-linux /tmp/solc-0.8.20
+ADD --checksum=sha256:fb03a29a517452b9f12bcf459ef37d0a543765bb3bbc911e70a87d6a37c30d5f https://github.com/ethereum/solidity/releases/download/v0.8.24/solc-static-linux /tmp/solc-0.8.24
+ADD --checksum=sha256:d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef https://github.com/ethereum/solidity/releases/download/v0.8.26/solc-static-linux /tmp/solc-0.8.26
 ADD --checksum=sha256:5942c9b0934e510ee61eb3e30273f1b3fe2590df93933a93d7c58b81d19c8ff5 https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64 /tmp/jq
 RUN echo "${SOLC_0_8_20_SHA256}  /tmp/solc-0.8.20" | sha256sum -c - \
+    && echo "${SOLC_0_8_24_SHA256}  /tmp/solc-0.8.24" | sha256sum -c - \
+    && echo "${SOLC_0_8_26_SHA256}  /tmp/solc-0.8.26" | sha256sum -c - \
     && echo "${JQ_SHA256}  /tmp/jq" | sha256sum -c - \
     && install -m 0755 /tmp/solc-0.8.20 /usr/local/bin/solc-0.8.20 \
-    && ln -sf /usr/local/bin/solc-0.8.20 /usr/local/bin/solc \
+    && install -m 0755 /tmp/solc-0.8.24 /usr/local/bin/solc-0.8.24 \
+    && install -m 0755 /tmp/solc-0.8.26 /usr/local/bin/solc-0.8.26 \
     && install -m 0755 /tmp/jq /usr/local/bin/jq \
-    && rm -f /tmp/solc-0.8.20 \
+    && rm -f /tmp/solc-0.8.20 /tmp/solc-0.8.24 /tmp/solc-0.8.26 \
     && cd /opt/chaimir/evm-hardhat \
     && npm config set registry "${NPM_REGISTRY}" \
     && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
-    && mkdir -p /workspace /runtime-state \
+    && mkdir -p /workspace /runtime-state/hardhat-home \
     && chown -R 1000:1000 /workspace /runtime-state
 
 COPY entrypoint.sh /usr/local/bin/chaimir-hardhat-entrypoint
@@ -41,7 +48,7 @@ FROM cgr.dev/chainguard/glibc-dynamic@sha256:d0046044cd28948d3380eb0d98709dc7e63
 
 LABEL org.opencontainers.image.title="runtime/evm-hardhat"
 LABEL org.opencontainers.image.description="Chaimir Hardhat EVM teaching runtime"
-ENV HOME=/workspace
+ENV HOME=/runtime-state/hardhat-home
 
 # 最终层只保留运行所需的 glibc、Node、Foundry、Hardhat、Solidity 和 jq,不携带 Debian 包管理数据库。
 COPY --from=build /bin/sh /bin/sh
@@ -54,8 +61,9 @@ COPY --from=build /usr/local/bin/forge /usr/local/bin/forge
 COPY --from=build /usr/local/bin/anvil /usr/local/bin/anvil
 COPY --from=build /usr/local/bin/cast /usr/local/bin/cast
 COPY --from=build /usr/local/bin/chisel /usr/local/bin/chisel
-COPY --from=build /usr/local/bin/solc /usr/local/bin/solc
 COPY --from=build /usr/local/bin/solc-0.8.20 /usr/local/bin/solc-0.8.20
+COPY --from=build /usr/local/bin/solc-0.8.24 /usr/local/bin/solc-0.8.24
+COPY --from=build /usr/local/bin/solc-0.8.26 /usr/local/bin/solc-0.8.26
 COPY --from=build /usr/local/bin/jq /usr/local/bin/jq
 COPY --from=build /usr/local/bin/hardhat-wrapper /usr/local/bin/hardhat
 COPY --from=build /usr/local/bin/chaimir-hardhat-entrypoint /usr/local/bin/chaimir-hardhat-entrypoint

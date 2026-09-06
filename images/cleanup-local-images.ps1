@@ -114,11 +114,25 @@ foreach ($image in $images) {
     }
 
     if ($Apply) {
-        docker image rm $ref | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "删除临时镜像失败: $ref"
+        # A dangling project reference can share the same image ID with an
+        # upstream digest reference. Removing the short ID asks Docker to
+        # delete the whole image and fails with a multi-repository conflict.
+        # Remove only the exact project digest references instead.
+        $removableRefs = @($repoDigests | Where-Object {
+            $candidateRef = [string]$_
+            $candidateRef -match "^$([regex]::Escape($registryHost))/" -and
+                -not $protectedRefs.Contains($candidateRef)
+        })
+        if ($removableRefs.Count -eq 0) {
+            $removableRefs = @($ref)
         }
-        $removed.Add($ref)
+        foreach ($removableRef in $removableRefs) {
+            docker image rm $removableRef | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "删除临时镜像失败: $removableRef"
+            }
+            $removed.Add([string]$removableRef)
+        }
     } else {
         $removed.Add("$ref (dry-run)")
     }

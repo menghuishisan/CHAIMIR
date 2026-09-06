@@ -51,7 +51,7 @@ func (s *Service) CreateEnv(ctx context.Context, contestID, problemID int64, req
 		if problem.ContestID != contestID {
 			return apperr.ErrContestProblemInvalid
 		}
-		team, err = s.currentAccountTeam(ctx, tx, organizerTenantID, contestID, id.AccountID)
+		team, err = s.currentAccountTeam(ctx, tx, organizerTenantID, id.TenantID, contestID, id.AccountID)
 		if err != nil {
 			return err
 		}
@@ -127,7 +127,7 @@ func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, r
 		if problem.ContestID != contestID {
 			return apperr.ErrContestProblemInvalid
 		}
-		team, err = s.currentAccountTeam(ctx, tx, organizerTenantID, contestID, id.AccountID)
+		team, err = s.currentAccountTeam(ctx, tx, organizerTenantID, id.TenantID, contestID, id.AccountID)
 		if err != nil {
 			return err
 		}

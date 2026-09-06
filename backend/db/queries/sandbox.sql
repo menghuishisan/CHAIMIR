@@ -162,7 +162,6 @@ FROM runtime r
 JOIN runtime_image i
   ON i.runtime_id = r.id
  AND i.status = 1
- AND i.genesis_baked = true
 WHERE r.status = 1 AND r.selftest_status = 2
 ORDER BY r.code, i.version DESC;
 

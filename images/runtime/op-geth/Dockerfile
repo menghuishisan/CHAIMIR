@@ -25,9 +25,9 @@ RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}";
     && go get \
         go.opentelemetry.io/otel@v1.43.0 \
         go.opentelemetry.io/otel/sdk@v1.43.0 \
-        golang.org/x/crypto@v0.53.0 \
-        golang.org/x/net@v0.56.0 \
-        golang.org/x/text@v0.39.0 \
+        golang.org/x/crypto@v0.55.0 \
+        golang.org/x/net@v0.57.0 \
+        golang.org/x/text@v0.41.0 \
         google.golang.org/grpc@v1.82.1 \
     && go mod tidy \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go run build/ci.go install -static ./cmd/geth
@@ -47,6 +47,7 @@ RUN apk upgrade --no-cache \
 
 COPY --from=builder --chown=1000:1000 /src/op-geth/build/bin/geth /usr/local/bin/geth
 COPY --from=builder --chown=1000:1000 /out/chaimir-op-geth-entrypoint /usr/local/bin/chaimir-op-geth-entrypoint
+COPY --chown=1000:1000 genesis.json /opt/chaimir/genesis/op-geth.json
 USER 1000:1000
 WORKDIR /workspace
 EXPOSE 8545 8551

@@ -63,7 +63,15 @@ ENV PATH="/usr/share/grafana/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/b
     GF_PATHS_HOME=/usr/share/grafana \
     GF_PATHS_LOGS=/var/log/grafana \
     GF_PATHS_PLUGINS=/var/lib/grafana/plugins \
-    GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    GF_PATHS_PROVISIONING=/etc/grafana/provisioning \
+    GF_ANALYTICS_REPORTING_ENABLED=false \
+    GF_ANALYTICS_CHECK_FOR_UPDATES=false \
+    GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES=false \
+    GF_PLUGINS_PREINSTALL_DISABLED=true \
+    GF_PLUGINS_PREINSTALL_AUTO_UPDATE=false \
+    GF_PLUGINS_PUBLIC_KEY_RETRIEVAL_DISABLED=true \
+    GF_PLUGINS_PLUGIN_ADMIN_ENABLED=false \
+    GF_PLUGINS_PREINSTALL=
 
 WORKDIR /usr/share/grafana
 EXPOSE 3000

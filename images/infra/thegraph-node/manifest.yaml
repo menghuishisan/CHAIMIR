@@ -44,6 +44,7 @@ env_keys:
     - POSTGRES_PASSWORD
 secrets_required:
   - env: POSTGRES_PASSWORD
+    secret_key: PG_PASSWORD
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
 capabilities:
@@ -96,6 +97,59 @@ infra:
   roles:
     - indexer
     - subgraph
+  resource_spec:
+    components:
+      - name: infra
+        image_url: "@self"
+        env:
+          - name: CHAIMIR_GRAPH_NETWORK
+            value: local
+          - name: CHAIMIR_GRAPH_POSTGRES_DB
+            value: graph
+          - name: CHAIMIR_GRAPH_POSTGRES_USER
+            value: postgres
+        ports:
+          - name: graphql
+            container_port: 8000
+            service_port: 8000
+            protocol: TCP
+          - name: admin
+            container_port: 8020
+            service_port: 8020
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: "2"
+            memory: 4Gi
+        readiness_probe:
+          type: tcp
+          port: graphql
+          period_seconds: 2
+          failure_threshold: 30
+        read_only_root_filesystem: false
+        mount_workspace: false
+        mount_domains:
+          - runtime-state
+        writable_mount_domains:
+          - runtime-state
+    services:
+      - name: infra-thegraph-graphql
+        component: infra
+        ports:
+          - name: graphql
+            port: 8000
+            target_port: graphql
+            protocol: TCP
+      - name: infra-thegraph-admin
+        component: infra
+        ports:
+          - name: admin
+            port: 8020
+            target_port: admin
+            protocol: TCP
 ports:
   - name: graphql
     container_port: 8000

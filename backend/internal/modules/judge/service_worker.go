@@ -312,6 +312,8 @@ func privateSidecarsForSandbox(items []workload.ComponentSpec) []contracts.Sandb
 			ImageURL:               item.ImageURL,
 			Command:                append([]string(nil), item.Command...),
 			Args:                   append([]string(nil), item.Args...),
+			PrepullCommand:         append([]string(nil), item.PrepullCommand...),
+			PrepullHold:            item.PrepullHold,
 			Env:                    env,
 			Resources:              contracts.SandboxResourceSpec{Requests: maps.Clone(item.Resources.Requests), Limits: maps.Clone(item.Resources.Limits)},
 			Workdir:                item.Workdir,

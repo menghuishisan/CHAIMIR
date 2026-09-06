@@ -216,12 +216,66 @@ function Invoke-DockerBuildWithRetry {
     )
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         Write-Host "Docker build attempt [$attempt/$MaxAttempts] $Image"
-        Invoke-DockerCli -Arguments $Arguments
-        if ($LASTEXITCODE -eq 0) {
+        # 保留 BuildKit 的完整输出,便于只对“已导出 manifest 但 Harbor 传输失败”做
+        # 标准 Docker push 重试;编译或校验失败绝不能拿本地旧标签冒充新构建。
+        $savedErrorActionPreference = $ErrorActionPreference
+        try {
+            # PowerShell 5.1 会把 native stderr 转成错误记录;捕获 Docker 输出时必须暂时
+            # 允许其继续流出,否则 Stop 策略会在 BuildKit 返回最终退出码前中断脚本。
+            $ErrorActionPreference = "Continue"
+            $buildOutput = @(Invoke-DockerCli -Arguments $Arguments 2>&1)
+            $buildExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $savedErrorActionPreference
+        }
+        $buildOutput | ForEach-Object { Write-Host ([string]$_) }
+        if ($buildExitCode -eq 0) {
             return
         }
-        $exitCode = $LASTEXITCODE
+        $exitCode = $buildExitCode
         Write-Warning "docker build 失败: $Image, attempt=$attempt, exit=$exitCode"
+
+        $buildText = ($buildOutput | ForEach-Object { [string]$_ }) -join "`n"
+        $tagMatch = [regex]::Match($buildText, "(?m)naming to (?<ref>[^\s]+) done")
+        $tagRef = if ($tagMatch.Success) { $tagMatch.Groups["ref"].Value } else { "" }
+        if ([string]::IsNullOrWhiteSpace($tagRef)) {
+            foreach ($tagOption in @("-t", "--tag")) {
+                $tagIndex = [Array]::IndexOf($Arguments, $tagOption)
+                if ($tagIndex -ge 0 -and $tagIndex + 1 -lt $Arguments.Count) {
+                    $tagRef = [string]$Arguments[$tagIndex + 1]
+                    break
+                }
+            }
+        }
+        $manifestExported = $buildText -match "(?m)exporting manifest sha256:[0-9a-f]{64}" -and
+            $buildText -match "(?m)naming to $([regex]::Escape($tagRef)) done"
+        $networkPushFailure = $buildText -match "(?i)(failed to fetch oauth token|failed to do request|TLS handshake timeout|timeout awaiting response headers)"
+        if ($manifestExported -and $networkPushFailure -and -not [string]::IsNullOrWhiteSpace($tagRef)) {
+            $savedErrorActionPreference = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = "Continue"
+                $localImage = @(Invoke-DockerCli -Arguments @("image", "inspect", $tagRef) 2>&1)
+                $localImageExitCode = $LASTEXITCODE
+            } finally {
+                $ErrorActionPreference = $savedErrorActionPreference
+            }
+            if ($localImageExitCode -eq 0) {
+                Write-Warning "BuildKit manifest 已导出但 Harbor 推送握手失败,改用标准 Docker push 重试: $tagRef"
+                $savedErrorActionPreference = $ErrorActionPreference
+                try {
+                    $ErrorActionPreference = "Continue"
+                    $pushOutput = @(Invoke-DockerCli -Arguments @("push", $tagRef) 2>&1)
+                    $pushExitCode = $LASTEXITCODE
+                } finally {
+                    $ErrorActionPreference = $savedErrorActionPreference
+                }
+                $pushOutput | ForEach-Object { Write-Host ([string]$_) }
+                if ($pushExitCode -eq 0) {
+                    return
+                }
+                Write-Warning "标准 Docker push 失败: $tagRef, exit=$pushExitCode"
+            }
+        }
         if ($attempt -lt $MaxAttempts -and $RetryDelaySeconds -gt 0) {
             Start-Sleep -Seconds $RetryDelaySeconds
         }
@@ -339,12 +393,21 @@ foreach ($item in $selected) {
             throw "service/frontend 构建缺少前端构建配置: $frontendEnvPath"
         }
         # 将前端源码内容摘要作为构建参数,避免未提交改动被 BuildKit 错误复用旧的源码缓存层。
-        $frontendRoot = Join-Path $repoRoot "frontend"
+        $frontendRelativeFiles = @(& git -C $repoRoot ls-files --cached --others --exclude-standard -- "frontend/*")
+        if ($LASTEXITCODE -ne 0) {
+            throw "读取前端源码清单失败"
+        }
         $frontendFingerprintLines = @(
-            Get-ChildItem -LiteralPath $frontendRoot -Recurse -File |
-                Where-Object { $_.FullName -notmatch '\\(node_modules|dist|\.turbo|\.vite|\.cache)\\' } |
-                Sort-Object FullName |
-                ForEach-Object { "$($_.FullName)|$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)" }
+            $frontendRelativeFiles |
+                Sort-Object |
+                ForEach-Object {
+                    $relativePath = $_ -replace '/', '\\'
+                    $absolutePath = Join-Path $repoRoot $relativePath
+                    if (-not (Test-Path -LiteralPath $absolutePath -PathType Leaf)) {
+                        throw "前端源码文件不存在: $relativePath"
+                    }
+                    "$relativePath|$((Get-FileHash -LiteralPath $absolutePath -Algorithm SHA256).Hash)"
+                }
         )
         $frontendFingerprintBytes = [System.Text.Encoding]::UTF8.GetBytes(($frontendFingerprintLines -join "`n"))
         $frontendHasher = [System.Security.Cryptography.SHA256]::Create()

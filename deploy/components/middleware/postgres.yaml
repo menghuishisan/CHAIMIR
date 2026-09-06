@@ -80,8 +80,6 @@ spec:
                 secretKeyRef:
                   name: chaimir-data-secret
                   key: PG_PRIV_PASSWORD
-            - name: PGDATA
-              value: /var/lib/postgresql/data/pgdata
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -102,7 +100,7 @@ spec:
             periodSeconds: 20
           volumeMounts:
             - name: data
-              mountPath: /var/lib/postgresql/data
+              mountPath: /var/lib/postgresql
             - name: postgres-tls
               mountPath: /etc/postgresql/tls
               readOnly: true

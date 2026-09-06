@@ -99,7 +99,7 @@ selftest:
   commands:
     - name: besu-version
       command:
-        - besu
+        - /opt/besu/bin/besu
         - --version
 capability_selftest:
   query_target: chainId

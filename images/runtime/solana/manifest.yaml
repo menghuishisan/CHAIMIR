@@ -49,6 +49,12 @@ capabilities:
 runtime:
   eco: solana
   adapter_level: 1
+  workload:
+    env:
+      - name: CHAIMIR_SOLANA_LEDGER_DIR
+        value: /runtime-state/solana/ledger
+      - name: CHAIMIR_RUNTIME_RPC_PORT
+        value: "8899"
 ports:
   - name: rpc
     container_port: 8899

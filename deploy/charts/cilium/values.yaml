@@ -24,6 +24,15 @@ ipv6:
 
 operator:
   replicas: 2
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
 
 envoy:
   enabled: true

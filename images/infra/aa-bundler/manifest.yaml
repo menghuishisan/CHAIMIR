@@ -29,7 +29,13 @@ env_keys:
     - NETWORK
     - RPC_PORT
     - METRICS_PORT
-  secret: []
+  secret:
+    - SIGNER_PRIVATE_KEYS
+secrets_required:
+  - env: SIGNER_PRIVATE_KEYS
+    secret_key: CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
+    source: deploy/config/secret.env
+    runtime_value: secret-or-kms
 data_driven: true
 capabilities:
   provides:
@@ -44,6 +50,58 @@ capabilities:
 infra:
   eco_tags:
     - evm
+  resource_spec:
+    components:
+      - name: infra
+        image_url: "@self"
+        env:
+          - name: NETWORK
+            value: dev
+          - name: RPC_PORT
+            value: "3000"
+          - name: METRICS_PORT
+            value: "8080"
+        ports:
+          - name: http
+            container_port: 3000
+            service_port: 3000
+            protocol: TCP
+          - name: metrics
+            container_port: 8080
+            service_port: 8080
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+        readiness_probe:
+          type: tcp
+          port: http
+          period_seconds: 2
+          failure_threshold: 30
+        read_only_root_filesystem: true
+        mount_workspace: false
+        ephemeral_mounts:
+          - name: bundler-tmp
+            mount_path: /tmp
+    services:
+      - name: infra-aa-bundler-http
+        component: infra
+        ports:
+          - name: http
+            port: 3000
+            target_port: http
+            protocol: TCP
+      - name: infra-aa-bundler-metrics
+        component: infra
+        ports:
+          - name: metrics
+            port: 8080
+            target_port: metrics
+            protocol: TCP
   bindings:
     - name: execution_chain
       capability: evm-json-rpc

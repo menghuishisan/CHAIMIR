@@ -1,9 +1,121 @@
 // vite.config.ts 配置统一 Web 应用的构建环境、源码别名和本地开发服务。
 import { defineConfig } from 'vite'
+import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import fs from 'node:fs'
 import path from 'path'
+
+type FontAssetDefinition = {
+  name: string
+  packagePath: string
+  stylesheet: string
+}
+
+const fontAssetDefinitions: FontAssetDefinition[] = [
+  {
+    name: 'noto-sans-sc',
+    packagePath: path.resolve(__dirname, '../../packages/ui/node_modules/@fontsource-variable/noto-sans-sc'),
+    stylesheet: 'index.css',
+  },
+  {
+    name: 'jetbrains-mono',
+    packagePath: path.resolve(__dirname, '../../packages/ui/node_modules/@fontsource-variable/jetbrains-mono'),
+    stylesheet: 'index.css',
+  },
+  {
+    name: 'zcool-qingke-huangyou',
+    packagePath: path.resolve(__dirname, '../../packages/ui/node_modules/@fontsource/zcool-qingke-huangyou'),
+    stylesheet: '400.css',
+  },
+]
+
+/** resolveFontAsset 将固定字体包路径与请求相对路径安全拼接,拒绝越过包根目录。 */
+function resolveFontAsset(definition: FontAssetDefinition, relativePath: string): string | undefined {
+  const packageRoot = path.resolve(definition.packagePath)
+  const assetPath = path.resolve(packageRoot, relativePath)
+  const relative = path.relative(packageRoot, assetPath)
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return undefined
+  return assetPath
+}
+
+/** readFontAsset 读取已通过路径校验的字体资源,缺失资源交由调用方生成明确构建错误。 */
+function readFontAsset(definition: FontAssetDefinition, relativePath: string): Buffer | undefined {
+  const assetPath = resolveFontAsset(definition, relativePath)
+  if (!assetPath) return undefined
+  if (!fs.existsSync(assetPath)) return undefined
+  return fs.readFileSync(assetPath)
+}
+
+/** fontAssetsPlugin 将字体包作为独立同源静态资源服务和输出,避免 Rollup 反复解析全部分片。 */
+function fontAssetsPlugin(): Plugin {
+  return {
+    name: 'chaimir-font-assets',
+    configureServer(server) {
+      server.middlewares.use('/fonts', (request, response, next) => {
+        let requestPath: string
+        try {
+          requestPath = decodeURIComponent((request.url ?? '').split('?')[0]).replace(/^\/+/, '')
+        } catch {
+          response.statusCode = 400
+          response.end('字体资源路径无效')
+          return
+        }
+        const separator = requestPath.indexOf('/')
+        if (separator <= 0) {
+          next()
+          return
+        }
+        const packageName = requestPath.slice(0, separator)
+        const relativePath = requestPath.slice(separator + 1)
+        const definition = fontAssetDefinitions.find((item) => item.name === packageName)
+        if (!definition) {
+          next()
+          return
+        }
+        const assetPath = resolveFontAsset(definition, relativePath)
+        if (!assetPath || !fs.existsSync(assetPath)) {
+          next()
+          return
+        }
+        const extension = path.extname(assetPath)
+        const contentType = extension === '.css' ? 'text/css; charset=utf-8' : extension === '.woff' ? 'font/woff' : 'font/woff2'
+        response.setHeader('Content-Type', contentType)
+        fs.createReadStream(assetPath).on('error', next).pipe(response)
+      })
+    },
+    transformIndexHtml() {
+      return fontAssetDefinitions.map((definition) => ({
+        tag: 'link',
+        attrs: { rel: 'stylesheet', href: `/fonts/${definition.name}/${definition.stylesheet}` },
+        injectTo: 'head-prepend',
+      }))
+    },
+    generateBundle() {
+      for (const definition of fontAssetDefinitions) {
+        const stylesheet = readFontAsset(definition, definition.stylesheet)
+        if (!stylesheet) throw new Error(`字体资源缺失: ${definition.name}/${definition.stylesheet}`)
+        this.emitFile({
+          type: 'asset',
+          fileName: `fonts/${definition.name}/${definition.stylesheet}`,
+          source: stylesheet,
+        })
+        const filesDirectory = resolveFontAsset(definition, 'files')
+        if (!filesDirectory || !fs.existsSync(filesDirectory)) throw new Error(`字体分片目录缺失: ${definition.name}`)
+        for (const fileName of fs.readdirSync(filesDirectory)) {
+          if (!/\.woff2?$/.test(fileName)) continue
+          const source = readFontAsset(definition, `files/${fileName}`)
+          if (!source) throw new Error(`字体分片读取失败: ${definition.name}/files/${fileName}`)
+          this.emitFile({
+            type: 'asset',
+            fileName: `fonts/${definition.name}/files/${fileName}`,
+            source,
+          })
+        }
+      }
+    },
+  }
+}
 
 /**
  * readFrontendSecurityHeaders 从生产前端 Nginx 的唯一安全头配置读取本地入口策略。
@@ -56,7 +168,7 @@ function monacoManualChunk(moduleId: string): string | undefined {
 
 export default defineConfig({
   envDir: path.resolve(__dirname, '../..'),
-  plugins: [react(), tailwindcss()],
+  plugins: [fontAssetsPlugin(), react(), tailwindcss()],
   preview: {
     headers: readFrontendSecurityHeaders(),
   },

@@ -303,6 +303,7 @@ type CommandToolPolicy struct {
 type ComponentBinding struct {
 	Name            string `json:"name"`
 	Capability      string `json:"capability"`
+	SourceEndpoint  string `json:"source_endpoint,omitempty"`
 	Endpoint        string `json:"endpoint"`
 	Protocol        string `json:"protocol"`
 	RequiredAtStart bool   `json:"required_at_start"`

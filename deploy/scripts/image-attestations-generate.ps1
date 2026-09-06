@@ -10,11 +10,20 @@ param(
     [string]$EvidenceDir = "",
     [string]$DigestFragmentsDir = "",
     [switch]$GenerateKeyIfMissing,
-    [switch]$NoEnvWrite
+    [switch]$NoEnvWrite,
+    [int]$ToolMaxAttempts = 3,
+    [int]$ToolRetryDelaySeconds = 5
 )
 
 $ErrorActionPreference = "Stop"
 Import-Module (Join-Path $RepoRoot "images\lib\ImageMetadata.psm1") -Force
+
+if ($ToolMaxAttempts -lt 1) {
+    throw "ToolMaxAttempts 必须大于等于 1"
+}
+if ($ToolRetryDelaySeconds -lt 0) {
+    throw "ToolRetryDelaySeconds 不能小于 0"
+}
 
 # 统一拆分文档中的逗号镜像列表,保证选择性证明覆盖全部指定镜像。
 if ($Images.Count -eq 1 -and $Images[0] -match ',') {
@@ -229,10 +238,20 @@ function Invoke-ComposeTool {
             $env:COSIGN_PRIVATE_KEY_PASSWORD = $script:cosignPrivateKeyPassword
             $env:SUPPLY_CHAIN_EVIDENCE_HOST_DIR = $script:evidenceHostDir
             $ErrorActionPreference = "Continue"
-            & docker @args
-            $exitCode = $LASTEXITCODE
-            if ($exitCode -ne 0) {
-                throw "$Context 失败, exit=$exitCode"
+            for ($attempt = 1; $attempt -le $ToolMaxAttempts; $attempt++) {
+                & docker @args
+                $exitCode = $LASTEXITCODE
+                if ($exitCode -eq 0) {
+                    return
+                }
+                if ($attempt -lt $ToolMaxAttempts) {
+                    Write-Warning "$Context 失败, exit=$exitCode, 将在 $ToolRetryDelaySeconds 秒后重试 ($attempt/$ToolMaxAttempts)"
+                    if ($ToolRetryDelaySeconds -gt 0) {
+                        Start-Sleep -Seconds $ToolRetryDelaySeconds
+                    }
+                } else {
+                    throw "$Context 失败, exit=$exitCode"
+                }
             }
         } finally {
             $ErrorActionPreference = $previousErrorActionPreference

@@ -206,9 +206,10 @@ make image-attestations-generate
 `backend/.env`。Cosign 私钥目录固定由 `SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR` 指向,默认是
 `deploy/config/cosign/`;Docker registry 认证目录由 `SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR`
 指向,默认是 `deploy/config/docker-auth/`。这两个目录只保存本地/私有化凭据,已被 Git 忽略,
-不得提交到仓库。`SUPPLY_CHAIN_REGISTRY_HOST_ALIAS` 只用于容器化供应链工具访问宿主机暴露的
-Harbor 入口,必须与 `SUPPLY_CHAIN_REGISTRY` 的主机名一致。生产/预发布环境应由 CI/Harbor/KMS
-提供对应密钥和认证配置。
+不得提交到仓库。Helm 供应链容器使用 `SUPPLY_CHAIN_REGISTRY_HOST_ALIAS` 访问宿主机暴露的
+Harbor 入口,必须与 `SUPPLY_CHAIN_REGISTRY` 的主机名一致;Trivy/Cosign 使用 Docker host 网络
+直接复用同一受控 443 入口,不依赖本机代理或 host-gateway 转发。生产/预发布环境应由
+CI/Harbor/KMS 提供对应密钥和认证配置。
 
 本地供应链和实验测试都直接使用 `https://registry.chaimir.io` 的标准 443 入口；Docker Desktop
 节点启动时由 `make registry-runtime-dns` 使用节点动态解析到的 `host.docker.internal` 网关维护

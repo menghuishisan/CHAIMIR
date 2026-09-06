@@ -269,6 +269,9 @@ func validateToolResourceSpecShape(spec *ToolResourceSpec, kind int16) error {
 	}
 	for i := range spec.Components {
 		component := &spec.Components[i]
+		if kind != SandboxToolKindInfra && len(component.WritableMountDomains) > 0 {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
 		if err := validateComponentMountDomains(*component); err != nil {
 			return err
 		}
@@ -293,6 +296,9 @@ func validateComponentBindings(bindings []ComponentBinding) error {
 	for _, binding := range bindings {
 		name := strings.TrimSpace(binding.Name)
 		if name == "" || !bindingNamePattern.MatchString(name) || strings.TrimSpace(binding.Capability) == "" || strings.TrimSpace(binding.Endpoint) == "" {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		if source := strings.TrimSpace(binding.SourceEndpoint); source != "" && source != "component" {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
 		if binding.Protocol != "TCP" && binding.Protocol != "HTTP" && binding.Protocol != "HTTPS" && binding.Protocol != "WS" && binding.Protocol != "WSS" && binding.Protocol != "GRPC" {
@@ -1085,9 +1091,14 @@ func networkPortDeclared(ports map[string]int32, port int32) bool {
 func podTopologyForAdapter(spec AdapterSpec) []workload.PodSpec {
 	if len(spec.Pods) > 0 {
 		pods := append([]workload.PodSpec(nil), spec.Pods...)
+		declared := declaredContainerMap(spec)
 		seen := map[string]struct{}{}
-		for _, pod := range pods {
-			for _, container := range pod.Containers {
+		for podIndex := range pods {
+			for containerIndex := range pods[podIndex].Containers {
+				container := &pods[podIndex].Containers[containerIndex]
+				if definition, ok := declared[container.Name]; ok && podContainerIsReferenceOnly(*container) {
+					*container = definition
+				}
 				seen[container.Name] = struct{}{}
 			}
 		}
@@ -1588,6 +1599,15 @@ func validateComponentMountDomains(spec workload.ComponentSpec) error {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
 		seen[domain] = struct{}{}
+	}
+	for _, raw := range spec.WritableMountDomains {
+		domain := strings.TrimSpace(raw)
+		if !mountNamePattern.MatchString(domain) {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		if _, exists := seen[domain]; !exists {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
 	}
 	return nil
 }

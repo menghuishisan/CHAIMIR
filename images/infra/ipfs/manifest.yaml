@@ -55,6 +55,52 @@ infra:
   roles:
     - storage
     - content-addressing
+  resource_spec:
+    components:
+      - name: infra
+        image_url: "@self"
+        ports:
+          - name: api
+            container_port: 5001
+            service_port: 5001
+            protocol: TCP
+          - name: gateway
+            container_port: 8080
+            service_port: 8080
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi
+        readiness_probe:
+          type: tcp
+          port: api
+          period_seconds: 2
+          failure_threshold: 30
+        read_only_root_filesystem: false
+        mount_workspace: false
+        mount_domains:
+          - runtime-state
+        writable_mount_domains:
+          - runtime-state
+    services:
+      - name: infra-ipfs-api
+        component: infra
+        ports:
+          - name: api
+            port: 5001
+            target_port: api
+            protocol: TCP
+      - name: infra-ipfs-gateway
+        component: infra
+        ports:
+          - name: gateway
+            port: 8080
+            target_port: gateway
+            protocol: TCP
 ports:
   - name: api
     container_port: 5001

@@ -34,6 +34,7 @@ env_keys:
     - POSTGRES_PASSWORD
 secrets_required:
   - env: POSTGRES_PASSWORD
+    secret_key: PG_PASSWORD
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
 capabilities:

@@ -323,6 +323,8 @@ func privateSidecarsFromContract(items []contracts.SandboxPrivateSidecarSpec) []
 			ImageURL:               item.ImageURL,
 			Command:                append([]string(nil), item.Command...),
 			Args:                   append([]string(nil), item.Args...),
+			PrepullCommand:         append([]string(nil), item.PrepullCommand...),
+			PrepullHold:            item.PrepullHold,
 			Env:                    env,
 			Resources:              workload.ResourceSpec{Requests: copyStringMap(item.Resources.Requests), Limits: copyStringMap(item.Resources.Limits)},
 			Workdir:                item.Workdir,

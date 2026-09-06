@@ -27,9 +27,9 @@ RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${N
     && test "$(git rev-parse HEAD)" = "${KUBO_COMMIT}" \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         if go get \
-            golang.org/x/crypto@v0.53.0 \
-            golang.org/x/net@v0.56.0 \
-            golang.org/x/text@v0.39.0 \
+            golang.org/x/crypto@v0.55.0 \
+            golang.org/x/net@v0.57.0 \
+            golang.org/x/text@v0.41.0 \
             google.golang.org/grpc@v1.82.1; then break; fi; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 5)); \
@@ -60,12 +60,12 @@ LABEL org.opencontainers.image.description="Chaimir IPFS Kubo node image"
 # IPFS 数据目录由 runtime-state 卷承载,镜像内不写入业务数据。
 COPY --from=kubo-build /out/ipfs /usr/local/bin/ipfs
 COPY --from=entrypoint-build /src/chaimir-ipfs-entrypoint /usr/local/bin/chaimir-ipfs-entrypoint
-COPY --chown=65532:65532 --from=dirs /out/runtime-state /runtime-state
-COPY --chown=65532:65532 --from=dirs /out/workspace /workspace
+COPY --chown=1000:1000 --from=dirs /out/runtime-state /runtime-state
+COPY --chown=1000:1000 --from=dirs /out/workspace /workspace
 
 ENV IPFS_PATH=/runtime-state/ipfs
 ENV IPFS_TELEMETRY=off
-USER nonroot:nonroot
+USER 1000:1000
 WORKDIR /workspace
 EXPOSE 5001 8080
 ENTRYPOINT ["/usr/local/bin/chaimir-ipfs-entrypoint"]

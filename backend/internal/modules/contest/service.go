@@ -140,7 +140,7 @@ func currentServiceTenant(ctx context.Context) (int64, error) {
 	return id.TenantID, nil
 }
 
-// resolvePublishedContestTenant 解析公开竞赛的组织租户,用于跨校学生入口。
+// resolvePublishedContestTenant 解析已发布竞赛的组织租户,供受控跨校入口使用。
 // 解析结果只用于后续 M8 租户事务,不会改变当前请求身份或把组织租户写入用户会话。
 func (s *Service) resolvePublishedContestTenant(ctx context.Context, contestID int64) (int64, error) {
 	if contestID <= 0 {
@@ -158,6 +158,27 @@ func (s *Service) resolvePublishedContestTenant(ctx context.Context, contestID i
 		return 0, apperr.ErrContestNotFound
 	}
 	return organizerTenantID, nil
+}
+
+// contestReadAccessAllowed 判断当前身份是否具备已发布竞赛的读取资格。
+// 同租户账号可读取本租户竞赛;跨租户账号必须先成为该竞赛队伍成员。
+func contestReadAccessAllowed(id tenant.Identity, organizerTenantID int64, teamMember bool) bool {
+	return id.TenantID == organizerTenantID || teamMember
+}
+
+// ensurePublishedContestReadAccess 校验跨租户竞赛详情和题面读取权限。
+// 未加入组织方竞赛的跨租户账号统一返回竞赛不存在,避免泄露资源存在性。
+func (s *Service) ensurePublishedContestReadAccess(ctx context.Context, tx TxStore, organizerTenantID, contestID int64, id tenant.Identity) error {
+	if contestReadAccessAllowed(id, organizerTenantID, false) {
+		return nil
+	}
+	if _, err := tx.GetTeamForAccount(ctx, organizerTenantID, contestID, id.TenantID, id.AccountID); err != nil {
+		if isNoRows(err) {
+			return apperr.ErrContestNotFound
+		}
+		return err
+	}
+	return nil
 }
 
 // resolveTeamTenant 解析队伍所属组织租户,供队伍深链和锁定入口使用。

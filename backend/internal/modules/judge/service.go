@@ -465,6 +465,15 @@ func (s *Service) compileJudgerResourceSpec(ctx context.Context, req JudgerReque
 		if err != nil {
 			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
 		}
+		snapshot.PrivateSidecars = privateSidecarsForSandbox(execution.ExecutionSidecars)
+		if err := contracts.AppendPrivateSidecarImageClosure(&snapshot); err != nil {
+			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
+		}
+		digest, digestErr := contracts.CanonicalSnapshotDigest(snapshot)
+		if digestErr != nil {
+			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(digestErr)
+		}
+		snapshot.Digest = digest
 		spec.CompositionSnapshot = snapshot
 	}
 	if err := validateJudgerResourceSpecForUse(Judger{Type: req.Type, RuntimeRequired: req.RuntimeRequired, ResourceSpec: spec}); err != nil {

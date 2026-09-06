@@ -40,9 +40,10 @@ env_keys:
     - OP_NODE_RPC_ADDR
     - OP_NODE_RPC_PORT
   secret:
-    - CHAIMIR_OP_NODE_L2_ENGINE_JWT
+    - OP_GETH_JWT_SECRET
 secrets_required:
-  - env: CHAIMIR_OP_NODE_L2_ENGINE_JWT
+  - env: OP_GETH_JWT_SECRET
+    secret_key: OP_GETH_JWT_SECRET
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
 data_driven: true
@@ -60,6 +61,7 @@ capabilities:
   config_schema:
     type: object
     additionalProperties: false
+    required: [rollup_config]
     properties:
       rollup_config:
         type: string
@@ -78,6 +80,46 @@ infra:
   runtime_config_required: true
   eco_tags:
     - evm
+  resource_spec:
+    components:
+      - name: infra
+        image_url: "@self"
+        env:
+          - name: OP_NODE_RPC_ADDR
+            value: 0.0.0.0
+          - name: OP_NODE_RPC_PORT
+            value: "8545"
+        ports:
+          - name: http
+            container_port: 8545
+            service_port: 8545
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 256Mi
+        read_only_root_filesystem: true
+        mount_workspace: false
+        mount_domains:
+          - runtime-state
+        writable_mount_domains:
+          - runtime-state
+        readiness_probe:
+          type: tcp
+          port: http
+          period_seconds: 2
+          failure_threshold: 30
+    services:
+      - name: infra-op-stack-http
+        component: infra
+        ports:
+          - name: http
+            port: 8545
+            target_port: http
+            protocol: TCP
   bindings:
     - name: l1_execution
       capability: evm-json-rpc

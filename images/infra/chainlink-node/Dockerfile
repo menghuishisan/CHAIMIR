@@ -34,8 +34,8 @@ RUN rm -f /usr/local/bin/chainlink-* /usr/local/bin/aptos /usr/local/bin/consens
     && (id -u 1000 >/dev/null 2>&1 || useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir) \
     && mkdir -p /chainlink /workspace \
     && chown -R 1000:1000 /chainlink /workspace
+COPY --chmod=0755 entrypoint.sh /usr/local/bin/chaimir-chainlink-entrypoint
 USER 1000:1000
 WORKDIR /workspace
 EXPOSE 6688
-ENTRYPOINT ["chainlink"]
-CMD ["node", "start", "--config", "/chainlink/config.toml", "--secrets", "/chainlink/secrets.toml"]
+ENTRYPOINT ["/usr/local/bin/chaimir-chainlink-entrypoint"]

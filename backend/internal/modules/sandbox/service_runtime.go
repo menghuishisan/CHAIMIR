@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"reflect"
 	"strings"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
@@ -374,11 +375,11 @@ func runtimeSelftestStatuses(runtime Runtime, selftestErr error) (int16, int16) 
 	return RuntimeSelftestPassed, RuntimeStatusAvailable
 }
 
-// selectRuntimeSelftestImage 只选择已启用且已烘焙创世数据的版本;组合预拉取属于具体组合,不阻塞运行时接入自检。
+// selectRuntimeSelftestImage 选择已启用且有不可变证明的版本;创世状态由运行时自己的启动契约处理,
+// 不能把仅适用于少数预烘焙 runtime 的 genesis_baked 字段当成所有 runtime 的自检门禁。
 func selectRuntimeSelftestImage(images []RuntimeImage) (RuntimeImage, bool) {
 	for _, image := range images {
-		if image.Status != RuntimeImageStatusAvailable ||
-			!image.GenesisBaked {
+		if image.Status != RuntimeImageStatusAvailable {
 			continue
 		}
 		return image, true
@@ -435,7 +436,13 @@ func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, plan CreateS
 	if err != nil {
 		return err
 	}
-	if err := s.resetRuntimeForPlan(ctx, plan, cap); err != nil {
+	target, ok := runtime.AdapterSpec.Selftest["query_target"].(string)
+	if !ok || strings.TrimSpace(target) == "" {
+		return apperr.ErrSandboxSelftestSpecInvalid
+	}
+	// Kubernetes Ready 只表示容器探针通过，不能替代运行时声明的原生能力。
+	// 先以无副作用的 query_target 确认节点可服务，再执行会改变链状态的 deploy/tx。
+	if err := s.waitRuntimeCapabilityReady(ctx, cap, sb, runtime, strings.TrimSpace(target)); err != nil {
 		return err
 	}
 	payload, ok := runtime.AdapterSpec.Selftest["deploy_payload"].(map[string]any)
@@ -450,14 +457,43 @@ func (s *Service) runRuntimeCapabilitySelftest(ctx context.Context, plan CreateS
 			return err
 		}
 	}
-	target, ok := runtime.AdapterSpec.Selftest["query_target"].(string)
-	if !ok || strings.TrimSpace(target) == "" {
-		return apperr.ErrSandboxSelftestSpecInvalid
-	}
 	if _, err := cap.Query(ctx, sb, runtime, strings.TrimSpace(target)); err != nil {
 		return err
 	}
 	return s.resetRuntimeForPlan(ctx, plan, cap)
+}
+
+// waitRuntimeCapabilityReady 在既有 Pod 就绪窗口内等待声明的只读查询能力，
+// 避免容器已启动但节点仍在导入账户、账本或 RPC 初始化时提前执行 deploy。
+func (s *Service) waitRuntimeCapabilityReady(ctx context.Context, cap ChainCapability, sb Sandbox, runtime Runtime, target string) error {
+	if s.cfg.ReadyTimeoutSeconds <= 0 || s.cfg.ReadyPollIntervalSeconds <= 0 || s.cfg.ChainRPCTimeoutSeconds <= 0 {
+		return apperr.ErrSandboxSelftestRecycleConfigInvalid
+	}
+	probeRuntime := runtime
+	query := &probeRuntime.AdapterSpec.CapabilityCommands.Query
+	chainTimeout := int32(s.cfg.ChainRPCTimeoutSeconds)
+	if query.TimeoutSeconds <= 0 || query.TimeoutSeconds > chainTimeout {
+		query.TimeoutSeconds = chainTimeout
+	}
+	readyCtx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
+	defer cancel()
+	ticker := time.NewTicker(sandboxPodReadyPollInterval(s.cfg.ReadyPollIntervalSeconds))
+	defer ticker.Stop()
+	var lastErr error
+	for {
+		if _, err := cap.Query(readyCtx, sb, probeRuntime, target); err == nil {
+			return nil
+		} else if !errors.Is(err, apperr.ErrSandboxChainFailed) && !errors.Is(err, context.DeadlineExceeded) {
+			return err
+		} else {
+			lastErr = err
+		}
+		select {
+		case <-readyCtx.Done():
+			return fmt.Errorf("运行时声明查询能力未在 %s 内就绪: %w", timeDurationSeconds(s.cfg.ReadyTimeoutSeconds), lastErr)
+		case <-ticker.C:
+		}
+	}
 }
 
 // resetRuntimeForPlan 根据运行时契约选择控制面重建或生态原生 reset 命令。
@@ -663,7 +699,7 @@ func (c *prepullSpecCollector) add(imageURL string, command []string, hold bool,
 
 // prepullImageSpecsForSnapshot 从不可变组合快照重建预拉取闭包,不读取当前工具目录,避免发布后目录变化污染运行环境。
 func prepullImageSpecsForSnapshot(snapshot contracts.SandboxCompositionSnapshot) ([]PrepullImageSpec, error) {
-	collector := newPrepullSpecCollector(len(snapshot.Runtimes) + len(snapshot.Components))
+	collector := newPrepullSpecCollector(len(snapshot.Runtimes) + len(snapshot.Components) + len(snapshot.PrivateSidecars))
 	for _, frozen := range snapshot.Runtimes {
 		var adapter AdapterSpec
 		if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &adapter); err != nil {
@@ -694,6 +730,11 @@ func prepullImageSpecsForSnapshot(snapshot contracts.SandboxCompositionSnapshot)
 			if err := collector.add(workloadComponent.ImageURL, command, workloadComponent.PrepullHold, workloadComponent.EphemeralMounts); err != nil {
 				return nil, err
 			}
+		}
+	}
+	for _, sidecar := range snapshot.PrivateSidecars {
+		if err := collector.add(sidecar.ImageURL, sidecar.PrepullCommand, sidecar.PrepullHold, privateSidecarEphemeralMounts(sidecar.EphemeralMounts)); err != nil {
+			return nil, fmt.Errorf("判题私有 sidecar %s 预拉取声明无效: %w", sidecar.Name, err)
 		}
 	}
 	expectedSpecs := make([]PrepullImageSpec, 0, len(snapshot.ImageClosure))
@@ -735,6 +776,15 @@ func prepullImageSpecsForSnapshot(snapshot contracts.SandboxCompositionSnapshot)
 		return nil, fmt.Errorf("组合预拉取闭包必须且只能包含一个保持容器,实际为 %d 个", holdCount)
 	}
 	return collector.specs, nil
+}
+
+// privateSidecarEphemeralMounts 将跨模块判题 sidecar 的临时目录投影为预拉取声明。
+func privateSidecarEphemeralMounts(items []contracts.SandboxEphemeralMountSpec) []workload.EphemeralMountSpec {
+	out := make([]workload.EphemeralMountSpec, 0, len(items))
+	for _, item := range items {
+		out = append(out, workload.EphemeralMountSpec{Name: item.Name, MountPath: item.MountPath})
+	}
+	return out
 }
 
 // runtimePrepullContractChanged 只比较会改变预拉取镜像、自检命令、常驻用途或临时目录的声明。

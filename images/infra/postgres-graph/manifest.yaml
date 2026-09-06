@@ -27,10 +27,12 @@ env_keys:
   config:
     - POSTGRES_DB
     - POSTGRES_USER
+    - POSTGRES_INITDB_ARGS
   secret:
     - POSTGRES_PASSWORD
 secrets_required:
   - env: POSTGRES_PASSWORD
+    secret_key: PG_PASSWORD
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
 capabilities:
@@ -49,6 +51,53 @@ infra:
   roles:
     - datastore
     - indexer-dependency
+  resource_spec:
+    components:
+      - name: infra
+        image_url: "@self"
+        args:
+          - -c
+          - max_connections=200
+        env:
+          - name: POSTGRES_DB
+            value: graph
+          - name: POSTGRES_USER
+            value: postgres
+          - name: POSTGRES_INITDB_ARGS
+            value: --auth-local=scram-sha-256 --auth-host=scram-sha-256 -E UTF8 --locale=C
+          - name: PGDATA
+            value: /runtime-state/postgres/data
+        ports:
+          - name: postgres
+            container_port: 5432
+            service_port: 5432
+            protocol: TCP
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 2Gi
+        readiness_probe:
+          type: tcp
+          port: postgres
+          period_seconds: 2
+          failure_threshold: 30
+        read_only_root_filesystem: false
+        mount_workspace: false
+        mount_domains:
+          - runtime-state
+        writable_mount_domains:
+          - runtime-state
+    services:
+      - name: infra-postgres-graph-postgres
+        component: infra
+        ports:
+          - name: postgres
+            port: 5432
+            target_port: postgres
+            protocol: TCP
 ports:
   - name: postgres
     container_port: 5432

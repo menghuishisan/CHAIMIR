@@ -58,6 +58,18 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 	if err != nil {
 		return nil, err
 	}
+	env, err = mergeRuntimeWorkloadEnv(env, manifest.Runtime.Workload.Env)
+	if err != nil {
+		return nil, err
+	}
+	secretEnv, err := secretEnvFromManifest(manifest.SecretsRequired)
+	if err != nil {
+		return nil, err
+	}
+	initContainers, err := normalizeRuntimeInitContainers(manifest.Runtime.Workload.InitContainers, runtimeImageURL)
+	if err != nil {
+		return nil, err
+	}
 	studentShell := map[string]any{
 		"name": "student-shell", "image_url": workspaceImageURL, "command": []string{"sleep", "2147483647"},
 		"env":                       []map[string]any{{"name": "HOME", "value": "/runtime-state/workspace-home"}},
@@ -77,7 +89,7 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 		"runtime_container": map[string]any{
 			"name": "runtime", "image_url": runtimeImageURL, "ports": ports,
 			"env":                       env,
-			"secret_env":                secretEnvFromManifest(manifest.SecretsRequired),
+			"secret_env":                secretEnv,
 			"resources":                 map[string]any{"requests": map[string]string{"cpu": manifest.Resources.CPURequest, "memory": manifest.Resources.MemoryRequest}, "limits": map[string]string{"cpu": manifest.Resources.CPULimit, "memory": manifest.Resources.MemoryLimit}},
 			"read_only_root_filesystem": manifest.Security.ReadOnlyRootFilesystem,
 			"labels":                    map[string]string{"chaimir.io/student-access": "false"}, "mount_workspace": false,
@@ -85,7 +97,7 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 		},
 		"infra_sidecars": []map[string]any{studentShell},
 		"pods": []map[string]any{
-			{"name": "sandbox", "containers": []map[string]any{{"name": "runtime"}}},
+			{"name": "sandbox", "init_containers": initContainers, "containers": []map[string]any{{"name": "runtime"}}},
 			{"name": "workspace", "containers": []map[string]any{studentShell}},
 		},
 		"workspace_ops": map[string]any{
@@ -103,23 +115,97 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 			"exec_target": archiveTarget,
 			"unpack_tar":  []string{"/usr/local/bin/chaimir-workspace", "unpack", "{{domain}}", "{{domain}}"},
 		},
-		"capability_commands": capabilityCommandSet(nativeHelper, nativeTarget, resetStrategy),
+		"capability_commands": capabilityCommandSet(nativeHelper, nativeTarget, resetStrategy, manifest.Runtime.Native.Actions),
 		"capabilities":        manifest.Capabilities,
 		"selftest":            runtimeSelftestSpec(manifest),
 	}, nil
 }
 
+// mergeRuntimeWorkloadEnv 合并 manifest 明确声明的运行期非敏感环境变量。
+func mergeRuntimeWorkloadEnv(base, extra []workload.EnvVarSpec) ([]workload.EnvVarSpec, error) {
+	out := append([]workload.EnvVarSpec(nil), base...)
+	index := make(map[string]int, len(out))
+	for position, item := range out {
+		index[item.Name] = position
+	}
+	for _, item := range extra {
+		item.Name = strings.TrimSpace(item.Name)
+		if item.Name == "" {
+			return nil, fmt.Errorf("runtime.workload.env 包含空环境变量名")
+		}
+		if current, exists := index[item.Name]; exists {
+			if out[current].Value != item.Value {
+				return nil, fmt.Errorf("runtime.workload.env 与基础环境变量 %s 冲突", item.Name)
+			}
+			continue
+		}
+		index[item.Name] = len(out)
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// normalizeRuntimeInitContainers 只接受 manifest 显式声明、使用已证明 digest 的初始化容器。
+func normalizeRuntimeInitContainers(items []workload.ComponentSpec, runtimeImageURL string) ([]workload.ComponentSpec, error) {
+	out := make([]workload.ComponentSpec, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		item.Name = strings.TrimSpace(item.Name)
+		if item.Name == "" || !workload.ValidNonShellCommand(item.Command) || item.PrepullHold {
+			return nil, fmt.Errorf("runtime.workload.init_containers 声明无效")
+		}
+		if _, exists := seen[item.Name]; exists {
+			return nil, fmt.Errorf("runtime.workload.init_containers 名称重复: %s", item.Name)
+		}
+		switch strings.TrimSpace(item.ImageURL) {
+		case "@self":
+			item.ImageURL = runtimeImageURL
+		case "":
+			return nil, fmt.Errorf("runtime.workload.init_containers %s 缺少 image_url", item.Name)
+		default:
+			if !strings.Contains(item.ImageURL, "@sha256:") {
+				return nil, fmt.Errorf("runtime.workload.init_containers %s 必须使用不可变镜像 digest", item.Name)
+			}
+		}
+		if item.MountWorkspace == nil || *item.MountWorkspace {
+			return nil, fmt.Errorf("runtime.workload.init_containers %s 不得挂载学生工作区", item.Name)
+		}
+		seen[item.Name] = struct{}{}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
 // capabilityCommandSet 仅为声明了 native helper 的 runtime 生成平台原生动作；L1 runtime 保留基础工作负载而不伪造动作。
-func capabilityCommandSet(helper, target, resetStrategy string) map[string]any {
+func capabilityCommandSet(helper, target, resetStrategy string, actions map[string][]string) map[string]any {
 	if strings.TrimSpace(helper) == "" {
 		return map[string]any{}
 	}
+	command := func(action string, timeout int) map[string]any {
+		argv := append([]string(nil), actions[action]...)
+		if len(argv) == 0 {
+			argv = []string{helper, action}
+		}
+		return map[string]any{"exec_target": target, "command": argv, "timeout_seconds": timeout}
+	}
 	return map[string]any{
-		"deploy":         map[string]any{"exec_target": target, "command": []string{helper, "deploy"}, "timeout_seconds": 120},
-		"tx":             map[string]any{"exec_target": target, "command": []string{helper, "tx"}, "timeout_seconds": 120},
-		"query":          map[string]any{"exec_target": target, "command": []string{helper, "query"}, "timeout_seconds": 60},
+		"deploy":         command("deploy", 120),
+		"tx":             command("tx", 120),
+		"query":          command("query", 60),
 		"reset_strategy": resetStrategy,
 	}
+}
+
+// runtimeCapabilityImpl 只为声明真实 native helper 的 L2/L3 runtime 选择内置执行器。
+// L1 runtime 仅提供基础节点能力，不能因为目录初始化而被强行纳入原生动作自检。
+func runtimeCapabilityImpl(manifest platformRuntimeManifest) string {
+	if manifest.Runtime.AdapterLevel < sandbox.RuntimeAdapterLevelStandard {
+		return ""
+	}
+	if strings.TrimSpace(manifest.Runtime.Native.Helper) == "" {
+		return ""
+	}
+	return sandbox.BuiltinExecCapability
 }
 
 // runtimeManifestCapabilityReason 返回标准链能力清单缺失的明确原因。
@@ -155,13 +241,13 @@ func runtimeSelftestSpec(manifest platformRuntimeManifest) map[string]any {
 }
 
 // runtimeAdapterEnv 将运行时 manifest 的插件 argv/RPC 方法转成受控环境变量,不解释生态语义。
-func runtimeAdapterEnv(manifest platformRuntimeManifest) ([]map[string]any, error) {
+func runtimeAdapterEnv(manifest platformRuntimeManifest) ([]workload.EnvVarSpec, error) {
 	port := runtimeRPCPort(manifest.Ports)
 	url := fmt.Sprintf("http://127.0.0.1:%d", port)
-	env := []map[string]any{
-		{"name": "CHAIMIR_RUNTIME_PROFILE", "value": manifest.Runtime.Native.Profile},
-		{"name": "CHAIMIR_CHAIN_RPC_URL", "value": url},
-		{"name": "HOME", "value": "/runtime-state/adapter-home"},
+	env := []workload.EnvVarSpec{
+		{Name: "CHAIMIR_RUNTIME_PROFILE", Value: manifest.Runtime.Native.Profile},
+		{Name: "CHAIMIR_CHAIN_RPC_URL", Value: url},
+		{Name: "HOME", Value: "/runtime-state/adapter-home"},
 	}
 	for action, argv := range manifest.Runtime.Native.Actions {
 		if len(argv) == 0 {
@@ -172,7 +258,7 @@ func runtimeAdapterEnv(manifest platformRuntimeManifest) ([]map[string]any, erro
 			return nil, fmt.Errorf("编码运行时 %s 动作 argv 失败: %w", action, err)
 		}
 		name := "CHAIMIR_ADAPTER_" + strings.ToUpper(strings.TrimSpace(action)) + "_ARGV"
-		env = append(env, map[string]any{"name": name, "value": string(raw)})
+		env = append(env, workload.EnvVarSpec{Name: name, Value: string(raw)})
 	}
 	for action, method := range manifest.Runtime.Native.Methods {
 		method = strings.TrimSpace(method)
@@ -180,7 +266,7 @@ func runtimeAdapterEnv(manifest platformRuntimeManifest) ([]map[string]any, erro
 			continue
 		}
 		name := "CHAIMIR_ADAPTER_" + strings.ToUpper(strings.TrimSpace(action)) + "_METHOD"
-		env = append(env, map[string]any{"name": name, "value": method})
+		env = append(env, workload.EnvVarSpec{Name: name, Value: method})
 	}
 	return env, nil
 }
