@@ -18,6 +18,7 @@ DOCKER_RUNTIME_SCRIPT := scripts/docker-runtime.ps1
 DOCKER_RUNTIME_WATCHER_SCRIPT := scripts/docker-runtime-watcher.ps1
 IMAGE_DIGEST_LOCK := ../images/image-digests.lock
 INGRESS_NGINX_DIGEST := $(shell powershell -NoProfile -Command "((Select-String -Path '$(IMAGE_DIGEST_LOCK)' -Pattern '^ingress/ingress-nginx ').Line -split '\\s+')[1]")
+INGRESS_WEBHOOK_CERTGEN_DIGEST := $(shell powershell -NoProfile -Command "((Select-String -Path '$(IMAGE_DIGEST_LOCK)' -Pattern '^ingress/kube-webhook-certgen ').Line -split '\\s+')[1]")
 GVISOR_CHECK_DIGEST := $(shell powershell -NoProfile -Command "((Select-String -Path '$(IMAGE_DIGEST_LOCK)' -Pattern '^base/chain-tools ').Line -split '\\s+')[1]")
 GVISOR_CHECK_IMAGE := registry.chaimir.io/base/chain-tools@$(GVISOR_CHECK_DIGEST)
 TLS_DIR := config/chaimir-tls
@@ -34,8 +35,9 @@ POLICY_CONTROLLER_WEBHOOK_REPLICAS := 2
 POLICY_CONTROLLER_WEBHOOK_CPU_REQUEST := 200m
 POLICY_CONTROLLER_WEBHOOK_CPU_LIMIT := 500m
 # CSI snapshotter 只安装 VolumeSnapshot CRD 与 snapshot-controller;
-# 真实快照能力仍取决于生产集群的 CSI 驱动和 VolumeSnapshotClass。
-SNAPSHOTTER_VERSION := v8.6.0
+# controller 镜像必须来自正式 digest lock,缺少 lock 条目时禁止渲染/安装。
+SNAPSHOT_CONTROLLER_LOCK_KEY := infra/snapshot-controller
+SNAPSHOT_CONTROLLER_IMAGE_ENV := components/csi-snapshotter/snapshot-controller-image.env
 # gVisor 节点运行时使用对象版本与 SHA512 双重固定,禁止跟随 latest 内容漂移。
 GVISOR_RUNSC_URL := https://storage.googleapis.com/gvisor/releases/release/20260817.0/x86_64/runsc?generation=1787184197271930
 GVISOR_RUNSC_SHA512 := 84936438d583ec976800f464e75a83e1515f0890b451b9b4db219c4472b54ca9b106a6772ee683f1e64cce2128871d7637b14d800591f8451b8137f6c39fb2ef
@@ -215,6 +217,7 @@ registry-pull-secret-sync: registry-runtime-dns harbor-projects-ensure apply-acc
 .PHONY: ingress-up
 ingress-up: ## 安装 ingress-nginx 并打 namespace 标签(供 NetworkPolicy 识别)
 	@test -n "$(INGRESS_NGINX_DIGEST)" || { echo "$(IMAGE_DIGEST_LOCK) 缺少 ingress/ingress-nginx digest"; exit 1; }
+	@test -n "$(INGRESS_WEBHOOK_CERTGEN_DIGEST)" || { echo "$(IMAGE_DIGEST_LOCK) 缺少 ingress/kube-webhook-certgen digest"; exit 1; }
 	@auth_dir="$$(sed -n 's/^SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR=//p' "$(SUPPLY_CHAIN_CONFIG)")"; \
 	auth_file="$$auth_dir/config.json"; \
 	test -f "$$auth_file" || { echo "缺少 $$auth_file;请先完成 Harbor robot 凭据校验"; exit 1; }; \
@@ -229,7 +232,8 @@ ingress-up: ## 安装 ingress-nginx 并打 namespace 标签(供 NetworkPolicy �
 		--type=kubernetes.io/dockerconfigjson \
 		--dry-run=client -o yaml | kubectl apply -f -
 	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm \
-		-e INGRESS_NGINX_DIGEST=$(INGRESS_NGINX_DIGEST) --entrypoint sh helm -lc 'set -eu; \
+		-e INGRESS_NGINX_DIGEST=$(INGRESS_NGINX_DIGEST) \
+		-e INGRESS_WEBHOOK_CERTGEN_DIGEST=$(INGRESS_WEBHOOK_CERTGEN_DIGEST) --entrypoint sh helm -lc 'set -eu; \
 		helm repo add ingress-nginx "$$SUPPLY_CHAIN_INGRESS_NGINX_CHART_REPOSITORY" --force-update; \
 		helm repo update; \
 		helm upgrade --install "$$SUPPLY_CHAIN_INGRESS_NGINX_RELEASE_NAME" ingress-nginx/ingress-nginx \
@@ -238,14 +242,40 @@ ingress-up: ## 安装 ingress-nginx 并打 namespace 标签(供 NetworkPolicy �
 			--server-side=false \
 			-f "/workspace/$$SUPPLY_CHAIN_INGRESS_NGINX_VALUES_PATH" \
 			--set-string controller.image.digest="$$INGRESS_NGINX_DIGEST" \
+			--set-string controller.admissionWebhooks.patch.image.registry=registry.chaimir.io \
+			--set-string controller.admissionWebhooks.patch.image.image=ingress/kube-webhook-certgen \
+			--set-string controller.admissionWebhooks.patch.image.tag= \
+			--set-string controller.admissionWebhooks.patch.image.digest="$$INGRESS_WEBHOOK_CERTGEN_DIGEST" \
 			--rollback-on-failure --wait --timeout 5m'
 	kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
 	kubectl -n ingress-nginx get deployment,service,ingressclass
 
 # ---- metrics-server ----
-.PHONY: metrics-apply
-metrics-apply: ## 应用项目固定的 metrics-server 清单
+.PHONY: metrics-tls metrics-apply
+metrics-tls: ## 准备 metrics-server 的受控服务端证书与 CA
+	@set -euo pipefail; \
+	if kubectl -n kube-system get secret metrics-server-tls >/dev/null 2>&1; then \
+		test -n "$$(kubectl -n kube-system get secret metrics-server-tls -o jsonpath='{.data.tls\.crt}')" || { echo "metrics-server-tls 缺少 tls.crt" >&2; exit 1; }; \
+		test -n "$$(kubectl -n kube-system get secret metrics-server-tls -o jsonpath='{.data.tls\.key}')" || { echo "metrics-server-tls 缺少 tls.key" >&2; exit 1; }; \
+		test -n "$$(kubectl -n kube-system get secret metrics-server-tls -o jsonpath='{.data.ca\.crt}')" || { echo "metrics-server-tls 缺少 ca.crt" >&2; exit 1; }; \
+	else \
+		tmp=$$(mktemp -d); \
+		trap 'rm -rf "$$tmp"' EXIT; \
+		docker run --rm --pull never --network none --entrypoint sh --mount "type=bind,source=$$tmp,target=/out" $(GVISOR_CHECK_IMAGE) -ec ' \
+			openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 30 -subj "/CN=Chaimir metrics-server CA" -keyout /out/ca.key -out /out/ca.crt >/dev/null 2>&1; \
+			openssl req -newkey rsa:3072 -nodes -subj "/CN=metrics-server.kube-system.svc" -keyout /out/tls.key -out /out/tls.csr >/dev/null 2>&1; \
+			printf "%s\\n" "[v3_req]" "subjectAltName=DNS:metrics-server,DNS:metrics-server.kube-system,DNS:metrics-server.kube-system.svc,DNS:metrics-server.kube-system.svc.cluster.local" "extendedKeyUsage=serverAuth" > /out/tls.cnf; \
+			openssl x509 -req -sha256 -days 30 -in /out/tls.csr -CA /out/ca.crt -CAkey /out/ca.key -CAcreateserial -out /out/tls.crt -extfile /out/tls.cnf -extensions v3_req >/dev/null 2>&1; \
+		'; \
+		kubectl -n kube-system create secret generic metrics-server-tls --from-file=tls.crt="$$tmp/tls.crt" --from-file=tls.key="$$tmp/tls.key" --from-file=ca.crt="$$tmp/ca.crt" --dry-run=client -o yaml | kubectl apply -f -; \
+	fi
+
+metrics-apply: metrics-tls ## 应用项目固定的 metrics-server 清单并绑定 CA
 	kubectl apply -k components/metrics-server
+	@set -euo pipefail; \
+	ca_bundle=$$(kubectl -n kube-system get secret metrics-server-tls -o jsonpath='{.data.ca\.crt}'); \
+	test -n "$$ca_bundle" || { echo "metrics-server-tls 的 CA 为空" >&2; exit 1; }; \
+	kubectl patch apiservice v1beta1.metrics.k8s.io --type merge -p "{\"spec\":{\"caBundle\":\"$$ca_bundle\"}}"
 
 .PHONY: metrics-up
 metrics-up: metrics-apply ## 安装官方 metrics-server(生产/标准集群路径,不放宽 kubelet TLS)
@@ -256,6 +286,13 @@ metrics-up: metrics-apply ## 安装官方 metrics-server(生产/标准集群路�
 # ---- CSI VolumeSnapshot ----
 .PHONY: snapshot-up
 snapshot-up: ## 安装 CSI VolumeSnapshot CRD 与 snapshot-controller(不安装具体存储驱动)
+	@set -euo pipefail; \
+	if [ ! -f "$(SNAPSHOT_CONTROLLER_IMAGE_ENV)" ]; then echo "缺少 $(SNAPSHOT_CONTROLLER_IMAGE_ENV),禁止安装 snapshot-controller" >&2; exit 1; fi; \
+	image=$$(awk -F= '$$1 == "SNAPSHOT_CONTROLLER_IMAGE" { sub(/^[^=]*=/, ""); print; exit }' "$(SNAPSHOT_CONTROLLER_IMAGE_ENV)"); \
+	digest=$$(awk -v image="$(SNAPSHOT_CONTROLLER_LOCK_KEY)" '$$1 == image { print $$2; exit }' "$(IMAGE_DIGEST_LOCK)"); \
+	if [[ ! "$$digest" =~ ^sha256:[0-9a-f]{64}$$ ]]; then echo "正式镜像锁缺少 $(SNAPSHOT_CONTROLLER_LOCK_KEY) digest,禁止安装 snapshot-controller" >&2; exit 1; fi; \
+	expected="registry.chaimir.io/infra/snapshot-controller@$$digest"; \
+	if [[ "$$image" != "$$expected" ]]; then echo "$(SNAPSHOT_CONTROLLER_IMAGE_ENV) 必须精确匹配 $$expected" >&2; exit 1; fi; \
 	kubectl apply -k components/csi-snapshotter
 	kubectl -n kube-system rollout status deployment/snapshot-controller --timeout=180s
 
@@ -356,21 +393,19 @@ capacity-check: ## 校验 HPA 副本上限与 PostgreSQL 连接预算
 tls: ## 使用持久化 HTTPS 证书并写入当前集群的 TLS Secret
 	@set -euo pipefail; \
 	mkdir -p "$(TLS_DIR)"; \
-	if [ -s "$(TLS_DIR)/tls.key" ] && [ -s "$(TLS_DIR)/tls.crt" ] && ! command -v openssl >/dev/null 2>&1; then \
-		echo "复用已有 TLS 证书(宿主机无 openssl,不执行生成)"; \
-	elif [ -s "$(TLS_DIR)/tls.key" ] && [ -s "$(TLS_DIR)/tls.crt" ] && openssl x509 -in "$(TLS_DIR)/tls.crt" -checkend 86400 -noout >/dev/null 2>&1 && openssl x509 -in "$(TLS_DIR)/tls.crt" -noout -ext subjectAltName | grep -q 'DNS:www.chaimir.io' && openssl x509 -in "$(TLS_DIR)/tls.crt" -noout -ext subjectAltName | grep -q 'DNS:tools.chaimir.io' && openssl x509 -in "$(TLS_DIR)/tls.crt" -noout -ext subjectAltName | grep -q 'DNS:registry.chaimir.io'; then \
+	command -v openssl >/dev/null 2>&1 || { echo "缺少 openssl,无法验证或生成 HTTPS 证书" >&2; exit 1; }; \
+	if [ -s "$(TLS_DIR)/tls.key" ] && [ -s "$(TLS_DIR)/tls.crt" ] && openssl x509 -in "$(TLS_DIR)/tls.crt" -checkend 86400 -noout >/dev/null 2>&1 && openssl x509 -in "$(TLS_DIR)/tls.crt" -noout -ext subjectAltName | grep -q 'DNS:www.chaimir.io' && openssl x509 -in "$(TLS_DIR)/tls.crt" -noout -ext subjectAltName | grep -q 'DNS:tools.chaimir.io' && openssl x509 -in "$(TLS_DIR)/tls.crt" -noout -ext subjectAltName | grep -q 'DNS:registry.chaimir.io' && test "$$(openssl x509 -in "$(TLS_DIR)/tls.crt" -pubkey -noout | openssl pkey -pubin -outform DER 2>/dev/null | openssl dgst -sha256)" = "$$(openssl pkey -in "$(TLS_DIR)/tls.key" -pubout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | openssl dgst -sha256)"; then \
 		echo "复用现有 canonical TLS 证书"; \
 	else \
-		command -v openssl >/dev/null 2>&1 || { echo "缺少 openssl,无法生成 HTTPS 证书"; exit 1; }; \
 		openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
 			-keyout "$(TLS_DIR)/tls.key" -out "$(TLS_DIR)/tls.crt" \
 			-subj "/CN=www.chaimir.io" \
 			-addext "subjectAltName=DNS:www.chaimir.io,DNS:tools.chaimir.io,DNS:registry.chaimir.io" >/dev/null 2>&1; \
 	fi; \
-	kubectl create namespace chaimir-system --dry-run=client -o yaml | kubectl apply -f -; \
-	kubectl -n chaimir-system create secret tls "$(TLS_SECRET)" \
+	kubectl --request-timeout=10s create namespace chaimir-system --dry-run=client -o yaml | kubectl --request-timeout=10s apply -f -; \
+	kubectl --request-timeout=10s -n chaimir-system create secret tls "$(TLS_SECRET)" \
 		--cert="$(TLS_DIR)/tls.crt" --key="$(TLS_DIR)/tls.key" \
-		--dry-run=client -o yaml | kubectl apply -f -
+		--dry-run=client -o yaml | kubectl --request-timeout=10s apply -f -
 
 .PHONY: middleware-wait
 middleware-wait: apply-acceptance ## 等待中间件就绪(迁移前置)
@@ -402,8 +437,18 @@ generated-config-gc: ## 按当前工作负载引用清理未使用的 Kustomize 
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generated-config-gc.ps1 -Context kind-chaimir-cilium
 
 # ---- 镜像供应链工具与 Harbor(可选,本地/私有化私有仓)----
+.PHONY: supply-chain-image-input-check
+supply-chain-image-input-check: ## 校验 Trivy 漏洞数据库均为显式不可变 digest 引用
+	@set -euo pipefail; \
+	for key in SUPPLY_CHAIN_TRIVY_DB_REPOSITORY SUPPLY_CHAIN_TRIVY_JAVA_DB_REPOSITORY; do \
+		value=$$(awk -F= -v key="$$key" '$$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$(SUPPLY_CHAIN_CONFIG)"); \
+		if [[ ! "$$value" =~ ^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$$ ]]; then \
+			echo "$(SUPPLY_CHAIN_CONFIG) 的 $$key 必须是 image@sha256:<64 hex>,禁止普通 tag 或缺失" >&2; exit 1; \
+		fi; \
+	done
+
 .PHONY: supply-chain-tools-pull
-supply-chain-tools-pull: ## 拉取容器化 Trivy/Cosign/Helm 工具镜像
+supply-chain-tools-pull: supply-chain-image-input-check ## 拉取容器化 Trivy/Cosign/Helm 工具镜像
 	@set -e; \
 	for attempt in 1 2 3; do \
 		docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) pull --policy missing trivy cosign helm && exit 0; \
@@ -413,7 +458,7 @@ supply-chain-tools-pull: ## 拉取容器化 Trivy/Cosign/Helm 工具镜像
 	done
 
 .PHONY: supply-chain-tools-check
-supply-chain-tools-check: ## 通过 Docker 容器检查 Trivy/Cosign/Helm 可执行
+supply-chain-tools-check: supply-chain-image-input-check ## 通过 Docker 容器检查 Trivy/Cosign/Helm 可执行
 	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm trivy --version
 	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm cosign version
 	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm helm version
@@ -439,7 +484,7 @@ harbor-projects-ensure: supply-chain-secret-check ## 按镜像分类创建 Harbo
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/harbor-projects-ensure.ps1 -ConfigPath "$(SUPPLY_CHAIN_CONFIG)" -SecretPath "$(SUPPLY_CHAIN_SECRET_FILE)"
 
 .PHONY: image-attestations-generate
-image-attestations-generate: supply-chain-secret-check ## 扫描/签名/验签镜像并回写 deploy 与 backend env 的沙箱准入证明
+image-attestations-generate: supply-chain-secret-check supply-chain-image-input-check ## 扫描/签名/验签镜像并回写 deploy 与 backend env 的沙箱准入证明
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/image-attestations-generate.ps1 -RepoRoot "$$(cd .. && pwd)" -ConfigPath "$(SUPPLY_CHAIN_CONFIG)" -SecretPath "$(SUPPLY_CHAIN_SECRET_FILE)" -GenerateKeyIfMissing
 
 # ---- 校验(无需集群)----

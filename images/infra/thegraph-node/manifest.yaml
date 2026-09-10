@@ -42,10 +42,17 @@ env_keys:
     - CHAIMIR_GRAPH_NETWORK
   secret:
     - POSTGRES_PASSWORD
+    - GRAPH_POI_ACCESS_TOKEN
 secrets_required:
-  - env: POSTGRES_PASSWORD
+  - component: infra
+    env: POSTGRES_PASSWORD
     secret_key: PG_PASSWORD
     source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
+  - component: infra
+    env: GRAPH_POI_ACCESS_TOKEN
+    secret_key: GRAPH_POI_ACCESS_TOKEN
+    source: deploy/config/secret.env
     runtime_value: secret-or-kms
 capabilities:
   provides:
@@ -78,18 +85,21 @@ infra:
   bindings:
     - name: chain_rpc
       capability: evm-json-rpc
+      source_component: infra
       endpoint: rpc
       protocol: HTTP
       required_at_start: true
       config_binding: env:CHAIMIR_GRAPH_RPC_URL
     - name: graph_database
       capability: graph-datastore
+      source_component: infra
       endpoint: postgres
       protocol: TCP
       required_at_start: true
       config_binding: env:CHAIMIR_GRAPH_POSTGRES_ADDRESS
     - name: content_store
       capability: ipfs-http-api
+      source_component: infra
       endpoint: api
       protocol: HTTP
       required_at_start: true

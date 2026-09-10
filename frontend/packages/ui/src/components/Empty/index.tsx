@@ -23,6 +23,7 @@ export interface EmptyProps {
 export function Empty({ icon, title, description, action, className }: EmptyProps) {
   return (
     <div
+      role="status"
       className={cn(
         "flex flex-col items-center justify-center px-6 py-12 text-center",
         className,

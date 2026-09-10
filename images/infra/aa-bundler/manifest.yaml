@@ -32,7 +32,8 @@ env_keys:
   secret:
     - SIGNER_PRIVATE_KEYS
 secrets_required:
-  - env: SIGNER_PRIVATE_KEYS
+  - component: infra
+    env: SIGNER_PRIVATE_KEYS
     secret_key: CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
     source: deploy/config/secret.env
     runtime_value: secret-or-kms
@@ -105,6 +106,7 @@ infra:
   bindings:
     - name: execution_chain
       capability: evm-json-rpc
+      source_component: infra
       endpoint: rpc
       protocol: HTTP
       required_at_start: true

@@ -3,7 +3,7 @@
 
 import { useMemo } from 'react'
 import { PAGINATION_MAX_SIZE, type Account, type AuditLogEntry } from '@chaimir/api-client'
-import type { SelectOption, TableColumn } from '@chaimir/ui'
+import { Badge, type SelectOption, type TableColumn } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { useAsyncResource } from '../../../../hooks'
 import { auditActorRoleLabel } from '../../../../utils/labels/admin'
@@ -90,6 +90,15 @@ export default function SchoolAdminAuditPage() {
       subjectColumn={subjectColumn}
       actorOptions={actorOptions}
       taskPath="/school-admin/tasks"
+      scopeNote={
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="jade">本校范围</Badge>
+            <span className="text-sm font-medium text-ink">按操作者追溯学校内操作</span>
+          </div>
+          <p>这里按身份呈现本校管理员、教师和学生的操作记录，可按操作者、动作、对象和时间筛选。</p>
+        </div>
+      }
     />
   )
 }

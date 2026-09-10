@@ -24,6 +24,7 @@ import {
   DataPanel,
   FilterBar,
   FilterField,
+  IconButton,
   MetricStrip,
   PageHeader,
   PageScaffold,
@@ -280,6 +281,28 @@ export default function TeacherSimulationsPage() {
                   title: item.name,
                   meta: `${simCategoryLabel(item.category)} · 版本 ${item.version}`,
                   badge: <StatusIndicator tone={simPackageStatusTone(item.status)} label={simPackageStatusLabel(item.status)} />,
+                  action: mine ? (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <IconButton
+                        variant="ghost"
+                        size="sm"
+                        icon={FileSearch}
+                        aria-label={`查看场景 ${item.name} 的审核报告`}
+                        onClick={() => setPreviewTarget(item)}
+                      />
+                      {isPackageEditable(item.status) ? (
+                        <IconButton
+                          variant="ghost"
+                          size="sm"
+                          icon={Pencil}
+                          aria-label={`更新场景 ${item.name}`}
+                          onClick={() => setFormTarget({ item })}
+                        />
+                      ) : null}
+                    </div>
+                  ) : (
+                    <span className="shrink-0 text-xs text-ink-faint">仅浏览</span>
+                  ),
                 })}
               />
             )}

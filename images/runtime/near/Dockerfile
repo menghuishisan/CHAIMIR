@@ -12,8 +12,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apt-get -o Acquire::Retries=10 update \
-        && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=10 --fix-missing -y upgrade \
-        && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=10 -y upgrade \
+        && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=10 -y install --no-install-recommends ca-certificates \
         && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 3)); \

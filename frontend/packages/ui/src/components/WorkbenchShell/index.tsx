@@ -85,7 +85,7 @@ export function WorkbenchTopbar({
         <div className="truncate text-sm font-medium leading-tight text-on-dark">{title}</div>
         {subtitle && <div className="truncate text-xs leading-tight text-on-dark-sub">{subtitle}</div>}
       </div>
-      <div className="flex min-w-0 flex-1 items-center justify-center px-2">{progress}</div>
+      <div className="flex min-w-0 flex-1 items-center justify-center overflow-x-auto px-2">{progress}</div>
       {cta && <div className="flex shrink-0 items-center pl-2 pr-4">{cta}</div>}
     </header>
   );

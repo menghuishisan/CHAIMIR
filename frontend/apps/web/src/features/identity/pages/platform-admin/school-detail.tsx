@@ -140,7 +140,7 @@ function SchoolOverview({ tenant, onBack }: { tenant: Tenant; onBack: () => void
         description="学校短名在开通时确定,不能修改;状态与到期时间在学校列表页调整。展示配置由该校管理员自行维护,平台端只读。"
         className="mt-6"
       >
-        <div className="flex flex-col gap-4 rounded-lg bg-surface p-5 shadow-xs">
+        <div className="flex flex-col gap-4 rounded-tl-lg bg-surface p-5 shadow-xs">
           <DescriptionList
             columns={2}
             items={[

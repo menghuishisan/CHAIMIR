@@ -103,7 +103,7 @@ export default function PlatformVulnerabilitiesPage() {
             skeleton={<Skeleton variant="line" lines={4} />}
           >
             {(items) => (
-              <div className="grid gap-4 lg:grid-cols-2">
+              <div className={items.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
                 {items.map((source) => (
                   <VulnSourceCard
                     key={source.id}

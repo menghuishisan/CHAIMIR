@@ -13,9 +13,9 @@ import (
 // genericRuntimeAdapterSpec 从 runtime manifest 生成统一的可执行适配器。
 // 运行时镜像自己提供链能力 helper;平台只声明平台私有工作区 sidecar,
 // 不把教师可选工具或 base/chain-tools 伪装成链适配器。
-func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL, workspaceImageURL string) (map[string]any, error) {
-	if strings.TrimSpace(runtimeImageURL) == "" || strings.TrimSpace(workspaceImageURL) == "" {
-		return nil, fmt.Errorf("运行时和工作区镜像地址不能为空")
+func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL, workspaceImageURL, archiveImageURL string) (map[string]any, error) {
+	if strings.TrimSpace(runtimeImageURL) == "" || strings.TrimSpace(workspaceImageURL) == "" || strings.TrimSpace(archiveImageURL) == "" {
+		return nil, fmt.Errorf("运行时、工作区和私有归档镜像地址不能为空")
 	}
 	selftest, err := platformManifestSelftestCommand(manifest.Selftest)
 	if err != nil {
@@ -50,10 +50,8 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 			return nil, fmt.Errorf("运行时 native exec_target 必须使用 pod/container")
 		}
 	}
-	archiveTarget := nativeTarget
-	if archiveTarget == "" {
-		archiveTarget = "sandbox/runtime"
-	}
+	archiveTarget := "sandbox/private-archive"
+	initAssetTarget := "sandbox/init-assets"
 	env, err := runtimeAdapterEnv(manifest)
 	if err != nil {
 		return nil, err
@@ -62,7 +60,7 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 	if err != nil {
 		return nil, err
 	}
-	secretEnv, err := secretEnvFromManifest(manifest.SecretsRequired)
+	secretEnv, err := secretEnvFromManifest(manifest.SecretsRequired, "runtime")
 	if err != nil {
 		return nil, err
 	}
@@ -76,12 +74,35 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 		"resources":                 map[string]any{"requests": map[string]string{"cpu": "50m", "memory": "64Mi"}, "limits": map[string]string{"cpu": "250m", "memory": "256Mi"}},
 		"read_only_root_filesystem": true, "labels": map[string]string{"chaimir.io/student-access": "true"}, "mount_workspace": true,
 		"ephemeral_mounts": []map[string]any{{"name": "student-shell-tmp", "mount_path": "/tmp"}, {"name": "student-shell-home", "mount_path": "/runtime-state/workspace-home"}},
+		"mount_domains":    []string{sandbox.VolumeDomainPublicAssets},
 		"prepull_command":  []string{"/usr/local/bin/chaimir-workspace", "selftest"}, "prepull_hold": true,
+	}
+	privateArchive := map[string]any{
+		"name": "private-archive", "image_url": archiveImageURL, "command": []string{"sleep", "2147483647"},
+		"resources":                 map[string]any{"requests": map[string]string{"cpu": "50m", "memory": "64Mi"}, "limits": map[string]string{"cpu": "250m", "memory": "256Mi"}},
+		"read_only_root_filesystem": true, "labels": map[string]string{"chaimir.io/student-access": "false", "chaimir.io/sensitivity": "judge-private"}, "mount_workspace": false, "run_as_user": int64(1000), "run_as_group": int64(1000),
+		"mount_domains": []string{sandbox.VolumeDomainJudgePrivate}, "writable_mount_domains": []string{sandbox.VolumeDomainJudgePrivate},
+		"ephemeral_mounts": []map[string]any{{"name": "private-archive-tmp", "mount_path": "/tmp"}},
+		"prepull_command":  []string{"tar", "--help"}, "prepull_hold": false,
+	}
+	initAssetSidecar := map[string]any{
+		"name": "init-assets", "image_url": archiveImageURL, "command": []string{"sleep", "2147483647"},
+		"resources":                 map[string]any{"requests": map[string]string{"cpu": "50m", "memory": "64Mi"}, "limits": map[string]string{"cpu": "250m", "memory": "256Mi"}},
+		"read_only_root_filesystem": true, "labels": map[string]string{"chaimir.io/student-access": "false", "chaimir.io/sensitivity": "runtime-assets"}, "mount_workspace": false, "run_as_user": int64(1000), "run_as_group": int64(1000),
+		"mount_domains": []string{"runtime-state", sandbox.VolumeDomainPublicAssets}, "writable_mount_domains": []string{"runtime-state", sandbox.VolumeDomainPublicAssets},
+		"ephemeral_mounts": []map[string]any{{"name": "init-assets-tmp", "mount_path": "/tmp"}},
+		"prepull_command":  []string{"tar", "--help"}, "prepull_hold": false,
+	}
+	initAssets := append([]sandbox.InitAssetSpec(nil), manifest.Runtime.InitAssets...)
+	infraSidecars := []map[string]any{studentShell, privateArchive}
+	if len(initAssets) > 0 {
+		infraSidecars = append(infraSidecars, initAssetSidecar)
 	}
 	return map[string]any{
 		"workspace_dir": "/workspace",
 		"volume_domains": []map[string]any{
 			{"name": "workspace", "mount_path": "/workspace", "student_access": "read_write", "persistence": "object_storage_code", "snapshot_scope": "always"},
+			{"name": "public-assets", "mount_path": "/public-assets", "student_access": "read_only", "persistence": "ephemeral", "snapshot_scope": "never"},
 			{"name": "runtime-state", "mount_path": "/runtime-state", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "snapshot_enabled"},
 			{"name": "judge-private", "mount_path": "/judge-private", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "never"},
 			{"name": "runtime-tmp", "mount_path": "/tmp", "student_access": "none", "persistence": "ephemeral", "snapshot_scope": "never"},
@@ -93,9 +114,10 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 			"resources":                 map[string]any{"requests": map[string]string{"cpu": manifest.Resources.CPURequest, "memory": manifest.Resources.MemoryRequest}, "limits": map[string]string{"cpu": manifest.Resources.CPULimit, "memory": manifest.Resources.MemoryLimit}},
 			"read_only_root_filesystem": manifest.Security.ReadOnlyRootFilesystem,
 			"labels":                    map[string]string{"chaimir.io/student-access": "false"}, "mount_workspace": false,
+			"mount_domains": []string{"runtime-state", "public-assets"}, "writable_mount_domains": []string{"runtime-state", "public-assets"},
 			"prepull_command": selftest,
 		},
-		"infra_sidecars": []map[string]any{studentShell},
+		"infra_sidecars": infraSidecars,
 		"pods": []map[string]any{
 			{"name": "sandbox", "init_containers": initContainers, "containers": []map[string]any{{"name": "runtime"}}},
 			{"name": "workspace", "containers": []map[string]any{studentShell}},
@@ -113,9 +135,14 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 		},
 		"private_archive_ops": map[string]any{
 			"exec_target": archiveTarget,
-			"unpack_tar":  []string{"/usr/local/bin/chaimir-workspace", "unpack", "{{domain}}", "{{domain}}"},
+			"unpack_tar":  []string{"tar", "-C", "{{domain}}", "-xf", "-"},
+		},
+		"init_asset_ops": map[string]any{
+			"exec_target": initAssetTarget,
+			"unpack_tar":  []string{"tar", "-C", "{{domain}}", "-xf", "-"},
 		},
 		"capability_commands": capabilityCommandSet(nativeHelper, nativeTarget, resetStrategy, manifest.Runtime.Native.Actions),
+		"init_assets":         initAssets,
 		"capabilities":        manifest.Capabilities,
 		"selftest":            runtimeSelftestSpec(manifest),
 	}, nil

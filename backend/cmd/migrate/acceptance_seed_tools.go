@@ -2,6 +2,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -11,6 +12,7 @@ import (
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/modules/sandbox"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/workload"
 
 	"sigs.k8s.io/yaml"
@@ -75,7 +77,7 @@ type toolManifest struct {
 	Auth               map[string]any              `json:"auth"`
 	Security           toolManifestSecurity        `json:"security"`
 	SecurityExceptions []map[string]any            `json:"security_exceptions"`
-	StudentAccess      map[string]any              `json:"student_access"`
+	StudentAccess      toolStudentAccess           `json:"student_access"`
 	Resources          toolManifestResources       `json:"resources"`
 	Build              map[string]any              `json:"build"`
 	Selftest           map[string]any              `json:"selftest"`
@@ -114,6 +116,50 @@ type manifestCapabilities struct {
 	StudentAccess string         `json:"student_access"`
 }
 
+// toolStudentAccess 是工具学生入口权限的强类型声明,必须与实际 WorkloadSpec 挂载一致。
+type toolStudentAccess struct {
+	Enabled       bool     `json:"enabled"`
+	Shell         string   `json:"shell"`
+	AllowedMounts []string `json:"allowed_mounts"`
+}
+
+// UnmarshalJSON 统一解析对象式和基础镜像使用的列表式 capabilities,并拒绝未知能力字段。
+func (c *manifestCapabilities) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		*c = manifestCapabilities{}
+		return nil
+	}
+	if trimmed[0] == '[' {
+		var provides []string
+		if err := json.Unmarshal(trimmed, &provides); err != nil {
+			return fmt.Errorf("capabilities 列表格式无效: %w", err)
+		}
+		*c = manifestCapabilities{Provides: provides}
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &fields); err != nil {
+		return fmt.Errorf("capabilities 对象格式无效: %w", err)
+	}
+	allowed := map[string]struct{}{
+		"provides": {}, "requires": {}, "conflicts": {}, "cardinality": {},
+		"placement": {}, "config_schema": {}, "student_access": {},
+	}
+	for key := range fields {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("capabilities 包含未知字段 %s", key)
+		}
+	}
+	type plain manifestCapabilities
+	var value plain
+	if err := json.Unmarshal(trimmed, &value); err != nil {
+		return fmt.Errorf("capabilities 字段格式无效: %w", err)
+	}
+	*c = manifestCapabilities(value)
+	return nil
+}
+
 type toolManifestTool struct {
 	Kind                  string                        `json:"kind"`
 	EcoTags               []string                      `json:"eco_tags"`
@@ -135,6 +181,7 @@ type toolManifestTool struct {
 type manifestBinding struct {
 	Name            string `json:"name"`
 	Capability      string `json:"capability"`
+	SourceComponent string `json:"source_component"`
 	SourceEndpoint  string `json:"source_endpoint,omitempty"`
 	Endpoint        string `json:"endpoint"`
 	Protocol        string `json:"protocol"`
@@ -231,11 +278,45 @@ func readToolManifest(path string) (toolManifest, error) {
 	if studentAccess != "public" && studentAccess != "private" {
 		return toolManifest{}, fmt.Errorf("工具 manifest capabilities.student_access 无效: %s", path)
 	}
-	enabled, ok := manifest.StudentAccess["enabled"].(bool)
-	if !ok || (enabled && studentAccess != "public") || (!enabled && studentAccess != "private") {
+	if manifest.StudentAccess.Enabled != (studentAccess == "public") {
 		return toolManifest{}, fmt.Errorf("工具 manifest 能力访问级别与 student_access.enabled 不一致: %s", path)
 	}
+	if err := validateToolStudentAccess(manifest); err != nil {
+		return toolManifest{}, err
+	}
 	return manifest, nil
+}
+
+// validateToolStudentAccess 校验学生权限声明与工具组件将要使用的安全域一致。
+func validateToolStudentAccess(manifest toolManifest) error {
+	allowed := map[string]struct{}{}
+	for _, raw := range manifest.StudentAccess.AllowedMounts {
+		name := strings.TrimSpace(raw)
+		if name != sandbox.VolumeDomainWorkspace && name != sandbox.VolumeDomainPublicAssets {
+			return fmt.Errorf("工具 %s 的 student_access.allowed_mounts 包含不允许的安全域 %s", manifest.Name, name)
+		}
+		if _, exists := allowed[name]; exists {
+			return fmt.Errorf("工具 %s 的 student_access.allowed_mounts 重复声明 %s", manifest.Name, name)
+		}
+		allowed[name] = struct{}{}
+	}
+	if !manifest.StudentAccess.Enabled {
+		if len(allowed) != 0 || strings.TrimSpace(manifest.StudentAccess.Shell) != "" && strings.TrimSpace(manifest.StudentAccess.Shell) != "none" {
+			return fmt.Errorf("非学生工具 %s 不得声明学生挂载或 shell 权限", manifest.Name)
+		}
+		return nil
+	}
+	workspaceAllowed := false
+	if _, ok := allowed[sandbox.VolumeDomainWorkspace]; ok {
+		workspaceAllowed = true
+	}
+	if manifest.Tool.MountWorkspace != workspaceAllowed {
+		return fmt.Errorf("工具 %s 的 mount_workspace 与 student_access.allowed_mounts.workspace 不一致", manifest.Name)
+	}
+	if strings.TrimSpace(manifest.StudentAccess.Shell) == "" || strings.TrimSpace(manifest.StudentAccess.Shell) == "none" {
+		return fmt.Errorf("学生工具 %s 必须声明 shell 权限", manifest.Name)
+	}
+	return nil
 }
 
 // toolStatusFromManifest 返回已通过供应链与 WorkloadSpec 校验的目录状态。
@@ -280,6 +361,12 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 		if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
 			return nil, err
 		}
+		if err := applyToolStudentMounts(spec, manifest); err != nil {
+			return nil, err
+		}
+		if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
+			return nil, err
+		}
 		applyManifestCapabilities(spec, manifest)
 		return spec, nil
 	}
@@ -311,11 +398,63 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 	if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
 		return nil, err
 	}
+	if err := applyToolStudentMounts(spec, manifest); err != nil {
+		return nil, err
+	}
+	if err := validateGeneratedToolResourceSpec(spec, kind); err != nil {
+		return nil, err
+	}
 	applyManifestCapabilities(spec, manifest)
 	return spec, nil
 }
 
-// appendManifestSecretEnv 将显式 WorkloadSpec 的敏感环境变量统一绑定到平台 Secret。
+// applyToolStudentMounts 把公开工具的学生安全域权限落实为容器挂载,不保留只登记不生效的权限。
+func applyToolStudentMounts(spec map[string]any, manifest toolManifest) error {
+	if !manifest.StudentAccess.Enabled {
+		return nil
+	}
+	components, ok := spec["components"].([]workload.ComponentSpec)
+	if !ok || len(components) == 0 {
+		return fmt.Errorf("工具 %s 缺少可执行组件", manifest.Name)
+	}
+	allowed := make([]string, 0, len(manifest.StudentAccess.AllowedMounts))
+	for _, raw := range manifest.StudentAccess.AllowedMounts {
+		name := strings.TrimSpace(raw)
+		if name != sandbox.VolumeDomainWorkspace {
+			allowed = append(allowed, name)
+		}
+	}
+	for index := range components {
+		component := &components[index]
+		if component.MountWorkspace == nil || *component.MountWorkspace != manifest.Tool.MountWorkspace {
+			return fmt.Errorf("工具 %s 的组件 %s 与 mount_workspace 不一致", manifest.Name, component.Name)
+		}
+		seen := map[string]struct{}{}
+		for _, raw := range component.MountDomains {
+			name := strings.TrimSpace(raw)
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			seen[name] = struct{}{}
+			found := false
+			for _, item := range allowed {
+				if item == name {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return fmt.Errorf("工具 %s 的组件 %s 请求未授权安全域 %s", manifest.Name, component.Name, name)
+			}
+		}
+		component.MountDomains = append([]string(nil), allowed...)
+		component.WritableMountDomains = nil
+	}
+	spec["components"] = components
+	return nil
+}
+
+// appendManifestSecretEnv 将显式 WorkloadSpec 的敏感环境变量绑定到声明的实际组件。
 func appendManifestSecretEnv(spec map[string]any, requirements []manifestSecretRequirement) error {
 	if len(requirements) == 0 {
 		return nil
@@ -324,26 +463,51 @@ func appendManifestSecretEnv(spec map[string]any, requirements []manifestSecretR
 	if !ok || len(components) == 0 {
 		return fmt.Errorf("显式 WorkloadSpec 缺少 Secret 注入目标组件")
 	}
-	component, ok := components[0].(map[string]any)
-	if !ok {
-		return fmt.Errorf("显式 WorkloadSpec 首个组件格式非法")
+	byName := make(map[string]map[string]any, len(components))
+	for _, raw := range components {
+		component, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("显式 WorkloadSpec component 格式非法")
+		}
+		name := strings.TrimSpace(anyString(component["name"]))
+		if name == "" {
+			return fmt.Errorf("显式 WorkloadSpec component 缺少 name")
+		}
+		if _, exists := byName[name]; exists {
+			return fmt.Errorf("显式 WorkloadSpec component 名称重复: %s", name)
+		}
+		byName[name] = component
 	}
-	secretEnv := make([]any, 0, len(requirements))
-	seen := map[string]struct{}{}
+	secretEnv := make(map[string][]any, len(byName))
+	seen := make(map[string]map[string]struct{}, len(byName))
 	for _, requirement := range requirements {
+		componentName := strings.TrimSpace(requirement.Component)
+		if componentName == "" {
+			return fmt.Errorf("Secret %s 缺少 component", strings.TrimSpace(requirement.Env))
+		}
+		if _, exists := byName[componentName]; !exists {
+			return fmt.Errorf("Secret %s 声明的 component %s 不存在", strings.TrimSpace(requirement.Env), componentName)
+		}
 		name := strings.TrimSpace(requirement.Env)
 		secretKey := strings.TrimSpace(requirement.SecretKey)
 		if name == "" || secretKey == "" {
 			return fmt.Errorf("Secret 引用必须同时声明 env 和 secret_key")
 		}
-		if _, exists := seen[name]; exists {
-			return fmt.Errorf("Secret 环境变量重复声明: %s", name)
+		if seen[componentName] == nil {
+			seen[componentName] = map[string]struct{}{}
 		}
-		seen[name] = struct{}{}
-		secretEnv = append(secretEnv, map[string]any{"name": name, "secret_name": "chaimir-secret", "secret_key": secretKey})
+		if _, exists := seen[componentName][name]; exists {
+			return fmt.Errorf("组件 %s 的 Secret 环境变量重复声明: %s", componentName, name)
+		}
+		seen[componentName][name] = struct{}{}
+		secretEnv[componentName] = append(secretEnv[componentName], map[string]any{"name": name, "secret_name": "chaimir-secret", "secret_key": secretKey})
 	}
-	if len(secretEnv) > 0 {
-		component["secret_env"] = secretEnv
+	for componentName, env := range secretEnv {
+		component := byName[componentName]
+		if existing, exists := component["secret_env"]; exists && existing != nil {
+			return fmt.Errorf("组件 %s 不得同时声明 secret_env 和 secrets_required", componentName)
+		}
+		component["secret_env"] = env
 	}
 	return nil
 }
@@ -406,6 +570,16 @@ func normalizeExplicitToolResourceSpec(input map[string]any, imageURL string, ki
 		if _, ok := spec["command_policy"].(map[string]any); !ok {
 			return nil, fmt.Errorf("命令工具显式 WorkloadSpec 必须声明 command_policy")
 		}
+	}
+	// YAML manifest 的 resource_spec 使用 map 接收是为了先解析镜像占位符;
+	// 在返回前必须落到正式结构体做严格字段和类型校验,避免未知字段被静默丢弃。
+	raw, err := json.Marshal(spec)
+	if err != nil {
+		return nil, fmt.Errorf("编码显式 WorkloadSpec 失败: %w", err)
+	}
+	var typed workload.ToolResourceSpec
+	if err := jsonx.DecodeStrictKnownFields(raw, &typed); err != nil {
+		return nil, fmt.Errorf("显式 WorkloadSpec 包含未知字段或类型错误: %w", err)
 	}
 	return spec, nil
 }
@@ -554,7 +728,7 @@ func toolComponentFromManifest(manifest toolManifest, imageURL string, kind int1
 	if err != nil {
 		return workload.ComponentSpec{}, fmt.Errorf("解析工具 selftest.commands 失败: %w", err)
 	}
-	secretEnv, err := secretEnvFromManifest(manifest.SecretsRequired)
+	secretEnv, err := secretEnvFromManifest(manifest.SecretsRequired, toolComponentName(kind))
 	if err != nil {
 		return workload.ComponentSpec{}, err
 	}

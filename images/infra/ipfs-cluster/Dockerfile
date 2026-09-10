@@ -12,7 +12,7 @@ ARG NO_PROXY
 
 ARG IPFS_CLUSTER_VERSION=v1.1.6
 ARG IPFS_CLUSTER_COMMIT=2182e887ef378f906455784396f1011df968822c
-ARG GO_MODULE_PROXY=https://goproxy.cn,direct
+ARG GO_MODULE_PROXY=
 
 RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && for attempt in 1 2 3 4 5 6 7 8; do \
@@ -24,7 +24,7 @@ RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${N
 WORKDIR /src/ipfs-cluster
 COPY entrypoint.go /src/ipfs-cluster-entrypoint.go
 RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
-    && export GOPROXY="${GO_MODULE_PROXY}" \
+    && if [ -n "${GO_MODULE_PROXY}" ]; then export GOPROXY="${GO_MODULE_PROXY}"; fi \
     && test "$(git rev-parse HEAD)" = "${IPFS_CLUSTER_COMMIT}" \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         if go get \
@@ -51,7 +51,6 @@ COPY --from=cluster-build /out/chaimir-ipfs-cluster-entrypoint /usr/local/bin/ch
 COPY --chown=1000:1000 --from=cluster-build /tmp/chaimir-ipfs-cluster/runtime-state /runtime-state
 COPY --chown=1000:1000 --from=cluster-build /tmp/chaimir-ipfs-cluster/workspace /workspace
 
-ENV IPFS_CLUSTER_PATH=/runtime-state/ipfs-cluster
 USER 1000:1000
 WORKDIR /workspace
 EXPOSE 9094 9095 9096

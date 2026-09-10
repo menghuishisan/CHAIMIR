@@ -45,6 +45,10 @@ capabilities:
 runtime:
   eco: fabric
   adapter_level: 1
+  workload:
+    env:
+      - name: CHAIMIR_FABRIC_CHANNEL
+        value: chaimir
 ports:
   - name: peer
     container_port: 7051

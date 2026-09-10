@@ -10,10 +10,25 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
-TARGETS = [target for target in os.environ.get("CHAIMIR_COLLECTOR_TARGETS", "").split(",") if target]
-OUTPUT = Path(os.environ.get("CHAIMIR_COLLECTOR_OUTPUT", "/runtime-state/collector.json"))
-INTERVAL = float(os.environ.get("CHAIMIR_COLLECTOR_INTERVAL_SECONDS", "5"))
-ALLOWED_PREFIXES = [prefix for prefix in os.environ.get("CHAIMIR_COLLECTOR_ALLOWED_PREFIXES", "").split(",") if prefix]
+def required_config(name: str) -> str:
+    """读取由 M2 注入的 sidecar 配置,缺失时拒绝启动。"""
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(f"{name} is required")
+    return value
+
+
+TARGETS = [target.strip() for target in required_config("CHAIMIR_COLLECTOR_TARGETS").split(",") if target.strip()]
+OUTPUT = Path(required_config("CHAIMIR_COLLECTOR_OUTPUT"))
+try:
+    INTERVAL = float(required_config("CHAIMIR_COLLECTOR_INTERVAL_SECONDS"))
+except ValueError as exc:
+    raise RuntimeError("CHAIMIR_COLLECTOR_INTERVAL_SECONDS must be positive") from exc
+if INTERVAL <= 0:
+    raise RuntimeError("CHAIMIR_COLLECTOR_INTERVAL_SECONDS must be positive")
+ALLOWED_PREFIXES = [prefix.strip() for prefix in required_config("CHAIMIR_COLLECTOR_ALLOWED_PREFIXES").split(",") if prefix.strip()]
+if not TARGETS or not ALLOWED_PREFIXES:
+    raise RuntimeError("CHAIMIR_COLLECTOR_TARGETS and CHAIMIR_COLLECTOR_ALLOWED_PREFIXES must contain values")
 
 
 def validate_target(target: str) -> None:

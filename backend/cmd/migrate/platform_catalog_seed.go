@@ -19,8 +19,20 @@ import (
 )
 
 type platformRuntimeManifest struct {
+	SchemaVersion                      int `json:"schema_version"`
 	Category, Name, Image, Description string
-	GenesisBaked                       bool `json:"genesis_baked"`
+	Labels                             map[string]string `json:"labels"`
+	Source                             map[string]any    `json:"source"`
+	Upstream                           map[string]any    `json:"upstream"`
+	DataDriven                         bool              `json:"data_driven"`
+	EnvKeys                            map[string]any    `json:"env_keys"`
+	RpcExposure                        map[string]any    `json:"rpc_exposure"`
+	SecurityExceptions                 []map[string]any  `json:"security_exceptions"`
+	StudentAccess                      map[string]any    `json:"student_access"`
+	Build                              map[string]any    `json:"build"`
+	Toolchain                          manifestToolchain `json:"toolchain"`
+	GenesisBaked                       bool              `json:"genesis_baked"`
+	Infra                              map[string]any    `json:"infra"`
 	Runtime                            struct {
 		Eco          string `json:"eco"`
 		AdapterLevel int16  `json:"adapter_level"`
@@ -28,7 +40,8 @@ type platformRuntimeManifest struct {
 			Env            []workload.EnvVarSpec    `json:"env"`
 			InitContainers []workload.ComponentSpec `json:"init_containers"`
 		} `json:"workload"`
-		Native struct {
+		InitAssets []sandbox.InitAssetSpec `json:"init_assets"`
+		Native     struct {
 			Helper        string              `json:"helper"`
 			Profile       string              `json:"profile"`
 			ExecTarget    string              `json:"exec_target"`
@@ -47,8 +60,19 @@ type platformRuntimeManifest struct {
 	CapabilitySelftest map[string]any              `json:"capability_selftest"`
 }
 type platformJudgerManifest struct {
+	SchemaVersion                      int `json:"schema_version"`
 	Category, Name, Image, Description string
-	SupplyChain                        map[string]any `json:"supply_chain"`
+	Labels                             map[string]string    `json:"labels"`
+	Source                             map[string]any       `json:"source"`
+	Upstream                           map[string]any       `json:"upstream"`
+	DataDriven                         bool                 `json:"data_driven"`
+	Toolchain                          manifestToolchain    `json:"toolchain"`
+	Capabilities                       manifestCapabilities `json:"capabilities"`
+	Ports                              []toolManifestPort   `json:"ports"`
+	SecurityExceptions                 []map[string]any     `json:"security_exceptions"`
+	StudentAccess                      map[string]any       `json:"student_access"`
+	Build                              map[string]any       `json:"build"`
+	SupplyChain                        map[string]any       `json:"supply_chain"`
 	Judger                             struct {
 		Type             string                `json:"type"`
 		RuntimeCode      string                `json:"runtime_code"`
@@ -57,6 +81,8 @@ type platformJudgerManifest struct {
 		ExecTarget       string                `json:"exec_target"`
 		Env              []workload.EnvVarSpec `json:"env"`
 		SuiteArchiveName string                `json:"suite_archive_name"`
+		Modes            []string              `json:"modes"`
+		OutputContract   map[string]any        `json:"output_contract"`
 	} `json:"judger"`
 	Security  toolManifestSecurity  `json:"security"`
 	Selftest  map[string]any        `json:"selftest"`
@@ -64,8 +90,20 @@ type platformJudgerManifest struct {
 }
 
 type platformInfraManifest struct {
+	SchemaVersion                      int `json:"schema_version"`
 	Category, Name, Image, Description string
 	Labels                             map[string]string    `json:"labels"`
+	Source                             map[string]any       `json:"source"`
+	Upstream                           map[string]any       `json:"upstream"`
+	DataDriven                         bool                 `json:"data_driven"`
+	EnvKeys                            map[string]any       `json:"env_keys"`
+	SecurityExceptions                 []map[string]any     `json:"security_exceptions"`
+	StudentAccess                      map[string]any       `json:"student_access"`
+	Build                              map[string]any       `json:"build"`
+	PrivateDelivery                    map[string]any       `json:"private_delivery"`
+	DataVolumes                        []map[string]any     `json:"data_volumes"`
+	Backup                             map[string]any       `json:"backup"`
+	Network                            map[string]any       `json:"network"`
 	Capabilities                       manifestCapabilities `json:"capabilities"`
 	Infra                              struct {
 		EcoTags      []string          `json:"eco_tags"`
@@ -82,6 +120,7 @@ type platformInfraManifest struct {
 
 // manifestSecretRequirement 描述 manifest 对平台 Secret 键的最小运行期引用。
 type manifestSecretRequirement struct {
+	Component    string `json:"component"`
 	Env          string `json:"env"`
 	SecretKey    string `json:"secret_key"`
 	Source       string `json:"source"`
@@ -136,7 +175,7 @@ func readPlatformManifest(path string, out any) error {
 	if err != nil {
 		return fmt.Errorf("读取 manifest 失败 %s: %w", path, err)
 	}
-	if err := yaml.Unmarshal(raw, out); err != nil {
+	if err := yaml.UnmarshalStrict(raw, out); err != nil {
 		return fmt.Errorf("解析 manifest 失败 %s: %w", path, err)
 	}
 	return nil
@@ -208,11 +247,15 @@ func syncPlatformRuntime(ctx context.Context, tx pgx.Tx, root string) error {
 			adapterSpec = map[string]any{"disabled_reason": reason}
 		} else {
 			workspaceImage, workspaceProven := platformProof("tool/workspace")
+			archiveImage, archiveProven := platformProof("base/judge-min")
 			if !workspaceProven {
 				reason = "平台工作区能力镜像缺少不可变证明"
 				adapterSpec = map[string]any{"disabled_reason": reason}
+			} else if !archiveProven {
+				reason = "平台私有归档能力镜像缺少不可变证明"
+				adapterSpec = map[string]any{"disabled_reason": reason}
 			} else {
-				adapterSpec, err = genericRuntimeAdapterSpec(m, imageURL, workspaceImage)
+				adapterSpec, err = genericRuntimeAdapterSpec(m, imageURL, workspaceImage, archiveImage)
 				if err != nil {
 					return fmt.Errorf("生成运行时 %s 适配器失败: %w", m.Name, err)
 				}
@@ -428,10 +471,17 @@ func platformManifestSelftestCommand(raw map[string]any) ([]string, error) {
 }
 
 // secretEnvFromManifest 将 manifest 的密钥需求转换为受控 SecretKeyRef 声明。
-func secretEnvFromManifest(requirements []manifestSecretRequirement) ([]workload.SecretEnvVarSpec, error) {
+func secretEnvFromManifest(requirements []manifestSecretRequirement, component string) ([]workload.SecretEnvVarSpec, error) {
+	component = strings.TrimSpace(component)
+	if component == "" {
+		return nil, fmt.Errorf("Secret 注入目标组件不能为空")
+	}
 	out := make([]workload.SecretEnvVarSpec, 0, len(requirements))
 	seen := map[string]struct{}{}
 	for _, requirement := range requirements {
+		if declared := strings.TrimSpace(requirement.Component); declared == "" || declared != component {
+			return nil, fmt.Errorf("Secret %s 必须显式归属组件 %s", strings.TrimSpace(requirement.Env), component)
+		}
 		name := strings.TrimSpace(requirement.Env)
 		secretKey := strings.TrimSpace(requirement.SecretKey)
 		if name == "" || secretKey == "" {
@@ -634,12 +684,13 @@ func platformJudgerResourceSpec(manifest platformJudgerManifest, imageURL string
 		ImageURL:               imageURL,
 		Command:                []string{"sleep", "2147483647"},
 		Env:                    env,
-		Workdir:                "/judge-private",
+		Workdir:                "/judge",
 		Resources:              workload.ResourceSpec{Requests: map[string]string{"cpu": manifest.Resources.CPURequest, "memory": manifest.Resources.MemoryRequest}, Limits: map[string]string{"cpu": manifest.Resources.CPULimit, "memory": manifest.Resources.MemoryLimit}},
 		ReadOnlyRootFilesystem: &readOnly,
 		Labels:                 map[string]string{"chaimir.io/student-access": "false", "chaimir.io/sensitivity": "judge-private"},
 		MountWorkspace:         func() *bool { value := true; return &value }(),
-		EphemeralMounts:        []workload.EphemeralMountSpec{{Name: "judge-workdir", MountPath: "/judge-private"}, {Name: "judge-tmp", MountPath: "/tmp"}},
+		MountDomains:           []string{sandbox.VolumeDomainJudgePrivate},
+		EphemeralMounts:        []workload.EphemeralMountSpec{{Name: "judge-workdir", MountPath: "/judge"}, {Name: "judge-tmp", MountPath: "/tmp"}},
 		PrepullCommand:         []string{"sleep", "1"},
 	}
 	return contracts.SandboxCompositionSpec{ID: "judge:" + manifest.Name, Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: runtimeCode, ImageVersion: platformRuntimeImageVersion(runtimeCode)}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}, judge.JudgerResourceSpec{

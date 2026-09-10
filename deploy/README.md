@@ -145,7 +145,10 @@ make cilium-cluster-down     # 删除项目 Kind 集群,不删除外部 Harbor
 禁止在 `docker-desktop` 内删除 Kindnet 后直接安装 Cilium,也禁止 CNI chaining。Cilium Chart 固定为 `1.20.1@sha256:906ce40d35daad838d12add8a5ba7033e767767f51799a93c7eace2cec9cdc05`,agent/operator/Envoy 必须引用 `images/image-digests.lock` 的正式 Harbor digest,策略模式固定为 `always`。
 
 M2 快照能力分为两层:通用 `VolumeSnapshot` CRD/snapshot-controller 与具体 CSI 存储驱动。
-本仓库提供 `make snapshot-up` 安装官方 CSI snapshotter 集群组件,并提供 `make snapshot-check`
+本仓库提供 `make snapshot-up` 安装 CSI snapshotter 集群组件; controller 必须先由正式供应链
+写入 `images/image-digests.lock` 的 `infra/snapshot-controller` digest，并生成
+`components/csi-snapshotter/snapshot-controller-image.env`，否则清单不能渲染且安装会 fail-closed。仓库不使用
+上游普通 tag。安装后提供 `make snapshot-check`
 检查 CRD、`VolumeSnapshotClass` 与 `StorageClass` 是否存在。真正能创建快照还必须由集群安装
 支持快照的 CSI 驱动,并在 `SANDBOX_STORAGE_CLASS_NAME`、`SANDBOX_VOLUME_SNAPSHOT_CLASS_NAME`
 中填写真实类名。`rancher.io/local-path`、普通 Docker volume 或演示用 hostpath CSI 不作为生产
@@ -262,4 +265,11 @@ README、docs 或普通应用提交不直接创建 staging Deployment。只有�
 - CSI snapshotter:提供 `VolumeSnapshot` CRD 与 snapshot-controller;生产还必须接入支持快照的 CSI
   存储驱动并创建 `VolumeSnapshotClass`。
 - Sigstore policy-controller:执行平台镜像 Cosign 签名门禁。应用包含 `ClusterImagePolicy`,因此部署平台 overlay 前必须先运行 `make policy-controller-up`,由容器化 Helm 安装 CRD/controller 并把本地 `config/cosign/cosign.pub` 注入 `cosign-system/cosign-public-key` Secret。`policy-controller-up` 将准入 webhook 超时固定为 30 秒、保持 `failurePolicy=Fail`,并使用两个副本和 200m/500m CPU 请求/上限,覆盖一次性校验运行时、工具和基础设施镜像的预拉取请求。
-- Ingress Controller 与证书签发器:执行 Ingress HTTPS 与证书引用。
+- Ingress Controller 与证书签发器:执行 Ingress HTTPS 与证书引用。`prod-saas` 当前
+  overlay 通过 `cert-manager.io/cluster-issuer: chaimir-prod-issuer` 声明外部 cert-manager
+  契约；基础设施团队必须在应用 overlay 前，以自身的固定版本、digest、签名和供应链流程
+  安装 cert-manager，并确认 `ClusterIssuer/chaimir-prod-issuer` 为 `Ready=True`。仓库不把
+  cert-manager 伪装成 Chaimir 业务镜像，也不在 overlay 中内置未锁定的控制器。若该外部
+  签发链路不存在，`prod-saas` 必须阻断，不能仅创建 Ingress 或用过期/不匹配的
+  `chaimir-tls` Secret 冒充就绪。`acceptance` 使用项目受控 `make tls`，`prod-school`
+  使用学校运维预置的同名 `kubernetes.io/tls` Secret；两者均不依赖 cert-manager。

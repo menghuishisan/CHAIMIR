@@ -29,7 +29,6 @@ FROM docker.io/library/ubuntu:26.04@sha256:3131b4cc82a783df6c9df078f86e01819a135
 
 # 从固定基座获得安全更新和 Cilium 所需运行依赖。Pebble 不属于 Cilium、也不被任何 Cilium 二进制调用，删除以消除基座遗留高危项。
 RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         bash-completion ca-certificates iproute2 ipset iptables jq kmod libatomic1 \
     && apt-get purge --auto-remove -y \

@@ -7,6 +7,7 @@ import { useCallback, useState } from 'react'
 import { Download } from 'lucide-react'
 import type { ImportPreviewResponse } from '@chaimir/api-client'
 import {
+  Badge,
   Button,
   Callout,
   FormField,
@@ -94,6 +95,18 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
           </ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
+          <div className="grid gap-2 sm:grid-cols-3" aria-label="组织导入步骤">
+            {[
+              ['1', '下载模板'],
+              ['2', '上传并预览'],
+              ['3', '确认提交'],
+            ].map(([step, label]) => (
+              <div key={step} className="flex items-center gap-2 rounded-lg border border-border bg-surface p-3">
+                <Badge tone={preview ? 'success' : 'neutral'}>{step}</Badge>
+                <span className="text-sm text-ink">{label}</span>
+              </div>
+            ))}
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" leftIcon={Download} onClick={() => void downloadTemplate()}>
               下载导入模板

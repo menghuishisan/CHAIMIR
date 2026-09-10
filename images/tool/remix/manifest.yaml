@@ -40,6 +40,14 @@ tool:
   eco_tags:
     - evm
   mount_workspace: true
+  args:
+    - -addr
+    - :8080
+    - -root
+    - /usr/share/remix
+  env:
+    - name: CHAIMIR_HTTP_TIMEOUT_SECONDS
+      value: "30"
   ephemeral_mounts:
     - name: remix-tmp
       mount_path: /tmp

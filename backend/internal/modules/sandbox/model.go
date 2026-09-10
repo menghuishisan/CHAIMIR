@@ -217,6 +217,7 @@ type AdapterSpec struct {
 	Selftest           map[string]any             `json:"selftest"`
 	WorkspaceOps       WorkspaceOps               `json:"workspace_ops"`
 	PrivateArchiveOps  PrivateArchiveOps          `json:"private_archive_ops"`
+	InitAssetOps       PrivateArchiveOps          `json:"init_asset_ops"`
 	CapabilityCommands CapabilityCommandSet       `json:"capability_commands"`
 	// StartupOrder is the deterministic component order for links marked required_at_start.
 	StartupOrder []string `json:"startup_order,omitempty"`
@@ -233,9 +234,11 @@ type VolumeDomainSpec struct {
 
 // InitAssetSpec 描述个性化阶段注入的已审核资产。
 type InitAssetSpec struct {
-	Name       string `json:"name"`
-	SourceRef  string `json:"source_ref"`
-	ApplyPhase string `json:"apply_phase"`
+	Name           string `json:"name"`
+	SourceRef      string `json:"source_ref"`
+	TargetDomain   string `json:"target_domain"`
+	ExpectedSHA256 string `json:"expected_sha256"`
+	ApplyPhase     string `json:"apply_phase"`
 }
 
 // WorkspaceOps 描述运行时镜像内已审核的工作区操作命令模板。
@@ -303,6 +306,7 @@ type CommandToolPolicy struct {
 type ComponentBinding struct {
 	Name            string `json:"name"`
 	Capability      string `json:"capability"`
+	SourceComponent string `json:"source_component"`
 	SourceEndpoint  string `json:"source_endpoint,omitempty"`
 	Endpoint        string `json:"endpoint"`
 	Protocol        string `json:"protocol"`
@@ -324,6 +328,9 @@ type CreateSandboxPlan struct {
 	Runtimes                 []RuntimePlan
 	Tools                    []Tool
 	PrivateSidecars          []workload.ComponentSpec
+	// RuntimeOnlyBootstrap 只在组合初始化阶段使用:保留完整卷和网络声明,暂不创建工具/基础设施 Pod。
+	// 这样 init_assets/init_script 完成后,依赖材料的组件才会首次启动。
+	RuntimeOnlyBootstrap bool
 }
 
 // WorkspaceRuntime 返回组合显式指定的工作区运行时,禁止按数组顺序隐式选择。

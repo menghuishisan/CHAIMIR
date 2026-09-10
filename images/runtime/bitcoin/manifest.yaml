@@ -37,6 +37,16 @@ capabilities:
 runtime:
   eco: bitcoin
   adapter_level: 2
+  workload:
+    env:
+      - name: CHAIMIR_BITCOIN_DATA_DIR
+        value: /runtime-state/bitcoin
+      - name: CHAIMIR_BITCOIN_WALLET
+        value: chaimir
+      - name: CHAIMIR_BITCOIN_FALLBACK_FEE
+        value: "0.0001"
+      - name: CHAIMIR_RUNTIME_RPC_PORT
+        value: "18443"
   native:
     helper: /usr/local/bin/chaimir-bitcoin-adapter
     profile: bitcoin-regtest

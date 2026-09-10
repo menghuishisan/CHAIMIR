@@ -19,6 +19,7 @@ import {
   RefreshCw,
   Server,
   ShieldCheck,
+  ArrowLeft,
 } from 'lucide-react'
 import {
   ImagePrepullStatus,
@@ -112,6 +113,11 @@ export default function PlatformRuntimeDetailPage() {
           <Breadcrumb
             items={[{ label: '底层资源' }, { label: '链运行时', href: '/platform-admin/runtimes' }]}
           />
+        }
+        actions={
+          <Button variant="outline" size="sm" leftIcon={ArrowLeft} onClick={() => navigate('/platform-admin/runtimes')}>
+            返回列表
+          </Button>
         }
       />
 

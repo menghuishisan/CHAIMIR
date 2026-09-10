@@ -16,10 +16,8 @@ labels:
   chaimir.io/source: thin-wrapper
 description: FISCO BCOS 联盟链教学运行时镜像。
 source:
-  type: thin-wrapper
+  type: platform-built
 upstream:
-  base_image: registry.chaimir.io/runtime/fisco-bcos
-  base_digest: sha256:fb4f78010f1088d00f6b921e1f63203ed637e4e0b56f820e29bf2c26d30ccfe3
   image: fiscoorg/fiscobcos:v3.12.1
   version: v3.12.1
   digest: sha256:93db5277a5c896fde402f2165d133cc3d346effef4165ec417ef098eb2ede74b

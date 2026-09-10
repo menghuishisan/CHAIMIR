@@ -114,22 +114,24 @@ export function StatisticsTrendSection({ load, idPrefix, description }: Statisti
 
         {/* 没有任何可呈现的分组时也要出一张容器:它自己有空/载/错三态与引导文案,
             比页面另外拼一个空块更一致(§8.2) */}
-        {(groups.length > 0 ? groups : [emptyGroup()]).map((item) => (
-          <ChartContainer
-            key={item.group.id}
-            title={item.group.title}
-            description={groupDescription(item)}
-            loading={loading}
-            error={error}
-            onRetry={statistics.reload}
-            isEmpty={item.data.length === 0}
-            emptyHint="这个区间内还没有统计数据。统计每日生成,新开通的租户需要等一天。"
-            ariaSummary={trendSummary(item)}
-            dataTable={groupDataTable(item)}
-          >
-            <TrendLineChart data={item.data} xKey="date" series={item.series} />
-          </ChartContainer>
-        ))}
+        <div className={groups.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
+          {(groups.length > 0 ? groups : [emptyGroup()]).map((item) => (
+            <ChartContainer
+              key={item.group.id}
+              title={item.group.title}
+              description={groupDescription(item)}
+              loading={loading}
+              error={error}
+              onRetry={statistics.reload}
+              isEmpty={item.data.length === 0}
+              emptyHint="这个区间内还没有统计数据。统计每日生成,新开通的租户需要等一天。"
+              ariaSummary={trendSummary(item)}
+              dataTable={groupDataTable(item)}
+            >
+              <TrendLineChart data={item.data} xKey="date" series={item.series} />
+            </ChartContainer>
+          ))}
+        </div>
       </div>
     </PageSection>
   )

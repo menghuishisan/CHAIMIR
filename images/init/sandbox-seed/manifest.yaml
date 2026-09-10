@@ -26,6 +26,11 @@ data_driven: false
 capabilities:
   - init-container
   - sandbox-seed-injection
+env_keys:
+  config:
+    - CHAIMIR_SEED_SOURCE
+    - CHAIMIR_SEED_TARGET
+  secret: []
 ports: []
 security:
   run_as_non_root: true

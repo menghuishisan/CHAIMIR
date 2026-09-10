@@ -778,7 +778,11 @@ func (s *Service) planForExistingSandbox(ctx context.Context, sb Sandbox) (Creat
 			return CreateSandboxPlan{}, err
 		}
 	}
-	return CreateSandboxPlan{Sandbox: sb, WorkspaceRuntimeInstance: snapshot.Spec.WorkspaceRuntimeInstance, Runtimes: runtimePlans, Tools: tools}, nil
+	privateSidecars := privateSidecarsFromContract(snapshot.PrivateSidecars)
+	if err := validatePrivateSidecars(privateSidecars, s.cfg, adapterSpecForPrivateSidecarValidation(runtimePlans)); err != nil {
+		return CreateSandboxPlan{}, err
+	}
+	return CreateSandboxPlan{Sandbox: sb, WorkspaceRuntimeInstance: snapshot.Spec.WorkspaceRuntimeInstance, Runtimes: runtimePlans, Tools: tools, PrivateSidecars: privateSidecars}, nil
 }
 
 // toolsForSandbox 从不可变快照重建沙箱组件,当前目录只负责撤销门禁,不覆盖已发布执行规格。
@@ -1155,6 +1159,9 @@ func (s *Service) scheduleSandboxStart(ctx context.Context, plan CreateSandboxPl
 func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 	ctx, cancel := context.WithTimeout(ctx, timeDurationSeconds(s.cfg.ReadyTimeoutSeconds))
 	defer cancel()
+	needsInitialization := sandboxNeedsInitialization(plan)
+	bootstrapPlan := plan
+	bootstrapPlan.RuntimeOnlyBootstrap = needsInitialization
 	resourcesReady := false
 	if checker, ok := s.orchestrator.(sandboxResourceReadiness); ok {
 		ready, err := checker.SandboxResourcesReady(ctx, plan)
@@ -1165,7 +1172,7 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 		}
 	}
 	if !resourcesReady {
-		if err := s.orchestrator.CreateSandboxResources(ctx, plan); err != nil {
+		if err := s.orchestrator.CreateSandboxResources(ctx, bootstrapPlan); err != nil {
 			// 服务重启可能留下已经就绪的 K8s 资源,但原进程内协程已经消失;
 			// 标记沙箱失败前必须再次探测资源状态。
 			if checker, ok := s.orchestrator.(sandboxResourceReadiness); ok {
@@ -1193,8 +1200,7 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 		return
 	}
 	s.broadcastProgress(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseReady, SandboxStatusReady, response.TraceFromContext(ctx))
-	go s.updateToolsAsync(ctx, plan)
-	if sandboxNeedsInitialization(plan) {
+	if needsInitialization {
 		advanced, err = s.advanceStartupState(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseInitializing, SandboxStatusRunning, map[string]any{"phase": SandboxPhaseInitializing}, SandboxStatusReady)
 		if err != nil {
 			logging.ErrorContext(ctx, "sandbox init phase update failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
@@ -1204,9 +1210,14 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 			return
 		}
 		s.broadcastProgress(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseInitializing, SandboxStatusRunning, response.TraceFromContext(ctx))
-		if err := s.applyInitAssetsIfNeeded(ctx, plan.Sandbox, workspaceRuntimeForPlan(plan)); err != nil {
-			s.markInitFailed(ctx, plan.Sandbox, err)
-			return
+		for _, runtimePlan := range plan.Runtimes {
+			if len(runtimePlan.Runtime.AdapterSpec.InitAssets) == 0 {
+				continue
+			}
+			if err := s.applyInitAssetsIfNeeded(ctx, plan.Sandbox, runtimePlan.Runtime); err != nil {
+				s.markInitFailed(ctx, plan.Sandbox, err)
+				return
+			}
 		}
 		if strings.TrimSpace(plan.Sandbox.InitCodeRef) != "" {
 			if err := s.restoreInitCodeIfNeeded(ctx, plan.Sandbox, workspaceRuntimeForPlan(plan), plan.Sandbox.InitCodeRef); err != nil {
@@ -1220,6 +1231,10 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 				return
 			}
 		}
+		if err := s.orchestrator.CreateSandboxResources(ctx, plan); err != nil {
+			s.markInitFailed(ctx, plan.Sandbox, err)
+			return
+		}
 		advanced, err = s.advanceStartupState(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseFullyReady, SandboxStatusRunning, map[string]any{"phase": SandboxPhaseFullyReady}, SandboxStatusRunning)
 		if err != nil {
 			logging.ErrorContext(ctx, "sandbox init phase update failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
@@ -1230,6 +1245,7 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 		}
 		s.broadcastProgress(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseFullyReady, SandboxStatusRunning, response.TraceFromContext(ctx))
 	}
+	go s.updateToolsAsync(ctx, plan)
 }
 
 // updateToolsAsync 在环境就绪后独立推进 Web 工具状态,不让慢启动工具阻塞 phase=2。

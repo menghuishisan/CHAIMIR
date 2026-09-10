@@ -22,7 +22,7 @@ metadata:
     policy.sigstore.dev/include: "true"
     # Pod Security:平台工作负载强制 restricted(non-root、禁特权、seccomp)。
     pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/enforce-version: v1.36
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
 ---
@@ -36,7 +36,7 @@ metadata:
     policy.sigstore.dev/include: "true"
     # 中间件需挂数据卷、部分镜像固定 uid,放宽到 baseline(仍禁特权/主机命名空间)。
     pod-security.kubernetes.io/enforce: baseline
-    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/enforce-version: v1.36
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
 ---
@@ -50,7 +50,7 @@ metadata:
     policy.sigstore.dev/include: "true"
     # 镜像预拉取仅运行非业务 DaemonSet,必须保持 restricted。
     pod-security.kubernetes.io/enforce: restricted
-    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/enforce-version: v1.36
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
 ---
@@ -63,6 +63,6 @@ metadata:
     chaimir.io/layer: monitoring
     # 监控为外接占位,Prometheus/Grafana 随 M9 落地;暂设 baseline。
     pod-security.kubernetes.io/enforce: baseline
-    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/enforce-version: v1.36
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

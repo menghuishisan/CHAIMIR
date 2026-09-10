@@ -163,7 +163,7 @@ export default function PlatformSandboxToolsPage() {
               visible.length === 0 ? (
                 <Callout tone="info">这个类型下没有工具,换个类型看看。</Callout>
               ) : (
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className={visible.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
                   {visible.map((tool) => (
                     <ToolCard key={tool.id} tool={tool} />
                   ))}
@@ -254,7 +254,11 @@ function ToolCard({ tool }: { tool: SandboxToolDefinition }) {
   return (
     <Card>
       <CardHeader
-        title={tool.name}
+        title={
+          <span className="truncate font-semibold text-ink">
+            {tool.name}
+          </span>
+        }
         description={sandboxToolKindLabel(tool.kind)}
         actions={
           <div className="flex flex-wrap items-center gap-2">

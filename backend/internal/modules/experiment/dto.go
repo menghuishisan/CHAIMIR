@@ -58,6 +58,7 @@ type TeacherEnvComponentDTO struct {
 	Tools                    []contracts.CompositionComponentRef `json:"tools"`
 	Links                    []contracts.CompositionLink         `json:"links"`
 	AccessProfile            contracts.SandboxAccessProfile      `json:"access_profile"`
+	InitAssets               []contracts.CompositionInitAsset    `json:"init_assets,omitempty"`
 	CompositionDigest        string                              `json:"composition_digest"`
 	InitCodeRef              string                              `json:"init_code_ref"`
 	InitScriptRef            string                              `json:"init_script_ref"`

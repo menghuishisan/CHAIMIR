@@ -1,6 +1,15 @@
 #!/usr/bin/env sh
 # 本脚本启动仅限沙箱内部访问的 geth dev 链。
 set -eu
+: "${CHAIMIR_RUNTIME_RPC_PORT:?CHAIMIR_RUNTIME_RPC_PORT is required}"
+
+case "$CHAIMIR_RUNTIME_RPC_PORT" in
+  ''|*[!0-9]*) echo "CHAIMIR_RUNTIME_RPC_PORT must be a valid TCP port" >&2; exit 2 ;;
+esac
+if [ "$CHAIMIR_RUNTIME_RPC_PORT" -lt 1 ] || [ "$CHAIMIR_RUNTIME_RPC_PORT" -gt 65535 ]; then
+  echo "CHAIMIR_RUNTIME_RPC_PORT must be in 1-65535" >&2
+  exit 2
+fi
 
 if [ "$#" -gt 0 ]; then
   exec "$@"
@@ -30,6 +39,6 @@ exec env \
   --datadir "$state_dir" \
   --http \
   --http.addr 0.0.0.0 \
-  --http.port "${CHAIMIR_RUNTIME_RPC_PORT:-8545}" \
+  --http.port "${CHAIMIR_RUNTIME_RPC_PORT}" \
   --http.api eth,net,web3,debug,txpool \
   --http.vhosts '*'

@@ -557,7 +557,7 @@ function SubmissionGradePane({ submission, onSaved, onError }: SubmissionGradePa
       </FormField>
 
       {/* 动作条贴详情片底边;<lg 由 QueueDetailLayout 钉到屏幕底部 */}
-      <div className="mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
+      <div className="sticky bottom-0 z-sticky -mx-5 -mb-5 mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-line bg-surface px-5 py-4">
         <span className="mr-auto text-sm text-ink-sub">你的评分会覆盖为最终得分。</span>
         <Button variant="primary" loading={working} onClick={() => void submit()}>
           提交批改并看下一条
@@ -602,7 +602,7 @@ function JudgeTasksSection() {
           skeleton={<Skeleton variant="line" lines={3} />}
         >
           {(page) => (
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className={page.list.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
               {page.list.map((task) => (
                 // 每条任务自成一块抬起片:任务卡是并列的处理入口,不是表格行
                 <div

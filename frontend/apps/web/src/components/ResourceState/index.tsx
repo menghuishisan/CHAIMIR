@@ -91,7 +91,11 @@ interface ResourceErrorProps {
 function ResourceError({ message, traceId, onRetry }: ResourceErrorProps) {
   return (
     // 抬起片(规范 §6.5.1 第 1 级):失败块与它替代的那张表同层,故同样不画边框
-    <div className="flex flex-col items-center gap-3 rounded-lg bg-surface px-6 py-12 text-center shadow-xs">
+    <div
+      role="alert"
+      aria-live="assertive"
+      className="flex flex-col items-center gap-3 px-6 py-12 text-center"
+    >
       <p className="text-base text-ink">{message}</p>
       {traceId ? (
         <p className="font-mono text-xs text-ink-sub">{traceHintText(traceId)}</p>

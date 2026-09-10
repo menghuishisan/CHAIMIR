@@ -356,6 +356,23 @@ function JudgeMonitorSection({
                       label={judgeTaskStatusLabel(task.status)}
                     />
                   ),
+                  action: (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button variant="ghost" size="sm" onClick={() => onOpenDetail(task)}>
+                        详情
+                      </Button>
+                      {isJudgeTaskAbnormal(task.status) ? (
+                        <IconButton
+                          variant="ghost"
+                          size="sm"
+                          icon={RotateCcw}
+                          aria-label={`重新判题 ${task.task_id}`}
+                          disabled={rejudgingId === task.task_id}
+                          onClick={() => void rejudge(task.task_id)}
+                        />
+                      ) : null}
+                    </div>
+                  ),
                 })}
               />
             )

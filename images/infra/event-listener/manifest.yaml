@@ -25,15 +25,24 @@ upstream:
 env_keys:
   config:
     - CHAIMIR_IMAGE_PORT
+    - CHAIMIR_HTTP_TIMEOUT_SECONDS
     - CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
     - CHAIMIR_EVENT_RPC_URL
     - CHAIMIR_EVENT_CONTRACT_ADDRESS
     - CHAIMIR_EVENT_TOPIC
     - CHAIMIR_EVENT_LOOKBACK_BLOCKS
+    - CHAIMIR_EVENT_CONFIRMATIONS
+    - CHAIMIR_EVENT_MAX_BLOCK_RANGE
+    - CHAIMIR_EVENT_MAX_EVENTS
+    - CHAIMIR_EVENT_REORG_DEPTH
+    - CHAIMIR_EVENT_POLL_INTERVAL_SECONDS
+    - CHAIMIR_EVENT_RPC_TIMEOUT_SECONDS
+    - CHAIMIR_EVENT_STATE_PATH
   secret:
     - CHAIMIR_EVENT_LISTENER_SERVICE_AUTH_SECRET
 secrets_required:
-  - env: CHAIMIR_EVENT_LISTENER_SERVICE_AUTH_SECRET
+  - component: infra
+    env: CHAIMIR_EVENT_LISTENER_SERVICE_AUTH_SECRET
     secret_key: CHAIMIR_EVENT_LISTENER_SERVICE_AUTH_SECRET
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
@@ -49,6 +58,10 @@ capabilities:
   config_schema:
     type: object
     additionalProperties: false
+    required:
+      - contract_address
+      - event_topic
+      - lookback_blocks
     properties:
       contract_address:
         type: string
@@ -70,8 +83,24 @@ infra:
         env:
           - name: CHAIMIR_IMAGE_PORT
             value: "8080"
+          - name: CHAIMIR_HTTP_TIMEOUT_SECONDS
+            value: "30"
           - name: CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
             value: "300"
+          - name: CHAIMIR_EVENT_CONFIRMATIONS
+            value: "1"
+          - name: CHAIMIR_EVENT_MAX_BLOCK_RANGE
+            value: "100"
+          - name: CHAIMIR_EVENT_MAX_EVENTS
+            value: "256"
+          - name: CHAIMIR_EVENT_REORG_DEPTH
+            value: "12"
+          - name: CHAIMIR_EVENT_POLL_INTERVAL_SECONDS
+            value: "2"
+          - name: CHAIMIR_EVENT_RPC_TIMEOUT_SECONDS
+            value: "10"
+          - name: CHAIMIR_EVENT_STATE_PATH
+            value: /runtime-state/event-listener/state.json
         ports:
           - name: http
             container_port: 8080
@@ -92,6 +121,10 @@ infra:
           failure_threshold: 30
         read_only_root_filesystem: true
         mount_workspace: false
+        mount_domains:
+          - runtime-state
+        writable_mount_domains:
+          - runtime-state
         ephemeral_mounts:
           - name: listener-tmp
             mount_path: /tmp
@@ -106,6 +139,7 @@ infra:
   bindings:
     - name: chain
       capability: evm-json-rpc
+      source_component: infra
       endpoint: rpc
       protocol: HTTP
       required_at_start: true
@@ -151,7 +185,7 @@ selftest:
       command:
         - node
         - -e
-        - "const fs=require('fs'); const src=fs.readFileSync('/app/event-listener.mjs','utf8'); if(!src.includes('verifyServiceSignature') || !src.includes('CHAIMIR_EVENT_LISTENER_SERVICE_AUTH_SECRET')) process.exit(1)"
+        - "const fs=require('fs'); const src=fs.readFileSync('/app/event-listener.mjs','utf8'); if(!src.includes('persistState') || !src.includes('CHAIMIR_EVENT_STATE_PATH') || !src.includes('getLogs') || !src.includes('verifyServiceSignature')) process.exit(1)"
 supply_chain:
   sbom: true
   trivy_required: true

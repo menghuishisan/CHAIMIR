@@ -50,7 +50,7 @@ spec:
         - name: redis
           image: chaimir/middleware/redis:placeholder
           # 从环境变量读取密码并以 requirepass 启动(避免硬编码到 args)。
-          command: ["sh", "-c", "exec redis-server --requirepass \"$REDIS_PASSWORD\" --appendonly yes"]
+          command: ["/usr/local/bin/chaimir-redis-entrypoint"]
           ports:
             - name: redis
               containerPort: 6379
@@ -70,12 +70,12 @@ spec:
             limits: {cpu: 500m, memory: 256Mi}
           readinessProbe:
             exec:
-              command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep -q PONG"]
+              command: ["/usr/local/bin/chaimir-redis-probe"]
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             exec:
-              command: ["sh", "-c", "redis-cli -a \"$REDIS_PASSWORD\" ping | grep -q PONG"]
+              command: ["/usr/local/bin/chaimir-redis-probe"]
             initialDelaySeconds: 15
             periodSeconds: 20
           volumeMounts:

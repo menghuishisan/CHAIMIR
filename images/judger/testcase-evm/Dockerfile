@@ -1,11 +1,15 @@
 # 本文件定义 EVM 测试用例判题镜像,基于已验证 digest 保留离线 Hardhat/solc 工具链。
 ARG EVM_HARDHAT_IMAGE=invalid.invalid/runtime/evm-hardhat:required
+ARG JUDGE_MIN_IMAGE=invalid.invalid/base/judge-min:required
 FROM ${EVM_HARDHAT_IMAGE} AS solidity-source
-FROM registry.chaimir.io/judger/testcase-evm@sha256:e80b8fc8ef1ac54616ec2d7508c94047c4378aec1d35f009302349c1c776d54c AS base
+FROM ${JUDGE_MIN_IMAGE} AS judge-base
+FROM ${EVM_HARDHAT_IMAGE} AS base
 
 USER root
 COPY run_evm_tests.sh /usr/local/bin/run-evm-tests
 COPY hardhat-offline-wrapper.mjs /opt/chaimir/testcase-evm/hardhat-offline-wrapper.mjs
+COPY rpc-probe.mjs /opt/chaimir/testcase-evm/rpc-probe.mjs
+COPY --from=judge-base /usr/local/bin/normalize-result /usr/local/bin/normalize-result
 COPY --from=solidity-source /usr/local/bin/solc-0.8.20 /usr/local/bin/solc-0.8.20
 COPY --from=solidity-source /usr/local/bin/solc-0.8.24 /usr/local/bin/solc-0.8.24
 COPY --from=solidity-source /usr/local/bin/solc-0.8.26 /usr/local/bin/solc-0.8.26

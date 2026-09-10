@@ -121,7 +121,7 @@ function OrgContent({ view, keyword, statusFilter, onKeywordChange, onStatusChan
         {departments.length === 0 ? (
           <Empty icon={Building2} title="还没有院系" description="学校管理员建立院系后会显示在这里。" />
         ) : (
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className={departments.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
             {departments.map((department) => (
               <DepartmentCard
                 key={department.id}

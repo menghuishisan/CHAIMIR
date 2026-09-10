@@ -88,6 +88,12 @@ resources:
   memory_limit: 512Mi
   ephemeral_storage_limit: 512Mi
 selftest:
+  commands:
+    - name: security-entrypoint
+      command:
+        - test
+        - -x
+        - /usr/local/bin/chaimir-nats-entrypoint
   upstream_healthcheck:
     type: http
     path: /healthz

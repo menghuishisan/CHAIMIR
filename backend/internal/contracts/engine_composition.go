@@ -60,6 +60,17 @@ type CompositionLink struct {
 	ConfigBinding   string `json:"config_binding"`
 }
 
+// CompositionInitAsset 是组合发布时绑定到某个 runtime 实例的已审核初始化归档。
+// 归档只保存对象存储引用和完整性约束，实际读取、租户归属校验和解包仍由 M2 启动阶段执行。
+type CompositionInitAsset struct {
+	Name                  string `json:"name"`
+	SourceRef             string `json:"source_ref"`
+	TargetRuntimeInstance string `json:"target_runtime_instance"`
+	TargetDomain          string `json:"target_domain"`
+	ExpectedSHA256        string `json:"expected_sha256,omitempty"`
+	ApplyPhase            string `json:"apply_phase,omitempty"`
+}
+
 // SandboxCompositionSpec 是单个环境的唯一声明来源。
 type SandboxCompositionSpec struct {
 	ID                       string                    `json:"id"`
@@ -71,6 +82,7 @@ type SandboxCompositionSpec struct {
 	AccessProfile            SandboxAccessProfile      `json:"access_profile"`
 	ResourceProfile          map[string]string         `json:"resource_profile,omitempty"`
 	NetworkProfile           map[string]any            `json:"network_profile,omitempty"`
+	InitAssets               []CompositionInitAsset    `json:"init_assets,omitempty"`
 	InitCodeRef              string                    `json:"init_code_ref,omitempty"`
 	InitScriptRef            string                    `json:"init_script_ref,omitempty"`
 }

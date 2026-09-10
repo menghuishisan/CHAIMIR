@@ -343,7 +343,7 @@ function WizardContent({ experiment, courses }: WizardContentProps) {
         </div>
       </PageSection>
 
-      <PageSection>
+      <div className="sticky bottom-0 z-sticky -mx-4 mt-0 border-t border-line bg-surface px-4 py-3 shadow-md md:-mx-8 md:px-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <Button
             variant="outline"
@@ -378,7 +378,7 @@ function WizardContent({ experiment, courses }: WizardContentProps) {
             )}
           </div>
         </div>
-      </PageSection>
+      </div>
 
       <Modal
         open={validateResult !== undefined}

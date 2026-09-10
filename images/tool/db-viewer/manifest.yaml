@@ -33,7 +33,8 @@ env_keys:
   secret:
     - POSTGRES_PASSWORD
 secrets_required:
-  - env: POSTGRES_PASSWORD
+  - component: web
+    env: POSTGRES_PASSWORD
     secret_key: PG_PASSWORD
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
@@ -46,7 +47,19 @@ capabilities:
   conflicts: []
   cardinality: one
   placement: sandbox
-  config_schema: {}
+  config_schema:
+    type: object
+    additionalProperties: false
+    required:
+      - database_name
+      - database_user
+    properties:
+      database_name:
+        type: string
+        x-chaimir-env: web/CHAIMIR_DATABASE_NAME
+      database_user:
+        type: string
+        x-chaimir-env: web/CHAIMIR_DATABASE_USER
   student_access: public
 tool:
   kind: web-embed
@@ -58,6 +71,7 @@ tool:
   bindings:
     - name: database
       capability: postgres-compatible
+      source_component: web
       endpoint: postgres
       protocol: TCP
       required_at_start: true

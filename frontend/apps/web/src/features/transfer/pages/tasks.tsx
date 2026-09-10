@@ -211,7 +211,7 @@ export default function TransferTasksPage() {
     <PageScaffold>
       <PageHeader
         title="任务与下载"
-        description="你发起的导入和导出都在这里。处理完成后可以下载结果文件。"
+        description="你发起的导入和导出任务都在这里。异步处理完成后可安全下载结果文件。"
         icon={ListChecks}
         actions={
           <IconButton
@@ -226,7 +226,7 @@ export default function TransferTasksPage() {
       {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是任务记录 */}
       <MetricStrip
         label="任务总量摘要"
-        className="mb-5"
+        className="mb-6"
         items={[
           { label: '任务总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
           {
@@ -287,13 +287,39 @@ export default function TransferTasksPage() {
                 elevated={false}
                 // <md 换行卡(§6.4.1 规则 3):任务名一行、类型与更新时间一行,状态在右
                 mobileCard={(task) => ({
-                  title: transferChannelLabel(task.channel),
-                  meta: `${formatShortDateTime(task.updated_at)}`,
+                  title: transferTaskSubjectLabel(task.subject),
+                  meta: `${transferChannelLabel(task.channel)} · ${task.file_name} · ${formatShortDateTime(task.updated_at)}`,
                   badge: (
                     <StatusIndicator
                       tone={transferTaskStatusTone(task.status)}
                       label={transferTaskStatusLabel(task.status)}
                     />
+                  ),
+                  action: (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {TRANSFER_ACTIVE_STATUSES.has(task.status) ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          leftIcon={RefreshCw}
+                          loading={checkingId === task.task_id}
+                          onClick={() => void checkTask(task)}
+                        >
+                          查看进度
+                        </Button>
+                      ) : null}
+                      {task.status === TRANSFER_STATUS.SUCCEEDED && task.artifact_file_name ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          leftIcon={Download}
+                          loading={downloadingId === task.task_id}
+                          onClick={() => void downloadArtifact(task)}
+                        >
+                          下载结果
+                        </Button>
+                      ) : null}
+                    </div>
                   ),
                 })}
               />

@@ -55,6 +55,15 @@ $EvidenceDir = if ([System.IO.Path]::IsPathRooted($EvidenceDir)) {
 }
 New-Item -ItemType Directory -Force -Path $EvidenceDir | Out-Null
 $script:evidenceHostDir = $EvidenceDir
+
+# Remove-ArtifactIfPresent 只清理本轮明确命名的旧产物；删除失败必须阻断证明流程。
+function Remove-ArtifactIfPresent {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+    }
+}
+
 if (-not [string]::IsNullOrWhiteSpace($DigestFragmentsDir)) {
     $DigestFragmentsDir = if ([System.IO.Path]::IsPathRooted($DigestFragmentsDir)) {
         [System.IO.Path]::GetFullPath($DigestFragmentsDir)
@@ -63,7 +72,7 @@ if (-not [string]::IsNullOrWhiteSpace($DigestFragmentsDir)) {
     }
     New-Item -ItemType Directory -Force -Path $DigestFragmentsDir | Out-Null
     # 每轮只允许当前证明结果晋升,避免复用同一证据目录时误读上一轮片段。
-    Remove-Item -LiteralPath (Join-Path $DigestFragmentsDir "verified-images.lock") -Force -ErrorAction SilentlyContinue
+    Remove-ArtifactIfPresent -Path (Join-Path $DigestFragmentsDir "verified-images.lock")
 }
 
 # Read-EnvFile 读取简单 KEY=VALUE 文件;只返回键值,不输出密钥内容。
@@ -279,7 +288,11 @@ if ([string]::IsNullOrWhiteSpace($registryEndpoint)) {
     $registryEndpoint = $registry
 }
 $registryExternalUrl = [string]$config["SUPPLY_CHAIN_HARBOR_EXTERNAL_URL"]
-$allowHttpRegistry = $registryExternalUrl.StartsWith("http://", [System.StringComparison]::OrdinalIgnoreCase)
+if ($registryExternalUrl.StartsWith("http://", [System.StringComparison]::OrdinalIgnoreCase) -or
+    $registryEndpoint.StartsWith("http://", [System.StringComparison]::OrdinalIgnoreCase) -or
+    $registry.StartsWith("http://", [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "供应链 Registry 必须使用 HTTPS,不允许 HTTP 或 insecure 参数"
+}
 $script:cosignPrivateKeyPassword = $secret["COSIGN_PRIVATE_KEY_PASSWORD"]
 
 $cosignDirValue = $config["SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR"]
@@ -315,7 +328,8 @@ New-Item -ItemType Directory -Force -Path $sbomDir | Out-Null
 New-Item -ItemType Directory -Force -Path $trivyDir | Out-Null
 $jsonPath = Join-Path $EvidenceDir "platform-image-attestations.json"
 $summaryPath = Join-Path $EvidenceDir "image-attestations-summary.txt"
-Remove-Item -LiteralPath $scanLog, $signLog -ErrorAction SilentlyContinue
+Remove-ArtifactIfPresent -Path $scanLog
+Remove-ArtifactIfPresent -Path $signLog
 
 $digestItems = Read-ChaimirDigestLock -Path $DigestLock -Required
 if ($digestItems.Count -eq 0) {
@@ -354,9 +368,6 @@ foreach ($item in $items) {
             "image", "--config", "/workspace/deploy/ci/trivy.yaml",
             "--format", "json", "--output", $trivyContainerPath
         )
-        if ($allowHttpRegistry) {
-            $trivyArgs += "--insecure"
-        }
         if ($trivySkipByManifest.ContainsKey($item.Image)) {
             foreach ($skipFile in @($trivySkipByManifest[$item.Image])) {
                 $trivyArgs += @("--skip-files", $skipFile)
@@ -385,9 +396,6 @@ foreach ($item in $items) {
     $sbomContainerPath = "/evidence/sbom/$sbomName"
     try {
         $sbomArgs = @("image", "--format", "cyclonedx", "--output", $sbomContainerPath)
-        if ($allowHttpRegistry) {
-            $sbomArgs += "--insecure"
-        }
         $sbomArgs += $toolRef
         Invoke-ComposeTool -Tool "trivy" -ToolArgs $sbomArgs -Context "生成 SBOM $canonicalRef" *>> $scanLog
     } catch {
@@ -404,9 +412,6 @@ foreach ($item in $items) {
         $cosignSignArgs = @(
             "sign", "--yes", "--key", "/cosign/cosign.key", "--tlog-upload=false"
         )
-        if ($allowHttpRegistry) {
-            $cosignSignArgs += "--allow-http-registry"
-        }
         $cosignSignArgs += $toolRef
         Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignSignArgs -Context "Cosign 签名 $canonicalRef" *>> $signLog
 
@@ -414,9 +419,6 @@ foreach ($item in $items) {
             "attest", "--yes", "--key", "/cosign/cosign.key", "--type", "cyclonedx",
             "--predicate", $sbomContainerPath, "--tlog-upload=false"
         )
-        if ($allowHttpRegistry) {
-            $cosignAttestArgs += "--allow-http-registry"
-        }
         $cosignAttestArgs += $toolRef
         Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignAttestArgs -Context "Cosign SBOM 证明 $canonicalRef" *>> $signLog
     } catch {
@@ -430,20 +432,13 @@ foreach ($item in $items) {
         continue
     }
     try {
-        $cosignVerifyArgs = @("verify", "--key", "/cosign/cosign.pub", "--insecure-ignore-tlog=true")
-        if ($allowHttpRegistry) {
-            $cosignVerifyArgs += "--allow-http-registry"
-        }
+        $cosignVerifyArgs = @("verify", "--offline", "--key", "/cosign/cosign.pub")
         $cosignVerifyArgs += $toolRef
         Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignVerifyArgs -Context "Cosign 验签 $canonicalRef" *>> $signLog
 
         $cosignVerifyAttestationArgs = @(
-            "verify-attestation", "--key", "/cosign/cosign.pub", "--type", "cyclonedx",
-            "--insecure-ignore-tlog=true"
+            "verify-attestation", "--offline", "--key", "/cosign/cosign.pub", "--type", "cyclonedx"
         )
-        if ($allowHttpRegistry) {
-            $cosignVerifyAttestationArgs += "--allow-http-registry"
-        }
         $cosignVerifyAttestationArgs += $toolRef
         Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignVerifyAttestationArgs -Context "Cosign SBOM 验证 $canonicalRef" *>> $signLog
     } catch {

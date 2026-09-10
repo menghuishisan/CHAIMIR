@@ -278,11 +278,14 @@ function AssignmentForm({
       ) : null}
 
       <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
-        <div className="min-w-0 lg:w-48 lg:shrink-0">
+        <div
+          className="min-w-0 lg:sticky lg:w-48 lg:shrink-0 lg:self-start"
+          style={{ top: 'var(--topnav-h)' }}
+        >
           <AnchorNav label="作业题目" items={anchorItems} />
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-4 pb-16 lg:pb-4">
           {detail.items.map((item, index) => (
             <AssignmentItemCard
               key={item.id}

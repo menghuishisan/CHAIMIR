@@ -95,13 +95,6 @@ LABEL org.opencontainers.image.description="Chaimir frontend static asset servic
 # Nginx 官方镜像默认监听 80;平台内部统一使用容器端口 8080,避免 root 绑定低端口。
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
-    && sed -i 's#https://dl-cdn.alpinelinux.org/alpine#https://mirrors.aliyun.com/alpine#g' /etc/apk/repositories \
-    && rm -f /var/cache/apk/* \
-    && for attempt in 1 2 3 4 5 6 7 8; do \
-        apk upgrade --cache-dir /var/cache/apk --update-cache && break; \
-        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
-        sleep $((attempt * 3)); \
-    done \
     && rm -rf /usr/share/nginx/html/* \
     && mkdir -p /var/cache/nginx/client_temp /var/cache/nginx/proxy_temp /var/cache/nginx/fastcgi_temp /var/cache/nginx/uwsgi_temp /var/cache/nginx/scgi_temp \
     && chown -R 101:101 /usr/share/nginx/html /var/cache/nginx /run /var/run /var/log/nginx

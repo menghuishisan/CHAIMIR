@@ -88,6 +88,28 @@ export default function SchoolAdminAuthConfigPage() {
         {() => null}
       </ResourceState>
 
+      <div className="mb-6 grid gap-4 sm:grid-cols-2">
+        {([SsoType.CAS, SsoType.LDAP] as const).map((type) => {
+          const config = byType.get(type)
+          const label = type === SsoType.CAS ? '学校统一认证(CAS)' : '目录服务(LDAP)'
+          return (
+            <div key={type} className="rounded-lg border border-border bg-surface p-4 shadow-xs">
+              <div className="flex items-center justify-between gap-3">
+                <p className="font-medium text-ink">{label}</p>
+                <Badge tone={config?.enabled ? 'success' : 'neutral'}>
+                  {config?.enabled ? '已启用' : config ? '已配置未启用' : '未配置'}
+                </Badge>
+              </div>
+              <p className="mt-2 text-sm leading-relaxed text-ink-sub">
+                {config
+                  ? '参数已保存；是否实际生效由租户配置页的登录方式决定。'
+                  : '先在下方填写参数并保存，再到租户配置页切换登录方式。'}
+              </p>
+            </div>
+          )
+        })}
+      </div>
+
       {/*
         归族:配置表单族(§6.5.3 第 ③)。两种认证方式是两套互不相干的参数、两次独立提交,
         故用 Tabs 让一次只出现一套表单 —— 这样底部粘性保存条也只服务当前那一套。

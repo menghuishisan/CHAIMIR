@@ -492,14 +492,26 @@ export default function SchoolAdminUsersPage() {
               rowKey={(item) => item.id}
               elevated={false}
               // <md 换行卡(§6.4.1 规则 3):姓名一行、学工号与身份一行、状态在右
-              mobileCard={(item) => ({
-                title: item.name,
-                meta: `${item.no ?? '—'} · ${baseIdentityLabel(item.base_identity)}`,
+                mobileCard={(item) => ({
+                  title: item.name,
+                  meta: `${item.no ?? '—'} · ${baseIdentityLabel(item.base_identity)}`,
                 badge: (
                   <StatusIndicator
                     tone={accountStatusTone(item.status)}
                     label={accountStatusLabel(item.status)}
                   />
+                ),
+                action: (
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button variant="ghost" size="sm" onClick={() => setFormTarget({ account: item })}>
+                      编辑
+                    </Button>
+                    <AccountActionMenu
+                      account={item}
+                      onRequest={(action) => setConfirm({ action, account: item })}
+                      onResetPassword={() => setResetTarget(item)}
+                    />
+                  </div>
                 ),
               })}
             />

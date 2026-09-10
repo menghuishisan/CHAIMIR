@@ -36,8 +36,16 @@ capabilities:
   - rich-query
 env_keys:
   config: []
-  secret: []
-secrets_required: []
+  secret:
+    - COUCHDB_USER
+    - COUCHDB_PASSWORD
+secrets_required:
+  - env: COUCHDB_USER
+    source: external-kms
+    runtime_value: secret-or-kms
+  - env: COUCHDB_PASSWORD
+    source: external-kms
+    runtime_value: secret-or-kms
 ports:
   - name: http
     container_port: 5984

@@ -4,7 +4,7 @@
 // 旧前端「编辑多题作业静默丢弃第 2 题及以后」正是把题目当单值处理造成的。
 
 import { useCallback, useMemo, useState } from 'react'
-import { ClipboardList, FileCheck2, Pencil, Plus, Send } from 'lucide-react'
+import { ClipboardList, FileCheck2, MoreVertical, Pencil, Plus, Send } from 'lucide-react'
 import {
   AssignmentStatus,
   GradingMode,
@@ -17,10 +17,10 @@ import {
 import {
   Button,
   Callout,
-  DataPanel,
+	DataPanel,
   Empty,
   FormField,
-  IconButton,
+	IconButton,
   Input,
   Modal,
   ModalBody,
@@ -28,7 +28,11 @@ import {
   ModalDescription,
   ModalFooter,
   ModalHeader,
-  ModalTitle,
+	ModalTitle,
+	Menu,
+	MenuContent,
+	MenuItem,
+	MenuTrigger,
 	PageSection,
 	Pagination,
   Select,
@@ -123,30 +127,13 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
       header: '操作',
       align: 'right',
       render: (assignment) => (
-        <div className="flex justify-end gap-1">
-          {assignment.status === AssignmentStatus.DRAFT ? (
-            <>
-              <IconButton
-                variant="ghost"
-                size="sm"
-                icon={Pencil}
-                aria-label={`编辑作业 ${assignment.title}`}
-                onClick={() => setFormOpen({ assignment })}
-              />
-              <Button variant="ghost" size="sm" leftIcon={Send} onClick={() => setPublishTarget(assignment)}>
-                发布
-              </Button>
-            </>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              leftIcon={FileCheck2}
-              onClick={() => onOpenGrading(assignment.id)}
-            >
-              去批改
-            </Button>
-          )}
+        <div className="flex justify-end">
+          <AssignmentActionMenu
+            assignment={assignment}
+            onEdit={() => setFormOpen({ assignment })}
+            onPublish={() => setPublishTarget(assignment)}
+            onOpenGrading={() => onOpenGrading(assignment.id)}
+          />
         </div>
       ),
     },
@@ -205,6 +192,14 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
                       label={assignmentStatusLabel(item.status)}
                     />
                   ),
+                  action: (
+                    <AssignmentActionMenu
+                      assignment={item}
+                      onEdit={() => setFormOpen({ assignment: item })}
+                      onPublish={() => setPublishTarget(item)}
+                      onOpenGrading={() => onOpenGrading(item.id)}
+                    />
+                  ),
                 })}
               />
             )}
@@ -252,6 +247,50 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
         </ModalContent>
       </Modal>
     </PageSection>
+  )
+}
+
+interface AssignmentActionMenuProps {
+  assignment: Assignment
+  onEdit: () => void
+  onPublish: () => void
+  onOpenGrading: () => void
+}
+
+/** AssignmentActionMenu 将作业的对象级动作收进同一入口,避免表格列与窄屏行卡都被按钮撑开。 */
+function AssignmentActionMenu({
+  assignment,
+  onEdit,
+  onPublish,
+  onOpenGrading,
+}: AssignmentActionMenuProps) {
+  return (
+    <Menu>
+      <MenuTrigger asChild>
+        <IconButton
+          variant="ghost"
+          size="sm"
+          icon={MoreVertical}
+          aria-label={`${assignment.title} 的更多操作`}
+        />
+      </MenuTrigger>
+      <MenuContent align="end">
+        {assignment.status === AssignmentStatus.DRAFT ? (
+          <>
+            <MenuItem icon={Pencil} onSelect={onEdit}>
+              编辑作业
+            </MenuItem>
+            <MenuItem icon={Send} onSelect={onPublish}>
+              发布作业
+            </MenuItem>
+          </>
+        ) : (
+          <MenuItem icon={FileCheck2} onSelect={onOpenGrading}>
+            去批改
+          </MenuItem>
+        )}
+      </MenuContent>
+    </Menu>
   )
 }
 

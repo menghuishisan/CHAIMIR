@@ -138,7 +138,7 @@ function LevelConfigsSection() {
         skeleton={<Skeleton variant="line" lines={4} />}
       >
         {(list) => (
-          <div className="grid gap-4 lg:grid-cols-2">
+          <div className={list.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
             {list.map((config) => (
               <LevelConfigCard
                 key={config.id}

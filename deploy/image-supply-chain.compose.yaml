@@ -16,8 +16,8 @@ services:
       http_proxy: ${SUPPLY_CHAIN_HTTP_PROXY:-}
       https_proxy: ${SUPPLY_CHAIN_HTTPS_PROXY:-}
       no_proxy: ${SUPPLY_CHAIN_NO_PROXY:-}
-      TRIVY_DB_REPOSITORY: ${SUPPLY_CHAIN_TRIVY_DB_REPOSITORY:-ghcr.io/aquasecurity/trivy-db:2}
-      TRIVY_JAVA_DB_REPOSITORY: ${SUPPLY_CHAIN_TRIVY_JAVA_DB_REPOSITORY:-ghcr.io/aquasecurity/trivy-java-db:1}
+      TRIVY_DB_REPOSITORY: ${SUPPLY_CHAIN_TRIVY_DB_REPOSITORY:?SUPPLY_CHAIN_TRIVY_DB_REPOSITORY must be an image@sha256 digest reference}
+      TRIVY_JAVA_DB_REPOSITORY: ${SUPPLY_CHAIN_TRIVY_JAVA_DB_REPOSITORY:?SUPPLY_CHAIN_TRIVY_JAVA_DB_REPOSITORY must be an image@sha256 digest reference}
       # 验收使用已校验的项目缓存时跳过重复下载，CI 未设置该变量则按默认行为更新。
       TRIVY_SKIP_DB_UPDATE: ${SUPPLY_CHAIN_TRIVY_SKIP_DB_UPDATE:-}
       TRIVY_SKIP_JAVA_DB_UPDATE: ${SUPPLY_CHAIN_TRIVY_SKIP_JAVA_DB_UPDATE:-}

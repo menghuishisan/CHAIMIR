@@ -448,7 +448,7 @@ function AlertRulesSection({ scope, description, emptyDescription }: AlertRulesS
           skeleton={<Skeleton variant="line" lines={4} />}
         >
           {(list) => (
-            <div className="grid gap-4 lg:grid-cols-2">
+            <div className={list.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
               {list.map((rule) => (
                 <AlertRuleCard key={rule.id} rule={rule} onEdit={() => setFormTarget({ rule })} />
               ))}

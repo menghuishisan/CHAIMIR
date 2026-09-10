@@ -18,7 +18,6 @@ LABEL org.opencontainers.image.description="Chaimir Fabric chaincode testcase ju
 USER root
 RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 -y upgrade \
     && apt-get -o Acquire::Retries=3 -y install --no-install-recommends ca-certificates bash \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 chaimir \

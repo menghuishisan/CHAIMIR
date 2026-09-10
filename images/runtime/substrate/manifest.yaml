@@ -40,6 +40,10 @@ capabilities:
 runtime:
   eco: substrate
   adapter_level: 1
+  workload:
+    env:
+      - name: CHAIMIR_RUNTIME_RPC_PORT
+        value: "9944"
 ports:
   - name: rpc
     container_port: 9944

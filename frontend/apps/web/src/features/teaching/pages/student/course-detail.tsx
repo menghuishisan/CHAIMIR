@@ -9,6 +9,7 @@ import {
   ClipboardList,
   Layers,
   MessageSquare,
+  MoreVertical,
 } from 'lucide-react'
 import { ProgressStatus, type Assignment, type Chapter, type CourseOutline, type Lesson } from '@chaimir/api-client'
 import {
@@ -18,7 +19,12 @@ import {
   CoverImage,
   DataPanel,
   Empty,
+  IconButton,
   MetricStrip,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuTrigger,
   ObjectIdentity,
   PageBody,
   PageHeader,
@@ -267,6 +273,15 @@ function CourseDetailContent({ courseId, outline, onNavigate }: CourseDetailCont
                       label={progressStatusLabel(row.status)}
                     />
                   ),
+                  action: (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onNavigate(`/student/courses/${courseId}/lessons/${row.lesson.id}`)}
+                    >
+                      学习
+                    </Button>
+                  ),
                 })}
                 empty={
                   <Empty
@@ -427,6 +442,30 @@ function CourseAssignments({ courseId, onNavigate }: CourseAssignmentsProps) {
                   <Badge tone={ASSIGNMENT_DUE_TONE[formatRelativeDeadline(item.due_at).urgency]}>
                     {formatRelativeDeadline(item.due_at).text}
                   </Badge>
+                ),
+                action: (
+                  <Menu>
+                    <MenuTrigger asChild>
+                      <IconButton
+                        variant="ghost"
+                        size="sm"
+                        icon={MoreVertical}
+                        aria-label={`${item.title} 的更多操作`}
+                      />
+                    </MenuTrigger>
+                    <MenuContent align="end">
+                      <MenuItem onSelect={() => onNavigate(`/student/courses/${courseId}/assignments/${item.id}`)}>
+                        去作答
+                      </MenuItem>
+                      <MenuItem
+                        onSelect={() =>
+                          onNavigate(`/student/courses/${courseId}/assignments/${item.id}/submissions`)
+                        }
+                      >
+                        看结果
+                      </MenuItem>
+                    </MenuContent>
+                  </Menu>
                 ),
               })}
             />

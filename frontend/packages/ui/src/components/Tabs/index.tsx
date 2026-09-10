@@ -85,7 +85,7 @@ export function TabsList({ className, children, ...rest }: TabsListProps) {
   return (
     <TabsPrimitive.List
       ref={listRef}
-      className={cn('relative flex items-center gap-1 border-b border-line', className)}
+      className={cn('relative flex max-w-full items-center gap-1 overflow-x-auto border-b border-line', className)}
       {...rest}
     >
       {children}
@@ -111,7 +111,7 @@ export function TabsTrigger({ icon, className, children, ...rest }: TabsTriggerP
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        'inline-flex min-h-11 items-center gap-1.5 rounded-sm px-3 py-2 text-sm text-ink-sub',
+        'inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-sm px-3 py-2 text-sm text-ink-sub',
         'transition-colors duration-fast hover:text-ink',
         'data-[state=active]:font-medium data-[state=active]:text-primary',
         'focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2',

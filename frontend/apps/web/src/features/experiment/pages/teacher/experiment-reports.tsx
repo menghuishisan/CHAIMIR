@@ -569,7 +569,15 @@ function GroupsSection({ experiment }: { experiment: Experiment }) {
           }
         >
           {(list) => (
-            <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+            <div
+              className={
+                list.length > 2
+                  ? 'grid gap-4 lg:grid-cols-2 xl:grid-cols-3'
+                  : list.length > 1
+                    ? 'grid gap-4 lg:grid-cols-2'
+                    : 'grid gap-4'
+              }
+            >
               {list.map((group) => (
                 // 每个小组自成一块抬起片:它们是并列的编排入口,不是表格行
                 <div

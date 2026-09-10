@@ -1,8 +1,9 @@
 #!/usr/bin/env sh
 # 本脚本启动 Sui 本地网络。
 set -eu
+: "${CHAIMIR_SUI_CONFIG_DIR:?CHAIMIR_SUI_CONFIG_DIR is required}"
 
-CONFIG_DIR="${CHAIMIR_SUI_CONFIG_DIR:-/runtime-state/sui}"
+CONFIG_DIR="${CHAIMIR_SUI_CONFIG_DIR}"
 if [ ! -f "$CONFIG_DIR/network.yaml" ]; then
   /usr/local/bin/sui genesis --working-dir "$CONFIG_DIR" --with-faucet -f
 fi

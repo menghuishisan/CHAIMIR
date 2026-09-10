@@ -11,7 +11,6 @@ USER root
 
 # 安装最小运行依赖并创建平台工作区用户;默认 MSP 私钥不进入最终镜像层。
 RUN apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 -y upgrade \
     && apt-get -o Acquire::Retries=3 -y install --no-install-recommends ca-certificates bash \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 chaimir \

@@ -1,4 +1,6 @@
-# 本文件定义 FISCO BCOS 运行时镜像,基于已验证 digest 更新严格配置入口。
+# 本文件定义 FISCO BCOS 运行时镜像,直接提取官方节点二进制并加入平台配置入口。
+FROM fiscoorg/fiscobcos:v3.12.1@sha256:93db5277a5c896fde402f2165d133cc3d346effef4165ec417ef098eb2ede74b AS fisco-upstream
+
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 AS fisco-config-assets
 
 ARG FISCO_BUILD_CHAIN_URL=https://github.com/FISCO-BCOS/FISCO-BCOS/releases/download/v3.11.0/build_chain.sh
@@ -17,7 +19,7 @@ RUN apk add --no-cache curl \
     && chmod 0555 /out/build_chain.sh /out/tassl-1.1.1b \
     && rm -f /tmp/tassl.tar.gz
 
-FROM registry.chaimir.io/runtime/fisco-bcos@sha256:fb4f78010f1088d00f6b921e1f63203ed637e4e0b56f820e29bf2c26d30ccfe3
+FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
 LABEL org.opencontainers.image.title="runtime/fisco-bcos"
 LABEL org.opencontainers.image.description="Chaimir FISCO BCOS teaching runtime"
@@ -29,6 +31,7 @@ RUN apk add --no-cache bash gcompat
 COPY entrypoint.sh /usr/local/bin/chaimir-fisco-entrypoint
 COPY fisco-config-init.sh /usr/local/bin/chaimir-fisco-config-init
 COPY uuidgen.sh /usr/local/bin/uuidgen
+COPY --from=fisco-upstream /usr/local/bin/fisco-bcos /usr/local/bin/fisco-bcos
 COPY --from=fisco-config-assets /out/build_chain.sh /usr/local/lib/chaimir/fisco/build_chain.sh
 COPY --from=fisco-config-assets /out/tassl-1.1.1b /usr/local/lib/chaimir/fisco/tassl-1.1.1b
 RUN chmod +x /usr/local/bin/chaimir-fisco-entrypoint /usr/local/bin/chaimir-fisco-config-init /usr/local/bin/uuidgen \

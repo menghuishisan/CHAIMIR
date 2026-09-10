@@ -24,6 +24,7 @@ upstream:
   source_archive: https://github.com/blockscout/blockscout/archive/refs/tags/v11.2.8.tar.gz
   source_sha256: 223e504a3fd48157b90e0a6fb4ac6dc6432b7acfb19cbf7e0e99d7798413cf5e
   assets_builder_arg: NODE_BUILDER_IMAGE
+  build_base_arg: BLOCKSCOUT_BUILD_IMAGE
   rebuild_policy: source-rebuild
   build_base_image: hexpm/elixir
   build_base_version: 1.19.4-erlang-27.3.4.6-alpine-3.22.2
@@ -34,15 +35,18 @@ env_keys:
     - CHAIMIR_BLOCKSCOUT_DATABASE_NAME
     - CHAIMIR_BLOCKSCOUT_DATABASE_USER
     - ETHEREUM_JSONRPC_HTTP_URL
+    - ETHEREUM_JSONRPC_TRACE_URL
   secret:
     - SECRET_KEY_BASE
     - POSTGRES_PASSWORD
 secrets_required:
-  - env: SECRET_KEY_BASE
+  - component: web
+    env: SECRET_KEY_BASE
     secret_key: SECRET_KEY_BASE
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
-  - env: POSTGRES_PASSWORD
+  - component: web
+    env: POSTGRES_PASSWORD
     secret_key: PG_PASSWORD
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
@@ -68,12 +72,21 @@ tool:
   bindings:
     - name: chain_rpc
       capability: evm-json-rpc
+      source_component: web
       endpoint: rpc
       protocol: HTTP
       required_at_start: true
       config_binding: env:ETHEREUM_JSONRPC_HTTP_URL
+    - name: trace_rpc
+      capability: evm-json-rpc
+      source_component: web
+      endpoint: rpc
+      protocol: HTTP
+      required_at_start: true
+      config_binding: env:ETHEREUM_JSONRPC_TRACE_URL
     - name: database
       capability: postgres-compatible
+      source_component: web
       endpoint: postgres
       protocol: TCP
       required_at_start: true
@@ -87,6 +100,10 @@ tool:
         env:
           - name: DISABLE_WEBAPP
             value: "false"
+          - name: CHAIMIR_BLOCKSCOUT_DATABASE_NAME
+            value: blockscout
+          - name: CHAIMIR_BLOCKSCOUT_DATABASE_USER
+            value: postgres
           - name: ETHEREUM_JSONRPC_VARIANT
             value: geth
           - name: ECTO_SSL_MODE

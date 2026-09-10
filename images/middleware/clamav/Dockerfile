@@ -2,8 +2,8 @@
 FROM docker.io/clamav/clamav@sha256:594d54aff5ad3b1a5211d67cdc6d49a9a332276da35d821c3dd4cf6c4cdf6237
 
 RUN apk add --no-cache \
-    'libcrypto3>=3.5.8-r0' \
-    'libssl3>=3.5.8-r0'
+    'libcrypto3=3.6.3-r5' \
+    'libssl3=3.6.3-r5'
 
 LABEL org.opencontainers.image.title="middleware/clamav"
 LABEL org.opencontainers.image.description="Chaimir ClamAV middleware on the official ClamAV Alpine runtime"

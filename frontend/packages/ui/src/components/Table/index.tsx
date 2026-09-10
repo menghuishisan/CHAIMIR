@@ -131,11 +131,13 @@ export function Table<T>({
     // 给了 mobileCard 的表在 <md 改渲行卡,那时不需要横滚。
     <div
       className={cn(
-        "min-w-0 rounded-lg",
+        "min-w-0",
+        elevated && "rounded-lg",
         elevated && "bg-surface shadow-xs",
         mobileCard ? "md:overflow-x-auto" : "overflow-x-auto",
         className,
       )}
+      aria-busy={loading || undefined}
     >
       {/* 窄屏行卡(§6.4.1 规则 3):与表格同源一份 data,列定义不复制第二遍 */}
       {mobileCard && (
@@ -153,6 +155,10 @@ export function Table<T>({
                 )
               : data.map((row) => {
                   const card = mobileCard(row);
+                  const cardLabel =
+                    typeof card.title === "string" || typeof card.title === "number"
+                      ? String(card.title)
+                      : undefined;
                   return (
                     <li key={rowKey(row)}>
                       {/* 整卡可点时用 button 而不是给 li 挂 tabIndex:原生按钮自带角色与键盘行为 */}
@@ -161,6 +167,7 @@ export function Table<T>({
                         tabIndex={onRowClick ? 0 : undefined}
                         onClick={onRowClick ? (event) => handleRowClick(event, row) : undefined}
                         onKeyDown={onRowClick ? (event) => handleRowKeyDown(event, row) : undefined}
+                        aria-label={onRowClick ? cardLabel : undefined}
                         className={cn(
                           "flex items-center gap-3 border-b border-line px-4 py-3",
                           onRowClick &&

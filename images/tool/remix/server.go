@@ -9,15 +9,17 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const version = "remix-static-server-1"
 
 // main 校验静态目录并启动只服务 Remix 静态资源的 HTTP 服务器。
 func main() {
-	addr := flag.String("addr", ":8080", "listen address")
-	root := flag.String("root", "/usr/share/remix", "static root")
+	addr := flag.String("addr", "", "listen address")
+	root := flag.String("root", "", "static root")
 	showVersion := flag.Bool("version", false, "print version")
 	flag.Parse()
 
@@ -25,6 +27,10 @@ func main() {
 		fmt.Println(version)
 		return
 	}
+	if strings.TrimSpace(*addr) == "" || strings.TrimSpace(*root) == "" {
+		log.Fatal("-addr and -root are required")
+	}
+	httpTimeout := time.Duration(requiredPositiveInt("CHAIMIR_HTTP_TIMEOUT_SECONDS")) * time.Second
 
 	absRoot, err := filepath.Abs(*root)
 	if err != nil {
@@ -40,12 +46,26 @@ func main() {
 	server := &http.Server{
 		Addr:              *addr,
 		Handler:           mux,
-		ReadHeaderTimeout: 5_000_000_000,
+		ReadHeaderTimeout: httpTimeout,
+		ReadTimeout:       httpTimeout,
+		WriteTimeout:      httpTimeout,
+		IdleTimeout:       httpTimeout,
+		MaxHeaderBytes:    16 << 10,
 	}
 	log.Printf("serving Remix static assets on %s", *addr)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("serve Remix static assets: %v", err)
 	}
+}
+
+// requiredPositiveInt 读取服务端有限的正整数配置。
+func requiredPositiveInt(key string) int {
+	value := strings.TrimSpace(os.Getenv(key))
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		log.Fatalf("%s must be a positive integer", key)
+	}
+	return parsed
 }
 
 // staticHandler 返回静态资源处理器,并对前端路由回退到 index.html。

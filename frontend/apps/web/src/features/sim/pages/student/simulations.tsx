@@ -222,6 +222,22 @@ export default function StudentSimulationsPage() {
                 mobileCard={(item) => ({
                   title: item.name,
                   meta: `${simCategoryLabel(item.category)} · 版本 ${item.version}`,
+                  badge: <StatusIndicator tone={simPackageStatusTone(item.status)} label={simPackageStatusLabel(item.status)} />,
+                  action:
+                    item.compute === SIM_COMPUTE.BROWSER ? (
+                      <div className="flex shrink-0 items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setVersionPickerCode(item.code)}
+                        >
+                          版本
+                        </Button>
+                        <EnterSimulationButton code={item.code} version={item.version} />
+                      </div>
+                    ) : (
+                      <span className="shrink-0 text-xs text-ink-faint">随课程进入</span>
+                    ),
                 })}
               />
             )}

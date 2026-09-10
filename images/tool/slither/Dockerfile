@@ -11,7 +11,7 @@ ARG SOLC_0_8_24_PATH=solc-linux-amd64-v0.8.24+commit.e11b9ed9
 ARG SOLC_0_8_24_SHA256=fb03a29a517452b9f12bcf459ef37d0a543765bb3bbc911e70a87d6a37c30d5f
 ARG SOLC_0_8_26_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
 ARG SOLC_0_8_26_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
-ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_INDEX_URL=https://pypi.org/simple
 
 LABEL org.opencontainers.image.title="tool/slither"
 LABEL org.opencontainers.image.description="Chaimir Slither security scanner image"
@@ -21,13 +21,7 @@ COPY chaimir_slither.py /usr/local/bin/chaimir-slither
 USER root
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
-    && sed -i 's#https://dl-cdn.alpinelinux.org/alpine#https://mirrors.aliyun.com/alpine#g' /etc/apk/repositories \
     && rm -f /var/cache/apk/* \
-    && for attempt in 1 2 3 4 5 6 7 8; do \
-        apk upgrade --cache-dir /var/cache/apk --update-cache && break; \
-        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
-        sleep $((attempt * 3)); \
-    done \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache bash ca-certificates gcompat git libstdc++ py3-pip python3 wget && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
@@ -48,12 +42,12 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         chmod 0755 "/usr/local/bin/solc-${version}"; \
     done \
     && python3 -m venv /opt/slither \
-    && /opt/slither/bin/pip install --no-cache-dir --upgrade --index-url "${PIP_INDEX_URL}" \
-        "pip>=25.3" \
-        "setuptools>=80.0.0" \
-        "wheel>=0.46.0" \
+    && /opt/slither/bin/pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
+        "pip==25.3" \
+        "setuptools==80.0.0" \
+        "wheel==0.46.0" \
         "slither-analyzer==0.11.3" \
-        "aiohttp>=3.14.3" \
+        "aiohttp==3.14.3" \
     && rm -rf /opt/slither/lib/python3.12/site-packages/pip /opt/slither/lib/python3.12/site-packages/pip-*.dist-info \
     && apk del py3-pip \
     && /opt/slither/bin/slither --version >/dev/null \

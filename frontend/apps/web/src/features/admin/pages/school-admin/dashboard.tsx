@@ -96,6 +96,23 @@ function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
         </div>
       </PageSection>
 
+      <PageSection title="常用管理直达" description="从学校运行概览直接进入需要处理的管理任务。">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Button variant="outline" size="sm" className="justify-start" onClick={() => navigate('/school-admin/users')}>
+            账号管理
+          </Button>
+          <Button variant="outline" size="sm" className="justify-start" onClick={() => navigate('/school-admin/organization')}>
+            组织架构
+          </Button>
+          <Button variant="outline" size="sm" className="justify-start" onClick={() => navigate('/school-admin/approvals')}>
+            成绩审核
+          </Button>
+          <Button variant="outline" size="sm" className="justify-start" onClick={() => navigate('/school-admin/alerts')}>
+            学业预警
+          </Button>
+        </div>
+      </PageSection>
+
       <DashboardCompositionSection dashboard={dashboard} />
 
       <DashboardTeachingPracticeSection dashboard={dashboard} />

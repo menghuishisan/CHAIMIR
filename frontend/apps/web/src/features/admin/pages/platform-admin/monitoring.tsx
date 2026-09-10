@@ -45,7 +45,9 @@ export default function PlatformMonitoringPage() {
   const panels = useAsyncResource(
     () => api.admin.monitoringPanels(),
     [],
-    (value) => value.length === 0,
+    // 空数组是正常成功态:引导族仍需展示相邻出口和后续配置入口,
+    // 不能让 ResourceState 抢先渲染通用空态。
+    () => false,
   )
 
   const list = useMemo(() => panels.data ?? [], [panels.data])

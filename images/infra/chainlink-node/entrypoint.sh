@@ -29,6 +29,29 @@ case "$ETH_URL" in
   http://*|https://*) ;;
   *) echo "ETH_URL 必须使用 HTTP(S) 协议" >&2; exit 2 ;;
 esac
+eth_target="${ETH_URL#*://}"
+case "$eth_target" in
+  *@*|*/*|*\?*|*\#*)
+    echo "ETH_URL 不得包含凭据、路径、查询或片段" >&2
+    exit 2
+    ;;
+esac
+eth_host="${eth_target%:*}"
+eth_port="${eth_target##*:}"
+case "$eth_host" in
+  ''|*[!A-Za-z0-9.-]*) echo "ETH_URL host 无效" >&2; exit 2 ;;
+esac
+if [ "$eth_host" = "$eth_target" ] || [ -z "$eth_port" ]; then
+  echo "ETH_URL 必须包含显式 host 和端口" >&2
+  exit 2
+fi
+case "$eth_port" in
+  ''|*[!0-9]*) echo "ETH_URL 端口无效" >&2; exit 2 ;;
+esac
+if [ "$eth_port" -lt 1 ] || [ "$eth_port" -gt 65535 ]; then
+  echo "ETH_URL 端口必须位于 1-65535" >&2
+  exit 2
+fi
 case "$POSTGRES_PASSWORD" in
   *[!A-Za-z0-9_.~-]*|'') echo "POSTGRES_PASSWORD 必须使用 URL 安全字符" >&2; exit 2 ;;
 esac
@@ -53,6 +76,10 @@ fi
 case "$CHAINLINK_CHAIN_ID" in
   *[!0-9]*|'') echo "CHAINLINK_CHAIN_ID 必须是正整数" >&2; exit 2 ;;
 esac
+if [ "$CHAINLINK_CHAIN_ID" -lt 1 ]; then
+  echo "CHAINLINK_CHAIN_ID 必须是正整数" >&2
+  exit 2
+fi
 
 runtime_root=/runtime-state/chainlink
 config_path="$runtime_root/config.toml"
@@ -61,10 +88,12 @@ api_path="$runtime_root/api-credentials"
 mkdir -p "$runtime_root"
 umask 077
 
-# Chainlink 2.61 使用 TOML 配置;HTTP-only runtime 通过受控轮询代替 WS 订阅,
-# 不关闭 EVM log poller,也不伪造一个不存在的 WebSocket 地址。
+# Chainlink 2.61 的 HTTP-only runtime 使用 EVM LogPoller 通过 HTTP 轮询日志；
+# 旧 LogBroadcaster 依赖 WS 订阅，当前 runtime binding 不提供 WS，因此必须关闭。
 cat > "$config_path" <<EOF
 Log.Level = 'info'
+[Feature]
+LogPoller = true
 [WebServer]
 HTTPPort = 6688
 SecureCookies = false

@@ -72,6 +72,76 @@ function Get-LockedDigest {
     throw "权威镜像锁缺少 $LogicalImage"
 }
 
+# Ensure-CanonicalTls 使用正式锁定的链工具检查并轮换 canonical 证书,不依赖宿主机工具或临时镜像。
+function Ensure-CanonicalTls {
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $registryCAPath) | Out-Null
+    New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
+    $chainToolsDigest = Get-LockedDigest -LogicalImage "base/chain-tools"
+    $chainToolsImage = "registry.chaimir.io/base/chain-tools@$chainToolsDigest"
+    $tlsDirectory = Split-Path -Parent $registryCAPath
+    $certificateScript = @'
+set -eu
+if [ -s /out/tls.key ] && [ -s /out/tls.crt ] \
+  && openssl x509 -in /out/tls.crt -checkend 86400 -noout \
+  && openssl x509 -in /out/tls.crt -noout -ext subjectAltName | grep -q 'DNS:www.chaimir.io' \
+  && openssl x509 -in /out/tls.crt -noout -ext subjectAltName | grep -q 'DNS:tools.chaimir.io' \
+  && openssl x509 -in /out/tls.crt -noout -ext subjectAltName | grep -q 'DNS:registry.chaimir.io' \
+  && test "$(openssl x509 -in /out/tls.crt -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256)" = "$(openssl pkey -in /out/tls.key -pubout | openssl pkey -pubin -outform DER | openssl dgst -sha256)"; then
+  exit 0
+fi
+umask 077
+openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
+  -keyout /out/tls.key -out /out/tls.crt \
+  -subj '/CN=www.chaimir.io' \
+  -addext 'subjectAltName=DNS:www.chaimir.io,DNS:tools.chaimir.io,DNS:registry.chaimir.io' >/dev/null 2>&1
+# Docker Desktop bind mounts use the Windows ACL of the canonical directory;
+# chmod is not supported on that mount and would make a successful rotation fail.
+'@
+    $scriptPath = Join-Path $tmpRoot "ensure-canonical-tls.sh"
+    Write-Utf8NoBom -Path $scriptPath -Content $certificateScript
+    try {
+        Invoke-Native -FilePath "docker" -Arguments @(
+            "run", "--rm", "--pull", "never", "--network", "none", "--entrypoint", "sh",
+            "--mount", "type=bind,source=$tlsDirectory,target=/out",
+            "--mount", "type=bind,source=$tmpRoot,target=/work,readonly", $chainToolsImage,
+            "/work/ensure-canonical-tls.sh"
+        )
+    } finally {
+        if (Test-Path -LiteralPath $scriptPath) {
+            Remove-Item -LiteralPath $scriptPath -Force
+        }
+    }
+}
+
+# Sync-CanonicalTlsSecret 将同一份 canonical 证书写入显式目标 Secret,不产生第二份证书材料。
+function Sync-CanonicalTlsSecret {
+    param(
+        [Parameter(Mandatory = $true)][string]$Context,
+        [Parameter(Mandatory = $true)][string]$Namespace,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [switch]$CreateNamespace
+    )
+
+    New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
+    if ($CreateNamespace) {
+        $namespaceYaml = & kubectl --context $Context create namespace $Namespace --dry-run=client -o yaml
+        if ($LASTEXITCODE -ne 0) {
+            throw "生成 TLS 目标 namespace YAML 失败: $Context/$Namespace"
+        }
+        $namespacePath = Join-Path $tmpRoot "$($Context)-$Namespace-namespace.yaml"
+        Write-Utf8NoBom -Path $namespacePath -Content ($namespaceYaml -join "`n")
+        Invoke-Native -FilePath "kubectl" -Arguments @("--context", $Context, "apply", "-f", $namespacePath)
+    }
+
+    $secretYaml = & kubectl --context $Context -n $Namespace create secret tls $Name --cert=$registryCAPath --key=$registryKeyPath --dry-run=client -o yaml
+    if ($LASTEXITCODE -ne 0) {
+        throw "生成 canonical TLS Secret YAML 失败: $Context/$Namespace/$Name"
+    }
+    $secretPath = Join-Path $tmpRoot "$($Context)-$Namespace-$Name-tls.yaml"
+    Write-Utf8NoBom -Path $secretPath -Content ($secretYaml -join "`n")
+    Invoke-Native -FilePath "kubectl" -Arguments @("--context", $Context, "apply", "-f", $secretPath)
+}
+
 # Get-Kind 确保使用项目固定并经过 SHA256 校验的 Kind 二进制。
 function Get-Kind {
     $kindDirectory = Split-Path -Parent $kindPath
@@ -122,7 +192,7 @@ function Assert-DependencyRegistry {
         # PowerShell 7 may promote native stderr to a terminating error even when
         # the process exit code is handled; keep the bounded retry loop intact.
         try {
-            $statusCode = [string](& curl.exe --noproxy "*" -sS -o NUL -w "%{http_code}" --connect-timeout 3 --max-time 10 "https://$registryHost/v2/" 2>$null)
+            $statusCode = [string](& curl.exe --noproxy "*" --cacert $registryCAPath -sS -o NUL -w "%{http_code}" --connect-timeout 3 --max-time 10 "https://$registryHost/v2/" 2>$null)
             $curlExitCode = $LASTEXITCODE
         }
         catch {
@@ -386,7 +456,7 @@ esac
 
 temporary_hosts="$(mktemp)"
 trap 'rm -f "$temporary_hosts"' EXIT
-grep -vE '[[:space:]]__REGISTRY_HOST__([[:space:]]|$)' /etc/hosts >"$temporary_hosts" || true
+awk '!/[[:space:]]__REGISTRY_HOST__([[:space:]]|$)/' /etc/hosts >"$temporary_hosts"
 printf '%s\t%s\n' "$gateway" '__REGISTRY_HOST__' >>"$temporary_hosts"
 cat "$temporary_hosts" >/etc/hosts
 '@
@@ -746,7 +816,9 @@ function Repair-StaleCiliumEndpoints {
     }
 
     $targetKeys = @($staleEndpoints | ForEach-Object { "$($_.metadata.namespace)/$($_.metadata.name)" })
-    $deadline = (Get-Date).AddSeconds(120)
+    # Endpoint recreation may wait behind kubelet certificate and Cilium identity convergence;
+    # keep the wait bounded while allowing the current agent to finish that reconciliation.
+    $deadline = (Get-Date).AddSeconds(300)
     do {
         $currentPodsRaw = (& kubectl --context $runtimeContext get pods --all-namespaces -o json) -join "`n"
         if ($LASTEXITCODE -ne 0) {
@@ -1355,15 +1427,20 @@ if ($Action -eq "Stop") {
     return
 }
 
+if ($Action -in @("Up", "Start")) {
+    Ensure-CanonicalTls
+}
 Assert-RequiredFiles
 switch ($Action) {
     "Up" {
-        Assert-DependencyRegistry
         Remove-LegacyWorkloads
         Ensure-Cluster
         Sync-ContainerKubeconfigs
         Configure-RegistryOnNodes
         Approve-KubeletServingCertificates
+        Sync-CanonicalTlsSecret -Context $DependencyContext -Namespace "harbor" -Name "harbor-tls"
+        Sync-CanonicalTlsSecret -Context $runtimeContext -Namespace "chaimir-system" -Name "chaimir-tls" -CreateNamespace
+        Assert-DependencyRegistry
         Install-Cilium
         Repair-StaleCiliumEndpoints
         Configure-RegistryPodDns
@@ -1372,13 +1449,15 @@ switch ($Action) {
         Invoke-NetworkPolicySmoke
     }
     "Start" {
-        Assert-DependencyRegistry
         Ensure-Cluster -RequireExisting
         Sync-ContainerKubeconfigs
         Restore-RegistryOnNodes
         Approve-KubeletServingCertificates
         Wait-CiliumComponents -TimeoutSeconds 300
         Repair-StaleCiliumEndpoints
+        Sync-CanonicalTlsSecret -Context $DependencyContext -Namespace "harbor" -Name "harbor-tls"
+        Sync-CanonicalTlsSecret -Context $runtimeContext -Namespace "chaimir-system" -Name "chaimir-tls" -CreateNamespace
+        Assert-DependencyRegistry
         Configure-RegistryPodDns
         Assert-CiliumState
         Configure-ExternalEdge

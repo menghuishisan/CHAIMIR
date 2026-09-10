@@ -42,7 +42,8 @@ env_keys:
   secret:
     - OP_GETH_JWT_SECRET
 secrets_required:
-  - env: OP_GETH_JWT_SECRET
+  - component: infra
+    env: OP_GETH_JWT_SECRET
     secret_key: OP_GETH_JWT_SECRET
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
@@ -123,18 +124,21 @@ infra:
   bindings:
     - name: l1_execution
       capability: evm-json-rpc
+      source_component: infra
       endpoint: rpc
       protocol: HTTP
       required_at_start: true
       config_binding: env:OP_NODE_L1_ETH_RPC
     - name: l2_engine
       capability: evm-engine-api
+      source_component: infra
       endpoint: engine
       protocol: HTTP
       required_at_start: true
       config_binding: env:OP_NODE_L2_ENGINE_RPC
     - name: l1_beacon
       capability: ethereum-beacon-api
+      source_component: infra
       endpoint: http
       protocol: HTTP
       required_at_start: true

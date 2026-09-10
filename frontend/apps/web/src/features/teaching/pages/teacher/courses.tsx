@@ -277,6 +277,7 @@ export default function TeacherCoursesPage() {
           </Button>
           <CourseActionMenu
             course={course}
+            onManage={() => navigate(`/teacher/courses/${course.id}`)}
             onRequestStatus={(action) => setConfirm({ action, course })}
             onShare={() => void shareCourse(course)}
             onRefreshInvite={() => void refreshInviteCode(course)}
@@ -394,6 +395,16 @@ export default function TeacherCoursesPage() {
                     label={courseStatusLabel(course.status)}
                   />
                 ),
+                action: (
+                  <CourseActionMenu
+                    course={course}
+                    onManage={() => navigate(`/teacher/courses/${course.id}`)}
+                    onRequestStatus={(action) => setConfirm({ action, course })}
+                    onShare={() => void shareCourse(course)}
+                    onRefreshInvite={() => void refreshInviteCode(course)}
+                    onClone={() => setCloneTarget(course)}
+                  />
+                ),
               })}
               onRowClick={(course) => navigate(`/teacher/courses/${course.id}`)}
             />
@@ -455,6 +466,7 @@ export default function TeacherCoursesPage() {
 
 interface CourseActionMenuProps {
   course: Course
+  onManage: () => void
   onRequestStatus: (action: ConfirmAction) => void
   onShare: () => void
   onRefreshInvite: () => void
@@ -467,6 +479,7 @@ interface CourseActionMenuProps {
  */
 function CourseActionMenu({
   course,
+  onManage,
   onRequestStatus,
   onShare,
   onRefreshInvite,
@@ -484,6 +497,9 @@ function CourseActionMenu({
         <IconButton variant="ghost" size="sm" icon={MoreVertical} aria-label={`${course.name} 的更多操作`} />
       </MenuTrigger>
       <MenuContent align="end">
+        <MenuItem icon={Book} onSelect={onManage}>
+          管理内容
+        </MenuItem>
         {canPublish ? <MenuItem onSelect={() => onRequestStatus('publish')}>发布课程</MenuItem> : null}
         {canEnd ? <MenuItem onSelect={() => onRequestStatus('end')}>结束课程</MenuItem> : null}
         {canRefreshInvite ? (

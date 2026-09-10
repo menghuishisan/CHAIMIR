@@ -5,31 +5,22 @@ LABEL org.opencontainers.image.title="tool/jupyter"
 LABEL org.opencontainers.image.description="Chaimir Jupyter notebook tool image"
 
 USER root
-RUN for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do \
-        if [ -f "$source" ]; then \
-            sed -i \
-                -e 's|http://archive.ubuntu.com/ubuntu|https://mirror.leaseweb.com/ubuntu|g' \
-                -e 's|http://security.ubuntu.com/ubuntu|https://mirror.leaseweb.com/ubuntu|g' \
-                "$source"; \
-        fi; \
-    done \
-    && apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 -y upgrade \
-    && /opt/conda/bin/python -m pip install --no-cache-dir --upgrade \
-        "setuptools" \
-        "jupyter_server>=2.17.0" \
-        "jupyterlab>=4.5.0" \
-        "notebook>=7.5.0" \
-        "nbconvert>=7.17.0" \
-        "mistune>=3.2.1" \
-        "tornado>=6.5.2" \
-        "urllib3>=2.6.0" \
-        "PyJWT>=2.10.2" \
-        "wheel>=0.46.0" \
-        "Mako>=1.3.10" \
-        "Brotli>=1.2.0" \
-        "cryptography>=46.0.0" \
-        "soupsieve>=2.8.4" \
+RUN apt-get -o Acquire::Retries=3 update \
+    && /opt/conda/bin/python -m pip install --no-cache-dir \
+        "setuptools==80.9.0" \
+        "jupyter_server==2.17.0" \
+        "jupyterlab==4.5.0" \
+        "notebook==7.5.0" \
+        "nbconvert==7.17.0" \
+        "mistune==3.2.1" \
+        "tornado==6.5.2" \
+        "urllib3==2.6.0" \
+        "PyJWT==2.10.2" \
+        "wheel==0.46.0" \
+        "Mako==1.3.10" \
+        "Brotli==1.2.0" \
+        "cryptography==46.0.0" \
+        "soupsieve==2.8.4" \
     && /opt/conda/bin/python -m pip uninstall -y nbclassic \
     && rm -rf /var/lib/apt/lists/* /root/.cache/pip \
     && groupadd --gid 1000 chaimir \

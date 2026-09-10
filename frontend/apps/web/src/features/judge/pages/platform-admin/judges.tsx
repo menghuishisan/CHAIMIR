@@ -8,7 +8,7 @@
 // 任务与重判归教师端批改中心(对齐清单 §3.4)。
 
 import { useCallback, useMemo, useState } from 'react'
-import { Cpu, Plus, Settings2, ShieldCheck, Timer } from 'lucide-react'
+import { ArrowRight, Cpu, Plus, Settings2, ShieldCheck, Timer } from 'lucide-react'
 import { JudgerStatus, JudgerType, type Judger } from '@chaimir/api-client'
 import {
   Badge,
@@ -149,7 +149,7 @@ export default function PlatformJudgesPage() {
               visible.length === 0 ? (
                 <Callout tone="info">这个类型下没有判题器,换个类型看看。</Callout>
               ) : (
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className={visible.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
                   {visible.map((judger) => (
                     <JudgerCard
                       key={judger.id}
@@ -267,7 +267,17 @@ function JudgerCard({ judger, onEdit, onSelftested, onError }: JudgerCardProps) 
   return (
     <Card>
       <CardHeader
-        title={judger.name}
+        title={
+          <button
+            type="button"
+            onClick={onEdit}
+            className="group inline-flex items-center gap-1.5 truncate text-left font-semibold text-ink transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            title="编辑判题器配置"
+          >
+            <span>{judger.name}</span>
+            <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-1 text-accent opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
+          </button>
+        }
         description={judgerTypeLabel(judger.type)}
         actions={
           <div className="flex flex-wrap items-center gap-2">

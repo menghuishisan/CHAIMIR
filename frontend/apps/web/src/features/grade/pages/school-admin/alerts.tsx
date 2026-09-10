@@ -214,6 +214,16 @@ export default function SchoolAdminAlertsPage() {
         ]}
       />
 
+      <Callout
+        tone={pendingCount !== undefined && pendingCount > 0 ? 'warning' : 'info'}
+        title={pendingCount !== undefined && pendingCount > 0 ? '有预警等待学生确认' : '扫描结果由学生确认'}
+        className="mb-5"
+      >
+        {pendingCount !== undefined && pendingCount > 0
+          ? `当前有 ${pendingCount} 条预警等待学生确认。校管端负责扫描和跟进，不代替学生完成确认。`
+          : '执行扫描后，符合规则的学生会收到预警；确认动作必须由学生本人完成。'}
+      </Callout>
+
       {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
       <DataPanel
         label="预警记录"

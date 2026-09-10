@@ -208,6 +208,7 @@ export default function TeacherQuestionsPage() {
           />
           <ItemActionMenu
             item={item}
+            onEdit={() => setFormTarget({ item })}
             onRequest={(action) => setConfirm({ action, item })}
             onToggleShare={() => void toggleShare(item)}
             onOpenVersions={() => setVersionsTarget(item)}
@@ -291,7 +292,9 @@ export default function TeacherQuestionsPage() {
                 emptyIcon={Database}
                 emptyTitle={typeFilter ? '这个类型下没有题目' : '题库还是空的'}
                 emptyDescription={
-                  typeFilter ? '换个类型看看。' : '新建题目后可以在作业、实验与竞赛里引用。'
+                  typeFilter
+                    ? '换个类型看看。'
+                    : '新建题目后可以在作业、实验与竞赛里引用。'
                 }
                 emptyAction={
                   typeFilter ? undefined : (
@@ -312,6 +315,15 @@ export default function TeacherQuestionsPage() {
                     mobileCard={(item) => ({
                       title: item.title,
                       meta: `${contentTypeLabel(item.type)} · ${item.code} · ${item.version}`,
+                      action: (
+                        <ItemActionMenu
+                          item={item}
+                          onEdit={() => setFormTarget({ item })}
+                          onRequest={(action) => setConfirm({ action, item })}
+                          onToggleShare={() => void toggleShare(item)}
+                          onOpenVersions={() => setVersionsTarget(item)}
+                        />
+                      ),
                     })}
                   />
                 )}
@@ -399,6 +411,7 @@ export default function TeacherQuestionsPage() {
 
 interface ItemActionMenuProps {
   item: ContentItem
+  onEdit: () => void
   onRequest: (action: 'publish' | 'deprecate' | 'delete') => void
   onToggleShare: () => void
   onOpenVersions: () => void
@@ -408,7 +421,7 @@ interface ItemActionMenuProps {
  * ItemActionMenu 按当前状态给出可执行动作。
  * 删除是不可逆动作,与常规项用分隔线隔开。
  */
-function ItemActionMenu({ item, onRequest, onToggleShare, onOpenVersions }: ItemActionMenuProps) {
+function ItemActionMenu({ item, onEdit, onRequest, onToggleShare, onOpenVersions }: ItemActionMenuProps) {
   const canPublish = item.status === ContentStatus.DRAFT
   const canDeprecate = item.status === ContentStatus.PUBLISHED
   const canDelete = item.status === ContentStatus.DRAFT
@@ -425,6 +438,9 @@ function ItemActionMenu({ item, onRequest, onToggleShare, onOpenVersions }: Item
         />
       </MenuTrigger>
       <MenuContent align="end">
+        <MenuItem icon={Pencil} onSelect={onEdit}>
+          编辑题目
+        </MenuItem>
         <MenuItem onSelect={onOpenVersions}>版本与复用</MenuItem>
         {canPublish ? (
           <MenuItem icon={Send} onSelect={() => onRequest('publish')}>

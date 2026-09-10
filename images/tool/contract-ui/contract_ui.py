@@ -8,10 +8,28 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from eth_abi import encode
+from eth_abi.exceptions import EncodingError, ParseError
 from eth_utils import function_signature_to_4byte_selector, to_hex
 
-PORT = int(os.environ.get("CHAIMIR_IMAGE_PORT", "8080"))
-MAX_BODY_BYTES = int(os.environ.get("CHAIMIR_MAX_BODY_BYTES", "1048576"))
+def required_positive_int(name: str) -> int:
+    """读取必填正整数配置,拒绝镜像自行选择运行参数。"""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        raise RuntimeError(f"{name} is required")
+    try:
+        value = int(raw, 10)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise RuntimeError(f"{name} must be a positive integer")
+    return value
+
+
+PORT = required_positive_int("CHAIMIR_IMAGE_PORT")
+MAX_BODY_BYTES = required_positive_int("CHAIMIR_MAX_BODY_BYTES")
+HTTP_TIMEOUT_SECONDS = required_positive_int("CHAIMIR_HTTP_TIMEOUT_SECONDS")
+MAX_HEADER_BYTES = 16 * 1024
+MAX_HEADER_COUNT = 64
 INDEX_HTML = """<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -61,11 +79,29 @@ document.getElementById('build').onclick=async()=>{
 
 def parse_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     """读取并校验 JSON 请求体。"""
-    length = int(handler.headers.get("Content-Length", "0"))
+    if handler.headers.get("Transfer-Encoding"):
+        raise ValueError("transfer encoding is unsupported")
+    content_lengths = handler.headers.get_all("Content-Length", [])
+    if len(content_lengths) != 1:
+        raise ValueError("content-length must be declared exactly once")
+    raw_length = content_lengths[0].strip()
+    if not raw_length or not raw_length.isdecimal():
+        raise ValueError("content-length is invalid")
+    try:
+        length = int(raw_length, 10)
+    except ValueError as exc:
+        raise ValueError("content-length is invalid") from exc
+    if length < 0:
+        raise ValueError("content-length is invalid")
     if length > MAX_BODY_BYTES:
         raise ValueError("payload too large")
     body = handler.rfile.read(length)
-    payload = json.loads(body.decode("utf-8") or "{}")
+    if len(body) != length:
+        raise ValueError("incomplete body")
+    try:
+        payload = json.loads(body.decode("utf-8") or "{}")
+    except UnicodeDecodeError as exc:
+        raise ValueError("body must be UTF-8 JSON") from exc
     if not isinstance(payload, dict):
         raise ValueError("body must be a json object")
     return payload
@@ -75,9 +111,17 @@ def abi_methods(abi: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """提取 ABI 中可调用函数的表单描述。"""
     methods = []
     for item in abi:
-        if item.get("type") != "function" or not item.get("name"):
+        if not isinstance(item, dict):
+            raise ValueError("abi entries must be objects")
+        if item.get("type") != "function":
             continue
+        name = item.get("name")
         inputs = item.get("inputs") or []
+        if not isinstance(name, str) or not name or not isinstance(inputs, list):
+            raise ValueError("abi function declaration is invalid")
+        for field in inputs:
+            if not isinstance(field, dict) or not isinstance(field.get("type"), str) or not field["type"]:
+                raise ValueError("abi function input declaration is invalid")
         methods.append(
             {
                 "name": item["name"],
@@ -90,17 +134,26 @@ def abi_methods(abi: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def build_call_data(abi: list[dict[str, Any]], method_name: str, args: list[Any]) -> dict[str, Any]:
     """根据 ABI 方法和参数生成 EVM calldata。"""
+    if not isinstance(method_name, str) or not method_name:
+        raise ValueError("method is required")
+    if not isinstance(args, list):
+        raise ValueError("args must be an array")
     candidates = [item for item in abi if item.get("type") == "function" and item.get("name") == method_name]
     if len(candidates) != 1:
         raise ValueError("method must match exactly one ABI function")
     method = candidates[0]
     inputs = method.get("inputs") or []
+    if not isinstance(inputs, list) or not all(isinstance(field, dict) and isinstance(field.get("type"), str) and field["type"] for field in inputs):
+        raise ValueError("abi function input declaration is invalid")
     types = [field["type"] for field in inputs]
     if len(args) != len(types):
         raise ValueError("argument count mismatch")
     signature = f"{method_name}({','.join(types)})"
-    selector = function_signature_to_4byte_selector(signature)
-    encoded_args = encode(types, args)
+    try:
+        selector = function_signature_to_4byte_selector(signature)
+        encoded_args = encode(types, args)
+    except (EncodingError, TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("arguments do not match ABI") from exc
     return {
         "method": method_name,
         "signature": signature,
@@ -111,6 +164,22 @@ def build_call_data(abi: list[dict[str, Any]], method_name: str, args: list[Any]
 
 class ContractUIHandler(BaseHTTPRequestHandler):
     """处理合约 UI 请求。"""
+
+    def parse_request(self) -> bool:
+        """拒绝过多或过大的请求头,避免连接长期占用工作线程。"""
+        if not super().parse_request():
+            return False
+        header_bytes = sum(len(key) + len(value) + 4 for key, value in self.headers.items())
+        if len(self.headers) > MAX_HEADER_COUNT or header_bytes > MAX_HEADER_BYTES:
+            self.send_error(431, "request headers too large")
+            self.close_connection = True
+            return False
+        return True
+
+    def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
+        """以结构化 JSON 返回协议和输入错误,避免默认 HTML 错误页泄漏实现细节。"""
+        self.close_connection = True
+        self.write_json({"status": "error", "error": message or "request failed"}, status=code)
 
     def do_GET(self) -> None:
         """返回健康检查和默认面板信息。"""
@@ -127,6 +196,7 @@ class ContractUIHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """解析 ABI JSON 并返回方法表单或调用载荷。"""
+        self.close_connection = True
         if self.path not in {"/abi/methods", "/call-data"}:
             self.send_error(404, "not found")
             return
@@ -142,12 +212,13 @@ class ContractUIHandler(BaseHTTPRequestHandler):
         if not isinstance(abi, list) or not all(isinstance(item, dict) for item in abi):
             self.send_error(400, "abi must be an array")
             return
-        if self.path == "/abi/methods":
-            self.write_json({"methods": abi_methods(abi)})
-            return
         try:
-            result = build_call_data(abi, str(payload.get("method", "")), list(payload.get("args", [])))
-        except (TypeError, ValueError) as exc:
+            methods = abi_methods(abi)
+            if self.path == "/abi/methods":
+                self.write_json({"methods": methods})
+                return
+            result = build_call_data(abi, payload.get("method", ""), payload.get("args", []))
+        except (TypeError, ValueError, OverflowError, KeyError, ParseError) as exc:
             self.send_error(400, str(exc))
             return
         self.write_json(result)
@@ -156,12 +227,14 @@ class ContractUIHandler(BaseHTTPRequestHandler):
         """关闭默认访问日志。"""
         return
 
-    def write_json(self, payload: dict[str, object]) -> None:
+    def write_json(self, payload: dict[str, object], status: int = 200) -> None:
         """写出 JSON 响应。"""
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        self.send_response(200)
+        self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
@@ -175,5 +248,17 @@ class ContractUIHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """为工具 HTTP 端口设置有限连接超时和请求头上限。"""
+
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def get_request(self):
+        request, client_address = super().get_request()
+        request.settimeout(HTTP_TIMEOUT_SECONDS)
+        return request, client_address
+
+
 if __name__ == "__main__":
-    ThreadingHTTPServer(("0.0.0.0", PORT), ContractUIHandler).serve_forever()
+    BoundedThreadingHTTPServer(("0.0.0.0", PORT), ContractUIHandler).serve_forever()

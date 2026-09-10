@@ -11,7 +11,7 @@ ARG SOLC_0_8_24_PATH=solc-linux-amd64-v0.8.24+commit.e11b9ed9
 ARG SOLC_0_8_24_SHA256=fb03a29a517452b9f12bcf459ef37d0a543765bb3bbc911e70a87d6a37c30d5f
 ARG SOLC_0_8_26_PATH=solc-linux-amd64-v0.8.26+commit.8a97fa7a
 ARG SOLC_0_8_26_SHA256=d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93f149ef
-ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_INDEX_URL=https://pypi.org/simple
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
@@ -37,13 +37,13 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
         done; \
     done \
     && python3.10 -m venv /opt/mythril \
-    && /opt/mythril/bin/pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" --upgrade pip \
+    && /opt/mythril/bin/pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" "pip==25.3" \
     && /opt/mythril/bin/pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
         "mythril==0.24.8" \
         "setuptools==80.9.0" \
-        "urllib3>=2.6.0" \
-        "cryptography>=50.0.0" \
-        "requests>=2.32.5" \
+        "urllib3==2.6.0" \
+        "cryptography==50.0.0" \
+        "requests==2.32.5" \
     && rm -rf \
         /opt/mythril/lib/python3.10/site-packages/setuptools/_vendor/wheel \
         /opt/mythril/lib/python3.10/site-packages/setuptools/_vendor/wheel-*.dist-info \

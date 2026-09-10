@@ -28,6 +28,16 @@ env_keys:
     - CORE_PEER_ADDRESS
     - CHAIMIR_FABRIC_ORDERER_ADDRESS
     - CHAIMIR_FABRIC_EXPLORER_PORT
+    - CHAIMIR_HTTP_TIMEOUT_SECONDS
+    - CORE_PEER_TLS_ENABLED
+    - CORE_PEER_TLS_ROOTCERT_FILE
+    - CORE_PEER_TLS_CLIENTCERT_FILE
+    - CORE_PEER_TLS_CLIENTKEY_FILE
+    - CORE_PEER_TLS_CLIENTAUTHREQUIRED
+    - CORE_PEER_TLS_SERVERHOSTOVERRIDE
+    - CHAIMIR_FABRIC_ORDERER_TLS_ROOTCERT_FILE
+    - CHAIMIR_FABRIC_ORDERER_TLS_CLIENTCERT_FILE
+    - CHAIMIR_FABRIC_ORDERER_TLS_CLIENTKEY_FILE
   secret: []
 data_driven: true
 capabilities:
@@ -51,12 +61,14 @@ tool:
   bindings:
     - name: peer
       capability: fabric-peer-orderer
+      source_component: web
       endpoint: peer
       protocol: GRPC
       required_at_start: true
       config_binding: env:CORE_PEER_ADDRESS
     - name: orderer
       capability: fabric-peer-orderer
+      source_component: web
       endpoint: orderer
       protocol: GRPC
       required_at_start: true
@@ -73,7 +85,27 @@ tool:
           - name: CORE_PEER_MSPCONFIGPATH
             value: /runtime-state/fabric/crypto/peerOrganizations/org1.chaimir.local/users/Admin@org1.chaimir.local/msp
           - name: CORE_PEER_TLS_ENABLED
-            value: "false"
+            value: "true"
+          - name: CORE_PEER_TLS_ROOTCERT_FILE
+            value: /runtime-state/fabric/crypto/peerOrganizations/org1.chaimir.local/peers/peer0.org1.chaimir.local/tls/ca.crt
+          - name: CORE_PEER_TLS_CLIENTCERT_FILE
+            value: /runtime-state/fabric/crypto/peerOrganizations/org1.chaimir.local/users/Admin@org1.chaimir.local/tls/client.crt
+          - name: CORE_PEER_TLS_CLIENTKEY_FILE
+            value: /runtime-state/fabric/crypto/peerOrganizations/org1.chaimir.local/users/Admin@org1.chaimir.local/tls/client.key
+          - name: CORE_PEER_TLS_CLIENTAUTHREQUIRED
+            value: "true"
+          - name: CORE_PEER_TLS_SERVERHOSTOVERRIDE
+            value: peer0
+          - name: CHAIMIR_FABRIC_ORDERER_TLS_ROOTCERT_FILE
+            value: /runtime-state/fabric/crypto/ordererOrganizations/chaimir.local/orderers/orderer.chaimir.local/tls/ca.crt
+          - name: CHAIMIR_FABRIC_ORDERER_TLS_CLIENTCERT_FILE
+            value: /runtime-state/fabric/crypto/ordererOrganizations/chaimir.local/users/Admin@chaimir.local/tls/client.crt
+          - name: CHAIMIR_FABRIC_ORDERER_TLS_CLIENTKEY_FILE
+            value: /runtime-state/fabric/crypto/ordererOrganizations/chaimir.local/users/Admin@chaimir.local/tls/client.key
+          - name: CHAIMIR_FABRIC_EXPLORER_PORT
+            value: "8080"
+          - name: CHAIMIR_HTTP_TIMEOUT_SECONDS
+            value: "30"
         ports:
           - name: http
             container_port: 8080

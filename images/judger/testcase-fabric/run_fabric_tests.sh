@@ -2,7 +2,7 @@
 # 本脚本执行 Fabric 链码测试脚本。
 set -eu
 
-: "${CHAIMIR_TEST_SCRIPT:=/judge/tests/run.sh}"
+: "${CHAIMIR_TEST_SCRIPT:?CHAIMIR_TEST_SCRIPT is required}"
 RESULT_STDOUT="/tmp/chaimir-judge-stdout.txt"
 if [ ! -x "${CHAIMIR_TEST_SCRIPT}" ]; then
   echo "Fabric 判题脚本不存在或不可执行" >&2

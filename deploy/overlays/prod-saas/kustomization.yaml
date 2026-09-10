@@ -29,7 +29,8 @@ replicas:
     count: 3
 
 patches:
-  # 生产证书由 cert-manager 签发,WAF 经 Ingress 注解按基础设施策略开启。
+  # 外部生产基础设施必须预先安装并验证 cert-manager 与 ClusterIssuer/chaimir-prod-issuer；
+  # 该控制器不属于 Chaimir images 目录，本 overlay 只声明 Ingress 的签发契约。
   - target:
       kind: Ingress
       name: chaimir

@@ -76,7 +76,11 @@ function Invoke-ProcessWithTimeout {
         }
     } finally {
         $process.Dispose()
-        Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+        foreach ($temporaryPath in @($stdoutPath, $stderrPath)) {
+            if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) {
+                Remove-Item -LiteralPath $temporaryPath -Force
+            }
+        }
     }
 }
 

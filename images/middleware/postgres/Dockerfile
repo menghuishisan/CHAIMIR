@@ -5,10 +5,12 @@ LABEL org.opencontainers.image.title="middleware/postgres"
 LABEL org.opencontainers.image.description="Chaimir PostgreSQL middleware thin wrapper"
 
 USER root
-RUN apk upgrade --no-cache \
-    && rm -f /usr/local/bin/gosu \
+RUN rm -f /usr/local/bin/gosu \
     && mkdir -p /var/lib/postgresql/data /var/run/postgresql \
     && chown -R postgres:postgres /var/lib/postgresql /var/run/postgresql
+
+COPY postgres-probe.sh /usr/local/bin/chaimir-postgres-probe
+RUN chmod 0555 /usr/local/bin/chaimir-postgres-probe
 
 USER postgres
 WORKDIR /var/lib/postgresql

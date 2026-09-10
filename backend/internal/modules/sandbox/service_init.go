@@ -4,6 +4,7 @@ package sandbox
 import (
 	"context"
 	"encoding/base64"
+	"encoding/hex"
 	"path"
 	"strings"
 
@@ -19,8 +20,18 @@ import (
 // applyInitAssetsIfNeeded 在个性化阶段注入运行时声明的已审核初始化资产。
 func (s *Service) applyInitAssetsIfNeeded(ctx context.Context, sb Sandbox, runtime Runtime) error {
 	for _, asset := range runtime.AdapterSpec.InitAssets {
-		if strings.TrimSpace(asset.SourceRef) == "" {
+		if strings.TrimSpace(asset.Name) == "" || strings.TrimSpace(asset.SourceRef) == "" || strings.TrimSpace(asset.TargetDomain) == "" {
 			return apperr.ErrSandboxInitAssetConfigInvalid
+		}
+		domain, ok := volumeDomainByName(runtime.AdapterSpec, asset.TargetDomain)
+		if !ok || (domain.Name != VolumeDomainPublicAssets && domain.Name != VolumeDomainRuntimeState) || domain.StudentAccess == VolumeAccessReadWrite {
+			return apperr.ErrSandboxInitAssetConfigInvalid
+		}
+		if hash := strings.TrimSpace(asset.ExpectedSHA256); hash != "" {
+			decoded, err := hex.DecodeString(hash)
+			if err != nil || len(decoded) != 32 {
+				return apperr.ErrSandboxInitAssetConfigInvalid
+			}
 		}
 		phase := strings.TrimSpace(asset.ApplyPhase)
 		if phase != "" &&
@@ -28,11 +39,74 @@ func (s *Service) applyInitAssetsIfNeeded(ctx context.Context, sb Sandbox, runti
 			!strings.EqualFold(phase, InitAssetApplyPhasePersonalization) {
 			return apperr.ErrSandboxInitAssetConfigInvalid
 		}
-		if err := s.restoreArchiveToWorkspace(ctx, sb, runtime, asset.SourceRef); err != nil {
+		if err := s.restoreArchiveToDomain(ctx, sb, runtime, asset.SourceRef, asset.ExpectedSHA256, domain); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// restoreArchiveToDomain 把审核归档解包到运行时声明的非学生安全域,不借用 workspace 文件接口。
+func (s *Service) restoreArchiveToDomain(ctx context.Context, sb Sandbox, runtime Runtime, objectRef, expectedHash string, domain VolumeDomainSpec) error {
+	ref, err := storage.ParseObjectRef(objectRef)
+	if err != nil {
+		return apperr.ErrSandboxInitObjectRefInvalid.WithCause(err)
+	}
+	if err := validateInitObjectRef(sb.TenantID, ref, s.objectStorage.BucketCode(), s.objectStorage.BucketAttach()); err != nil {
+		return err
+	}
+	reader, err := s.objectStorage.Get(ctx, ref.Bucket, ref.Key)
+	if err != nil {
+		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
+	}
+	defer logging.CloseContext(ctx, "关闭沙箱初始化归档读取器失败", reader)
+	data, sizeResult, err := upload.ReadBounded(reader, s.cfg.InitArchiveMaxBytes)
+	if err != nil {
+		return apperr.ErrSandboxInitObjectReadFailed.WithCause(err)
+	}
+	if sizeResult == upload.SizeEmpty || sizeResult == upload.SizeTooLarge {
+		return apperr.ErrSandboxInitArchiveTooLarge
+	}
+	if hash := strings.TrimSpace(expectedHash); hash != "" && !strings.EqualFold(hash, pkgcrypto.SHA256Hex(data)) {
+		return apperr.ErrSandboxInitArchiveInvalid
+	}
+	tarball, err := upload.SafeArchiveTar(ref.Key, data, upload.ArchiveLimits{MaxFiles: s.cfg.InitArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InitArchiveMaxUnpackedBytes})
+	if err != nil {
+		return apperr.ErrSandboxInitArchiveInvalid.WithCause(err)
+	}
+	ops := runtime.AdapterSpec.InitAssetOps
+	if !componentCanWriteDomain(runtime.AdapterSpec, ops.ExecTarget, domain.Name) {
+		return apperr.ErrSandboxInitAssetConfigInvalid
+	}
+	command := workspaceCommand(ops.UnpackTar, runtime.AdapterSpec.WorkspaceDir, domain.MountPath, "")
+	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, ops.ExecTarget, command, tarball, false); err != nil {
+		return sandboxExecFailure(apperr.ErrSandboxInitExecFailed, err, stderr)
+	}
+	return nil
+}
+
+// componentCanWriteDomain 确认初始化归档的执行目标显式拥有目标域写权限,避免借用学生容器或只读挂载。
+func componentCanWriteDomain(adapter AdapterSpec, target, domainName string) bool {
+	parts := strings.SplitN(strings.TrimSpace(target), "/", 2)
+	if len(parts) != 2 {
+		return false
+	}
+	for _, pod := range podTopologyForAdapter(adapter) {
+		if pod.Name != strings.TrimSpace(parts[0]) {
+			continue
+		}
+		for _, component := range pod.Containers {
+			if component.Name != strings.TrimSpace(parts[1]) || studentAccessibleContainer(component) {
+				continue
+			}
+			for _, raw := range component.WritableMountDomains {
+				if strings.TrimSpace(raw) == strings.TrimSpace(domainName) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // restoreInitCodeIfNeeded 在个性化初始化阶段把已授权代码归档恢复到工作区。

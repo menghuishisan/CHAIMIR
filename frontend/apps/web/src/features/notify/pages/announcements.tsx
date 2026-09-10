@@ -72,7 +72,7 @@ const PUBLISHER_COPY: Record<
 > = {
   platform: {
     group: '底层资源',
-    description: '向全平台所有学校发布公告。发布后会推送到各校师生的通知收件箱。',
+    description: '向全平台所有学校发布公告。发布后会实时推送到各校师生的通知收件箱。',
     listDescription: '按发布时间从新到旧排列,这里是你发布过的平台公告。',
     emptyDescription: '发布公告后会推送到所有学校师生的通知收件箱。',
   },
@@ -148,6 +148,28 @@ export default function AnnouncementsPage({ publisher }: AnnouncementsPageProps)
         ]}
       />
 
+      <div className="mb-6 grid gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-border bg-surface p-5 shadow-xs">
+          <p className="text-xs font-medium text-ink-sub">发布前检查</p>
+          <ol className="mt-3 flex flex-col gap-2 text-sm leading-relaxed text-ink-sub">
+            <li>确认标题能概括这次变更或通知事项。</li>
+            <li>正文按阅读顺序组织，必要时使用换行分段。</li>
+            <li>发布后不可撤回或修改，请在确认前复核投递范围。</li>
+          </ol>
+        </div>
+        <div className="rounded-lg border border-border bg-surface p-5 shadow-xs">
+          <p className="text-xs font-medium text-ink-sub">当前发布范围</p>
+          <p className="mt-2 text-lg font-medium text-ink">
+            {publisher === 'platform' ? '全平台学校' : '本校师生'}
+          </p>
+          <p className="mt-2 text-sm leading-relaxed text-ink-sub">
+            {publisher === 'platform'
+              ? '发布后由各校通知收件箱接收，平台管理员本身不进入租户通知流。'
+              : '可在发布窗口中选择全校可见或指定校内角色。'}
+          </p>
+        </div>
+      </div>
+
       <PageSection title="已发布公告" description={copy.listDescription}>
         <ResourceState
           resource={announcements}
@@ -189,7 +211,7 @@ export default function AnnouncementsPage({ publisher }: AnnouncementsPageProps)
                       }
                     />
                     <CardBody>
-                      <p className="whitespace-pre-wrap text-base leading-relaxed text-ink">
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink sm:text-base">
                         {announcement.content}
                       </p>
                     </CardBody>

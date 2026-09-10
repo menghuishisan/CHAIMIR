@@ -10,7 +10,6 @@ import { Save } from 'lucide-react'
 import { BackupStatus, type BackupRecord } from '@chaimir/api-client'
 import {
   Breadcrumb,
-  Callout,
   DataPanel,
   MetricStrip,
   PageHeader,
@@ -106,7 +105,7 @@ export default function PlatformBackupsPage() {
       <PageHeader
         kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="备份记录"
-        description="备份由运维侧的定时任务执行,这里核对结果。连续失败要尽快查原因。"
+        description="系统备份由底层定时任务或受控运维流程执行，在此核对执行状态与快照大小。"
         icon={Save}
       />
 
@@ -117,7 +116,7 @@ export default function PlatformBackupsPage() {
       */}
       <MetricStrip
         label="备份结果摘要"
-        className="mb-5"
+        className="mb-6"
         items={[
           {
             label: '最近一次成功',
@@ -133,6 +132,30 @@ export default function PlatformBackupsPage() {
           { label: '进行中', value: runningCount ?? '—', hint: '正在执行的备份' },
         ]}
       />
+
+      <div className="mb-6 grid gap-4 lg:grid-cols-2">
+        <div className="rounded-lg border border-border bg-surface p-5 shadow-xs">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-medium text-ink-sub">健康判断</p>
+              <p className="mt-1 text-lg font-medium text-ink">
+                {failedCount === undefined ? '正在读取' : failedCount > 0 ? '需要关注' : '运行正常'}
+              </p>
+            </div>
+            <StatusIndicator
+              tone={failedCount === undefined ? 'neutral' : failedCount > 0 ? 'danger' : 'success'}
+              label={failedCount === undefined ? '等待结果' : failedCount > 0 ? '存在失败记录' : '暂无失败'}
+            />
+          </div>
+          <p className="mt-3 text-sm leading-relaxed text-ink-sub">
+            {failedCount === undefined
+              ? '正在汇总备份执行结果。'
+              : failedCount > 0
+                ? `发现 ${failedCount} 条失败记录，请在执行记录中核对时间和备份类型后联系运维。`
+                : '最近一次成功记录和当前执行队列都可在下方记录中追溯。'}
+          </p>
+        </div>
+      </div>
 
       {/* 数据表与分页同处一块抬起片(§6.5.2)。本页没有筛选项:后端列表只按状态过滤,
           而四种状态的条数已在上方摘要里给出,再排一条筛选井只是把同一件事说第二遍。 */}
@@ -176,10 +199,6 @@ export default function PlatformBackupsPage() {
         </ResourceState>
       </DataPanel>
 
-      <Callout tone="info" className="mt-4">
-        备份不能从界面触发:执行要在集群侧带着数据库凭据进行,这条链路不对浏览器开放。
-        需要临时备份请联系运维。
-      </Callout>
     </PageScaffold>
   )
 }

@@ -52,6 +52,10 @@ capabilities:
 runtime:
   eco: evm
   adapter_level: 1
+  workload:
+    env:
+      - name: CHAIMIR_RUNTIME_RPC_PORT
+        value: "8545"
 ports:
   - name: rpc
     container_port: 8545
@@ -101,6 +105,11 @@ selftest:
       command:
         - /opt/besu/bin/besu
         - --version
+    - name: qbft-bootstrap-generation
+      command:
+        - sh
+        - -c
+        - tmp="$(mktemp -d)" && /opt/besu/bin/besu operator generate-blockchain-config --config-file=/opt/besu/chaimir-qbft-config.json --to="$tmp" --private-key-file-name=key.priv --public-key-file-name=key.pub && test -s "$tmp/genesis.json" && test "$(find "$tmp/keys" -type f -name key.priv | wc -l | tr -d ' ')" -eq 1 && rm -rf "$tmp"
 capability_selftest:
   query_target: chainId
 supply_chain:

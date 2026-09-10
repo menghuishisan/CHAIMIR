@@ -9,3 +9,23 @@ resources:
   - volumesnapshots-crd.yaml
   - snapshot-controller-rbac.yaml
   - snapshot-controller-deployment.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+configMapGenerator:
+  - name: snapshot-controller-image
+    envs:
+      - snapshot-controller-image.env
+
+replacements:
+  - source:
+      kind: ConfigMap
+      name: snapshot-controller-image
+      fieldPath: data.SNAPSHOT_CONTROLLER_IMAGE
+    targets:
+      - select:
+          kind: Deployment
+          name: snapshot-controller
+        fieldPaths:
+          - spec.template.spec.containers.0.image

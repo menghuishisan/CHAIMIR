@@ -9,7 +9,10 @@ import time
 from pathlib import Path
 
 
-LOG_PATH = Path(os.environ.get("CHAIMIR_LOG_PATH", "/workspace/logs/runtime.log"))
+LOG_PATH_VALUE = os.environ.get("CHAIMIR_LOG_PATH", "").strip()
+if not LOG_PATH_VALUE:
+    raise RuntimeError("CHAIMIR_LOG_PATH is required")
+LOG_PATH = Path(LOG_PATH_VALUE)
 TOKEN_PATTERN = re.compile(r"(?i)(token|secret|password|private_key)=\S+")
 
 

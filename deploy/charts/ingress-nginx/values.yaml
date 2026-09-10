@@ -6,7 +6,7 @@ controller:
   image:
     registry: registry.chaimir.io
     image: ingress/ingress-nginx
-    tag: controller-v1.15.10
+    tag: ""
     digest: ""
     pullPolicy: IfNotPresent
     runAsNonRoot: true
@@ -53,10 +53,12 @@ controller:
     patch:
       enabled: true
       image:
-        registry: registry.k8s.io
-        image: ingress-nginx/kube-webhook-certgen
-        tag: v1.6.9
-        digest: sha256:01038e7de14b78d702d2849c3aad72fd25903c4765af63cf16aa3398f5d5f2dd
+        registry: registry.chaimir.io
+        image: ingress/kube-webhook-certgen
+        # The standard ingress entrypoint injects the digest from images/image-digests.lock.
+        # The chart intentionally has no usable image fallback; missing digest input must fail.
+        tag: ""
+        digest: ""
         pullPolicy: IfNotPresent
 
 imagePullSecrets:

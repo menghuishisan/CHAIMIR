@@ -58,6 +58,7 @@ const VIEW_OPTIONS = [
 const STYLES: Record<
   ChartContext,
   {
+    root: string;
     title: string;
     description: string;
     skeleton: string;
@@ -72,19 +73,21 @@ const STYLES: Record<
   }
 > = {
   paper: {
+    root: "rounded-lg bg-surface p-4 shadow-xs",
     title: "text-ink",
     description: "text-ink-sub",
     skeleton: "skeleton-shimmer",
     errorBox: "bg-danger-bg",
     errorText: "text-danger",
-    emptyBox: "bg-surface shadow-xs",
+    emptyBox: "bg-surface-sunken",
     emptyText: "text-ink-sub",
-    tableWrap: "bg-surface shadow-xs",
+    tableWrap: "bg-surface-sunken",
     tableHead: "border-line bg-surface-sunken text-ink-sub",
     tableRow: "border-line",
     tableCell: "text-ink",
   },
   dark: {
+    root: "rounded-lg border border-dark-line bg-dark-surface p-3",
     title: "text-on-dark",
     description: "text-on-dark-sub",
     skeleton: "bg-dark-elevated",
@@ -92,7 +95,7 @@ const STYLES: Record<
     errorText: "text-on-dark-danger",
     emptyBox: "border border-dark-line bg-dark-surface",
     emptyText: "text-on-dark-sub",
-    tableWrap: "border border-dark-line",
+    tableWrap: "bg-dark-surface",
     tableHead: "border-dark-line bg-dark-elevated text-on-dark-sub",
     tableRow: "border-dark-line",
     tableCell: "text-on-dark",
@@ -124,7 +127,7 @@ export function ChartContainer({
   const styles = STYLES[context];
 
   return (
-    <figure role="figure" aria-label={ariaSummary} className={cn("min-w-0", className)}>
+    <figure role="figure" aria-label={ariaSummary} className={cn("min-w-0", styles.root, className)}>
       {(title || description || isNormal) && (
         <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
@@ -200,7 +203,7 @@ export function ChartContainer({
       {isNormal && view === "table" && (
         <div
           style={{ height }}
-          className={cn("overflow-y-auto rounded-md", styles.tableWrap)}
+          className={cn("overflow-y-auto", styles.tableWrap)}
         >
           <table className="w-full border-collapse text-sm">
             <thead>

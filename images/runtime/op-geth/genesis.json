@@ -24,5 +24,9 @@
   },
   "difficulty": "0x1",
   "gasLimit": "0x1c9c380",
-  "alloc": {}
+  "alloc": {
+    "f39fd6e51aad88f6f4ce6ab8827279cfffb92266": {
+      "balance": "0x21e19e0c9bab2400000"
+    }
+  }
 }

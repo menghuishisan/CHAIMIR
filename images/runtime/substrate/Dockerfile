@@ -8,7 +8,6 @@ USER root
 
 # 官方镜像已提供 parity:1000:1000;只升级系统安全包并创建平台声明的写入目录。
 RUN apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 -y upgrade \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /workspace \
     && mkdir -p /runtime-state/substrate \

@@ -61,31 +61,19 @@ import (
 	"syscall"
 )
 
-func ensureEnv(key, value string) error {
-	if os.Getenv(key) != "" {
-		return nil
-	}
-	return os.Setenv(key, value)
-}
-
 func main() {
 	runtimeHome := os.Getenv("CHAIMIR_COSMOS_HOME")
-	if err := ensureEnv("HOME", "/workspace"); err != nil {
+	if strings.TrimSpace(runtimeHome) == "" {
+		fmt.Fprintln(os.Stderr, "必须通过初始化卷提供 CHAIMIR_COSMOS_HOME")
+		os.Exit(2)
+	}
+	if err := os.Setenv("HOME", filepath.Join(runtimeHome, "home")); err != nil {
 		fmt.Fprintf(os.Stderr, "设置 Cosmos HOME 失败: %v\n", err)
 		os.Exit(1)
 	}
-	if os.Getenv("TMPDIR") == "" {
-		if runtimeHome == "" {
-			if err := ensureEnv("TMPDIR", "/tmp"); err != nil {
-				fmt.Fprintf(os.Stderr, "设置 Cosmos TMPDIR 失败: %v\n", err)
-				os.Exit(1)
-			}
-		} else {
-			if err := ensureEnv("TMPDIR", runtimeHome+"/tmp"); err != nil {
-				fmt.Fprintf(os.Stderr, "设置 Cosmos TMPDIR 失败: %v\n", err)
-				os.Exit(1)
-			}
-		}
+	if err := os.Setenv("TMPDIR", filepath.Join(runtimeHome, "tmp")); err != nil {
+		fmt.Fprintf(os.Stderr, "设置 Cosmos TMPDIR 失败: %v\n", err)
+		os.Exit(1)
 	}
 	for _, dir := range []string{os.Getenv("HOME"), os.Getenv("TMPDIR")} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -96,10 +84,6 @@ func main() {
 	if os.Getenv("CHAIMIR_SELFTEST") == "1" {
 		execGaiad([]string{"gaiad", "version"})
 	}
-	if runtimeHome == "" {
-		fmt.Fprintln(os.Stderr, "必须通过初始化卷提供 CHAIMIR_COSMOS_HOME")
-		os.Exit(1)
-	}
 	if err := ensureCosmosHome(runtimeHome); err != nil {
 		fmt.Fprintf(os.Stderr, "初始化 Cosmos 运行目录失败: %v\n", err)
 		os.Exit(1)
@@ -108,10 +92,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "配置 Cosmos 网络监听失败: %v\n", err)
 		os.Exit(1)
 	}
-	minimumGasPrices := os.Getenv("CHAIMIR_COSMOS_MIN_GAS_PRICES")
-	if minimumGasPrices == "" {
-		minimumGasPrices = "0.0stake"
-	}
+	minimumGasPrices := requiredEnv("CHAIMIR_COSMOS_MIN_GAS_PRICES")
 	execGaiad([]string{"gaiad", "start", "--home", runtimeHome, "--minimum-gas-prices", minimumGasPrices})
 }
 
@@ -119,15 +100,15 @@ func main() {
 func ensureCosmosBindings(home string) error {
 	rpcLaddr := os.Getenv("CHAIMIR_COSMOS_RPC_LADDR")
 	if rpcLaddr == "" {
-		rpcLaddr = "tcp://0.0.0.0:26657"
+		return fmt.Errorf("CHAIMIR_COSMOS_RPC_LADDR is required")
 	}
 	restAddress := os.Getenv("CHAIMIR_COSMOS_REST_ADDRESS")
 	if restAddress == "" {
-		restAddress = "tcp://0.0.0.0:1317"
+		return fmt.Errorf("CHAIMIR_COSMOS_REST_ADDRESS is required")
 	}
 	grpcAddress := os.Getenv("CHAIMIR_COSMOS_GRPC_ADDRESS")
 	if grpcAddress == "" {
-		grpcAddress = "0.0.0.0:9090"
+		return fmt.Errorf("CHAIMIR_COSMOS_GRPC_ADDRESS is required")
 	}
 	for name, value := range map[string]string{
 		"CHAIMIR_COSMOS_RPC_LADDR":     rpcLaddr,
@@ -150,6 +131,15 @@ func ensureCosmosBindings(home string) error {
 		return err
 	}
 	return setTomlValue(appPath, "grpc", "address", strconv.Quote(grpcAddress))
+}
+
+func requiredEnv(key string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		fmt.Fprintf(os.Stderr, "%s is required\n", key)
+		os.Exit(2)
+	}
+	return value
 }
 
 // setTomlValue 修改指定 TOML section 中的单行键,保留其余用户配置和注释。
@@ -267,8 +257,6 @@ COPY --from=build --chown=1000:1000 /out/libwasmvm.x86_64.so /usr/local/lib/libw
 COPY --from=build --chown=1000:1000 /out/chaimir-cosmos-entrypoint /usr/local/bin/chaimir-cosmos-entrypoint
 
 ENV LD_LIBRARY_PATH=/usr/local/lib
-ENV HOME=/workspace
-ENV TMPDIR=/tmp
 USER 1000:1000
 WORKDIR /workspace
 EXPOSE 26657 1317

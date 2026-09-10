@@ -27,11 +27,6 @@ upstream:
   source_commit: f681b1359f6a0b8ecb9f2c49a88ac72b75bde73b
   source_archive: https://codeload.github.com/grafana/grafana/tar.gz/f681b1359f6a0b8ecb9f2c49a88ac72b75bde73b
   source_sha256: 8ea494789b17d13d7e6032ff158af581d512b9ba3c7e99fae33ba5c19e78a9bd
-  plugin_source_repository: https://github.com/grafana/grafana-prometheus-datasource
-  plugin_source_tag: v13.1.7
-  plugin_source_commit: 2e10053dd7d940f9eb91701df5122c8e348a0d18
-  plugin_source_archive: https://codeload.github.com/grafana/grafana-prometheus-datasource/tar.gz/2e10053dd7d940f9eb91701df5122c8e348a0d18
-  plugin_source_sha256: 8e66640a7c45b6762d1ac14aa7a94b87fa21c771b4d0d739a3a6716d6a019954
   builder_image: golang:1.26.6-alpine
   builder_digest: sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83
   sanitize_image: alpine:3.24.1

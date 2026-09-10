@@ -66,7 +66,7 @@ ARG NO_PROXY
 
 ARG PROMETHEUS_VERSION=3.12.0
 ARG PROMETHEUS_COMMIT=9f27dffc1f93ca23287972f632025879f2d1c658
-ARG GO_MODULE_PROXY=https://proxy.golang.org|direct
+ARG GO_MODULE_PROXY=https://proxy.golang.org,direct
 
 # Keep the source build within the local Docker Engine memory envelope.
 ENV GOMEMLIMIT=768MiB \

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -22,7 +23,11 @@ import (
 var fabricNamePattern = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
 
 type explorer struct {
-	timeout time.Duration
+	timeout              time.Duration
+	ordererAddress       string
+	ordererTLSRootCA     string
+	ordererTLSClientCert string
+	ordererTLSClientKey  string
 }
 
 type chaincodeRequest struct {
@@ -33,20 +38,35 @@ type chaincodeRequest struct {
 }
 
 func main() {
-	port := os.Getenv("CHAIMIR_FABRIC_EXPLORER_PORT")
-	if port == "" {
-		port = "8080"
+	port := requiredPort("CHAIMIR_FABRIC_EXPLORER_PORT")
+	httpTimeout := time.Duration(requiredPositiveInt("CHAIMIR_HTTP_TIMEOUT_SECONDS")) * time.Second
+	requiredEndpoint("CORE_PEER_ADDRESS")
+	ordererAddress := requiredEndpoint("CHAIMIR_FABRIC_ORDERER_ADDRESS")
+	explorerServer := &explorer{
+		timeout:              httpTimeout,
+		ordererAddress:       ordererAddress,
+		ordererTLSRootCA:     requiredFile("CHAIMIR_FABRIC_ORDERER_TLS_ROOTCERT_FILE"),
+		ordererTLSClientCert: requiredFile("CHAIMIR_FABRIC_ORDERER_TLS_CLIENTCERT_FILE"),
+		ordererTLSClientKey:  requiredFile("CHAIMIR_FABRIC_ORDERER_TLS_CLIENTKEY_FILE"),
 	}
-	server := &explorer{timeout: 30 * time.Second}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", server.healthz)
-	mux.HandleFunc("/api/channels", server.channels)
-	mux.HandleFunc("/api/block", server.block)
-	mux.HandleFunc("/api/chaincode/query", server.chaincodeQuery)
-	mux.HandleFunc("/api/chaincode/submit", server.chaincodeSubmit)
-	mux.HandleFunc("/", server.index)
-	log.Printf("fabric explorer listening port=%s", port)
-	if err := http.ListenAndServe(":"+port, requestLog(mux)); err != nil {
+	mux.HandleFunc("/healthz", explorerServer.healthz)
+	mux.HandleFunc("/api/channels", explorerServer.channels)
+	mux.HandleFunc("/api/block", explorerServer.block)
+	mux.HandleFunc("/api/chaincode/query", explorerServer.chaincodeQuery)
+	mux.HandleFunc("/api/chaincode/submit", explorerServer.chaincodeSubmit)
+	mux.HandleFunc("/", explorerServer.index)
+	log.Printf("fabric explorer listening port=%d", port)
+	server := &http.Server{
+		Addr:              ":" + strconv.Itoa(port),
+		Handler:           requestLog(mux),
+		ReadHeaderTimeout: httpTimeout,
+		ReadTimeout:       httpTimeout,
+		WriteTimeout:      httpTimeout,
+		IdleTimeout:       httpTimeout,
+		MaxHeaderBytes:    16 << 10,
+	}
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }
@@ -113,7 +133,7 @@ func (e *explorer) block(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 	args := []string{"channel", "fetch", number, path, "-c", channel}
-	args = appendOrdererAddress(args)
+	args = e.appendOrdererAddress(args)
 	_, stderr, runErr := e.runPeer(r.Context(), args...)
 	if runErr != nil {
 		writePeerError(w, "读取区块失败", stderr, runErr)
@@ -142,9 +162,15 @@ func (e *explorer) chaincode(w http.ResponseWriter, r *http.Request, submit bool
 		return
 	}
 	var req chaincodeRequest
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 64<<10))
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&req); err != nil || !validChaincodeRequest(req) {
+		writeError(w, http.StatusBadRequest, "链码请求参数不正确", "")
+		return
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
 		writeError(w, http.StatusBadRequest, "链码请求参数不正确", "")
 		return
 	}
@@ -163,7 +189,7 @@ func (e *explorer) chaincode(w http.ResponseWriter, r *http.Request, submit bool
 	command = append(command, "-C", req.Channel, "-n", req.Name, "-c", string(payload))
 	if submit {
 		command = append(command, "--waitForEvent")
-		command = appendOrdererAddress(command)
+		command = e.appendOrdererAddress(command)
 	}
 	stdout, stderr, runErr := e.runPeer(r.Context(), command...)
 	if runErr != nil {
@@ -174,12 +200,69 @@ func (e *explorer) chaincode(w http.ResponseWriter, r *http.Request, submit bool
 }
 
 // appendOrdererAddress 只使用组合编译注入的内部 orderer 地址,请求体不能改变网络目标。
-func appendOrdererAddress(args []string) []string {
-	address := strings.TrimSpace(os.Getenv("CHAIMIR_FABRIC_ORDERER_ADDRESS"))
-	if address == "" {
-		return args
+func (e *explorer) appendOrdererAddress(args []string) []string {
+	return append(args,
+		"-o", e.ordererAddress,
+		"--tls",
+		"--cafile", e.ordererTLSRootCA,
+		"--clientauth",
+		"--certfile", e.ordererTLSClientCert,
+		"--keyfile", e.ordererTLSClientKey,
+		"--ordererTLSHostnameOverride", "orderer",
+	)
+}
+
+func requiredConfig(key string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		log.Fatalf("%s is required", key)
 	}
-	return append(args, "-o", address)
+	return value
+}
+
+// requiredFile 校验运行期共享安全域中的证书或密钥路径,不读取或打印其内容。
+func requiredFile(key string) string {
+	value := requiredConfig(key)
+	if _, err := os.Stat(filepath.Clean(value)); err != nil {
+		log.Fatalf("%s points to an unavailable file", key)
+	}
+	return value
+}
+
+// requiredEndpoint accepts only the host:port form used by Fabric CLI flags.
+func requiredEndpoint(key string) string {
+	value := requiredConfig(key)
+	if strings.Contains(value, "://") || strings.ContainsAny(value, "/?#@") {
+		log.Fatalf("%s must be a host:port endpoint", key)
+	}
+	host, portText, err := net.SplitHostPort(value)
+	if err != nil || host == "" {
+		log.Fatalf("%s must be a host:port endpoint", key)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		log.Fatalf("%s must use a TCP port in 1-65535", key)
+	}
+	return value
+}
+
+func requiredPort(key string) int {
+	value := requiredConfig(key)
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		log.Fatalf("%s must be a valid TCP port", key)
+	}
+	return port
+}
+
+// requiredPositiveInt 读取 HTTP 服务的有限正整数配置。
+func requiredPositiveInt(key string) int {
+	value := requiredConfig(key)
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		log.Fatalf("%s must be a positive integer", key)
+	}
+	return parsed
 }
 
 func (e *explorer) index(w http.ResponseWriter, r *http.Request) {

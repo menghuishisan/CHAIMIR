@@ -11,14 +11,8 @@ import (
 
 func main() {
 	address := requiredEnv("CHAIMIR_DATABASE_ADDRESS")
-	user := os.Getenv("CHAIMIR_DATABASE_USER")
-	if user == "" {
-		user = "postgres"
-	}
-	database := os.Getenv("CHAIMIR_DATABASE_NAME")
-	if database == "" {
-		database = "postgres"
-	}
+	user := requiredEnv("CHAIMIR_DATABASE_USER")
+	database := requiredEnv("CHAIMIR_DATABASE_NAME")
 	password := requiredEnv("POSTGRES_PASSWORD")
 	if !safeToken(user) || !safeToken(database) {
 		fail("database user/name contains unsupported characters")

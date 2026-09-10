@@ -19,18 +19,12 @@ source:
   type: platform-built
 upstream:
   components:
-    - image: registry.chaimir.io/judger/testcase-evm
-      digest: sha256:e80b8fc8ef1ac54616ec2d7508c94047c4378aec1d35f009302349c1c776d54c
-      role: verified-offline-toolchain
-    - image: ghcr.io/foundry-rs/foundry:v1.7.1
-      digest: sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
-      role: foundry-toolchain
-    - image: node:24-trixie-slim
-      digest: sha256:db4f733c26868756bae92ac764d7e99bf31809ce7db886ed525960fe7d544601
-      role: node-build
-    - image: alpine:3.23
-      digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
-      role: runtime-shell
+    - image: base/judge-min
+      digest: sha256:094f1fffc4a1c42bfa31f8c445ff6cadd320a9f6f611539a91cb2b5d446f1811
+      role: result-normalizer
+    - image: runtime/evm-hardhat
+      digest: sha256:344843a7c5b7bf2b8496decd4ddd143c0c890aa7649468920dca4bec40e39ad1
+      role: hardhat-foundry-solidity-toolchain
   reuse_policy: self-developed-judger
 data_driven: true
 toolchain:
@@ -64,6 +58,8 @@ judger:
   env:
     - name: CHAIMIR_SUBMISSION_DIR
       value: /judge-private
+    - name: HOME
+      value: /judge-private/home
   suite_archive_name: platform-selftest.tar
   modes:
     - hardhat

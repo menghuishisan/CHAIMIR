@@ -28,12 +28,13 @@ upstream:
 data_driven: true
 env_keys:
   config:
-    - CHAIMIR_EVM_RPC_URL
+    - CHAIMIR_CHAIN_RPC_URL
     - CHAIMIR_RUNTIME_RPC_PORT
     - CHAIMIR_CHAIN_STATE_DIR
   secret: []
 secrets_required:
-  - env: CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
+  - component: runtime
+    env: CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
     secret_key: CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
 capabilities:
   provides:
@@ -49,6 +50,12 @@ capabilities:
 runtime:
   eco: evm
   adapter_level: 2
+  workload:
+    env:
+      - name: CHAIMIR_CHAIN_STATE_DIR
+        value: /runtime-state
+      - name: CHAIMIR_RUNTIME_RPC_PORT
+        value: "8545"
   native:
     helper: /usr/local/bin/chaimir-geth-adapter
     profile: evm-json-rpc

@@ -153,6 +153,15 @@ export default function StudentRecordsPage() {
                     label={contestStatusLabel(item.contest_status)}
                   />
                 ),
+                action: (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => navigate(`/student/contests/${item.contest_id}`)}
+                  >
+                    查看
+                  </Button>
+                ),
               })}
             />
           )}

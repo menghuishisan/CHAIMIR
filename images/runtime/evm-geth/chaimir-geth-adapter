@@ -3,8 +3,10 @@
 set -euo pipefail
 
 action="${1:-}"
-rpc_url="${CHAIMIR_EVM_RPC_URL:-http://127.0.0.1:${CHAIMIR_RUNTIME_RPC_PORT:-8545}}"
-state_dir="${CHAIMIR_CHAIN_STATE_DIR:-/runtime-state}"
+: "${CHAIMIR_CHAIN_RPC_URL:?CHAIMIR_CHAIN_RPC_URL is required}"
+: "${CHAIMIR_CHAIN_STATE_DIR:?CHAIMIR_CHAIN_STATE_DIR is required}"
+rpc_url="$CHAIMIR_CHAIN_RPC_URL"
+state_dir="$CHAIMIR_CHAIN_STATE_DIR"
 last_contract_file="$state_dir/last-contract-address"
 
 fail() { printf '%s\n' "$1" >&2; exit "${2:-1}"; }

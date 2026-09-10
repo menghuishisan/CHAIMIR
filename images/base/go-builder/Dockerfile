@@ -8,8 +8,7 @@ ARG GO_VERSION=go1.26.6
 ARG GO_SHA256=708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89
 
 # 构建基座必须应用发行版安全更新,并用官方 SHA256 校验 Go 工具链。
-RUN apk upgrade --no-cache \
-    && apk add --no-cache ca-certificates curl=8.20.0-r0 git \
+RUN apk add --no-cache ca-certificates curl=8.20.0-r0 git \
     && curl -fL --retry 8 --retry-all-errors --retry-delay 3 --connect-timeout 30 --max-time 600 \
         -o /tmp/go.tar.gz "https://go.dev/dl/${GO_VERSION}.linux-amd64.tar.gz" \
     && echo "${GO_SHA256}  /tmp/go.tar.gz" | sha256sum -c - \

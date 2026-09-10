@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-db_dir="${CLAMAV_DATABASE_DIR:-/var/lib/clamav}"
+db_dir=/var/lib/clamav
 mkdir -p "$db_dir" /run/clamav /tmp/clamav
 
 if ! find "$db_dir" -maxdepth 1 \( -name '*.cvd' -o -name '*.cld' \) | grep -q .; then

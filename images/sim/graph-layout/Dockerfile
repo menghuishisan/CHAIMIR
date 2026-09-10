@@ -4,8 +4,7 @@ FROM python:3.13-alpine@sha256:399babc8b49529dabfd9c922f2b5eea81d611e4512e3ed250
 LABEL org.opencontainers.image.title="sim/graph-layout"
 LABEL org.opencontainers.image.description="Chaimir backend graph layout simulation image"
 
-RUN apk upgrade --no-cache \
-    && addgroup -S chaimir \
+RUN addgroup -S chaimir \
     && adduser -S -G chaimir -h /sim chaimir
 
 WORKDIR /sim

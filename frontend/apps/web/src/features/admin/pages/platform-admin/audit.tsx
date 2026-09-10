@@ -76,16 +76,21 @@ export default function PlatformAuditPage() {
       idPrefix="platform-audit"
       breadcrumbItems={[{ label: '底层资源' }, { label: '平台审计' }]}
       title="平台审计"
-      description="全平台的敏感操作记录,含各学校内部的操作。只能查询与导出,不能修改或删除。"
+      description="全平台敏感操作与安全事件审计记录，涵盖平台与各租户操作。只支持多维查询与安全导出，禁止篡改。"
       actionOptions={ACTION_OPTIONS}
       targetTypeOptions={TARGET_TYPE_OPTIONS}
       subjectColumn={subjectColumn}
       taskPath="/platform-admin/tasks"
       scopeNote={
-        <>
-          这里按身份呈现操作者(平台管理员、学校管理员、教师、学生)。要看具体是谁,
-          请在那所学校的管理端审计页按人筛选 —— 跨学校的账号姓名不在平台侧解析。
-        </>
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="cinnabar">平台范围</Badge>
+            <span className="text-sm font-medium text-ink">跨学校查看操作轨迹</span>
+          </div>
+          <p>
+            这里按身份呈现操作者（平台管理员、学校管理员、教师、学生）。若需核对具体人员，请前往对应学校的管理端审计页按账号筛选；平台侧对跨校账号实施脱敏保护。
+          </p>
+        </div>
       }
     />
   )

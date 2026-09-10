@@ -13,7 +13,6 @@ LABEL org.opencontainers.image.description="Chaimir Hyperlane bridge relayer ima
 
 USER root
 RUN apt-get -o Acquire::Retries=5 update \
-    && apt-get -o Acquire::Retries=5 upgrade -y --no-install-recommends \
     && groupadd --gid 1000 chaimir \
     && useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir \
     && mkdir -p /workspace /runtime-state /hyperlane-config \

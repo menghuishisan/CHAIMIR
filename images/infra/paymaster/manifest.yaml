@@ -25,19 +25,27 @@ upstream:
 env_keys:
   config:
     - CHAIMIR_IMAGE_PORT
+    - CHAIMIR_HTTP_TIMEOUT_SECONDS
     - CHAIMIR_MAX_BODY_BYTES
     - CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
     - CHAIMIR_EVM_RPC_URL
     - CHAIMIR_ENTRYPOINT_ADDRESS
+    - CHAIMIR_PAYMASTER_ADDRESS
+    - CHAIMIR_PAYMASTER_SIGNER_ADDRESS
+    - CHAIMIR_PAYMASTER_VALIDITY_SECONDS
+    - CHAIMIR_PAYMASTER_MAX_USER_OPERATION_BYTES
+    - CHAIMIR_PAYMASTER_RPC_TIMEOUT_SECONDS
   secret:
     - CHAIMIR_PAYMASTER_PRIVATE_KEY
     - CHAIMIR_PAYMASTER_SERVICE_AUTH_SECRET
 secrets_required:
-  - env: CHAIMIR_PAYMASTER_PRIVATE_KEY
+  - component: infra
+    env: CHAIMIR_PAYMASTER_PRIVATE_KEY
     secret_key: CHAIMIR_PAYMASTER_PRIVATE_KEY
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
-  - env: CHAIMIR_PAYMASTER_SERVICE_AUTH_SECRET
+  - component: infra
+    env: CHAIMIR_PAYMASTER_SERVICE_AUTH_SECRET
     secret_key: CHAIMIR_PAYMASTER_SERVICE_AUTH_SECRET
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
@@ -55,10 +63,18 @@ capabilities:
     additionalProperties: false
     required:
       - entrypoint_address
+      - paymaster_address
+      - signer_address
     properties:
       entrypoint_address:
         type: string
         x-chaimir-env: infra/CHAIMIR_ENTRYPOINT_ADDRESS
+      paymaster_address:
+        type: string
+        x-chaimir-env: infra/CHAIMIR_PAYMASTER_ADDRESS
+      signer_address:
+        type: string
+        x-chaimir-env: infra/CHAIMIR_PAYMASTER_SIGNER_ADDRESS
   student_access: private
 infra:
   eco_tags:
@@ -70,8 +86,18 @@ infra:
         env:
           - name: CHAIMIR_IMAGE_PORT
             value: "8080"
+          - name: CHAIMIR_HTTP_TIMEOUT_SECONDS
+            value: "30"
           - name: CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
             value: "300"
+          - name: CHAIMIR_MAX_BODY_BYTES
+            value: "1048576"
+          - name: CHAIMIR_PAYMASTER_VALIDITY_SECONDS
+            value: "300"
+          - name: CHAIMIR_PAYMASTER_MAX_USER_OPERATION_BYTES
+            value: "262144"
+          - name: CHAIMIR_PAYMASTER_RPC_TIMEOUT_SECONDS
+            value: "10"
         ports:
           - name: http
             container_port: 8080
@@ -106,6 +132,7 @@ infra:
   bindings:
     - name: execution_chain
       capability: evm-json-rpc
+      source_component: infra
       endpoint: rpc
       protocol: HTTP
       required_at_start: true

@@ -200,6 +200,15 @@ export default function StudentContestsPage() {
                     {joinedContestIds.has(item.id) ? <Badge tone="jade">已报名</Badge> : null}
                   </div>
                 ),
+                action: (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => navigate(`/student/contests/${item.id}`)}
+                  >
+                    {joinedContestIds.has(item.id) ? '进入' : '详情'}
+                  </Button>
+                ),
               })}
             />
           )}

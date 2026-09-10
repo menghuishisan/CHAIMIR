@@ -3,9 +3,12 @@
 set -eu
 
 action="${1:-}"
-data_dir="${CHAIMIR_BITCOIN_DATA_DIR:-/runtime-state/bitcoin}"
-rpc_port="${CHAIMIR_RUNTIME_RPC_PORT:-18443}"
-wallet="${CHAIMIR_BITCOIN_WALLET:-chaimir}"
+: "${CHAIMIR_BITCOIN_DATA_DIR:?CHAIMIR_BITCOIN_DATA_DIR is required}"
+: "${CHAIMIR_RUNTIME_RPC_PORT:?CHAIMIR_RUNTIME_RPC_PORT is required}"
+: "${CHAIMIR_BITCOIN_WALLET:?CHAIMIR_BITCOIN_WALLET is required}"
+data_dir="$CHAIMIR_BITCOIN_DATA_DIR"
+rpc_port="$CHAIMIR_RUNTIME_RPC_PORT"
+wallet="$CHAIMIR_BITCOIN_WALLET"
 
 fail() {
   printf '%s\n' "$1" >&2
@@ -22,7 +25,9 @@ wallet_cli() {
 
 ensure_wallet() {
   local wallets
-  wallets="$(cli listwallets 2>/dev/null || true)"
+  if ! wallets="$(cli listwallets 2>/dev/null)"; then
+    fail "无法读取 Bitcoin regtest 钱包列表" 70
+  fi
   if jq -e --arg wallet "$wallet" 'index($wallet) != null' >/dev/null 2>&1 <<EOF
 $wallets
 EOF
@@ -42,7 +47,9 @@ mine_confirmations() {
 
 ensure_funds() {
   local balance
-  balance="$(wallet_cli getbalance 2>/dev/null || printf '0')"
+  if ! balance="$(wallet_cli getbalance 2>/dev/null)"; then
+    fail "无法读取 Bitcoin regtest 钱包余额" 70
+  fi
   if [ "$(printf '%s\n' "$balance" | awk '{print ($1 + 0 <= 0) ? "zero" : "nonzero"}')" = "zero" ]; then
     # regtest coinbase 需要 100 个成熟区块后才能作为交易输入。
     mine_confirmations 101

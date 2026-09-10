@@ -1,15 +1,26 @@
 #!/bin/sh
 set -eu
 
-if [ -n "${COUCHDB_USER:-}" ] || [ -n "${COUCHDB_PASSWORD:-}" ]; then
-  if [ -z "${COUCHDB_USER:-}" ] || [ -z "${COUCHDB_PASSWORD:-}" ]; then
-    echo "COUCHDB_USER and COUCHDB_PASSWORD must be set together" >&2
-    exit 1
-  fi
-  cat > /opt/couchdb/etc/local.d/10-admin.ini <<EOF
-[admins]
-${COUCHDB_USER} = ${COUCHDB_PASSWORD}
-EOF
+: "${COUCHDB_USER:?COUCHDB_USER is required}"
+: "${COUCHDB_PASSWORD:?COUCHDB_PASSWORD is required}"
+case "$COUCHDB_USER" in
+  ''|*[!A-Za-z0-9_.-]*) echo "COUCHDB_USER contains unsupported characters" >&2; exit 2 ;;
+esac
+case "$COUCHDB_PASSWORD" in
+  ''|*[!A-Za-z0-9_.~-]*) echo "COUCHDB_PASSWORD contains unsupported characters" >&2; exit 2 ;;
+esac
+if [ "${#COUCHDB_PASSWORD}" -lt 16 ] || [ "${#COUCHDB_PASSWORD}" -gt 128 ]; then
+  echo "COUCHDB_PASSWORD length must be between 16 and 128 characters" >&2
+  exit 2
 fi
+umask 077
+cat > /opt/couchdb/etc/local.d/10-admin.ini <<EOF
+[couchdb]
+single_node = true
+
+[admins]
+$COUCHDB_USER = $COUCHDB_PASSWORD
+EOF
+chmod 0600 /opt/couchdb/etc/local.d/10-admin.ini
 
 exec /usr/bin/couchdb

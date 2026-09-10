@@ -2,11 +2,18 @@
 # 本脚本执行 Solidity 静态扫描判题。
 set -eu
 
-: "${CHAIMIR_SUBMISSION_DIR:=/judge/submission}"
+: "${CHAIMIR_SUBMISSION_DIR:?CHAIMIR_SUBMISSION_DIR is required}"
 if [ -z "${CHAIMIR_SOLIDITY_VERSION:-}" ]; then
   echo "必须由组合配置声明 CHAIMIR_SOLIDITY_VERSION" >&2
   exit 64
 fi
+
+# 私有归档只读挂载;静态扫描缓存和结果必须落在 judger 自有工作目录。
+test -d "${CHAIMIR_SUBMISSION_DIR}"
+rm -rf /judge/input
+mkdir -p /judge/input
+cp -a "${CHAIMIR_SUBMISSION_DIR}/." /judge/input/
+CHAIMIR_WORK_DIR=/judge/input
 
 case "${CHAIMIR_SOLIDITY_VERSION}" in
   0.8.20|0.8.24|0.8.26) ;;
@@ -25,14 +32,17 @@ mkdir -p /judge/.solc-select/artifacts /tmp/slither
 # 静态分析也必须绑定并验证实际 runtime,否则只能证明工具能运行。
 if [ -n "${CHAIMIR_EVM_RPC_URL:-}" ]; then
   rpc_body='{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
-  rpc_response="$(wget -qO- --header='Content-Type: application/json' --post-data="${rpc_body}" "${CHAIMIR_EVM_RPC_URL}" 2>/dev/null || true)"
+  if ! rpc_response="$(wget -qO- --timeout=10 --tries=1 --header='Content-Type: application/json' --post-data="${rpc_body}" "${CHAIMIR_EVM_RPC_URL}")"; then
+    echo "EVM runtime RPC 请求失败" >&2
+    exit 66
+  fi
   case "${rpc_response}" in
     *'"result"'*) ;;
     *) echo "EVM runtime RPC 未返回有效 chainId" >&2; exit 66 ;;
   esac
 fi
 
-cd "${CHAIMIR_SUBMISSION_DIR}"
+cd "${CHAIMIR_WORK_DIR}"
 
 if command -v slither >/dev/null 2>&1; then
   # 每次判题必须从空报告开始,避免复用 judge 卷时把上一次样本的报告误判为本次结果。

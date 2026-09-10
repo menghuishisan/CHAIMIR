@@ -155,39 +155,36 @@ function ApplicationReview({ application, onReviewed }: ApplicationReviewProps) 
           },
         ]}
       />
+        <div className="mt-6 flex flex-col gap-4">
+          {pending ? (
+            <Callout tone="warning" title="审核风险提示">
+              通过审核将在底层原子事务中创建学校空间、初始化首个管理员账号并生成激活凭证。开通后不可撤销，请务必提前与申请学校核实联系人及授权信息。
+            </Callout>
+          ) : null}
 
-      {pending ? (
-        <Callout tone="warning" title="通过后不能撤销" className="mt-4">
-          通过会在一个事务里创建学校租户、开通首个学校管理员并签发一次性激活码。
-          联系方式由学校自行填写,开通前请另行核实身份。
-        </Callout>
-      ) : (
-        <Callout tone="info" className="mt-4">
-          {application.status === ApplicationStatus.APPROVED
-            ? '学校已开通。后续的停用、续期与配额调整在学校管理里做。'
-            : '申请已驳回。学校可以按驳回理由修改后重新提交。'}
-        </Callout>
-      )}
+          {application.reject_reason ? (
+            <Callout tone="danger" title="历史驳回理由">
+              {application.reject_reason}
+            </Callout>
+          ) : null}
 
-      {application.reject_reason ? (
-        <Callout tone="warning" title="驳回理由" className="mt-4">
-          {application.reject_reason}
-        </Callout>
-      ) : null}
-
-      {application.tenant_id ? (
-        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg bg-surface p-4 shadow-xs">
-          <Badge tone="success">已开通</Badge>
-          <span className="text-sm text-ink-sub">这份申请对应的学校已经创建。</span>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate(`/platform-admin/schools/${application.tenant_id}`)}
-          >
-            去学校详情
-          </Button>
+          {application.tenant_id ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface p-4 shadow-xs sm:flex-nowrap">
+              <div className="flex min-w-0 items-center gap-2">
+                <Badge tone="success">已生成租户</Badge>
+                <span className="truncate text-sm text-ink-sub">对应学校租户空间已建立并投入运行。</span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="shrink-0"
+                onClick={() => navigate(`/platform-admin/schools/${application.tenant_id}`)}
+              >
+                查看学校详情与配额
+              </Button>
+            </div>
+          ) : null}
         </div>
-      ) : null}
 
       {action === 'approve' ? (
         <ApproveModal
@@ -311,7 +308,7 @@ function ApproveModal({ application, onClose, onDone }: ReviewModalProps) {
         <ModalHeader>
           <ModalTitle>通过并开通学校</ModalTitle>
           <ModalDescription>
-            确认后会创建学校、开通首个管理员并签发激活码。这一步不能撤销,请核对信息。
+            确认通过后将在全平台事务中创建学校空间、开通首个管理员账号并生成激活码。该操作不可撤销，请核对信息。
           </ModalDescription>
         </ModalHeader>
         <form onSubmit={submit} noValidate>

@@ -46,6 +46,11 @@ export const platformAdminNavigation: RoleNavigationConfig = {
         { name: '判题器', path: '/platform-admin/judges', icon: Cpu },
         { name: '仿真治理', path: '/platform-admin/simulations', icon: Shield },
         { name: '漏洞题源', path: '/platform-admin/vulnerabilities', icon: Bug },
+      ],
+    },
+    {
+      title: '平台运维',
+      items: [
         { name: '告警中心', path: '/platform-admin/alerts', icon: BellRing },
         { name: '系统公告', path: '/platform-admin/announcements', icon: Megaphone },
         { name: '系统配置', path: '/platform-admin/settings', icon: Settings },

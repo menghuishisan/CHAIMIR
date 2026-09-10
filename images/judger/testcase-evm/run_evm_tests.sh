@@ -2,22 +2,29 @@
 # 本脚本按项目类型执行 EVM 判题测试。
 set -eu
 
-: "${CHAIMIR_SUBMISSION_DIR:=/judge/submission}"
+: "${CHAIMIR_SUBMISSION_DIR:?CHAIMIR_SUBMISSION_DIR is required}"
 RESULT_STDOUT="/tmp/chaimir-judge-stdout.txt"
-export HOME="${HOME:-/judge}"
+: "${HOME:?HOME is required}"
 export FOUNDRY_OFFLINE=true
+
+# 私有归档只读挂载;判题编译产物必须落在 judger 自有工作目录,不能回写隐藏输入。
+test -d "${CHAIMIR_SUBMISSION_DIR}"
+rm -rf /judge/input
+mkdir -p /judge/input
+cp -a "${CHAIMIR_SUBMISSION_DIR}/." /judge/input/
+CHAIMIR_WORK_DIR=/judge/input
 
 # 判题进入编译/测试前必须确认实际连接到组合提供的 EVM runtime。
 if [ -n "${CHAIMIR_EVM_RPC_URL:-}" ]; then
   rpc_body='{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}'
-  rpc_response="$(wget -qO- --header='Content-Type: application/json' --post-data="${rpc_body}" "${CHAIMIR_EVM_RPC_URL}" 2>/dev/null || true)"
+  rpc_response="$(node /opt/chaimir/testcase-evm/rpc-probe.mjs "${CHAIMIR_EVM_RPC_URL}")"
   case "${rpc_response}" in
     *'"result"'*) ;;
     *) echo "EVM runtime RPC 未返回有效 chainId" >&2; exit 66 ;;
   esac
 fi
 
-cd "${CHAIMIR_SUBMISSION_DIR}"
+cd "${CHAIMIR_WORK_DIR}"
 
 if [ -f foundry.toml ]; then
   if ! grep -Eq '^[[:space:]]*(solc|solc_version)[[:space:]]*=' foundry.toml; then

@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -22,26 +23,24 @@ func main() {
 	databaseAddress := required("CHAIMIR_GRAPH_POSTGRES_ADDRESS")
 	ipfs := required("CHAIMIR_GRAPH_IPFS_ADDRESS")
 	password := required("POSTGRES_PASSWORD")
-	network := envOr("CHAIMIR_GRAPH_NETWORK", "local")
-	database := envOr("CHAIMIR_GRAPH_POSTGRES_DB", "graph")
-	user := envOr("CHAIMIR_GRAPH_POSTGRES_USER", "postgres")
-	if !networkPattern.MatchString(network) || !databasePattern.MatchString(database) || !userPattern.MatchString(user) || !passwordPattern.MatchString(password) {
+	poiAccessToken := required("GRAPH_POI_ACCESS_TOKEN")
+	network := required("CHAIMIR_GRAPH_NETWORK")
+	database := required("CHAIMIR_GRAPH_POSTGRES_DB")
+	user := required("CHAIMIR_GRAPH_POSTGRES_USER")
+	if !networkPattern.MatchString(network) || !databasePattern.MatchString(database) || !userPattern.MatchString(user) || !passwordPattern.MatchString(password) || strings.TrimSpace(poiAccessToken) != poiAccessToken || strings.ContainsAny(poiAccessToken, "\r\n") {
 		fail("graph binding contains invalid characters")
 	}
-	if parsed, err := url.Parse(rpc); err != nil || parsed.Host == "" {
-		fail("CHAIMIR_GRAPH_RPC_URL is invalid")
-	}
+	requireHTTPURL("CHAIMIR_GRAPH_RPC_URL", rpc)
 	databaseHostPort, ok := normalizeDatabaseAddress(databaseAddress)
 	if !ok {
 		fail("CHAIMIR_GRAPH_POSTGRES_ADDRESS is invalid")
 	}
-	if parsed, err := url.Parse(ipfs); err != nil || parsed.Host == "" {
-		fail("CHAIMIR_GRAPH_IPFS_ADDRESS is invalid")
-	}
+	requireHTTPURL("CHAIMIR_GRAPH_IPFS_ADDRESS", ipfs)
 	env := append(os.Environ(),
 		"POSTGRES_URL=postgresql://"+user+":"+password+"@"+databaseHostPort+"/"+database,
 		"ETHEREUM_RPC="+network+":"+rpc,
 		"IPFS="+ipfs,
+		"GRAPH_POI_ACCESS_TOKEN="+poiAccessToken,
 	)
 	args := append([]string{"/usr/local/bin/graph-node"}, os.Args[1:]...)
 	if err := syscall.Exec(args[0], args, env); err != nil {
@@ -66,19 +65,51 @@ func normalizeDatabaseAddress(raw string) (string, bool) {
 	return parsed.Host, true
 }
 
+// requireHTTPURL enforces the HTTP binding contract before graph-node parses it.
+func requireHTTPURL(name, raw string) {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || !hasExplicitPort(raw) {
+		fail(name + " is invalid")
+	}
+	port := parsed.Port()
+	if port == "" {
+		port = explicitPort(raw)
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		fail(name + " port must be in 1-65535")
+	}
+}
+
+func hasExplicitPort(raw string) bool {
+	return explicitPort(raw) != ""
+}
+
+func explicitPort(raw string) string {
+	separator := strings.Index(raw, "://")
+	if separator < 0 {
+		return ""
+	}
+	authority := raw[separator+3:]
+	if end := strings.IndexAny(authority, "/?#"); end >= 0 {
+		authority = authority[:end]
+	}
+	if at := strings.LastIndex(authority, "@"); at >= 0 {
+		return ""
+	}
+	colon := strings.LastIndex(authority, ":")
+	if colon < 0 || colon == len(authority)-1 {
+		return ""
+	}
+	return authority[colon+1:]
+}
+
 func required(name string) string {
 	value := os.Getenv(name)
 	if value == "" {
 		fail(name + " is required")
 	}
 	return value
-}
-
-func envOr(name, fallback string) string {
-	if value := os.Getenv(name); value != "" {
-		return value
-	}
-	return fallback
 }
 
 func fail(message string) {

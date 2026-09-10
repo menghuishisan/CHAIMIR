@@ -247,8 +247,16 @@ function Invoke-DockerPullCli {
     $stdoutTask = $process.StandardOutput.ReadToEndAsync()
     $stderrTask = $process.StandardError.ReadToEndAsync()
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-        try { $process.Kill() } catch { }
-        try { $process.WaitForExit(5000) } catch { }
+        try {
+            if (-not $process.HasExited) {
+                $process.Kill()
+            }
+            if (-not $process.WaitForExit(5000)) {
+                throw "镜像拉取进程在终止宽限期内仍未退出"
+            }
+        } catch {
+            throw "镜像拉取超时后的进程清理失败: $($_.Exception.Message)"
+        }
         return [pscustomobject]@{ ExitCode = 124; Output = '镜像拉取超过有界时限' }
     }
     return [pscustomobject]@{

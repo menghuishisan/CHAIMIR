@@ -12,7 +12,7 @@ ARG NO_PROXY
 
 ARG KUBO_VERSION=v0.42.0
 ARG KUBO_COMMIT=969853d9609b3a261ef4e41a5eec437188c09ffe
-ARG GO_MODULE_PROXY=https://goproxy.cn,direct
+ARG GO_MODULE_PROXY=
 
 RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && for attempt in 1 2 3 4 5 6 7 8; do \
@@ -23,7 +23,7 @@ RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${N
     done
 WORKDIR /src/kubo
 RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
-    && export GOPROXY="${GO_MODULE_PROXY}" \
+    && if [ -n "${GO_MODULE_PROXY}" ]; then export GOPROXY="${GO_MODULE_PROXY}"; fi \
     && test "$(git rev-parse HEAD)" = "${KUBO_COMMIT}" \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         if go get \
@@ -42,12 +42,12 @@ FROM ${GO_BUILDER_IMAGE} AS entrypoint-build
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
-ARG GO_MODULE_PROXY=https://goproxy.cn,direct
+ARG GO_MODULE_PROXY=
 
 WORKDIR /src
 COPY entrypoint.go .
 RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o ./chaimir-ipfs-entrypoint ./entrypoint.go
+    && GO111MODULE=off CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o ./chaimir-ipfs-entrypoint ./entrypoint.go
 
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40 AS dirs
 RUN mkdir -p /out/runtime-state/ipfs /out/workspace

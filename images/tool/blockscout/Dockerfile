@@ -1,6 +1,6 @@
 # 本文件定义 Blockscout 区块链浏览器工具镜像,从固定官方源码重建 Web 与索引器。
 ARG NODE_BUILDER_IMAGE=invalid.invalid/base/node-builder:required
-ARG BLOCKSCOUT_BUILD_IMAGE=hexpm/elixir@sha256:31a23456941cff0f9b2aa5083e42d3371538e6e7032fc49185f6f4e87bcaacdd
+ARG BLOCKSCOUT_BUILD_IMAGE=invalid.invalid/base/blockscout-build:required
 ARG BLOCKSCOUT_SOURCE_URL=https://github.com/blockscout/blockscout/archive/refs/tags/v11.2.8.tar.gz
 ARG BLOCKSCOUT_SOURCE_SHA256=223e504a3fd48157b90e0a6fb4ac6dc6432b7acfb19cbf7e0e99d7798413cf5e
 
@@ -84,8 +84,7 @@ ENV RELEASE_VERSION=11.2.8
 ENV BLOCKSCOUT_VERSION=v11.2.8.+commit.01a56de2
 
 USER root
-RUN apk upgrade --no-cache \
-    && apk --no-cache --update add jq curl \
+RUN apk --no-cache --update add jq curl \
     && addgroup --system --gid ${BLOCKSCOUT_GID} ${BLOCKSCOUT_GROUP} \
     && adduser --system --uid ${BLOCKSCOUT_UID} --ingroup ${BLOCKSCOUT_GROUP} --disabled-password ${BLOCKSCOUT_USER}
 COPY --from=blockscout-build --chown=${BLOCKSCOUT_USER}:${BLOCKSCOUT_GROUP} /opt/release/blockscout /app

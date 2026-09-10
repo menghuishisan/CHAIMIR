@@ -15,8 +15,7 @@ LABEL org.opencontainers.image.title="infra/paymaster"
 LABEL org.opencontainers.image.description="Chaimir account abstraction paymaster service"
 
 WORKDIR /app
-RUN apk upgrade --no-cache \
-    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 COPY --from=deps --chown=1000:1000 /app /app
 
 ENV HOME=/app

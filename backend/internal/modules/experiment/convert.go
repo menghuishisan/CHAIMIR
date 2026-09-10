@@ -29,6 +29,7 @@ func teacherComponentConfigDTOFromModel(cfg ComponentConfig) TeacherComponentCon
 			Tools:                    cloneComponentRefs(spec.Tools),
 			Links:                    cloneCompositionLinks(spec.Links),
 			AccessProfile:            spec.AccessProfile,
+			InitAssets:               cloneCompositionInitAssets(spec.InitAssets),
 			CompositionDigest:        env.CompositionSnapshot.Digest,
 			InitCodeRef:              env.InitCodeRef,
 			InitScriptRef:            env.InitScriptRef,
@@ -39,6 +40,14 @@ func teacherComponentConfigDTOFromModel(cfg ComponentConfig) TeacherComponentCon
 		})
 	}
 	return out
+}
+
+// cloneCompositionInitAssets 返回教师可见的组合材料声明副本,学生投影不会调用该函数。
+func cloneCompositionInitAssets(items []contracts.CompositionInitAsset) []contracts.CompositionInitAsset {
+	if len(items) == 0 {
+		return nil
+	}
+	return append([]contracts.CompositionInitAsset(nil), items...)
 }
 
 // studentExperimentDTOFromModel 生成不含环境初始化与判题答案的学生实验视图。

@@ -226,6 +226,24 @@ export default function TeacherSharedLibraryPage() {
                 mobileCard={(item) => ({
                   title: item.title,
                   meta: `${contentTypeLabel(item.type)} · ${item.code} · ${item.version}`,
+                  action: (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <IconButton
+                        variant="ghost"
+                        size="sm"
+                        icon={Eye}
+                        aria-label={`预览题面 ${item.title}`}
+                        onClick={() => setPreviewTarget(item)}
+                      />
+                      <IconButton
+                        variant="ghost"
+                        size="sm"
+                        icon={Copy}
+                        aria-label={`克隆题目 ${item.title}`}
+                        onClick={() => setCloneTarget(item)}
+                      />
+                    </div>
+                  ),
                 })}
               />
             )}

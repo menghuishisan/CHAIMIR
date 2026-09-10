@@ -202,6 +202,12 @@ export default function SchoolAdminApprovalsPage() {
         ]}
       />
 
+      {pendingCount !== undefined && pendingCount > 0 ? (
+        <Callout tone="warning" title="先处理待审核报送" className="mb-5">
+          通过会锁定成绩并进入学生成绩中心，驳回会退回教师修改；解锁只用于已通过成绩的补救处理。请先查看右侧详情再确认动作。
+        </Callout>
+      ) : null}
+
       <QueueDetailLayout
         view={mobileView}
         detailHeader={

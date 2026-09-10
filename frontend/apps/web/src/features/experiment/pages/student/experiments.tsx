@@ -6,7 +6,7 @@
 
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { FlaskConical, Play } from 'lucide-react'
+import { FlaskConical, MoreVertical, Play } from 'lucide-react'
 import { ExperimentCollabMode, type StudentExperiment } from '@chaimir/api-client'
 import {
   Badge,
@@ -14,7 +14,12 @@ import {
   Button,
   Callout,
   DataPanel,
+  IconButton,
   MetricStrip,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuTrigger,
   PageHeader,
   PageScaffold,
   Pagination,
@@ -204,15 +209,32 @@ export default function StudentExperimentsPage() {
                 meta: `${experimentCollabModeLabel(item.collab_mode)} · ${item.components.checkpoints.length} 个检查点 · ${item.require_report ? '需交报告' : '免交报告'}`,
                 badge: <ExperimentStatusCell experiment={item} />,
                 action: (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    leftIcon={Play}
-                    loading={enteringId === item.id}
-                    onClick={() => void enterExperiment(item)}
-                  >
-                    进入
-                  </Button>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      leftIcon={Play}
+                      loading={enteringId === item.id}
+                      onClick={() => void enterExperiment(item)}
+                    >
+                      进入
+                    </Button>
+                    <Menu>
+                      <MenuTrigger asChild>
+                        <IconButton
+                          variant="ghost"
+                          size="sm"
+                          icon={MoreVertical}
+                          aria-label={`${item.name} 的更多操作`}
+                        />
+                      </MenuTrigger>
+                      <MenuContent align="end">
+                        <MenuItem onSelect={() => navigate(`/student/experiments/${item.id}`)}>
+                          查看详情
+                        </MenuItem>
+                      </MenuContent>
+                    </Menu>
+                  </div>
                 ),
               })}
             />

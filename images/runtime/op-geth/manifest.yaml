@@ -111,7 +111,8 @@ env_keys:
   secret:
     - OP_GETH_JWT_SECRET
 secrets_required:
-  - env: OP_GETH_JWT_SECRET
+  - component: runtime
+    env: OP_GETH_JWT_SECRET
     secret_key: OP_GETH_JWT_SECRET
 ports:
   - name: rpc

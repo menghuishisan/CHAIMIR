@@ -167,12 +167,12 @@ export function MainLayout({ config }: MainLayoutProps) {
             /* key 绑定路径:切页时重放入场动画,只动 opacity/translateY(§4.4) */
             key={location.pathname}
             className={cn(
-              'flex min-h-0 flex-1 flex-col overflow-hidden bg-canvas',
-              'rounded-none md:rounded-tl-lg md:shadow-pane',
+              'paper-surface',
               'animate-pane-in',
             )}
           >
-            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {/* 外层固定光面形状,内层独立滚动;滚动内容不会重新定义圆角或投影边界。 */}
+            <div className="paper-scrollport">
               <RouteErrorBoundary>
                 <Outlet />
               </RouteErrorBoundary>

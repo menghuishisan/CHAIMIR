@@ -25,58 +25,60 @@ export interface StepsProps {
 
 export function Steps({ steps, current, className }: StepsProps) {
   return (
-    <ol className={cn("flex items-center", className)}>
-      {steps.map((step, i) => {
-        const isDone = i < current;
-        const isCurrent = i === current;
-        return (
-          <li
-            key={step.key}
-            aria-current={isCurrent ? "step" : undefined}
-            className={cn("flex items-center", i > 0 && "flex-1")}
-          >
-            {/* 连接线:前一步完成则染玉色 */}
-            {i > 0 && (
-              <span
-                aria-hidden="true"
-                className={cn("mx-3 h-px min-w-4 flex-1", i <= current ? "bg-primary" : "bg-line")}
-              />
-            )}
-            <span className="flex items-center gap-2">
-              {/* 步骤圆点:完成=实底对勾 / 当前=描边+外圈 / 未来=灰描边序号 */}
-              {isDone ? (
-                <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-on-dark">
-                  <Icon icon={Check} size="sm" />
-                </span>
-              ) : (
+    <div className="min-w-0 max-w-full overflow-x-auto pb-1">
+      <ol className={cn("flex min-w-max items-center", className)}>
+        {steps.map((step, i) => {
+          const isDone = i < current;
+          const isCurrent = i === current;
+          return (
+            <li
+              key={step.key}
+              aria-current={isCurrent ? "step" : undefined}
+              className={cn("flex items-center", i > 0 && "flex-1")}
+            >
+              {/* 连接线:前一步完成则染玉色 */}
+              {i > 0 && (
                 <span
-                  className={cn(
-                    "flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-medium tabular-nums",
-                    isCurrent
-                      ? "border-2 border-primary bg-surface text-primary ring-4 ring-primary-soft"
-                      : "border-line-strong text-ink-sub",
-                  )}
-                >
-                  {i + 1}
-                </span>
+                  aria-hidden="true"
+                  className={cn("mx-3 h-px min-w-4 flex-1", i <= current ? "bg-primary" : "bg-line")}
+                />
               )}
-              <span className="flex min-w-0 flex-col">
-                <span
-                  className={cn(
-                    "text-sm",
-                    isCurrent ? "font-medium text-ink" : isDone ? "text-ink" : "text-ink-sub",
-                  )}
-                >
-                  {step.label}
-                </span>
-                {step.description && (
-                  <span className="text-xs text-ink-sub">{step.description}</span>
+              <span className="flex items-center gap-2">
+                {/* 步骤圆点:完成=实底对勾 / 当前=描边+外圈 / 未来=灰描边序号 */}
+                {isDone ? (
+                  <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-on-dark">
+                    <Icon icon={Check} size="sm" />
+                  </span>
+                ) : (
+                  <span
+                    className={cn(
+                      "flex size-6 shrink-0 items-center justify-center rounded-full border text-xs font-medium tabular-nums",
+                      isCurrent
+                        ? "border-2 border-primary bg-surface text-primary ring-4 ring-primary-soft"
+                        : "border-line-strong text-ink-sub",
+                    )}
+                  >
+                    {i + 1}
+                  </span>
                 )}
+                <span className="flex min-w-0 flex-col">
+                  <span
+                    className={cn(
+                      "text-sm",
+                      isCurrent ? "font-medium text-ink" : isDone ? "text-ink" : "text-ink-sub",
+                    )}
+                  >
+                    {step.label}
+                  </span>
+                  {step.description && (
+                    <span className="text-xs text-ink-sub">{step.description}</span>
+                  )}
+                </span>
               </span>
-            </span>
-          </li>
-        );
-      })}
-    </ol>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
   );
 }

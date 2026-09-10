@@ -5,7 +5,7 @@ FROM ${FABRIC_TOOLS_IMAGE} AS fabric-tools
 FROM ${GO_BUILDER_IMAGE} AS build
 WORKDIR /src
 COPY server.go .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/chaimir-fabric-explorer ./server.go
+RUN GO111MODULE=off CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/chaimir-fabric-explorer ./server.go
 
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
@@ -15,8 +15,8 @@ LABEL org.opencontainers.image.description="Chaimir native Hyperledger Fabric ex
 USER root
 RUN apk add --no-cache \
         ca-certificates \
-        'libcrypto3>=3.5.8-r0' \
-        'libssl3>=3.5.8-r0' \
+        'libcrypto3=3.6.3-r5' \
+        'libssl3=3.6.3-r5' \
     && addgroup -S -g 1000 chaimir \
     && adduser -S -u 1000 -G chaimir -h /workspace -s /sbin/nologin chaimir \
     && mkdir -p /workspace /tmp \

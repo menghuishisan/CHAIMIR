@@ -152,7 +152,7 @@ export default function PlatformRuntimesPage() {
               visible.length === 0 ? (
                 <Callout tone="info">这个状态下没有运行时,换个状态看看。</Callout>
               ) : (
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className={visible.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
                   {visible.map((runtime) => (
                     <RuntimeCard
                       key={runtime.id}
@@ -213,7 +213,16 @@ function RuntimeCard({ runtime, onEdit }: RuntimeCardProps) {
   return (
     <Card>
       <CardHeader
-        title={runtime.name}
+        title={
+          <button
+            type="button"
+            onClick={openDetail}
+            className="truncate text-left font-semibold text-ink hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 transition-colors"
+            title="查看运行时详情与镜像"
+          >
+            {runtime.name}
+          </button>
+        }
         description={`${runtime.eco} · ${ADAPTER_LEVEL_LABELS[runtime.adapter_level] ?? '未登记的适配层级'}`}
         actions={
           <StatusIndicator

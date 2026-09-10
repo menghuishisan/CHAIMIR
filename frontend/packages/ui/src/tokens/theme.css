@@ -506,12 +506,45 @@
 /* ---------- 光面外框(FE-6 / §1.2:日常页宣纸光面浮于墨色底层) ----------
    缝只作用于**顶与左**(挨着顶栏与侧栏那两边),右下不留 —— 光面出血到视口边缘,
    纸因此有落点。四周等宽的缝 + 四角圆角 + 环绕投影会把内容读作「被装进一个容器」,
-   那是隔离感而不是层次。<md 归零走全宽(圆角同步由调用处 rounded-none md:rounded-tl-pane 承担) */
+   那是隔离感而不是层次。<md 归零走全宽,圆角与投影由 paper-surface 统一处理 */
 @utility pane-frame {
   padding: 0;
   @media (min-width: 48rem) {
     padding-top: var(--pane-inset);
     padding-left: var(--pane-inset);
+  }
+}
+
+/* ---------- 光面与滚动视口(FE-6):形状固定在外层,滚动固定在内层 ---------- */
+@utility paper-surface {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--color-canvas);
+  border-top-left-radius: 0;
+  @media (min-width: 48rem) {
+    border-top-left-radius: var(--radius-lg);
+    box-shadow: var(--shadow-pane);
+  }
+}
+
+@utility paper-scrollport {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow-x: hidden;
+  overflow-y: auto;
+  background-color: transparent;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  @media (min-width: 48rem) {
+    /* 滚动内容由内层承载,同步光面的左上裁切,避免内容滚动后盖平方角。 */
+    border-top-left-radius: var(--radius-lg);
   }
 }
 

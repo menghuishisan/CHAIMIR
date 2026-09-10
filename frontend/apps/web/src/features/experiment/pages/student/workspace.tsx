@@ -500,18 +500,8 @@ function ExperimentBrief({
 }: ExperimentBriefProps) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
-      <section className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <FlaskConical aria-hidden="true" className="size-4 text-accent" />
-          <h2 className="text-sm font-medium text-on-dark">实验说明</h2>
-        </div>
-        <p className="whitespace-pre-wrap text-xs leading-relaxed text-on-dark-sub">
-          {experiment.description || '老师没有写额外说明,按阶段任务推进即可。'}
-        </p>
-      </section>
-
       {activeStage !== undefined ? (
-        <section className="flex flex-col gap-1">
+        <section className="sticky top-0 z-base -mx-4 shrink-0 bg-dark-bg px-4 pb-2 pt-1">
           <h3 className="text-xs font-medium text-on-dark-sub">当前阶段</h3>
           <p className="text-sm text-on-dark">
             第 {activeStage} 阶段 ·{' '}
@@ -529,10 +519,11 @@ function ExperimentBrief({
                 <button
                   type="button"
                   onClick={() => onPickSandbox(sandbox.sandbox_id)}
+                  aria-pressed={sandbox.sandbox_id === currentSandboxId}
                   className={
-                    'hit-target relative flex w-full flex-col rounded-md border px-2 py-1.5 text-left focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 ' +
+                    'hit-target relative flex w-full flex-col rounded-md border px-3 py-2 text-left focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2 ' +
                     (sandbox.sandbox_id === currentSandboxId
-                      ? 'border-accent bg-dark-elevated'
+                      ? 'border-accent bg-dark-elevated shadow-sm'
                       : 'border-dark-line bg-dark-surface hover:bg-dark-elevated')
                   }
                 >
@@ -556,7 +547,7 @@ function ExperimentBrief({
                 <button
                   type="button"
                   onClick={() => onOpenSimulation(sim)}
-                  className="hit-target flex w-full flex-col rounded-md border border-dark-line bg-dark-surface px-2 py-1.5 text-left hover:bg-dark-elevated focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
+                  className="hit-target flex w-full flex-col rounded-md border border-dark-line bg-dark-surface px-3 py-2 text-left hover:bg-dark-elevated focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
                 >
                   <span className="truncate text-sm text-on-dark">{sim.component_id}</span>
                   <span className="truncate font-mono text-xs text-on-dark-sub">
@@ -571,6 +562,16 @@ function ExperimentBrief({
           </p>
         </section>
       ) : null}
+
+      <section className="flex shrink-0 flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <FlaskConical aria-hidden="true" className="size-4 text-accent" />
+          <h2 className="text-sm font-medium text-on-dark">实验说明</h2>
+        </div>
+        <p className="whitespace-pre-wrap text-xs leading-relaxed text-on-dark-sub">
+          {experiment.description || '老师没有写额外说明,按阶段任务推进即可。'}
+        </p>
+      </section>
     </div>
   )
 }

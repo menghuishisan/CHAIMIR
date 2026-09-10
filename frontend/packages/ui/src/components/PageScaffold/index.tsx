@@ -22,7 +22,7 @@ export interface PageScaffoldProps {
  * 内距分档(§6.4.1 规则 1):<md 用 16,≥md 用 32×24 —— 375 宽用桌面内距等于把 64px 交给空白。
  */
 export function PageScaffold({ children, className }: PageScaffoldProps) {
-  return <div className={cn("w-full p-4 md:px-8 md:py-6", className)}>{children}</div>;
+  return <div className={cn("min-h-full min-w-0 w-full p-4 pb-10 md:px-8 md:py-6", className)}>{children}</div>;
 }
 
 /* ---------------------------------------------------------------- 页面头 */
@@ -69,11 +69,15 @@ export function PageHeader({ kicker, title, description, icon, actions, classNam
             </span>
           )}
           <div className="min-w-0">
-            {title && <h1 className="font-display text-3xl text-ink">{title}</h1>}
+            {title && <h1 className="font-display text-2xl leading-tight text-ink sm:text-3xl">{title}</h1>}
             {description && <p className="mt-1 text-sm text-ink-sub">{description}</p>}
           </div>
         </div>
-        {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+        {actions && (
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+            {actions}
+          </div>
+        )}
       </div>
     </header>
   );
@@ -131,7 +135,11 @@ export function PageSection({ title, description, actions, children, className }
             {title && <h2 className="text-lg font-semibold text-ink">{title}</h2>}
             {description && <p className="mt-0.5 text-sm text-ink-sub">{description}</p>}
           </div>
-          {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+          {actions && (
+            <div className="flex max-w-full flex-wrap items-center gap-2 sm:justify-end">
+              {actions}
+            </div>
+          )}
         </div>
       )}
       {children}

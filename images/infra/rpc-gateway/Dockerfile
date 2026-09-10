@@ -9,7 +9,6 @@ USER root
 RUN mkdir -p /workspace /etc/chaimir \
     && sed -i 's|http://archive.ubuntu.com|https://archive.ubuntu.com|g; s|http://security.ubuntu.com|https://security.ubuntu.com|g' /etc/apt/sources.list \
     && apt-get -o Acquire::Retries=5 update \
-    && apt-get -o Acquire::Retries=5 -y upgrade \
     && rm -rf /var/lib/apt/lists/* \
     && chown -R 1000:1000 /workspace /etc/chaimir
 COPY envoy.yaml /etc/chaimir/envoy.yaml

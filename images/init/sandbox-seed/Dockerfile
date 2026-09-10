@@ -4,8 +4,7 @@ FROM alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc
 LABEL org.opencontainers.image.title="init/sandbox-seed"
 LABEL org.opencontainers.image.description="Chaimir sandbox workspace seeding init image"
 
-RUN apk upgrade --no-cache \
-    && addgroup -S chaimir \
+RUN addgroup -S chaimir \
     && adduser -S -G chaimir -h /seed chaimir
 
 WORKDIR /seed

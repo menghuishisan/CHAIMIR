@@ -113,7 +113,7 @@ function Invoke-CosignVerifyBlob {
         "-v", "$CosignDirectory`:/cosign:ro",
         "--entrypoint", "cosign",
         $CosignImage,
-        "verify-blob", "--key", "/cosign/cosign.pub", "--insecure-ignore-tlog=true",
+        "verify-blob", "--offline", "--key", "/cosign/cosign.pub",
         "--signature", "/evidence/$signatureName", "/evidence/$blobName"
     )
     & docker @arguments
@@ -226,12 +226,12 @@ function Patch-HarborChart {
 
     $databasePath = Join-Path $ChartDirectory "templates\database\database-ss.yaml"
     $databaseText = Get-Content -LiteralPath $databasePath -Raw
-    $unsafeCommand = 'args: ["-c", "chmod -R 700 /var/lib/postgresql/data/pgdata || true"]'
     $safeCommand = 'args: ["-ec", "mkdir -p /var/lib/postgresql/data/pgdata; chmod -R 700 /var/lib/postgresql/data/pgdata"]'
-    if ([regex]::Matches($databaseText, [regex]::Escape($unsafeCommand)).Count -ne 1) {
+    $unsafePattern = 'args: \["-c", "chmod -R 700 /var/lib/postgresql/data/pgdata \|\| true"\]'
+    if ([regex]::Matches($databaseText, $unsafePattern).Count -ne 1) {
         throw "chart 数据库权限补丁目标数量错误"
     }
-    $databaseText = $databaseText.Replace($unsafeCommand, $safeCommand)
+    $databaseText = $databaseText -replace $unsafePattern, $safeCommand
     [System.IO.File]::WriteAllText($databasePath, $databaseText, [System.Text.UTF8Encoding]::new($false))
 }
 

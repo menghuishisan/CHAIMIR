@@ -110,24 +110,47 @@ export function AccountImportBatches() {
           skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
         >
           {(list) => (
-            <Table
-              columns={columns}
-              data={list}
-              rowKey={(item) => item.id}
-              elevated={false}
-              // <md 换行卡(§6.4.1 规则 3):文件名一行、时间与行数一行,状态在右
-              mobileCard={(item) => ({
-                title: item.file_name,
-                meta: `${TARGET_LABELS[item.target_type]} · ${formatDateTime(item.created_at)} · 成功 ${item.success}/${item.total}`,
-                badge: (
-                  <StatusIndicator
-                    tone={BATCH_STATUS_TONES[item.status]}
-                    label={BATCH_STATUS_LABELS[item.status]}
-                    loading={item.status === ImportBatchStatus.PROCESSING}
-                  />
-                ),
-              })}
-            />
+            <div className="flex flex-col gap-4">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
+                  <p className="text-sm font-medium text-ink">导入批次</p>
+                  <p className="mt-1 text-lg font-medium text-ink">{list.length}</p>
+                  <p className="mt-1 text-xs text-ink-sub">当前已加载的历史记录</p>
+                </div>
+                <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
+                  <p className="text-sm font-medium text-ink">处理中</p>
+                  <p className="mt-1 text-lg font-medium text-ink">
+                    {list.filter((item) => item.status === ImportBatchStatus.PROCESSING).length}
+                  </p>
+                  <p className="mt-1 text-xs text-ink-sub">服务端完成后刷新列表</p>
+                </div>
+                <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
+                  <p className="text-sm font-medium text-ink">处理失败</p>
+                  <p className="mt-1 text-lg font-medium text-ink">
+                    {list.filter((item) => item.status === ImportBatchStatus.FAILED).length}
+                  </p>
+                  <p className="mt-1 text-xs text-ink-sub">请根据失败行重新导入</p>
+                </div>
+              </div>
+              <Table
+                columns={columns}
+                data={list}
+                rowKey={(item) => item.id}
+                elevated={false}
+                // <md 换行卡(§6.4.1 规则 3):文件名一行、时间与行数一行,状态在右
+                mobileCard={(item) => ({
+                  title: item.file_name,
+                  meta: `${TARGET_LABELS[item.target_type]} · ${formatDateTime(item.created_at)} · 成功 ${item.success}/${item.total}`,
+                  badge: (
+                    <StatusIndicator
+                      tone={BATCH_STATUS_TONES[item.status]}
+                      label={BATCH_STATUS_LABELS[item.status]}
+                      loading={item.status === ImportBatchStatus.PROCESSING}
+                    />
+                  ),
+                })}
+              />
+            </div>
           )}
         </ResourceState>
       </DataPanel>

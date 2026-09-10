@@ -261,7 +261,7 @@ func validateToolResourceSpecShape(spec *ToolResourceSpec, kind int16) error {
 	if err := validateToolNetworkRules(spec); err != nil {
 		return err
 	}
-	if err := validateComponentBindings(spec.Bindings); err != nil {
+	if err := validateComponentBindings(spec.Bindings, spec.Components); err != nil {
 		return err
 	}
 	if err := validatePrepullCommand(spec.PrepullCommand); err != nil {
@@ -290,12 +290,27 @@ func validateToolResourceSpecShape(spec *ToolResourceSpec, kind int16) error {
 	return nil
 }
 
-// validateComponentBindings 校验组件绑定的角色、能力、端点、协议和环境变量契约。
-func validateComponentBindings(bindings []ComponentBinding) error {
+// validateComponentBindings 校验组件绑定的角色、实际源组件、端点、协议和环境变量契约。
+func validateComponentBindings(bindings []ComponentBinding, components []workload.ComponentSpec) error {
 	seen := map[string]struct{}{}
+	componentNames := map[string]struct{}{}
+	for _, component := range components {
+		name := strings.TrimSpace(component.Name)
+		if name == "" || !mountNamePattern.MatchString(name) {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		if _, exists := componentNames[name]; exists {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		componentNames[name] = struct{}{}
+	}
 	for _, binding := range bindings {
 		name := strings.TrimSpace(binding.Name)
-		if name == "" || !bindingNamePattern.MatchString(name) || strings.TrimSpace(binding.Capability) == "" || strings.TrimSpace(binding.Endpoint) == "" {
+		sourceComponent := strings.TrimSpace(binding.SourceComponent)
+		if name == "" || !bindingNamePattern.MatchString(name) || sourceComponent == "" || !mountNamePattern.MatchString(sourceComponent) || strings.TrimSpace(binding.Capability) == "" || strings.TrimSpace(binding.Endpoint) == "" {
+			return apperr.ErrSandboxToolCreateInvalid
+		}
+		if _, exists := componentNames[sourceComponent]; !exists {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
 		if source := strings.TrimSpace(binding.SourceEndpoint); source != "" && source != "component" {
@@ -438,6 +453,7 @@ func validateToolServicesAndRoutes(spec *ToolResourceSpec) error {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
 		declared := map[string]struct{}{}
+		declaredServicePorts := map[string]struct{}{}
 		for j := range service.Ports {
 			port := &service.Ports[j]
 			port.Name = strings.TrimSpace(port.Name)
@@ -456,7 +472,12 @@ func validateToolServicesAndRoutes(spec *ToolResourceSpec) error {
 			if _, exists := declared[port.Name]; exists {
 				return apperr.ErrSandboxToolCreateInvalid
 			}
+			servicePortKey := fmt.Sprintf("%d/%s", port.Port, port.Protocol)
+			if _, exists := declaredServicePorts[servicePortKey]; exists {
+				return apperr.ErrSandboxToolCreateInvalid
+			}
 			declared[port.Name] = struct{}{}
+			declaredServicePorts[servicePortKey] = struct{}{}
 		}
 		if _, exists := servicePorts[service.Name]; exists {
 			return apperr.ErrSandboxToolCreateInvalid
@@ -730,7 +751,13 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 	if err := validatePrivateArchiveOps(spec.PrivateArchiveOps); err != nil {
 		return err
 	}
+	if len(spec.InitAssets) > 0 && validatePrivateArchiveOps(spec.InitAssetOps) != nil {
+		return apperr.ErrSandboxInitAssetConfigInvalid
+	}
 	if err := validateCapabilityCommands(spec, cfg); err != nil {
+		return err
+	}
+	if err := validateAdapterComponentMountDomains(*spec); err != nil {
 		return err
 	}
 	if err := validateRuntimeContainerSpec(&spec.RuntimeContainer, cfg, true); err != nil {
@@ -766,14 +793,63 @@ func normalizeAndValidateAdapterSpec(spec *AdapterSpec, cfg config.SandboxConfig
 	if err := validateRuntimeContainerNames(spec); err != nil {
 		return err
 	}
+	if len(spec.Pods) == 0 {
+		if err := validatePodPortConflicts(podTopologyForAdapter(*spec)); err != nil {
+			return err
+		}
+	}
 	if err := validatePodTopology(spec); err != nil {
 		return err
 	}
 	if err := validateAdapterExecTargets(spec); err != nil {
 		return err
 	}
+	if err := validateInitAssets(*spec); err != nil {
+		return err
+	}
 	if err := validateNetworkRules(spec); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateInitAssets 校验运行时清单中的初始化资产只会由专用非学生 sidecar
+// 写入受控 runtime-state/public-assets 安全域,并拒绝重复名称与未校验哈希。
+func validateInitAssets(spec AdapterSpec) error {
+	if len(spec.InitAssets) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(spec.InitAssets))
+	for _, asset := range spec.InitAssets {
+		name := strings.TrimSpace(asset.Name)
+		if name == "" || strings.TrimSpace(asset.SourceRef) == "" || strings.TrimSpace(asset.TargetDomain) == "" {
+			return apperr.ErrSandboxInitAssetConfigInvalid
+		}
+		if _, exists := seen[name]; exists {
+			return apperr.ErrSandboxInitAssetConfigInvalid
+		}
+		seen[name] = struct{}{}
+		domain, ok := volumeDomainByName(spec, asset.TargetDomain)
+		if !ok || (domain.Name != VolumeDomainRuntimeState && domain.Name != VolumeDomainPublicAssets) || domain.StudentAccess == VolumeAccessReadWrite {
+			return apperr.ErrSandboxInitAssetConfigInvalid
+		}
+		if hash := strings.TrimSpace(asset.ExpectedSHA256); hash != "" {
+			if len(hash) != 64 {
+				return apperr.ErrSandboxInitAssetConfigInvalid
+			}
+			for _, char := range hash {
+				if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+					return apperr.ErrSandboxInitAssetConfigInvalid
+				}
+			}
+		}
+		phase := strings.TrimSpace(asset.ApplyPhase)
+		if phase != "" && !strings.EqualFold(phase, InitAssetApplyPhaseInit) && !strings.EqualFold(phase, InitAssetApplyPhasePersonalization) {
+			return apperr.ErrSandboxInitAssetConfigInvalid
+		}
+		if !componentCanWriteDomain(spec, spec.InitAssetOps.ExecTarget, domain.Name) {
+			return apperr.ErrSandboxInitAssetConfigInvalid
+		}
 	}
 	return nil
 }
@@ -907,6 +983,22 @@ func validatePodTopology(spec *AdapterSpec) error {
 	}
 	if !runtimeContainerSeen {
 		return apperr.ErrSandboxPodTopologyInvalid
+	}
+	return nil
+}
+
+// validatePodPortConflicts 校验缺省单 Pod 拓扑中所有容器的数值端口不冲突。
+func validatePodPortConflicts(pods []workload.PodSpec) error {
+	for _, pod := range pods {
+		ports := map[int32]struct{}{}
+		for _, container := range pod.Containers {
+			for _, port := range container.Ports {
+				if _, exists := ports[port.ContainerPort]; exists {
+					return apperr.ErrSandboxPodTopologyInvalid
+				}
+				ports[port.ContainerPort] = struct{}{}
+			}
+		}
 	}
 	return nil
 }
@@ -1179,6 +1271,9 @@ func normalizeAndValidateVolumeDomains(spec *AdapterSpec) error {
 		if domain.Name == VolumeDomainRuntimeState && domain.StudentAccess != VolumeAccessNone {
 			return apperr.ErrSandboxVolumeDomainInvalid
 		}
+		if domain.Name == VolumeDomainPublicAssets && domain.StudentAccess != VolumeAccessReadOnly {
+			return apperr.ErrSandboxVolumeDomainInvalid
+		}
 		if domain.Name == VolumeDomainJudgePrivate && (domain.StudentAccess != VolumeAccessNone || domain.SnapshotScope != VolumeSnapshotNever) {
 			return apperr.ErrSandboxPrivateDomainInvalid
 		}
@@ -1191,6 +1286,46 @@ func normalizeAndValidateVolumeDomains(spec *AdapterSpec) error {
 	}
 	if !workspaceSeen {
 		return apperr.ErrSandboxVolumeDomainInvalid
+	}
+	return nil
+}
+
+// validateAdapterComponentMountDomains 校验运行时所有实际组件只使用已声明安全域,并显式声明写权限。
+func validateAdapterComponentMountDomains(spec AdapterSpec) error {
+	declared := make(map[string]VolumeDomainSpec, len(spec.VolumeDomains))
+	for _, domain := range spec.VolumeDomains {
+		declared[strings.TrimSpace(domain.Name)] = domain
+	}
+	components := []workload.ComponentSpec{spec.RuntimeContainer}
+	components = append(components, spec.InfraSidecars...)
+	for _, pod := range spec.Pods {
+		components = append(components, pod.InitContainers...)
+		for _, component := range pod.Containers {
+			if !podContainerIsReferenceOnly(component) {
+				components = append(components, component)
+			}
+		}
+	}
+	for _, component := range components {
+		mounted := map[string]struct{}{}
+		for _, raw := range component.MountDomains {
+			name := strings.TrimSpace(raw)
+			domain, ok := declared[name]
+			if !ok || domain.Name == VolumeDomainWorkspace || (domain.Name == VolumeDomainJudgePrivate && studentAccessibleContainer(component)) {
+				return apperr.ErrSandboxVolumeDomainInvalid
+			}
+			mounted[name] = struct{}{}
+		}
+		for _, raw := range component.WritableMountDomains {
+			name := strings.TrimSpace(raw)
+			domain, ok := declared[name]
+			if !ok || domain.Name == VolumeDomainWorkspace || (domain.Name == VolumeDomainJudgePrivate && studentAccessibleContainer(component)) || domain.StudentAccess == VolumeAccessReadWrite {
+				return apperr.ErrSandboxPrivateDomainInvalid
+			}
+			if _, ok := mounted[name]; !ok {
+				return apperr.ErrSandboxVolumeDomainInvalid
+			}
+		}
 	}
 	return nil
 }
@@ -1234,6 +1369,14 @@ func validatePrivateSidecars(items []workload.ComponentSpec, cfg config.SandboxC
 			return err
 		}
 		if studentAccessibleContainer(*item) {
+			return apperr.ErrSandboxPrivateDomainInvalid
+		}
+		for _, raw := range item.MountDomains {
+			if strings.TrimSpace(raw) != VolumeDomainJudgePrivate {
+				return apperr.ErrSandboxPrivateDomainInvalid
+			}
+		}
+		if len(item.WritableMountDomains) > 0 {
 			return apperr.ErrSandboxPrivateDomainInvalid
 		}
 		if _, exists := seen[item.Name]; exists {
@@ -1408,6 +1551,12 @@ func validateAdapterExecTargets(spec *AdapterSpec) error {
 	privateContainer, exists := containers[strings.TrimSpace(spec.PrivateArchiveOps.ExecTarget)]
 	if !exists || studentAccessibleContainer(privateContainer) {
 		return apperr.ErrSandboxPrivateDomainInvalid
+	}
+	if len(spec.InitAssets) > 0 {
+		initContainer, initExists := containers[strings.TrimSpace(spec.InitAssetOps.ExecTarget)]
+		if !initExists || studentAccessibleContainer(initContainer) {
+			return apperr.ErrSandboxInitAssetConfigInvalid
+		}
 	}
 	return nil
 }
@@ -1592,7 +1741,7 @@ func validateComponentMountDomains(spec workload.ComponentSpec) error {
 	seen := map[string]struct{}{}
 	for _, raw := range spec.MountDomains {
 		domain := strings.TrimSpace(raw)
-		if !mountNamePattern.MatchString(domain) || domain == VolumeDomainWorkspace || domain == VolumeDomainJudgePrivate {
+		if !mountNamePattern.MatchString(domain) || domain == VolumeDomainWorkspace || (domain == VolumeDomainJudgePrivate && studentAccessibleContainer(spec)) {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
 		if _, exists := seen[domain]; exists {
@@ -1602,7 +1751,7 @@ func validateComponentMountDomains(spec workload.ComponentSpec) error {
 	}
 	for _, raw := range spec.WritableMountDomains {
 		domain := strings.TrimSpace(raw)
-		if !mountNamePattern.MatchString(domain) {
+		if !mountNamePattern.MatchString(domain) || (domain == VolumeDomainJudgePrivate && studentAccessibleContainer(spec)) {
 			return apperr.ErrSandboxToolCreateInvalid
 		}
 		if _, exists := seen[domain]; !exists {

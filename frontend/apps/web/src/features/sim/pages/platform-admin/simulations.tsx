@@ -205,7 +205,7 @@ export default function PlatformSimulationsPage() {
           >
             {(page) => (
               <div className="flex flex-col gap-4">
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className={page.list.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
                   {page.list.map((review) => (
                     <ReviewCard
                       key={review.id}

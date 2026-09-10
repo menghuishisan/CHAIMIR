@@ -39,14 +39,19 @@ func main() {
 		}
 		return
 	}
-	port := getenvInt("CHAIMIR_EDU_CHAIN_PORT", 8080)
-	maxBodyBytes := int64(getenvInt("CHAIMIR_MAX_BODY_BYTES", 65536))
-	chainID := getenv("CHAIMIR_EDU_CHAIN_ID", "chaimir-edu")
+	port := requiredPort("CHAIMIR_EDU_CHAIN_PORT")
+	maxBodyBytes := int64(requiredInt("CHAIMIR_MAX_BODY_BYTES"))
+	httpTimeout := time.Duration(requiredInt("CHAIMIR_HTTP_TIMEOUT_SECONDS")) * time.Second
+	chainID := required("CHAIMIR_EDU_CHAIN_ID")
 	handler := eduChainHandler{chainID: chainID, maxBodyBytes: maxBodyBytes, objects: map[string]map[string]any{}, txs: map[string]map[string]any{}}
 	server := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
 		Handler:           handler.routes(),
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: httpTimeout,
+		ReadTimeout:       httpTimeout,
+		WriteTimeout:      httpTimeout,
+		IdleTimeout:       httpTimeout,
+		MaxHeaderBytes:    16 << 10,
 	}
 	log.Fatal(server.ListenAndServe())
 }
@@ -331,23 +336,34 @@ func writeJSON(w http.ResponseWriter, payload map[string]any) {
 	}
 }
 
-// getenv 读取字符串环境变量。
-func getenv(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+// required 读取非空运行期配置,缺失时严格终止节点启动。
+func required(key string) string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		log.Printf("%s is required", key)
+		os.Exit(2)
 	}
-	return fallback
+	return value
 }
 
-// getenvInt 读取正整数环境变量。
-func getenvInt(key string, fallback int) int {
-	value := os.Getenv(key)
-	if value == "" {
-		return fallback
-	}
+// requiredInt 读取正整数运行期配置,拒绝缺失和非法值。
+func requiredInt(key string) int {
+	value := required(key)
 	parsed, err := strconv.Atoi(value)
 	if err != nil || parsed <= 0 {
-		return fallback
+		log.Printf("%s must be a positive integer", key)
+		os.Exit(2)
+	}
+	return parsed
+}
+
+// requiredPort validates the HTTP listener port separately from body limits.
+func requiredPort(key string) int {
+	value := required(key)
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 1 || parsed > 65535 {
+		log.Printf("%s must be a valid TCP port", key)
+		os.Exit(2)
 	}
 	return parsed
 }

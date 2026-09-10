@@ -19,27 +19,35 @@ func main() {
 		fail("CHAIMIR_IPFS_API_URL is required")
 	}
 	parsed, err := url.Parse(apiURL)
-	if err != nil || parsed.Hostname() == "" {
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 		fail("CHAIMIR_IPFS_API_URL is invalid")
 	}
 	port := parsed.Port()
 	if port == "" {
-		port = "5001"
+		fail("CHAIMIR_IPFS_API_URL port is required")
 	}
-	if _, err := strconv.Atoi(port); err != nil {
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
 		fail("CHAIMIR_IPFS_API_URL port is invalid")
 	}
+	port = strconv.Itoa(portNumber)
 	prefix := "dns4"
-	if net.ParseIP(parsed.Hostname()) != nil {
-		prefix = "ip4"
+	if ip := net.ParseIP(parsed.Hostname()); ip != nil {
+		if ip.To4() != nil {
+			prefix = "ip4"
+		} else {
+			prefix = "ip6"
+		}
 	}
 	multiaddress := fmt.Sprintf("/%s/%s/tcp/%s", prefix, parsed.Hostname(), port)
-	configDir := os.Getenv("IPFS_CLUSTER_PATH")
-	if configDir == "" {
-		configDir = "/runtime-state/ipfs-cluster"
-	}
+	configDir := "/runtime-state/ipfs-cluster"
 	if err := os.MkdirAll(configDir, 0700); err != nil {
 		fail("initialize IPFS Cluster config directory: " + err.Error())
+	}
+	// 官方 init 子命令只能通过 IPFS_CLUSTER_PATH 选择配置根目录；由唯一入口
+	// 固定为 runtime-state，避免把工作目录或外部未声明环境键当作状态边界。
+	if err := os.Setenv("IPFS_CLUSTER_PATH", configDir); err != nil {
+		fail("set IPFS Cluster config directory: " + err.Error())
 	}
 	configPath := filepath.Join(configDir, "service.json")
 	if err := ensureServiceConfig(configPath); err != nil {

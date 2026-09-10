@@ -61,6 +61,7 @@ infra:
   bindings:
     - name: ipfs_api
       capability: ipfs-node
+      source_component: infra
       endpoint: api
       protocol: HTTP
       required_at_start: true
@@ -69,9 +70,6 @@ infra:
     components:
       - name: infra
         image_url: "@self"
-        env:
-          - name: IPFS_CLUSTER_PATH
-            value: /runtime-state/ipfs-cluster
         ports:
           - name: cluster-api
             container_port: 9094

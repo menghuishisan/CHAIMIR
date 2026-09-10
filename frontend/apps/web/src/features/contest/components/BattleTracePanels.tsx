@@ -8,7 +8,7 @@
 // 链上动作是无界序列,归右侧事件流。日志按游标增长(拖到第 n 步就只显示前 n 步),
 // 这是「日志流随时间轴构建」的字面实现 —— 序列本身是后端记录的事实,不补帧、不插值。
 
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ShieldCheck, Swords, TriangleAlert } from 'lucide-react'
 import { BattleRole, type BattleReplayArchive, type BattleReplayAction } from '@chaimir/api-client'
 import { Badge, Button, cn, useReducedMotion } from '@chaimir/ui'
@@ -171,28 +171,49 @@ export function ChainLogStream({
 }: ChainLogStreamProps) {
   const reducedMotion = useReducedMotion()
   const listRef = useRef<HTMLOListElement>(null)
+  const [followLatest, setFollowLatest] = useState(true)
   const visible = useMemo(
     () => (archive ? archive.actions.slice(0, Math.min(step, archive.actions.length)) : []),
     [archive, step],
   )
 
-  // 跟随最新:游标前进时把最后一条滚进视口;减弱动效偏好下不做平滑滚动
+  // 换到另一局时恢复跟随最新,避免把上一局手动浏览的位置带进新轨迹。
+  useEffect(() => {
+    setFollowLatest(true)
+  }, [archive])
+
+  // 跟随最新:只有用户仍停在底部时才随游标移动,手动上翻日志不会被新帧抢回底部。
   useEffect(() => {
     const node = listRef.current
-    if (!node) return
+    if (!node || !followLatest) return
     node.scrollTo({ top: node.scrollHeight, behavior: reducedMotion ? 'auto' : 'smooth' })
-  }, [reducedMotion, visible.length])
+  }, [followLatest, reducedMotion, visible.length])
+
+  const jumpToLatest = () => {
+    setFollowLatest(true)
+    listRef.current?.scrollTo({
+      top: listRef.current.scrollHeight,
+      behavior: reducedMotion ? 'auto' : 'smooth',
+    })
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 flex-col gap-2 border-b border-dark-line p-3">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-sm font-medium text-on-dark">链上日志流</h2>
-          {archive ? (
-            <Badge onDark tone="neutral">
-              {visible.length}/{archive.actions.length} 步
-            </Badge>
-          ) : null}
+          <div className="flex items-center gap-2">
+            {archive && !followLatest ? (
+              <Button variant="on-dark" size="sm" onClick={jumpToLatest}>
+                跟随最新
+              </Button>
+            ) : null}
+            {archive ? (
+              <Badge onDark tone="neutral">
+                {visible.length}/{archive.actions.length} 步
+              </Badge>
+            ) : null}
+          </div>
         </div>
         {!available ? (
           <p className="text-xs text-on-dark-sub">这一局没有留下轨迹记录,没有可回放的链上动作。</p>
@@ -211,7 +232,15 @@ export function ChainLogStream({
         {error ? <p className="text-xs text-on-dark-danger">{error}</p> : null}
       </div>
 
-      <ol ref={listRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
+      <ol
+        ref={listRef}
+        onScroll={(event) => {
+          const node = event.currentTarget
+          const distanceToBottom = node.scrollHeight - node.scrollTop - node.clientHeight
+          setFollowLatest(distanceToBottom <= 24)
+        }}
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto p-3"
+      >
         {visible.map((action) => (
           <li key={action.seq} className="border-b border-dark-line py-2 last:border-b-0">
             <ChainLogRow action={action} />

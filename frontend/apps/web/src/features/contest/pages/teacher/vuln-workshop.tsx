@@ -36,8 +36,10 @@ import {
   Empty,
   FilterBar,
   FilterField,
+  IconButton,
   MetricStrip,
   PageHeader,
+  PageBody,
   PageScaffold,
   PageSection,
   Pagination,
@@ -290,45 +292,6 @@ export default function TeacherVulnWorkshopPage() {
         ]}
       />
 
-      <PageSection
-        title="漏洞来源"
-        description="从公开漏洞情报或弱点分类库拉取案例。密钥类配置由后端加密保存,不回显。"
-        actions={
-          <Button variant="outline" leftIcon={Plus} onClick={() => setSourceForm({})}>
-            添加来源
-          </Button>
-        }
-      >
-        <ResourceState
-          resource={sources}
-          emptyIcon={Database}
-          emptyTitle="还没有配置漏洞来源"
-          emptyDescription="配置来源后可以同步拉取漏洞案例,也可以先手工录入单个漏洞题。"
-          emptyAction={
-            <Button variant="outline" leftIcon={Plus} onClick={() => setSourceForm({})}>
-              添加来源
-            </Button>
-          }
-        >
-          {(list) => (
-            <div className="grid gap-4 lg:grid-cols-2">
-              {list.map((source) => (
-                <VulnSourceCard
-                  key={source.id}
-                  source={source}
-                  onEdit={() => setSourceForm({ source })}
-                  onSynced={() => {
-                    sources.reload()
-                    problems.reload()
-                  }}
-                  onError={setActionError}
-                />
-              ))}
-            </div>
-          )}
-        </ResourceState>
-      </PageSection>
-
       {/* 动作失败就近内联(§6.7 C) */}
       {actionError ? (
         <Callout tone="danger" className="mb-4">
@@ -336,11 +299,54 @@ export default function TeacherVulnWorkshopPage() {
         </Callout>
       ) : null}
 
-      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
-      <DataPanel
-        label="漏洞题草稿"
-        filter={
-          <FilterBar label="漏洞题草稿筛选">
+      <PageBody
+        rail={
+          <PageSection
+            title="漏洞来源"
+            description="从公开漏洞情报或弱点分类库拉取案例。密钥类配置由后端加密保存,不回显。"
+            actions={
+              <Button variant="outline" leftIcon={Plus} onClick={() => setSourceForm({})}>
+                添加来源
+              </Button>
+            }
+            className="mb-0"
+          >
+            <ResourceState
+              resource={sources}
+              emptyIcon={Database}
+              emptyTitle="还没有配置漏洞来源"
+              emptyDescription="配置来源后可以同步拉取漏洞案例,也可以先手工录入单个漏洞题。"
+              emptyAction={
+                <Button variant="primary" leftIcon={Plus} onClick={() => setSourceForm({})}>
+                  添加来源
+                </Button>
+              }
+            >
+              {(list) => (
+                <div className="flex flex-col gap-4">
+                  {list.map((source) => (
+                    <VulnSourceCard
+                      key={source.id}
+                      source={source}
+                      onEdit={() => setSourceForm({ source })}
+                      onSynced={() => {
+                        sources.reload()
+                        problems.reload()
+                      }}
+                      onError={setActionError}
+                    />
+                  ))}
+                </div>
+              )}
+            </ResourceState>
+          </PageSection>
+        }
+      >
+        {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2);主区优先承载从草稿到固化的工作流。 */}
+        <DataPanel
+          label="漏洞题草稿"
+          filter={
+            <FilterBar label="漏洞题草稿筛选">
             <FilterField label="草稿状态" group>
               <SegmentedControl
                 aria-label="按草稿状态筛选"
@@ -375,16 +381,16 @@ export default function TeacherVulnWorkshopPage() {
               />
             </FilterField>
           </FilterBar>
-        }
-        footer={
-          <Pagination
-            page={problems.page}
-            pageSize={problems.pageSize}
-            total={problems.total}
-            onPageChange={problems.setPage}
-          />
-        }
-      >
+          }
+          footer={
+            <Pagination
+              page={problems.page}
+              pageSize={problems.pageSize}
+              total={problems.total}
+              onPageChange={problems.setPage}
+            />
+          }
+        >
           <ResourceState
             resource={problems}
             emptyIcon={Bug}
@@ -412,11 +418,35 @@ export default function TeacherVulnWorkshopPage() {
                       label={vulnProblemStatusLabel(item.status)}
                     />
                   ),
+                  action: (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        leftIcon={FlaskConical}
+                        onClick={() => setPrevalidateTarget(item)}
+                      >
+                        预验证
+                      </Button>
+                      {item.prevalidate_status === VulnPrevalidateStatus.PASSED &&
+                      item.status === VulnProblemStatus.DRAFT ? (
+                        <IconButton
+                          variant="ghost"
+                          size="sm"
+                          icon={ShieldCheck}
+                          aria-label={`固化漏洞题 ${item.title}`}
+                          disabled={finalizingId === item.id}
+                          onClick={() => void finalize(item)}
+                        />
+                      ) : null}
+                    </div>
+                  ),
                 })}
               />
             )}
           </ResourceState>
-      </DataPanel>
+        </DataPanel>
+      </PageBody>
 
       <Callout tone="info">
         固化会把漏洞题写入本校题库并自动发布,答案与判题配置在写入时即被标记为敏感字段,学生取题面时看不到。

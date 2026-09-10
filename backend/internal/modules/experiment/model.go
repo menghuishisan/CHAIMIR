@@ -55,6 +55,7 @@ type EnvComponentRequest struct {
 	AccessProfile            contracts.SandboxAccessProfile      `json:"access_profile"`
 	ResourceProfile          map[string]string                   `json:"resource_profile,omitempty"`
 	NetworkProfile           map[string]any                      `json:"network_profile,omitempty"`
+	InitAssets               []contracts.CompositionInitAsset    `json:"init_assets,omitempty"`
 	InitCodeRef              string                              `json:"init_code_ref"`
 	InitScriptRef            string                              `json:"init_script_ref"`
 	KeepAlive                bool                                `json:"keep_alive"`

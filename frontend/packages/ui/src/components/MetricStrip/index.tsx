@@ -46,14 +46,14 @@ export function MetricStrip({ label, items, className }: MetricStripProps) {
           key={item.label}
           className={cn(
             // <md:每项一行,标签与数值同行基线对齐,底部一条分隔线代替卡片边界
-            "flex items-baseline justify-between gap-3 border-b border-line pb-1.5",
+            "flex min-w-0 items-baseline justify-between gap-3 border-b border-line pb-1.5",
             // ≥md:标签在上数值在下,竖线分隔;首项不画竖线
             "md:flex-col md:items-start md:justify-start md:gap-0 md:border-b-0 md:pb-0",
             index > 0 && "md:border-l md:border-line md:pl-7",
           )}
         >
-          <dt className="text-xs text-ink-sub">{item.label}</dt>
-          <dd className="text-lg font-semibold text-ink tabular-nums md:mt-0.5 md:text-xl">
+          <dt className="min-w-0 break-words text-xs text-ink-sub">{item.label}</dt>
+          <dd className="min-w-0 break-words text-right text-lg font-semibold text-ink tabular-nums md:mt-0.5 md:text-xl">
             {item.value}
           </dd>
           {/* 口径补充只在 ≥md 出现:窄屏一行放不下三段信息,口径让位于数值本身 */}

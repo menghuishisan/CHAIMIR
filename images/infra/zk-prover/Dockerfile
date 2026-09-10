@@ -13,8 +13,7 @@ ENV HOME=/workspace
 
 WORKDIR /opt/chaimir/zk-prover
 COPY --from=deps /opt/chaimir/zk-prover /opt/chaimir/zk-prover
-RUN apk upgrade --no-cache \
-    && apk add --no-cache bash ca-certificates \
+RUN apk add --no-cache bash ca-certificates \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
     && mkdir -p /workspace \
     && chown -R 1000:1000 /workspace

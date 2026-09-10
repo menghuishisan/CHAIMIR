@@ -10,8 +10,7 @@ RUN --mount=type=cache,target=/go/pkg \
     --mount=type=cache,target=/tmp/go-cache \
     make GOARCH="${TARGETARCH}" DESTDIR="/out/${TARGETOS}/${TARGETARCH}" \
         build-container-operator-generic install-container-binary-operator-generic licenses-all \
-    && mv LICENSE.all "/out/${TARGETOS}/${TARGETARCH}/LICENSE.all" \
-    && true
+    && mv LICENSE.all "/out/${TARGETOS}/${TARGETARCH}/LICENSE.all"
 
 FROM scratch
 ARG TARGETOS

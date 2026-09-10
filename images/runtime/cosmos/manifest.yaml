@@ -53,6 +53,8 @@ runtime:
         value: tcp://0.0.0.0:1317
       - name: CHAIMIR_COSMOS_GRPC_ADDRESS
         value: 0.0.0.0:9090
+      - name: CHAIMIR_COSMOS_MIN_GAS_PRICES
+        value: 0.0stake
 env_keys:
   config:
     - CHAIMIR_COSMOS_HOME

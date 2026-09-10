@@ -40,8 +40,7 @@ FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc
 LABEL org.opencontainers.image.title="runtime/op-geth"
 LABEL org.opencontainers.image.description="Chaimir OP Geth source rebuild with runtime adapter"
 
-RUN apk upgrade --no-cache \
-    && apk add --no-cache ca-certificates curl \
+RUN apk add --no-cache ca-certificates curl \
     && mkdir -p /runtime-state/op-geth \
     && chown -R 1000:1000 /runtime-state
 

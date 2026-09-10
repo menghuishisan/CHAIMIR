@@ -96,6 +96,7 @@ func acceptanceEVMJudgerSidecar(imageURL string) workload.ComponentSpec {
 		ReadOnlyRootFilesystem: &readOnlyRoot,
 		Labels:                 map[string]string{"chaimir.io/student-access": "false", "chaimir.io/sensitivity": "judge-private"},
 		MountWorkspace:         &mountWorkspace,
+		MountDomains:           []string{sandbox.VolumeDomainJudgePrivate},
 		EphemeralMounts: []workload.EphemeralMountSpec{
 			{Name: "judge-workdir", MountPath: "/judge"},
 			{Name: "judge-tmp", MountPath: "/tmp"},

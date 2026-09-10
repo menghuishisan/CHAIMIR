@@ -8,17 +8,19 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 )
 
 func main() {
-	for _, name := range []string{"OP_NODE_L1_ETH_RPC", "OP_NODE_L2_ENGINE_RPC", "OP_NODE_L1_BEACON", "OP_NODE_ROLLUP_CONFIG", "OP_GETH_JWT_SECRET"} {
+	for _, name := range []string{"OP_NODE_L1_ETH_RPC", "OP_NODE_L2_ENGINE_RPC", "OP_NODE_L1_BEACON", "OP_NODE_ROLLUP_CONFIG", "OP_NODE_RPC_ADDR", "OP_NODE_RPC_PORT", "OP_GETH_JWT_SECRET"} {
 		requiredEnv(name)
 	}
-	validateURL("OP_NODE_L1_ETH_RPC", os.Getenv("OP_NODE_L1_ETH_RPC"), "http", "https", "ws", "wss")
+	validateURL("OP_NODE_L1_ETH_RPC", os.Getenv("OP_NODE_L1_ETH_RPC"), "http", "https")
 	validateURL("OP_NODE_L2_ENGINE_RPC", os.Getenv("OP_NODE_L2_ENGINE_RPC"), "http", "https")
 	validateURL("OP_NODE_L1_BEACON", os.Getenv("OP_NODE_L1_BEACON"), "http", "https")
+	validatePort("OP_NODE_RPC_PORT", os.Getenv("OP_NODE_RPC_PORT"))
 	rollupConfig := os.Getenv("OP_NODE_ROLLUP_CONFIG")
 	info, err := os.Stat(rollupConfig)
 	if err != nil || info.IsDir() {
@@ -39,21 +41,18 @@ func main() {
 	if err := os.WriteFile(secretPath, []byte(jwt+"\n"), 0600); err != nil {
 		fail("write OP Node JWT file: " + err.Error())
 	}
-	if os.Getenv("OP_NODE_RPC_ADDR") == "" {
-		if err := os.Setenv("OP_NODE_RPC_ADDR", "0.0.0.0"); err != nil {
-			fail("set OP_NODE_RPC_ADDR: " + err.Error())
-		}
-	}
-	if os.Getenv("OP_NODE_RPC_PORT") == "" {
-		if err := os.Setenv("OP_NODE_RPC_PORT", "8545"); err != nil {
-			fail("set OP_NODE_RPC_PORT: " + err.Error())
-		}
-	}
 	if err := os.Setenv("OP_NODE_L2_ENGINE_AUTH", secretPath); err != nil {
 		fail("set OP_NODE_L2_ENGINE_AUTH: " + err.Error())
 	}
 	if err := syscall.Exec("/usr/local/bin/op-node", append([]string{"op-node"}, os.Args[1:]...), os.Environ()); err != nil {
 		fail("exec op-node: " + err.Error())
+	}
+}
+
+func validatePort(name, raw string) {
+	port, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || port < 1 || port > 65535 {
+		fail(name + " must be a valid TCP port")
 	}
 }
 
@@ -67,8 +66,12 @@ func requiredEnv(name string) string {
 
 func validateURL(name, raw string, schemes ...string) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil || parsed.Hostname() == "" {
+	if err != nil || parsed.Hostname() == "" || parsed.Port() == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 		fail(name + " is invalid")
+	}
+	port, portErr := strconv.Atoi(parsed.Port())
+	if portErr != nil || port < 1 || port > 65535 {
+		fail(name + " must use a TCP port in 1-65535")
 	}
 	for _, scheme := range schemes {
 		if parsed.Scheme == scheme {

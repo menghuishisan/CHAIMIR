@@ -11,8 +11,25 @@ from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_utils import to_checksum_address
 
-PORT = int(os.environ.get("CHAIMIR_IMAGE_PORT", "8080"))
-MAX_BODY_BYTES = int(os.environ.get("CHAIMIR_MAX_BODY_BYTES", "1048576"))
+def required_positive_int(name: str) -> int:
+    """读取必填正整数配置,拒绝镜像自行选择运行参数。"""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        raise RuntimeError(f"{name} is required")
+    try:
+        value = int(raw, 10)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a positive integer") from exc
+    if value <= 0:
+        raise RuntimeError(f"{name} must be a positive integer")
+    return value
+
+
+PORT = required_positive_int("CHAIMIR_IMAGE_PORT")
+MAX_BODY_BYTES = required_positive_int("CHAIMIR_MAX_BODY_BYTES")
+HTTP_TIMEOUT_SECONDS = required_positive_int("CHAIMIR_HTTP_TIMEOUT_SECONDS")
+MAX_HEADER_BYTES = 16 * 1024
+MAX_HEADER_COUNT = 64
 ACCOUNT = Account.create(os.urandom(32))
 
 INDEX_HTML = """<!doctype html>
@@ -130,13 +147,31 @@ refreshAccount();
 
 def parse_json_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
     """读取并校验 JSON 请求体,避免超大载荷进入签名流程。"""
-    length = int(handler.headers.get("Content-Length", "0"))
+    if handler.headers.get("Transfer-Encoding"):
+        raise ValueError("transfer encoding is unsupported")
+    content_lengths = handler.headers.get_all("Content-Length", [])
+    if len(content_lengths) != 1:
+        raise ValueError("content-length must be declared exactly once")
+    raw_length = content_lengths[0].strip()
+    if not raw_length or not raw_length.isdecimal():
+        raise ValueError("content-length is invalid")
+    try:
+        length = int(raw_length, 10)
+    except ValueError as exc:
+        raise ValueError("content-length is invalid") from exc
+    if length < 0:
+        raise ValueError("content-length is invalid")
     if length > MAX_BODY_BYTES:
         raise ValueError("payload too large")
     body = handler.rfile.read(length)
+    if len(body) != length:
+        raise ValueError("incomplete body")
     if not body:
         return {}
-    payload = json.loads(body.decode("utf-8"))
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except UnicodeDecodeError as exc:
+        raise ValueError("body must be UTF-8 JSON") from exc
     if not isinstance(payload, dict):
         raise ValueError("body must be a json object")
     return payload
@@ -171,7 +206,12 @@ def parse_int_field(payload: dict[str, Any], name: str, default: int | None = No
     value = payload.get(name, default)
     if value is None or value == "":
         raise ValueError(f"{name} is required")
-    out = int(str(value), 0)
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValueError(f"{name} must be an integer")
+    try:
+        out = int(str(value), 0)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
     if out < 0:
         raise ValueError(f"{name} must be non-negative")
     return out
@@ -182,16 +222,30 @@ def sign_transaction(payload: dict[str, Any]) -> dict[str, str]:
     to_addr = str(payload.get("to", "")).strip()
     if not to_addr:
         raise ValueError("to is required")
+    try:
+        checksum_to = to_checksum_address(to_addr)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("to must be a valid EVM address") from exc
+    data = payload.get("data", "0x") or "0x"
+    if not isinstance(data, str) or len(data) % 2 != 0 or not data.startswith("0x"):
+        raise ValueError("data must be 0x-prefixed hex")
+    try:
+        bytes.fromhex(data[2:])
+    except ValueError as exc:
+        raise ValueError("data must be 0x-prefixed hex") from exc
     tx = {
-        "to": to_checksum_address(to_addr),
+        "to": checksum_to,
         "value": parse_int_field(payload, "value_wei", 0),
         "nonce": parse_int_field(payload, "nonce"),
         "gas": parse_int_field(payload, "gas", 21000),
         "gasPrice": parse_int_field(payload, "gas_price_wei", 1000000000),
         "chainId": parse_int_field(payload, "chain_id"),
-        "data": str(payload.get("data", "0x") or "0x"),
+        "data": data,
     }
-    signed = Account.sign_transaction(tx, ACCOUNT.key)
+    try:
+        signed = Account.sign_transaction(tx, ACCOUNT.key)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("transaction fields are invalid") from exc
     raw = getattr(signed, "raw_transaction", getattr(signed, "rawTransaction", b""))
     return {
         "address": ACCOUNT.address,
@@ -202,6 +256,22 @@ def sign_transaction(payload: dict[str, Any]) -> dict[str, str]:
 
 class WalletSimHandler(BaseHTTPRequestHandler):
     """处理钱包模拟请求。"""
+
+    def parse_request(self) -> bool:
+        """拒绝过多或过大的请求头,避免连接长期占用工作线程。"""
+        if not super().parse_request():
+            return False
+        header_bytes = sum(len(key) + len(value) + 4 for key, value in self.headers.items())
+        if len(self.headers) > MAX_HEADER_COUNT or header_bytes > MAX_HEADER_BYTES:
+            self.send_error(431, "request headers too large")
+            self.close_connection = True
+            return False
+        return True
+
+    def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
+        """以结构化 JSON 返回协议和输入错误,避免默认 HTML 错误页泄漏实现细节。"""
+        self.close_connection = True
+        self.write_json({"status": "error", "error": message or "request failed"}, status=code)
 
     def do_GET(self) -> None:
         """返回健康检查和模拟账户。"""
@@ -228,6 +298,7 @@ class WalletSimHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         """根据请求体生成可验证的教学钱包签名。"""
+        self.close_connection = True
         if self.path not in {"/sign", "/import", "/tx"}:
             self.send_error(404, "not found")
             return
@@ -241,18 +312,24 @@ class WalletSimHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/import":
             try:
-                self.write_json(import_wallet(str(payload.get("private_key", ""))))
-            except ValueError as exc:
+                private_key = payload.get("private_key", "")
+                if not isinstance(private_key, str):
+                    raise ValueError("private_key must be a string")
+                self.write_json(import_wallet(private_key))
+            except (TypeError, ValueError) as exc:
                 self.send_error(400, str(exc))
             return
         if self.path == "/tx":
             try:
                 signed = sign_transaction(payload)
                 self.write_json(signed)
-            except ValueError as exc:
+            except (TypeError, ValueError, OverflowError) as exc:
                 self.write_json({"status": "failed", "reason": str(exc)}, status=422)
             return
-        message = str(payload.get("message", ""))
+        message = payload.get("message", "")
+        if not isinstance(message, str):
+            self.send_error(400, "message must be a string")
+            return
         if not message:
             self.send_error(400, "message is required")
             return
@@ -268,6 +345,8 @@ class WalletSimHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        if self.close_connection:
+            self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
 
@@ -280,5 +359,17 @@ class WalletSimHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class BoundedThreadingHTTPServer(ThreadingHTTPServer):
+    """为工具 HTTP 端口设置有限连接超时和请求头上限。"""
+
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def get_request(self):
+        request, client_address = super().get_request()
+        request.settimeout(HTTP_TIMEOUT_SECONDS)
+        return request, client_address
+
+
 if __name__ == "__main__":
-    ThreadingHTTPServer(("0.0.0.0", PORT), WalletSimHandler).serve_forever()
+    BoundedThreadingHTTPServer(("0.0.0.0", PORT), WalletSimHandler).serve_forever()

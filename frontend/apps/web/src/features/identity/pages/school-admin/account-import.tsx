@@ -9,6 +9,7 @@
 import { useCallback, useState } from 'react'
 import type { ImportActivationCode, ImportPreviewResponse } from '@chaimir/api-client'
 import {
+  Badge,
   Button,
   Callout,
   FormField,
@@ -154,6 +155,18 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
           </ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
+          <div className="grid gap-2 sm:grid-cols-3" aria-label="导入步骤">
+            {[
+              ['1', '选择模板', !preview],
+              ['2', '校验预览', Boolean(preview)],
+              ['3', '确认提交', false],
+            ].map(([step, label, active]) => (
+              <div key={String(step)} className="flex items-center gap-2 rounded-lg border border-border bg-surface p-3">
+                <Badge tone={active ? 'jade' : 'neutral'}>{step}</Badge>
+                <span className="text-sm text-ink">{label}</span>
+              </div>
+            ))}
+          </div>
           <FormField label="导入对象" required helper="教师与学生的模板列不同,请选对再上传">
             <SegmentedControl
               aria-label="导入对象"

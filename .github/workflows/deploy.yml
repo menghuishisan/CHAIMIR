@@ -62,6 +62,8 @@ jobs:
         run: |
           ./deploy/scripts/verify-overlay-image-lock.ps1 `
             -OverlayPath ./deploy/overlays/prod-saas
+      - name: 校验 prod-saas cert-manager 与 ClusterIssuer 前置
+        run: bash ./deploy/scripts/check-prod-saas-cert-manager.sh
       - name: 应用 prod-saas overlay
         run: |
           set -euo pipefail

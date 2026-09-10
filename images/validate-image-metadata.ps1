@@ -2,7 +2,8 @@
 param(
     [string]$RepoRoot = "",
     [string]$DigestLockPath = "",
-    [string]$DeployConfigPath = ""
+    [string]$DeployConfigPath = "",
+    [switch]$SkipPlatformAttestations
 )
 
 $ErrorActionPreference = "Stop"
@@ -51,28 +52,56 @@ function Test-DockerfileImmutableSources {
         [string]$ManifestPath
     )
     $manifestContents = Get-Content -LiteralPath $ManifestPath -Raw
+    $upstream = Get-ChaimirYamlBlock -Path $ManifestPath -BlockName "upstream"
+    $buildBaseArgument = Get-ChaimirYamlValue -Lines $upstream -Key "build_base_arg"
+    $buildBaseImage = Get-ChaimirYamlValue -Lines $upstream -Key "build_base_image"
+    $buildBaseDigest = Get-ChaimirYamlValue -Lines $upstream -Key "build_base_digest"
+    if (-not [string]::IsNullOrWhiteSpace($buildBaseArgument)) {
+        if ($buildBaseArgument -notmatch "^[A-Z0-9_]+_IMAGE$") {
+            $errors.Add("upstream.build_base_arg 必须是 *_IMAGE Dockerfile ARG: $Image -> $buildBaseArgument")
+        }
+        if ([string]::IsNullOrWhiteSpace($buildBaseImage) -or $buildBaseImage.Contains("@") -or $buildBaseDigest -notmatch "^sha256:[0-9a-f]{64}$") {
+            $errors.Add("upstream.build_base_image/build_base_digest 必须组成不可变镜像引用: $Image")
+        }
+    }
+    $stageNames = @{}
+    $dockerfileArguments = @{}
     $lineNumber = 0
     foreach ($line in Get-Content -LiteralPath $DockerfilePath) {
         $lineNumber++
-        if ($line -match "^\s*FROM\s+([^\s]+)") {
+        if ($line -match "^\s*FROM\s+([^\s]+)(?:\s+AS\s+([A-Za-z0-9_.-]+))?\s*$") {
             $source = $Matches[1]
+            $stageName = $Matches[2]
+            if ($stageNames.ContainsKey($source)) {
+                if (-not [string]::IsNullOrWhiteSpace($stageName)) {
+                    $stageNames[$stageName] = $true
+                }
+                continue
+            }
             if ($source -ne "scratch" -and $source -notmatch "^\$\{" -and $source -notmatch "@sha256:[0-9a-f]{64}$") {
                 $errors.Add("Dockerfile 字面量基础镜像必须锁定 digest: $Image`:$lineNumber -> $source")
             }
             elseif ($source -match "@(sha256:[0-9a-f]{64})$" -and $manifestContents -notmatch [regex]::Escape($Matches[1])) {
                 $errors.Add("Dockerfile 基础镜像 digest 未同步到 manifest: $Image`:$lineNumber -> $source")
             }
+            if (-not [string]::IsNullOrWhiteSpace($stageName)) {
+                $stageNames[$stageName] = $true
+            }
         }
         if ($line -match "^\s*ARG\s+([A-Z0-9_]+_IMAGE)(?:=(.*))?\s*$") {
             $argument = $Matches[1]
             $default = $Matches[2]
+            $dockerfileArguments[$argument] = $true
             if ([string]::IsNullOrWhiteSpace($default) -or $default -notmatch "^invalid\.invalid/.+:required$") {
                 $errors.Add("Dockerfile 镜像参数必须使用显式失败默认值: $Image`:$lineNumber -> $argument")
             }
-            if (-not $internalBuildArguments.Contains($argument) -and $argument -ne "NGINX_RUNTIME_IMAGE") {
+            if (-not $internalBuildArguments.Contains($argument) -and $argument -ne "NGINX_RUNTIME_IMAGE" -and $argument -ne $buildBaseArgument) {
                 $errors.Add("Dockerfile 镜像参数没有统一注入映射: $Image`:$lineNumber -> $argument")
             }
         }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($buildBaseArgument) -and -not $dockerfileArguments.ContainsKey($buildBaseArgument)) {
+        $errors.Add("upstream.build_base_arg 未在 Dockerfile 声明: $Image -> $buildBaseArgument")
     }
 }
 
@@ -412,55 +441,59 @@ foreach ($image in $lock.Keys) {
 }
 
 # 本地/私有化静态证明不得引用已阻断、已删除或与正式锁不一致的旧 digest。
-$attestationLine = Get-Content -LiteralPath $DeployConfigPath | Where-Object { $_ -match "^PLATFORM_IMAGE_ATTESTATIONS_JSON=" }
-$registryLine = Get-Content -LiteralPath $DeployConfigPath | Where-Object { $_ -match "^IMAGE_REGISTRY=" }
-if (@($attestationLine).Count -ne 1) {
-    $errors.Add("$DeployConfigPath 必须且只能声明一次 PLATFORM_IMAGE_ATTESTATIONS_JSON")
-} else {
-    if (@($registryLine).Count -ne 1) {
-        $errors.Add("$DeployConfigPath 必须且只能声明一次 IMAGE_REGISTRY")
-        $attestationRegistry = ""
+# 候选锁在正式构建前可能尚未拥有对应的签名/扫描证明；只有显式传入
+# -SkipPlatformAttestations 时才跳过这一段。正式入口不传该开关，仍强制执行完整门禁。
+if (-not $SkipPlatformAttestations) {
+    $attestationLine = Get-Content -LiteralPath $DeployConfigPath | Where-Object { $_ -match "^PLATFORM_IMAGE_ATTESTATIONS_JSON=" }
+    $registryLine = Get-Content -LiteralPath $DeployConfigPath | Where-Object { $_ -match "^IMAGE_REGISTRY=" }
+    if (@($attestationLine).Count -ne 1) {
+        $errors.Add("$DeployConfigPath 必须且只能声明一次 PLATFORM_IMAGE_ATTESTATIONS_JSON")
     } else {
-        $registryText = [string]$registryLine
-        $attestationRegistry = $registryText.Substring($registryText.IndexOf("=") + 1).Trim().TrimEnd("/")
-        if ($attestationRegistry -notmatch "^[^/:]+(?::[0-9]+)?$") {
-            $errors.Add("$DeployConfigPath 中 IMAGE_REGISTRY 必须是 registry host 或 host:port")
+        if (@($registryLine).Count -ne 1) {
+            $errors.Add("$DeployConfigPath 必须且只能声明一次 IMAGE_REGISTRY")
+            $attestationRegistry = ""
+        } else {
+            $registryText = [string]$registryLine
+            $attestationRegistry = $registryText.Substring($registryText.IndexOf("=") + 1).Trim().TrimEnd("/")
+            if ($attestationRegistry -notmatch "^[^/:]+(?::[0-9]+)?$") {
+                $errors.Add("$DeployConfigPath 中 IMAGE_REGISTRY 必须是 registry host 或 host:port")
+            }
         }
-    }
-    $attestationJSON = $attestationLine.Substring($attestationLine.IndexOf("=") + 1)
-    $seenAttestations = @{}
-    $parsedAttestations = ConvertFrom-Json -InputObject $attestationJSON
-    foreach ($item in $parsedAttestations) {
-        $imageURL = [string]$item.image_url
-        $canonicalPrefix = if ([string]::IsNullOrWhiteSpace($attestationRegistry)) { "^$" } else { "^$([regex]::Escape($attestationRegistry))/" }
-        if ($imageURL -notmatch "$canonicalPrefix([^/]+/[^/@]+)@(sha256:[0-9a-f]{64})$") {
-            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 包含非法镜像引用")
-            continue
+        $attestationJSON = $attestationLine.Substring($attestationLine.IndexOf("=") + 1)
+        $seenAttestations = @{}
+        $parsedAttestations = ConvertFrom-Json -InputObject $attestationJSON
+        foreach ($item in $parsedAttestations) {
+            $imageURL = [string]$item.image_url
+            $canonicalPrefix = if ([string]::IsNullOrWhiteSpace($attestationRegistry)) { "^$" } else { "^$([regex]::Escape($attestationRegistry))/" }
+            if ($imageURL -notmatch "$canonicalPrefix([^/]+/[^/@]+)@(sha256:[0-9a-f]{64})$") {
+                $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 包含非法镜像引用")
+                continue
+            }
+            $logical = $Matches[1]
+            $digest = $Matches[2]
+            if ($seenAttestations.ContainsKey($logical)) {
+                $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 重复登记: $logical")
+                continue
+            }
+            $seenAttestations[$logical] = $true
+            if (-not $expectedDigests.ContainsKey($logical) -or $expectedDigests[$logical] -ne $digest) {
+                $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 与镜像期望 digest 不一致: $logical")
+            }
+            if (-not $catalog.ContainsKey($logical) -or -not $catalog[$logical].Deployable) {
+                $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 包含未登记或已阻断镜像: $logical")
+            }
+            if (-not ([bool]$item.cosign_verified) -or -not [string]::Equals(([string]$item.trivy_status), "passed", [System.StringComparison]::OrdinalIgnoreCase)) {
+                $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 包含未通过门禁的条目: $logical")
+            }
         }
-        $logical = $Matches[1]
-        $digest = $Matches[2]
-        if ($seenAttestations.ContainsKey($logical)) {
-            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 重复登记: $logical")
-            continue
-        }
-        $seenAttestations[$logical] = $true
-        if (-not $expectedDigests.ContainsKey($logical) -or $expectedDigests[$logical] -ne $digest) {
-            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 与镜像期望 digest 不一致: $logical")
-        }
-        if (-not $catalog.ContainsKey($logical) -or -not $catalog[$logical].Deployable) {
-            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 包含未登记或已阻断镜像: $logical")
-        }
-        if (-not ([bool]$item.cosign_verified) -or -not [string]::Equals(([string]$item.trivy_status), "passed", [System.StringComparison]::OrdinalIgnoreCase)) {
-            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 包含未通过门禁的条目: $logical")
-        }
-    }
 
-    # 准入清单必须覆盖全部可部署 manifest。构建镜像的 digest 来自正式锁，
-    # upstream-pinned 镜像的 digest 来自 manifest.upstream.digest；两类都必须
-    # 有当前环境的扫描、SBOM 和签名证明，不能把“未进入正式锁”误当成免检。
-    foreach ($deployableImage in $deployableImages) {
-        if (-not $seenAttestations.ContainsKey($deployableImage)) {
-            $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 缺少可部署镜像证明: $deployableImage")
+        # 准入清单必须覆盖全部可部署 manifest。构建镜像的 digest 来自正式锁，
+        # upstream-pinned 镜像的 digest 来自 manifest.upstream.digest；两类都必须
+        # 有当前环境的扫描、SBOM 和签名证明，不能把“未进入正式锁”误当成免检。
+        foreach ($deployableImage in $deployableImages) {
+            if (-not $seenAttestations.ContainsKey($deployableImage)) {
+                $errors.Add("PLATFORM_IMAGE_ATTESTATIONS_JSON 缺少可部署镜像证明: $deployableImage")
+            }
         }
     }
 }

@@ -5,20 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"syscall"
 )
 
-// envOrDefault 返回非空环境变量,否则使用运行时默认值。
-func envOrDefault(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
-}
-
 // main 校验持久化账本并把信号直接交给 Solana 验证器进程。
 func main() {
-	ledgerDir := envOrDefault("CHAIMIR_SOLANA_LEDGER_DIR", "/runtime-state/solana/ledger")
+	ledgerDir := required("CHAIMIR_SOLANA_LEDGER_DIR")
+	rpcPort := requiredPort("CHAIMIR_RUNTIME_RPC_PORT")
 	// runtime-state is an empty PVC on first start; the runtime owns creation of
 	// its ledger directory so platform selftest does not require a host-side seed.
 	if err := os.MkdirAll(ledgerDir, 0o700); err != nil {
@@ -36,23 +30,19 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if os.Getenv("TMPDIR") == "" {
-		if err := os.Setenv("TMPDIR", tmpDir); err != nil {
-			fmt.Fprintf(os.Stderr, "设置 Solana 临时目录失败: %v\n", err)
-			os.Exit(1)
-		}
+	if err := os.Setenv("TMPDIR", tmpDir); err != nil {
+		fmt.Fprintf(os.Stderr, "设置 Solana 临时目录失败: %v\n", err)
+		os.Exit(1)
 	}
-	if os.Getenv("HOME") == "" {
-		if err := os.Setenv("HOME", homeDir); err != nil {
-			fmt.Fprintf(os.Stderr, "设置 Solana HOME 失败: %v\n", err)
-			os.Exit(1)
-		}
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		fmt.Fprintf(os.Stderr, "设置 Solana HOME 失败: %v\n", err)
+		os.Exit(1)
 	}
 
 	args := []string{
 		"solana-test-validator",
 		"--ledger", ledgerDir,
-		"--rpc-port", envOrDefault("CHAIMIR_RUNTIME_RPC_PORT", "8899"),
+		"--rpc-port", strconv.Itoa(rpcPort),
 		"--bind-address", "0.0.0.0",
 	}
 	if _, err := os.Stat(filepath.Join(ledgerDir, "genesis.bin")); os.IsNotExist(err) {
@@ -66,4 +56,24 @@ func main() {
 		fmt.Fprintf(os.Stderr, "启动 Solana 验证器失败: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+func required(key string) string {
+	value := os.Getenv(key)
+	if value == "" {
+		fmt.Fprintf(os.Stderr, "%s is required\n", key)
+		os.Exit(2)
+	}
+	return value
+}
+
+// requiredPort validates the runtime RPC port before invoking the validator.
+func requiredPort(key string) int {
+	value := required(key)
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		fmt.Fprintf(os.Stderr, "%s must be a valid TCP port\n", key)
+		os.Exit(2)
+	}
+	return port
 }

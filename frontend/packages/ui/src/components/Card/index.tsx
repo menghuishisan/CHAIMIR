@@ -90,7 +90,7 @@ export function CardHeader({ title, description, actions, className }: CardHeade
   return (
     <div
       className={cn(
-        'flex items-start justify-between gap-4 border-b border-line px-5 py-4',
+        'flex flex-wrap items-start justify-between gap-4 border-b border-line px-5 py-4',
         className
       )}
     >
@@ -101,7 +101,7 @@ export function CardHeader({ title, description, actions, className }: CardHeade
         )}
       </div>
       {actions !== undefined && actions !== null && (
-        <div className="flex shrink-0 items-center gap-2">{actions}</div>
+        <div className="flex max-w-full flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">{actions}</div>
       )}
     </div>
   )

@@ -172,7 +172,7 @@ function ConfigHistoryContent({ config, onRolledBack }: ConfigHistoryContentProp
     <>
       <ObjectIdentity
         name={`${configKeyLabel(config.key)}的变更历史`}
-        subtitle={configKeyDescription(config.key) ?? '使用方自定义的配置键,平台不额外登记说明。'}
+        subtitle={configKeyDescription(config.key) ?? '使用方自定义的系统配置项，修改与回滚均记入全平台审计。'}
         actions={
           <Button variant="outline" onClick={() => navigate('/platform-admin/settings')}>
             返回系统配置
@@ -186,6 +186,21 @@ function ConfigHistoryContent({ config, onRolledBack }: ConfigHistoryContentProp
         ]}
       />
 
+      <div className="mt-6 grid gap-4 sm:grid-cols-2">
+        <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
+          <p className="text-xs font-medium text-ink-sub">当前生效版本</p>
+          <p className="mt-1 font-mono text-lg tabular-nums text-ink">v{config.version}</p>
+          <p className="mt-2 text-sm text-ink-sub">
+            最近更新于 {formatDateTime(config.updated_at)}，回滚前会再次校验这个版本。
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
+          <p className="text-xs font-medium text-ink-sub">历史记录</p>
+          <p className="mt-1 text-lg font-medium text-ink">{history.total} 条变更</p>
+          <p className="mt-2 text-sm text-ink-sub">每次修改和回滚都会留下审计记录，可按时间回看。</p>
+        </div>
+      </div>
+
       {actionError ? (
         <Callout tone="danger" className="mt-4">
           {actionError}
@@ -197,7 +212,7 @@ function ConfigHistoryContent({ config, onRolledBack }: ConfigHistoryContentProp
         故点了「回滚到改动前」先在这里停一下,把回滚到哪一刻说清再落。
       */}
       {target ? (
-        <div className="mt-4 flex flex-col gap-3 rounded-lg bg-surface p-5 shadow-xs">
+        <div className="mt-4 flex flex-col gap-3 rounded-lg border border-warning/30 bg-surface p-5 shadow-xs">
           <div className="flex flex-wrap items-center gap-2">
             <TriangleAlert aria-hidden="true" className="size-4 text-warning" />
             <span className="text-base text-ink">

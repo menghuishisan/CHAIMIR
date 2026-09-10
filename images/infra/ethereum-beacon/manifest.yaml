@@ -101,6 +101,7 @@ infra:
   bindings:
     - name: execution_chain
       capability: evm-engine-api
+      source_component: infra
       endpoint: engine
       protocol: HTTP
       required_at_start: true
@@ -120,7 +121,8 @@ env_keys:
   secret:
     - BEACON_EXECUTION_JWT
 secrets_required:
-  - env: BEACON_EXECUTION_JWT
+  - component: infra
+    env: BEACON_EXECUTION_JWT
     secret_key: OP_GETH_JWT_SECRET
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms

@@ -297,7 +297,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
         <ModalHeader>
           <ModalTitle>登记沙箱工具</ModalTitle>
           <ModalDescription>
-            用已存在的短名再登记一次就是覆盖原定义。改动对之后创建的环境生效。
+            按短名唯一识别；使用已存在的短名提交将覆盖旧配置。配置生效于之后创建的沙箱环境。
           </ModalDescription>
         </ModalHeader>
         <form onSubmit={submit} noValidate>

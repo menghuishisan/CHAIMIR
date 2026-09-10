@@ -48,7 +48,7 @@ export default function PlatformDashboardPage() {
       <PageHeader
         kicker={<Breadcrumb items={[{ label: '运营' }]} />}
         title="平台看板"
-        description="全平台学校、账号、课程、实验与竞赛的当下概览,以及近期的运营趋势。"
+        description="全平台学校、账号、课程、实验与竞赛的当下全景概览，以及近期全链路运营趋势。"
         icon={LayoutDashboard}
       />
 
@@ -89,7 +89,7 @@ function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
   return (
     <>
       <PageSection title="学校" description="已开通的学校与待处理的入驻申请。">
-        <div className="metric-band gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <Stat label="学校数" value={dashboard.tenant_count ?? 0} icon={Building} />
           <Stat
             label="待审入驻申请"
@@ -105,6 +105,32 @@ function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
             hint="近期有登录记录"
           />
         </div>
+        {(dashboard.pending_apply_count ?? 0) > 0 ? (
+          <div className="mt-4 flex flex-col gap-3 rounded-lg border border-warning/30 bg-surface p-4 shadow-xs sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <Inbox aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-warning" />
+              <div className="min-w-0">
+                <p className="font-medium text-ink">入驻申请队列需要处理</p>
+                <p className="mt-1 text-sm text-ink-sub">
+                  当前有 {dashboard.pending_apply_count} 份申请等待审核，开通前请核对联系人和授权信息。
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0 self-start sm:self-auto"
+              onClick={() => navigate('/platform-admin/applications')}
+            >
+              查看待审申请
+            </Button>
+          </div>
+        ) : (
+          <div className="mt-4 flex items-center gap-3 rounded-lg border border-border bg-surface p-4 shadow-xs">
+            <Inbox aria-hidden="true" className="size-4 shrink-0 text-primary" />
+            <p className="text-sm text-ink-sub">入驻申请队列已清空，当前没有待处理事项。</p>
+          </div>
+        )}
       </PageSection>
 
       <DashboardCompositionSection dashboard={dashboard} />

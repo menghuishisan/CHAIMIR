@@ -407,9 +407,9 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
     <Modal open onOpenChange={(open) => !open && onClose()}>
       <ModalContent size="xl">
         <ModalHeader>
-          <ModalTitle>{editing ? '修改运行时配置' : '登记链运行时'}</ModalTitle>
+          <ModalTitle>{editing ? `修改运行时配置 · ${runtime.name}` : '登记链运行时'}</ModalTitle>
           <ModalDescription>
-            运行时声明使用字段编辑器维护，登记后还需镜像预拉取和自检。
+            运行时声明使用字段编辑器维护；登记后进入联调状态，需经节点镜像预拉取与全链路自检验证。
           </ModalDescription>
         </ModalHeader>
         <form onSubmit={submit} noValidate>

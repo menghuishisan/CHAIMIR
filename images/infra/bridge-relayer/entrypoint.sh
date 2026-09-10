@@ -7,6 +7,7 @@ set -eu
 : "${HYP_RELAYCHAINS:?必须通过组合配置提供 relayChains 配置}"
 : "${HYP_SOURCE_RPC:?必须通过 source_chain binding 提供源链 RPC}"
 : "${HYP_DESTINATION_RPC:?必须通过 destination_chain binding 提供目标链 RPC}"
+: "${HYP_DEFAULTSIGNER_KEY:?必须通过 Secret 提供 Hyperlane relayer 默认签名私钥}"
 
 if [ ! -f "$HYP_BASE_CONFIG" ]; then
   echo "Hyperlane base config 文件不存在: $HYP_BASE_CONFIG" >&2

@@ -31,7 +31,6 @@ export function DashboardCompositionSection({ dashboard }: DashboardCompositionS
   return (
     <PageSection title="师生构成" description="教师与学生的人数占比。管理员账号不计入这个整体。">
       <ChartContainer
-        title="师生构成"
         description="环心是师生合计人数。"
         isEmpty={total === 0}
         emptyHint="还没有开通教师或学生账号。开通后这里会显示构成占比。"

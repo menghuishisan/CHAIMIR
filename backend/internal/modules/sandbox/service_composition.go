@@ -169,6 +169,9 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 		if err != nil {
 			return err
 		}
+		if err := applyCompositionInitAssets(spec.InitAssets, compiledRuntimes); err != nil {
+			return err
+		}
 		for instance, compiledRuntime := range compiledRuntimes {
 			if err := validateNetworkRules(&compiledRuntime); err != nil {
 				return fmt.Errorf("运行时 %s 连接拓扑无效: %w", instance, err)
@@ -288,6 +291,149 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 	return snapshot, nil
 }
 
+// applyCompositionInitAssets 把组合声明的教师/题目资产绑定到明确 runtime 实例。
+// 资产 sidecar 只写 runtime-state 或 public-assets，不能读取 Secret、workspace 或 judge-private。
+func applyCompositionInitAssets(items []contracts.CompositionInitAsset, runtimes map[string]AdapterSpec) error {
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(item.Name)
+		sourceRef := strings.TrimSpace(item.SourceRef)
+		instance := strings.TrimSpace(item.TargetRuntimeInstance)
+		domainName := strings.TrimSpace(item.TargetDomain)
+		if name == "" || sourceRef == "" || instance == "" || domainName == "" {
+			return fmt.Errorf("组合初始化资产必须声明名称、来源、目标 runtime 实例和目标安全域")
+		}
+		key := instance + "\x00" + name
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("runtime 实例 %s 重复声明初始化资产 %s", instance, name)
+		}
+		seen[key] = struct{}{}
+		adapter, ok := runtimes[instance]
+		if !ok {
+			return fmt.Errorf("初始化资产 %s 引用的 runtime 实例 %s 不存在", name, instance)
+		}
+		for _, existing := range adapter.InitAssets {
+			if strings.EqualFold(strings.TrimSpace(existing.Name), name) {
+				return fmt.Errorf("runtime 实例 %s 重复声明初始化资产 %s", instance, name)
+			}
+		}
+		domain, ok := volumeDomainByName(adapter, domainName)
+		if !ok || (domain.Name != VolumeDomainRuntimeState && domain.Name != VolumeDomainPublicAssets) || domain.StudentAccess == VolumeAccessReadWrite {
+			return fmt.Errorf("初始化资产 %s 的目标安全域 %s 不允许写入", name, domainName)
+		}
+		if hash := strings.TrimSpace(item.ExpectedSHA256); hash != "" {
+			if len(hash) != 64 {
+				return fmt.Errorf("初始化资产 %s 的 SHA-256 长度无效", name)
+			}
+			for _, char := range hash {
+				if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+					return fmt.Errorf("初始化资产 %s 的 SHA-256 格式无效", name)
+				}
+			}
+		} else {
+			return fmt.Errorf("初始化资产 %s 必须声明 SHA-256", name)
+		}
+		phase := strings.TrimSpace(item.ApplyPhase)
+		if phase != "" && !strings.EqualFold(phase, InitAssetApplyPhaseInit) && !strings.EqualFold(phase, InitAssetApplyPhasePersonalization) {
+			return fmt.Errorf("初始化资产 %s 的应用阶段无效", name)
+		}
+		if !hasInitAssetSidecar(adapter) {
+			privateSidecar, exists := componentByName(adapter, "private-archive")
+			if !exists {
+				return fmt.Errorf("runtime 实例 %s 缺少受控初始化资产 sidecar 基座", instance)
+			}
+			adapter.InfraSidecars = append(adapter.InfraSidecars, initAssetSidecarFrom(privateSidecar))
+			adapter.InitAssetOps.ExecTarget = initAssetExecTarget(adapter.InitAssetOps.ExecTarget, adapter.PrivateArchiveOps.ExecTarget)
+		}
+		if err := validateInitAssetExecTarget(adapter); err != nil {
+			return fmt.Errorf("runtime 实例 %s 初始化资产执行目标无效: %w", instance, err)
+		}
+		if !componentCanWriteDomain(adapter, adapter.InitAssetOps.ExecTarget, domain.Name) {
+			return fmt.Errorf("runtime 实例 %s 的初始化资产 sidecar 不具备安全域 %s 写权限", instance, domain.Name)
+		}
+		adapter.InitAssets = append(adapter.InitAssets, InitAssetSpec{
+			Name: name, SourceRef: sourceRef, TargetDomain: domainName,
+			ExpectedSHA256: strings.TrimSpace(item.ExpectedSHA256), ApplyPhase: phase,
+		})
+		runtimes[instance] = adapter
+	}
+	return nil
+}
+
+// initAssetExecTarget derives the fixed init-assets sidecar target from the
+// already materialized runtime Pod name without accepting an arbitrary container.
+func initAssetExecTarget(current, privateArchive string) string {
+	for _, target := range []string{current, privateArchive} {
+		parts := strings.SplitN(strings.TrimSpace(target), "/", 2)
+		if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
+			continue
+		}
+		container := strings.TrimSpace(parts[1])
+		if container == "init-assets" || container == "private-archive" {
+			return strings.TrimSpace(parts[0]) + "/init-assets"
+		}
+	}
+	return ""
+}
+
+// validateInitAssetExecTarget enforces that only the dedicated non-student
+// init-assets sidecar can write teacher/题目 assets into runtime domains.
+func validateInitAssetExecTarget(adapter AdapterSpec) error {
+	target := strings.TrimSpace(adapter.InitAssetOps.ExecTarget)
+	parts := strings.SplitN(target, "/", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[1]) != "init-assets" {
+		return fmt.Errorf("必须指向 pod/init-assets")
+	}
+	component, ok := componentByName(adapter, "init-assets")
+	if !ok || studentAccessibleContainer(component) {
+		return fmt.Errorf("缺少非学生 init-assets sidecar")
+	}
+	return nil
+}
+
+// componentByName 在 runtime 的声明式组件集合中查找可复制的受控 sidecar。
+func componentByName(adapter AdapterSpec, name string) (workload.ComponentSpec, bool) {
+	for _, component := range adapter.InfraSidecars {
+		if strings.TrimSpace(component.Name) == name {
+			return component, true
+		}
+	}
+	return workload.ComponentSpec{}, false
+}
+
+// hasInitAssetSidecar 判断 runtime 是否已有明确的初始化资产执行目标。
+func hasInitAssetSidecar(adapter AdapterSpec) bool {
+	target := strings.TrimSpace(adapter.InitAssetOps.ExecTarget)
+	parts := strings.SplitN(target, "/", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[1]) != "init-assets" {
+		return false
+	}
+	_, exists := componentByName(adapter, "init-assets")
+	return exists
+}
+
+// initAssetSidecarFrom 复用已锁定的 judge-min 归档 sidecar 镜像,只扩大到公共初始化资产写域。
+func initAssetSidecarFrom(privateSidecar workload.ComponentSpec) workload.ComponentSpec {
+	privateSidecar.Name = "init-assets"
+	privateSidecar.Labels = cloneStringMap(privateSidecar.Labels)
+	privateSidecar.Labels["chaimir.io/student-access"] = "false"
+	privateSidecar.Labels["chaimir.io/sensitivity"] = "runtime-assets"
+	privateSidecar.MountDomains = []string{VolumeDomainRuntimeState, VolumeDomainPublicAssets}
+	privateSidecar.WritableMountDomains = []string{VolumeDomainRuntimeState, VolumeDomainPublicAssets}
+	return privateSidecar
+}
+
+func cloneStringMap(values map[string]string) map[string]string {
+	if values == nil {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
+}
+
 // validateRuntimeVolumeDomains 拒绝同名安全域在不同 runtime 中使用不同契约,避免工具挂载和 PVC 语义依赖数组顺序。
 func validateRuntimeVolumeDomains(plans []RuntimePlan) error {
 	seen := map[string]VolumeDomainSpec{}
@@ -381,6 +527,9 @@ func validateToolMountDomainsForComposition(tool Tool, runtime AdapterSpec) erro
 	for _, component := range tool.ResourceSpec.Components {
 		for _, raw := range component.MountDomains {
 			domain := strings.TrimSpace(raw)
+			if domain == VolumeDomainJudgePrivate {
+				return fmt.Errorf("组件 %s 不得挂载 judge-private", component.Name)
+			}
 			if _, ok := declared[domain]; !ok {
 				return fmt.Errorf("组件 %s 未声明安全域 %s", component.Name, domain)
 			}
@@ -394,6 +543,9 @@ func validateToolMountDomainsForComposition(tool Tool, runtime AdapterSpec) erro
 		}
 		for _, raw := range component.WritableMountDomains {
 			domain := strings.TrimSpace(raw)
+			if domain == VolumeDomainJudgePrivate {
+				return fmt.Errorf("组件 %s 不得写入 judge-private", component.Name)
+			}
 			domainSpec, ok := declared[domain]
 			if !ok || tool.Kind != SandboxToolKindInfra || domain != VolumeDomainRuntimeState || domainSpec.StudentAccess != VolumeAccessNone {
 				return fmt.Errorf("组件 %s 无权可写挂载安全域 %s", component.Name, domain)
@@ -414,6 +566,9 @@ func validateCompositionBindings(spec contracts.SandboxCompositionSpec, runtimes
 		}
 		byEnv := map[string]ComponentBinding{}
 		for _, binding := range tool.ResourceSpec.Bindings {
+			if strings.TrimSpace(binding.SourceComponent) == "" || !componentHasName(tool.ResourceSpec.Components, binding.SourceComponent) {
+				return fmt.Errorf("组件 %s 绑定 %s 未声明有效 source_component", ref.Code, binding.Name)
+			}
 			parsed, err := parseCompositionBinding(binding.ConfigBinding)
 			if err != nil {
 				return fmt.Errorf("组件 %s 绑定 %s 无效: %w", ref.Code, binding.Name, err)
@@ -448,6 +603,9 @@ func validateCompositionBindings(spec contracts.SandboxCompositionSpec, runtimes
 		}
 		if strings.TrimSpace(link.Protocol) != strings.TrimSpace(declaredBinding.Protocol) {
 			return fmt.Errorf("组件 %s 绑定 %s 的协议不匹配", sourceCode, declaredBinding.Name)
+		}
+		if strings.TrimSpace(declaredBinding.SourceComponent) == "" {
+			return fmt.Errorf("组件 %s 绑定 %s 缺少 source_component", sourceCode, declaredBinding.Name)
 		}
 		if link.RequiredAtStart != declaredBinding.RequiredAtStart {
 			return fmt.Errorf("组件 %s 绑定 %s 的启动前置不匹配", sourceCode, declaredBinding.Name)
@@ -850,11 +1008,19 @@ func compileCompositionLinks(spec contracts.SandboxCompositionSpec, runtimes map
 		if err != nil {
 			return nil, nil, err
 		}
-		source, err := resolveCompositionEndpoint(link.SourceComponent, link.SourceEndpoint, true, compiledRuntimes, compiledTools)
+		sourceComponent := ""
+		if _, isRuntime := compiledRuntimes[strings.TrimSpace(link.SourceComponent)]; !isRuntime {
+			declaredBinding, bindingErr := compositionBindingForLink(link.SourceComponent, binding.Name, compiledTools)
+			if bindingErr != nil {
+				return nil, nil, bindingErr
+			}
+			sourceComponent = declaredBinding.SourceComponent
+		}
+		source, err := resolveCompositionEndpoint(link.SourceComponent, link.SourceEndpoint, true, sourceComponent, compiledRuntimes, compiledTools)
 		if err != nil {
 			return nil, nil, err
 		}
-		target, err := resolveCompositionEndpoint(link.TargetComponent, link.TargetEndpoint, false, compiledRuntimes, compiledTools)
+		target, err := resolveCompositionEndpoint(link.TargetComponent, link.TargetEndpoint, false, "", compiledRuntimes, compiledTools)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1153,17 +1319,22 @@ func parseCompositionBinding(raw string) (compositionBinding, error) {
 }
 
 // resolveCompositionEndpoint 从运行时 Service 或工具 Service 解析稳定的内网地址。
-func resolveCompositionEndpoint(componentCode, endpoint string, source bool, runtimes map[string]AdapterSpec, tools map[string]Tool) (compositionEndpoint, error) {
+func resolveCompositionEndpoint(componentCode, endpoint string, source bool, sourceComponent string, runtimes map[string]AdapterSpec, tools map[string]Tool) (compositionEndpoint, error) {
 	componentCode = strings.TrimSpace(componentCode)
 	endpoint = strings.TrimSpace(endpoint)
+	sourceComponent = strings.TrimSpace(sourceComponent)
 	if runtime, ok := runtimes[componentCode]; ok {
+		var resolved *compositionEndpoint
 		for _, pod := range podTopologyForAdapter(runtime) {
 			for _, component := range pod.Containers {
 				for _, port := range component.Ports {
 					if port.Name != endpoint {
 						continue
 					}
-					return compositionEndpoint{
+					if port.ServicePort <= 0 {
+						return compositionEndpoint{}, fmt.Errorf("运行时端点 %s 未声明有效 Service 端口", endpoint)
+					}
+					candidate := compositionEndpoint{
 						ComponentCode: componentCode,
 						ComponentName: component.Name,
 						Role:          pod.Name,
@@ -1172,9 +1343,16 @@ func resolveCompositionEndpoint(componentCode, endpoint string, source bool, run
 						Protocol:      port.Protocol,
 						Port:          port.ServicePort,
 						URL:           endpointURL(runtimeServiceName(pod.Name), port.ServicePort, port.Protocol),
-					}, nil
+					}
+					if resolved != nil {
+						return compositionEndpoint{}, fmt.Errorf("运行时端点 %s 在多个 Pod 中重复声明", endpoint)
+					}
+					resolved = &candidate
 				}
 			}
+		}
+		if resolved != nil {
+			return *resolved, nil
 		}
 		return compositionEndpoint{}, fmt.Errorf("运行时端点 %s 不存在", endpoint)
 	}
@@ -1182,20 +1360,21 @@ func resolveCompositionEndpoint(componentCode, endpoint string, source bool, run
 	if !ok {
 		return compositionEndpoint{}, fmt.Errorf("组件 %s 不存在", componentCode)
 	}
+	var resolved *compositionEndpoint
 	for _, service := range tool.ResourceSpec.Services {
 		for _, servicePort := range service.Ports {
 			if servicePort.Name != endpoint {
 				continue
 			}
 			for _, component := range tool.ResourceSpec.Components {
-				if component.Name != service.Component {
+				if component.Name != service.Component || (source && sourceComponent != "" && component.Name != sourceComponent) {
 					continue
 				}
 				for _, port := range component.Ports {
 					if port.Name != servicePort.TargetPort {
 						continue
 					}
-					return compositionEndpoint{
+					candidate := compositionEndpoint{
 						ComponentCode: componentCode,
 						ComponentName: component.Name,
 						Role:          toolComponentPodName(componentCode, component.Name),
@@ -1204,16 +1383,26 @@ func resolveCompositionEndpoint(componentCode, endpoint string, source bool, run
 						Protocol:      servicePort.Protocol,
 						Port:          servicePort.Port,
 						URL:           endpointURL(service.Name, servicePort.Port, servicePort.Protocol),
-					}, nil
+					}
+					if resolved != nil {
+						return compositionEndpoint{}, fmt.Errorf("组件 %s 端点 %s 在多个 Service 中重复声明", componentCode, endpoint)
+					}
+					resolved = &candidate
 				}
 			}
 		}
 	}
+	if resolved != nil {
+		return *resolved, nil
+	}
 	if source && endpoint == "component" {
-		if len(tool.ResourceSpec.Components) != 1 {
-			return compositionEndpoint{}, fmt.Errorf("组件 %s 只有唯一 workload component 时才能使用 source_endpoint=component", componentCode)
+		if sourceComponent == "" {
+			return compositionEndpoint{}, fmt.Errorf("组件 %s 的 source_endpoint=component 必须声明 source_component", componentCode)
 		}
-		component := tool.ResourceSpec.Components[0]
+		component, ok := findComponentByName(tool.ResourceSpec.Components, sourceComponent)
+		if !ok {
+			return compositionEndpoint{}, fmt.Errorf("组件 %s 的 source_component %s 不存在", componentCode, sourceComponent)
+		}
 		return compositionEndpoint{
 			ComponentCode: componentCode,
 			ComponentName: component.Name,
@@ -1224,6 +1413,9 @@ func resolveCompositionEndpoint(componentCode, endpoint string, source bool, run
 	}
 	if source {
 		for _, component := range tool.ResourceSpec.Components {
+			if sourceComponent != "" && component.Name != sourceComponent {
+				continue
+			}
 			for _, port := range component.Ports {
 				if port.Name == endpoint {
 					return compositionEndpoint{ComponentCode: componentCode, ComponentName: component.Name, Role: toolComponentPodName(componentCode, component.Name), EndpointName: port.Name, Protocol: port.Protocol, Port: port.ContainerPort}, nil
@@ -1232,6 +1424,43 @@ func resolveCompositionEndpoint(componentCode, endpoint string, source bool, run
 		}
 	}
 	return compositionEndpoint{}, fmt.Errorf("组件 %s 端点 %s 不存在可发现 Service", componentCode, endpoint)
+}
+
+// compositionBindingForLink 返回连接环境变量对应的 manifest 绑定,不允许按组件顺序推断目标。
+func compositionBindingForLink(componentCode, envName string, tools map[string]Tool) (ComponentBinding, error) {
+	tool, ok := tools[strings.TrimSpace(componentCode)]
+	if !ok {
+		return ComponentBinding{}, fmt.Errorf("连接源组件 %s 不存在", componentCode)
+	}
+	for _, binding := range tool.ResourceSpec.Bindings {
+		parsed, err := parseCompositionBinding(binding.ConfigBinding)
+		if err != nil {
+			return ComponentBinding{}, fmt.Errorf("组件 %s 绑定 %s 无效: %w", componentCode, binding.Name, err)
+		}
+		if parsed.Name == strings.TrimSpace(envName) {
+			if strings.TrimSpace(binding.SourceComponent) == "" {
+				return ComponentBinding{}, fmt.Errorf("组件 %s 绑定 %s 缺少 source_component", componentCode, binding.Name)
+			}
+			return binding, nil
+		}
+	}
+	return ComponentBinding{}, fmt.Errorf("组件 %s 未声明连接环境变量 %s", componentCode, envName)
+}
+
+// componentHasName 判断 WorkloadSpec 是否声明了指定的实际源组件。
+func componentHasName(components []workload.ComponentSpec, name string) bool {
+	_, ok := findComponentByName(components, name)
+	return ok
+}
+
+func findComponentByName(components []workload.ComponentSpec, name string) (workload.ComponentSpec, bool) {
+	name = strings.TrimSpace(name)
+	for _, component := range components {
+		if strings.TrimSpace(component.Name) == name {
+			return component, true
+		}
+	}
+	return workload.ComponentSpec{}, false
 }
 
 // endpointURL 只生成沙箱命名空间内的协议地址,禁止把外部主机写入组合快照。
@@ -1387,6 +1616,7 @@ func materializeRuntimeTopology(instance string, adapter AdapterSpec) AdapterSpe
 	}
 	adapter.WorkspaceOps.ExecTarget = rewriteRuntimeExecTarget(adapter.WorkspaceOps.ExecTarget, podNames)
 	adapter.PrivateArchiveOps.ExecTarget = rewriteRuntimeExecTarget(adapter.PrivateArchiveOps.ExecTarget, podNames)
+	adapter.InitAssetOps.ExecTarget = rewriteRuntimeExecTarget(adapter.InitAssetOps.ExecTarget, podNames)
 	adapter.CapabilityCommands.Deploy.ExecTarget = rewriteRuntimeExecTarget(adapter.CapabilityCommands.Deploy.ExecTarget, podNames)
 	adapter.CapabilityCommands.Tx.ExecTarget = rewriteRuntimeExecTarget(adapter.CapabilityCommands.Tx.ExecTarget, podNames)
 	adapter.CapabilityCommands.Query.ExecTarget = rewriteRuntimeExecTarget(adapter.CapabilityCommands.Query.ExecTarget, podNames)

@@ -12,33 +12,26 @@ ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
 
-ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ARG PIP_INDEX_URL=https://pypi.org/simple
 
 LABEL org.opencontainers.image.title="judger/static-scan"
 LABEL org.opencontainers.image.description="Chaimir static scan judger image"
 
 USER root
 RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
-    && sed -i 's#https://dl-cdn.alpinelinux.org/alpine#https://mirrors.aliyun.com/alpine#g' /etc/apk/repositories \
     && for attempt in 1 2 3 4 5; do \
-        if apk upgrade --no-cache --timeout 300; then break; fi; \
-        if [ "$attempt" -eq 5 ]; then echo "apk upgrade failed after 5 attempts" >&2; exit 1; fi; \
-        sleep 3; \
-    done \
-    && for attempt in 1 2 3 4 5; do \
-        if apk add --no-cache --timeout 300 bash ca-certificates gcompat git libstdc++ py3-pip 'py3-setuptools>=80.9.0-r2' python3; then break; fi; \
+        if apk add --no-cache --timeout 300 bash ca-certificates gcompat git libstdc++ py3-pip 'py3-setuptools=80.9.0-r2' python3; then break; fi; \
         if [ "$attempt" -eq 5 ]; then echo "apk package installation failed after 5 attempts" >&2; exit 1; fi; \
         sleep 3; \
     done \
-    && true \
     && python3 -m venv /opt/slither \
-    && /opt/slither/bin/pip install --index-url "${PIP_INDEX_URL}" --no-cache-dir --timeout 300 --retries 8 --upgrade \
-        "pip>=25.3" \
-        "setuptools>=80.0.0" \
-        "wheel>=0.46.0" \
-        "msgpack>=1.2.1" \
+    && /opt/slither/bin/pip install --index-url "${PIP_INDEX_URL}" --no-cache-dir --timeout 300 --retries 8 \
+        "pip==25.3" \
+        "setuptools==80.0.0" \
+        "wheel==0.46.0" \
+        "msgpack==1.2.1" \
         "slither-analyzer==0.11.3" \
-        "aiohttp>=3.14.3" \
+        "aiohttp==3.14.3" \
     && rm -rf /opt/slither/lib/python3.12/site-packages/pip /opt/slither/lib/python3.12/site-packages/pip-*.dist-info \
     && apk del py3-pip py3-setuptools \
     && /opt/slither/bin/slither --version >/dev/null \

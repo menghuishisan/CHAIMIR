@@ -9,7 +9,7 @@
 
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Building, CircleSlash, Search, ShieldCheck } from 'lucide-react'
+import { Building, CircleSlash, ExternalLink, Search, ShieldCheck } from 'lucide-react'
 import { TenantStatus, type Tenant } from '@chaimir/api-client'
 import {
   Badge,
@@ -115,7 +115,14 @@ export default function PlatformSchoolsPage() {
       header: '学校',
       render: (tenant) => (
         <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{tenant.display_name || tenant.name}</div>
+          <button
+            type="button"
+            onClick={() => navigate(`/platform-admin/schools/${tenant.id}`)}
+            className="truncate text-left font-semibold text-ink underline-offset-4 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            title="查看学校详情"
+          >
+            {tenant.display_name || tenant.name}
+          </button>
           <div className="truncate font-mono text-xs text-ink-sub">{tenant.code}</div>
         </div>
       ),
@@ -162,6 +169,8 @@ export default function PlatformSchoolsPage() {
           <Button
             variant="ghost"
             size="sm"
+            leftIcon={ExternalLink}
+            aria-label={`查看学校 ${tenant.name} 详情`}
             onClick={() => navigate(`/platform-admin/schools/${tenant.id}`)}
           >
             详情
@@ -218,6 +227,8 @@ export default function PlatformSchoolsPage() {
             <FilterField label="学校名称或短名" htmlFor="schools-keyword">
               <Input
                 id="schools-keyword"
+                type="search"
+                autoComplete="off"
                 leftIcon={Search}
                 value={keyword}
                 placeholder="输入关键词"
@@ -264,6 +275,20 @@ export default function PlatformSchoolsPage() {
                   title: item.name,
                   meta: `${item.code} · ${item.expire_at ? `到期 ${formatDate(item.expire_at)}` : '长期有效'}`,
                   badge: <StatusIndicator tone={tenantStatusTone(item.status)} label={tenantStatusLabel(item.status)} />,
+                  action: (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => navigate(`/platform-admin/schools/${item.id}`)}
+                      >
+                        详情
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setTarget(item)}>
+                        调整
+                      </Button>
+                    </div>
+                  ),
                 })}
               />
             )}

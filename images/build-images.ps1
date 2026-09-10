@@ -145,7 +145,7 @@ function Get-DockerConfigBasicAuth {
 function Get-RemoteDigestFromRegistryV2 {
     param([string]$TaggedRef)
     if ($TaggedRef -notmatch "^([^/]+)/(.+):([^/:]+)$") {
-        return $null
+        throw "待解析镜像引用必须是 registry/repository:tag: $TaggedRef"
     }
     $registryHost = $Matches[1]
     $repository = $Matches[2]
@@ -169,43 +169,20 @@ function Get-RemoteDigestFromRegistryV2 {
     }
     try {
         $response = Invoke-WebRequest -UseBasicParsing -Method Head -Uri "$registryBaseUri/v2/$repository/manifests/$tag" -Headers $headers -TimeoutSec 30
-        $digest = $response.Headers["Docker-Content-Digest"]
-        if ($digest -match "^sha256:[0-9a-f]{64}$") {
-            return $digest
-        }
     } catch {
-        return $null
+        throw "读取刚推送镜像的 Registry digest 失败: $TaggedRef; $($_.Exception.Message)"
     }
-    return $null
+    $digest = $response.Headers["Docker-Content-Digest"]
+    if ($digest -notmatch "^sha256:[0-9a-f]{64}$") {
+        throw "Registry 未返回合法 Docker-Content-Digest: $TaggedRef"
+    }
+    return $digest
 }
 
 # Get-RegistryDigest 解析刚推送到 Harbor 的 tag digest。
 function Get-RegistryDigest {
     param([string]$Ref)
-    $digest = Get-RemoteDigestFromRegistryV2 -TaggedRef $Ref
-    if (-not [string]::IsNullOrWhiteSpace($digest)) {
-        return $digest
-    }
-    $repository = $Ref
-    if ($Ref -match "^(.+):[^/:]+$") {
-        $repository = $Matches[1]
-    }
-    $localDigestOutput = Invoke-DockerCli -Arguments @("image", "inspect", "--format", "{{json .RepoDigests}}", $Ref) 2>&1
-    foreach ($line in $localDigestOutput) {
-        if ($line -match "$([regex]::Escape($repository))@(sha256:[0-9a-f]{64})") {
-            return $Matches[1]
-        }
-    }
-    $output = Invoke-DockerCli -Arguments @("buildx", "imagetools", "inspect", $Ref) 2>&1
-    foreach ($line in $output) {
-        if ($line -match "^\s*Digest:\s*(sha256:[0-9a-f]{64})\s*$") {
-            return $Matches[1]
-        }
-    }
-    foreach ($line in $output) {
-        Write-Warning $line
-    }
-    throw "registry digest 输出不可解析: $Ref"
+    return Get-RemoteDigestFromRegistryV2 -TaggedRef $Ref
 }
 
 # Invoke-DockerBuildWithRetry 执行构建并按配置重试。
@@ -386,6 +363,17 @@ foreach ($item in $selected) {
     }
     if ($item.DockerfileText -match "(?m)^\s*ARG\s+NGINX_RUNTIME_IMAGE\b") {
         $buildArguments["NGINX_RUNTIME_IMAGE"] = Get-PinnedUpstreamRef -ManifestPath $item.Manifest -ImageKey "runtime" -DigestKey "runtime_digest"
+    }
+    $upstream = Get-ChaimirYamlBlock -Path $item.Manifest -BlockName "upstream"
+    $buildBaseArgument = Get-ChaimirYamlValue -Lines $upstream -Key "build_base_arg"
+    if (-not [string]::IsNullOrWhiteSpace($buildBaseArgument)) {
+        if ($buildBaseArgument -notmatch "^[A-Z0-9_]+_IMAGE$") {
+            throw "$($item.Image): upstream.build_base_arg 必须是 *_IMAGE Dockerfile ARG"
+        }
+        if ($item.DockerfileText -notmatch "(?m)^\s*ARG\s+$([regex]::Escape($buildBaseArgument))\b") {
+            throw "$($item.Image): upstream.build_base_arg 未在 Dockerfile 声明: $buildBaseArgument"
+        }
+        $buildArguments[$buildBaseArgument] = Get-PinnedUpstreamRef -ManifestPath $item.Manifest -ImageKey "build_base_image" -DigestKey "build_base_digest"
     }
     if ($item.Image -eq "service/frontend") {
         $frontendEnvPath = Join-Path $repoRoot "frontend\.env"

@@ -185,7 +185,18 @@ function Install-Watcher {
 }
 
 function Uninstall-Watcher {
-    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+    $task = $null
+    try {
+        $task = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    } catch {
+        # 仅把 Windows 明确的 ERROR_FILE_NOT_FOUND 视为幂等卸载；权限和 CIM 故障必须上抛。
+        if ($_.Exception.HResult -ne -2147024894 -and $_.FullyQualifiedErrorId -notmatch "TaskNotFound|NoMatching") {
+            throw
+        }
+    }
+    if ($null -ne $task) {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
+    }
     Write-WatcherLog "已卸载用户级计划任务 $taskName"
 }
 

@@ -45,6 +45,10 @@ capabilities:
 runtime:
   eco: sui
   adapter_level: 1
+  workload:
+    env:
+      - name: CHAIMIR_SUI_CONFIG_DIR
+        value: /runtime-state/sui
 ports:
   - name: rpc
     container_port: 9000

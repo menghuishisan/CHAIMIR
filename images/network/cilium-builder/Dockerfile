@@ -9,7 +9,7 @@ ARG HTTP_PROXY
 ARG HTTPS_PROXY
 ARG NO_PROXY
 
-ARG GO_MODULE_PROXY=https://goproxy.cn,direct
+ARG GO_MODULE_PROXY=
 ARG CILIUM_SOURCE_URL=https://github.com/cilium/cilium/archive/refs/tags/v1.20.1.tar.gz
 ARG CILIUM_SOURCE_SHA256=6b133c7b5a6a037a15c8b5ce02d7fcf94e98d90d121fb76b712c79eda9d36731
 ARG CILIUM_SOURCE_COMMIT=7d68cfb394f2960e10aa72e76d0d51e66c1b2ebc
@@ -19,13 +19,6 @@ ARG GOPS_SOURCE_SHA256=c4637684ac8efbcc0bc55faf64e3920a7764a9ae8f4580945084c1a5b
 USER root
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
-    && sed -i 's#https://dl-cdn.alpinelinux.org/alpine#https://mirrors.aliyun.com/alpine#g' /etc/apk/repositories \
-    && rm -f /var/cache/apk/* \
-    && for attempt in 1 2 3 4 5 6 7 8; do \
-        apk upgrade --cache-dir /var/cache/apk --update-cache && break; \
-        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
-        sleep $((attempt * 3)); \
-    done \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache bash binutils ca-certificates ccache coreutils elfutils-dev gcc git linux-headers make musl-dev pkgconf python3 py3-jinja2 scapy && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \

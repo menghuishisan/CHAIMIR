@@ -78,6 +78,7 @@ infra:
   bindings:
     - name: upstream
       capability: evm-json-rpc
+      source_component: infra
       endpoint: rpc
       protocol: HTTP
       required_at_start: true

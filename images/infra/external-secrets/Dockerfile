@@ -2,14 +2,14 @@
 FROM golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 AS builder
 ARG SOURCE_URL=https://github.com/external-secrets/external-secrets/archive/refs/tags/v2.10.0.tar.gz
 ARG SOURCE_SHA256=a0c8834a9ecc7b98b5107f748a48a40189ff7a16e5b7033418e9b89992a159df
-ARG GO_MODULE_PROXY=https://goproxy.cn,direct
+ARG GO_MODULE_PROXY=
 WORKDIR /src
 RUN curl --fail --location --retry 5 --retry-all-errors --connect-timeout 20 --max-time 300 \
       -o /tmp/external-secrets.tar.gz "${SOURCE_URL}" \
     && echo "${SOURCE_SHA256}  /tmp/external-secrets.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/external-secrets.tar.gz -C /src --strip-components=1 \
     && rm -f /tmp/external-secrets.tar.gz
-RUN go env -w GOPROXY="${GO_MODULE_PROXY}" \
+RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}"; fi \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false \
       -ldflags='-s -w' -o /out/external-secrets-linux-amd64 ./main.go
 

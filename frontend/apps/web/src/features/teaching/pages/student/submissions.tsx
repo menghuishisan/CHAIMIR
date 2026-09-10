@@ -165,15 +165,7 @@ export default function StudentSubmissionsPage() {
             resource={submissions}
             emptyIcon={ClipboardCheck}
             emptyTitle="还没有提交记录"
-            emptyDescription="完成作答并提交后,得分与老师反馈会显示在这里。"
-            emptyAction={
-              <Button
-                variant="primary"
-                onClick={() => navigate(`/student/courses/${courseId}/assignments/${assignmentId}`)}
-              >
-                去作答
-              </Button>
-            }
+            emptyDescription="完成作答并提交后,得分与老师反馈会显示在这里。点击页面右上角“回到作答”开始。"
             skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (

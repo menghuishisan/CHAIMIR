@@ -116,6 +116,22 @@ runs:
           exit 1
         fi
 
+        read_config_value() {
+          local key="$1"
+          awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' deploy/config/chaimir.env
+        }
+        trivy_db_repository="$(read_config_value SUPPLY_CHAIN_TRIVY_DB_REPOSITORY)"
+        trivy_java_db_repository="$(read_config_value SUPPLY_CHAIN_TRIVY_JAVA_DB_REPOSITORY)"
+        digest_reference='^[A-Za-z0-9._:/-]+@sha256:[0-9a-f]{64}$'
+        if [[ ! "$trivy_db_repository" =~ $digest_reference ]]; then
+          echo "deploy/config/chaimir.env 的 SUPPLY_CHAIN_TRIVY_DB_REPOSITORY 必须是 image@sha256:<64 hex>" >&2
+          exit 1
+        fi
+        if [[ ! "$trivy_java_db_repository" =~ $digest_reference ]]; then
+          echo "deploy/config/chaimir.env 的 SUPPLY_CHAIN_TRIVY_JAVA_DB_REPOSITORY 必须是 image@sha256:<64 hex>" >&2
+          exit 1
+        fi
+
         logical="${{ inputs.image }}"
         logical="${logical#${{ inputs.registry }}/}"
         manifest="images/${logical}/manifest.yaml"
@@ -155,7 +171,8 @@ runs:
         docker run --rm \
           -v /var/run/docker.sock:/var/run/docker.sock \
           -v "$GITHUB_WORKSPACE:/workspace:ro" \
-          -e TRIVY_DB_REPOSITORY=ghcr.io/aquasecurity/trivy-db:2 \
+          -e "TRIVY_DB_REPOSITORY=$trivy_db_repository" \
+          -e "TRIVY_JAVA_DB_REPOSITORY=$trivy_java_db_repository" \
           "$trivy_image" image \
             --config /workspace/deploy/ci/trivy.yaml \
             --format table \
@@ -165,7 +182,8 @@ runs:
         docker run --rm \
           -v /var/run/docker.sock:/var/run/docker.sock \
           -v "$RUNNER_TEMP:/output" \
-          -e TRIVY_DB_REPOSITORY=ghcr.io/aquasecurity/trivy-db:2 \
+          -e "TRIVY_DB_REPOSITORY=$trivy_db_repository" \
+          -e "TRIVY_JAVA_DB_REPOSITORY=$trivy_java_db_repository" \
           "$trivy_image" image \
             --format cyclonedx \
             --output /output/chaimir-image-sbom.cdx.json \
@@ -201,11 +219,11 @@ runs:
         cosign public-key --key "$key_file" > "$public_key_file"
         cosign sign --yes --key "$key_file" --tlog-upload=false \
           "${{ steps.digest.outputs.digest_ref }}"
-        cosign verify --key "$public_key_file" --insecure-ignore-tlog=true \
+        cosign verify --offline --key "$public_key_file" \
           "${{ steps.digest.outputs.digest_ref }}"
         cosign attest --yes --key "$key_file" --type cyclonedx \
           --predicate "$RUNNER_TEMP/chaimir-image-sbom.cdx.json" \
           --tlog-upload=false \
           "${{ steps.digest.outputs.digest_ref }}"
-        cosign verify-attestation --key "$public_key_file" --type cyclonedx --insecure-ignore-tlog=true \
+        cosign verify-attestation --offline --key "$public_key_file" --type cyclonedx \
           "${{ steps.digest.outputs.digest_ref }}"

@@ -59,7 +59,7 @@ export function StickySaveBar({
         </span>
         {hint && <span className="ml-3 text-on-dark-sub">{hint}</span>}
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
         {/* 无改动时不给「放弃」:没有可放弃的东西,留着只会让人怀疑自己漏改了什么 */}
         {isDirty && !saving ? discardAction : null}
         {saveAction}

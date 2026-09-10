@@ -43,19 +43,23 @@ env_keys:
     - CHAINLINK_API_EMAIL
     - CHAINLINK_API_PASSWORD
 secrets_required:
-  - env: POSTGRES_PASSWORD
+  - component: infra
+    env: POSTGRES_PASSWORD
     secret_key: PG_PASSWORD
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
-  - env: CHAINLINK_KEYSTORE_PASSWORD
+  - component: infra
+    env: CHAINLINK_KEYSTORE_PASSWORD
     secret_key: CHAINLINK_KEYSTORE_PASSWORD
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
-  - env: CHAINLINK_API_EMAIL
+  - component: infra
+    env: CHAINLINK_API_EMAIL
     secret_key: CHAINLINK_API_EMAIL
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
-  - env: CHAINLINK_API_PASSWORD
+  - component: infra
+    env: CHAINLINK_API_PASSWORD
     secret_key: CHAINLINK_API_PASSWORD
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
@@ -127,12 +131,14 @@ infra:
   bindings:
     - name: execution_chain
       capability: evm-json-rpc
+      source_component: infra
       endpoint: rpc
       protocol: HTTP
       required_at_start: true
       config_binding: env:ETH_URL
     - name: database
       capability: postgres-compatible
+      source_component: infra
       endpoint: postgres
       protocol: TCP
       required_at_start: true

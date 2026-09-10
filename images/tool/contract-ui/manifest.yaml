@@ -33,6 +33,7 @@ env_keys:
   config:
     - CHAIMIR_IMAGE_PORT
     - CHAIMIR_MAX_BODY_BYTES
+    - CHAIMIR_HTTP_TIMEOUT_SECONDS
   secret: []
 data_driven: true
 capabilities:
@@ -50,6 +51,13 @@ tool:
   eco_tags:
     - evm
   mount_workspace: true
+  env:
+    - name: CHAIMIR_IMAGE_PORT
+      value: "8080"
+    - name: CHAIMIR_MAX_BODY_BYTES
+      value: "1048576"
+    - name: CHAIMIR_HTTP_TIMEOUT_SECONDS
+      value: "30"
 ports:
   - name: http
     container_port: 8080

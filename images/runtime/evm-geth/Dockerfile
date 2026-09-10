@@ -39,10 +39,9 @@ LABEL org.opencontainers.image.description="Chaimir go-ethereum private-chain ru
 
 USER root
 RUN for attempt in 1 2 3 4 5; do \
-      apk upgrade --no-cache \
-      && apk add --no-cache \
-         'libcrypto3>=3.5.8-r0' \
-         'libssl3>=3.5.8-r0' \
+      apk add --no-cache \
+         'libcrypto3=3.6.3-r5' \
+         'libssl3=3.6.3-r5' \
          bash ca-certificates curl jq \
       && break; \
       if [ "${attempt}" -eq 5 ]; then exit 1; fi; \

@@ -226,7 +226,7 @@ export default function SchoolAdminOrganizationPage() {
                   }
                 />
               ) : (
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div className={value.departments.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
                   {value.departments.map((department) => (
                     <DepartmentCard
                       key={department.id}

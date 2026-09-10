@@ -203,6 +203,7 @@ func componentConfigRequestFromModel(cfg ComponentConfig) ComponentConfigRequest
 			AccessProfile:            spec.AccessProfile,
 			ResourceProfile:          spec.ResourceProfile,
 			NetworkProfile:           spec.NetworkProfile,
+			InitAssets:               append([]contracts.CompositionInitAsset(nil), spec.InitAssets...),
 			InitCodeRef:              env.InitCodeRef,
 			InitScriptRef:            env.InitScriptRef,
 			KeepAlive:                env.KeepAlive,

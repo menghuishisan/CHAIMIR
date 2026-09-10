@@ -278,7 +278,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
     <Modal open onOpenChange={(open) => !open && onClose()}>
       <ModalContent size="xl">
         <ModalHeader>
-          <ModalTitle>{editing ? '修改判题器配置' : '登记判题器'}</ModalTitle>
+          <ModalTitle>{editing ? `修改判题器配置 · ${judger.name}` : '登记判题器'}</ModalTitle>
           <ModalDescription>
             判题器决定一道题怎么判分。不同类型需要的声明不同,选好类型后表单会跟着变。
           </ModalDescription>

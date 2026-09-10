@@ -37,13 +37,6 @@ LABEL org.opencontainers.image.description="Chaimir NATS middleware built from o
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
-    && sed -i 's#https://dl-cdn.alpinelinux.org/alpine#https://mirrors.aliyun.com/alpine#g' /etc/apk/repositories \
-    && rm -f /var/cache/apk/* \
-    && for attempt in 1 2 3 4 5 6 7 8; do \
-        apk upgrade --cache-dir /var/cache/apk --update-cache && break; \
-        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
-        sleep $((attempt * 3)); \
-    done \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ca-certificates && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
@@ -55,9 +48,12 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     && chown -R 1000:1000 /data
 
 COPY --from=build --chown=1000:1000 /out/nats-server /usr/local/bin/nats-server
+COPY --chown=1000:1000 nats-entrypoint.sh /usr/local/bin/chaimir-nats-entrypoint
+COPY --chown=1000:1000 nats-probe.sh /usr/local/bin/chaimir-nats-probe
+RUN chmod 0555 /usr/local/bin/chaimir-nats-entrypoint /usr/local/bin/chaimir-nats-probe
 
 USER 1000:1000
 WORKDIR /data
 EXPOSE 4222 8222
-ENTRYPOINT ["/usr/local/bin/nats-server"]
+ENTRYPOINT ["/usr/local/bin/chaimir-nats-entrypoint"]
 CMD ["--jetstream", "--store_dir", "/data", "--http_port", "8222"]

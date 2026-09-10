@@ -77,6 +77,7 @@ infra:
   bindings:
     - name: source_chain
       capability: evm-json-rpc
+      source_component: infra
       source_endpoint: component
       endpoint: rpc
       protocol: HTTP
@@ -84,6 +85,7 @@ infra:
       config_binding: env:HYP_SOURCE_RPC
     - name: destination_chain
       capability: evm-json-rpc
+      source_component: infra
       source_endpoint: component
       endpoint: rpc
       protocol: HTTP
@@ -101,10 +103,11 @@ env_keys:
     - HYP_SOURCE_RPC
     - HYP_DESTINATION_RPC
   secret:
-    - HYP_CHAINS
+    - HYP_DEFAULTSIGNER_KEY
 secrets_required:
-  - env: HYP_CHAINS
-    secret_key: HYP_CHAINS
+  - component: infra
+    env: HYP_DEFAULTSIGNER_KEY
+    secret_key: HYP_DEFAULTSIGNER_KEY
     source: external-kms
     runtime_value: secret-or-kms
 ports: []

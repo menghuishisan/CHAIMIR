@@ -53,7 +53,7 @@ spec:
         - name: nats
           image: chaimir/middleware/nats:placeholder
           # JetStream 持久化 + token 认证(token 经环境变量,不硬编码)。
-          command: ["sh", "-c", "exec nats-server -js -sd /data -m 8222 --auth \"$NATS_TOKEN\""]
+          command: ["/usr/local/bin/chaimir-nats-entrypoint"]
           ports:
             - name: client
               containerPort: 4222

@@ -8,7 +8,7 @@
 
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { Inbox, Search } from 'lucide-react'
+import { ArrowRight, ExternalLink, Inbox, Search } from 'lucide-react'
 import { ApplicationStatus, type TenantApplication } from '@chaimir/api-client'
 import {
   Breadcrumb,
@@ -89,8 +89,16 @@ export default function PlatformApplicationsPage() {
       key: 'school_name',
       header: '学校',
       render: (item) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{item.school_name}</div>
+        <div className="min-w-0 group flex flex-col">
+          <button
+            type="button"
+            onClick={() => navigate(`/platform-admin/applications/${item.application_id}`)}
+            className="truncate text-left font-medium text-ink underline-offset-4 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 inline-flex items-center gap-1.5"
+            title="查看申请审核详情"
+          >
+            <span className="truncate">{item.school_name}</span>
+            <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-1 text-accent opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
+          </button>
           <div className="truncate text-xs text-ink-sub">{schoolTypeLabel(item.school_type)}</div>
         </div>
       ),
@@ -137,6 +145,7 @@ export default function PlatformApplicationsPage() {
         <Button
           variant="ghost"
           size="sm"
+          leftIcon={ExternalLink}
           onClick={() => navigate(`/platform-admin/applications/${item.application_id}`)}
         >
           {item.status === ApplicationStatus.PENDING ? '去审核' : '看详情'}
@@ -190,6 +199,8 @@ export default function PlatformApplicationsPage() {
             <FilterField label="学校名称或联系人" htmlFor="applications-keyword">
               <Input
                 id="applications-keyword"
+                type="search"
+                autoComplete="off"
                 leftIcon={Search}
                 value={keyword}
                 placeholder="输入关键词"
@@ -224,6 +235,15 @@ export default function PlatformApplicationsPage() {
                       tone={applicationStatusTone(item.status)}
                       label={applicationStatusLabel(item.status)}
                     />
+                  ),
+                  action: (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => navigate(`/platform-admin/applications/${item.application_id}`)}
+                    >
+                      {item.status === ApplicationStatus.PENDING ? '审核' : '详情'}
+                    </Button>
                   ),
                 })}
               />

@@ -173,6 +173,11 @@ export function ContestProblems({ contest }: ContestProblemsProps) {
                 ) : (
                   <Badge tone="neutral">解题</Badge>
                 ),
+                action: (
+                  <Button variant="ghost" size="sm" onClick={() => setModal({ problem: item })}>
+                    编辑
+                  </Button>
+                ),
               })}
             />
           )}

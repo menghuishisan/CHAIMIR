@@ -114,14 +114,34 @@ export default function ProfilePage({ canChangePhone, statusKind = 'account' }: 
       <ObjectIdentity
         name={account.name}
         status={<StatusIndicator tone={statusPresentation.tone} label={statusPresentation.label} />}
-        subtitle={`${userRolesLabel(account.roles) || '未分配角色'} · 资料由学校维护,如需更正请联系管理员`}
+        subtitle={`${userRolesLabel(account.roles) || '未分配角色'} · 身份资料由平台/学校维护,如需更正请联系系统管理员`}
         properties={identityProperties}
       />
 
+      <div className="mt-6 grid gap-4 md:grid-cols-2">
+        <div className="rounded-lg border border-border bg-surface p-5 shadow-xs">
+          <div className="flex items-center gap-2">
+            <ShieldCheck aria-hidden="true" className="size-4 shrink-0 text-primary" />
+            <p className="font-medium text-ink">账号安全</p>
+          </div>
+          <p className="mt-2 text-sm leading-relaxed text-ink-sub">
+            定期更新密码可以让其他设备上的旧会话失效；登录会话列表会显示最近的设备和地址。
+          </p>
+        </div>
+        <div className="rounded-lg border border-border bg-surface p-5 shadow-xs">
+          <p className="font-medium text-ink">资料维护</p>
+          <p className="mt-2 text-sm leading-relaxed text-ink-sub">
+            {canChangePhone
+              ? '身份资料由学校维护，手机号可以在本页通过验证码换绑。'
+              : '平台身份资料由系统管理员维护，平台账号不提供租户字段或手机号换绑入口。'}
+          </p>
+        </div>
+      </div>
+
       <PageBody
-        className="mt-6"
+        className="mt-6 gap-6"
         rail={
-          <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-5">
             <PasswordCard />
             {canChangePhone ? <PhoneCard onChanged={reload} /> : null}
           </div>

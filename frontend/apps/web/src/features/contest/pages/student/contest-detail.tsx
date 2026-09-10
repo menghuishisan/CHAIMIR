@@ -486,6 +486,16 @@ function ContestProblems({ contestId, canAnswer }: ContestProblemsProps) {
               mobileCard={(item) => ({
                 title: `第 ${item.seq} 题`,
                 meta: `${item.score} 分`,
+                action: (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={!canAnswer}
+                    onClick={() => navigate(`/student/contests/${contestId}/workspace`)}
+                  >
+                    去作答
+                  </Button>
+                ),
               })}
             />
           )}

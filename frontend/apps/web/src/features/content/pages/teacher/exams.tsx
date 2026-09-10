@@ -182,6 +182,11 @@ export default function TeacherExamsPage() {
                   paper.gen_mode === PaperMode.RANDOM ? (
                     <Badge tone="neutral">可重抽</Badge>
                   ) : undefined,
+                action: (
+                  <Button variant="ghost" size="sm" onClick={() => setDetailTarget(paper)}>
+                    查看题目
+                  </Button>
+                ),
               })}
             />
           )}

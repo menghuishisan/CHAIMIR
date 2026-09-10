@@ -2,8 +2,10 @@
 # 本脚本把公开初始化素材复制到学生工作区。
 set -eu
 
-SOURCE_DIR="${CHAIMIR_SEED_SOURCE:-/seed-source}"
-TARGET_DIR="${CHAIMIR_SEED_TARGET:-/workspace}"
+: "${CHAIMIR_SEED_SOURCE:?CHAIMIR_SEED_SOURCE is required}"
+: "${CHAIMIR_SEED_TARGET:?CHAIMIR_SEED_TARGET is required}"
+SOURCE_DIR=${CHAIMIR_SEED_SOURCE}
+TARGET_DIR=${CHAIMIR_SEED_TARGET}
 
 if [ ! -d "$SOURCE_DIR" ]; then
   echo "seed source not found: $SOURCE_DIR" >&2

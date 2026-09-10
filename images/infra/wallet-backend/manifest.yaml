@@ -25,18 +25,18 @@ upstream:
 env_keys:
   config:
     - CHAIMIR_IMAGE_PORT
+    - CHAIMIR_HTTP_TIMEOUT_SECONDS
     - CHAIMIR_MAX_BODY_BYTES
     - CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
     - CHAIMIR_WALLET_ALLOWED_DOMAINS
+    - CHAIMIR_WALLET_CHALLENGE_TTL_SECONDS
+    - CHAIMIR_WALLET_MAX_CHALLENGES
+    - CHAIMIR_WALLET_STATE_PATH
   secret:
-    - CHAIMIR_WALLET_SIGNER_PRIVATE_KEY
     - CHAIMIR_WALLET_SESSION_SECRET
 secrets_required:
-  - env: CHAIMIR_WALLET_SIGNER_PRIVATE_KEY
-    secret_key: CHAIMIR_WALLET_SIGNER_PRIVATE_KEY
-    source: deploy/config/chaimir.env
-    runtime_value: secret-or-kms
-  - env: CHAIMIR_WALLET_SESSION_SECRET
+  - component: infra
+    env: CHAIMIR_WALLET_SESSION_SECRET
     secret_key: CHAIMIR_WALLET_SESSION_SECRET
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
@@ -68,8 +68,18 @@ infra:
         env:
           - name: CHAIMIR_IMAGE_PORT
             value: "8080"
+          - name: CHAIMIR_HTTP_TIMEOUT_SECONDS
+            value: "30"
           - name: CHAIMIR_IMAGE_SERVICE_AUTH_MAX_SKEW_SECONDS
             value: "300"
+          - name: CHAIMIR_MAX_BODY_BYTES
+            value: "1048576"
+          - name: CHAIMIR_WALLET_CHALLENGE_TTL_SECONDS
+            value: "300"
+          - name: CHAIMIR_WALLET_MAX_CHALLENGES
+            value: "4096"
+          - name: CHAIMIR_WALLET_STATE_PATH
+            value: /runtime-state/wallet-backend/challenges.json
         ports:
           - name: http
             container_port: 8080
@@ -90,6 +100,10 @@ infra:
           failure_threshold: 30
         read_only_root_filesystem: true
         mount_workspace: false
+        mount_domains:
+          - runtime-state
+        writable_mount_domains:
+          - runtime-state
         ephemeral_mounts:
           - name: wallet-tmp
             mount_path: /tmp
@@ -142,7 +156,7 @@ selftest:
       command:
         - node
         - -e
-        - "const fs=require('fs'); const src=fs.readFileSync('/app/wallet-backend.mjs','utf8'); if(!src.includes('verifyServiceSignature') || !src.includes('CHAIMIR_WALLET_ALLOWED_DOMAINS')) process.exit(1)"
+        - "const fs=require('fs'); const src=fs.readFileSync('/app/wallet-backend.mjs','utf8'); if(!src.includes('verifyServiceSignature') || !src.includes('ethers.verifyMessage') || !src.includes('challengeTtlSeconds') || !src.includes('persistState') || !src.includes('runtime-state')) process.exit(1)"
 supply_chain:
   sbom: true
   trivy_required: true

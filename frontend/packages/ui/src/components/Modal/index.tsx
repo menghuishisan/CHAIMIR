@@ -124,7 +124,7 @@ export function ModalFooter({ className, ...props }: HTMLAttributes<HTMLDivEleme
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center justify-end gap-3 border-t border-line px-6 py-4",
+        "flex shrink-0 flex-wrap items-center justify-end gap-3 border-t border-line px-6 py-4",
         className,
       )}
       {...props}

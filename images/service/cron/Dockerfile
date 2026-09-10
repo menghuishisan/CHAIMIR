@@ -21,8 +21,7 @@ LABEL org.opencontainers.image.title="service/cron"
 LABEL org.opencontainers.image.description="Chaimir controlled cron task image"
 
 USER root
-RUN apk upgrade --no-cache \
-    && rm -f /usr/local/bin/gosu \
+RUN rm -f /usr/local/bin/gosu \
     && addgroup -S -g 65532 nonroot \
     && adduser -S -u 65532 -G nonroot -h /nonexistent -s /sbin/nologin nonroot
 

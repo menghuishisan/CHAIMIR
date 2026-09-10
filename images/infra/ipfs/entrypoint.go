@@ -32,10 +32,8 @@ func main() {
 
 // prepareRepo 初始化 Kubo repo,并把 API/Gateway 监听地址与 telemetry 配置收敛到平台要求。
 func prepareRepo() error {
-	if _, ok := os.LookupEnv("IPFS_PATH"); !ok {
-		if err := os.Setenv("IPFS_PATH", "/runtime-state/ipfs"); err != nil {
-			return fmt.Errorf("set IPFS_PATH: %w", err)
-		}
+	if err := os.Setenv("IPFS_PATH", "/runtime-state/ipfs"); err != nil {
+		return fmt.Errorf("set IPFS_PATH: %w", err)
 	}
 	if err := os.Setenv("IPFS_TELEMETRY", "off"); err != nil {
 		return fmt.Errorf("set IPFS_TELEMETRY: %w", err)

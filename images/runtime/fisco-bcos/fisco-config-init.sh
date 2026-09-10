@@ -2,7 +2,7 @@
 # 本脚本在受控 runtime-state 卷中离线生成 FISCO BCOS 单节点配置与证书材料。
 set -eu
 
-root="${CHAIMIR_FISCO_CONFIG_ROOT:-/runtime-state/fisco}"
+root=/runtime-state/fisco
 config_path="${root}/nodes/127.0.0.1/node0/config.ini"
 build_chain="/usr/local/lib/chaimir/fisco/build_chain.sh"
 tassl="/usr/local/lib/chaimir/fisco/tassl-1.1.1b"

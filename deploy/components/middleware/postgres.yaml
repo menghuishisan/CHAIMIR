@@ -90,12 +90,12 @@ spec:
           readinessProbe:
             exec:
               # 用容器已注入的 POSTGRES_USER/DB 环境变量,不硬编码库名/用户。
-              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+              command: ["/usr/local/bin/chaimir-postgres-probe"]
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             exec:
-              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+              command: ["/usr/local/bin/chaimir-postgres-probe"]
             initialDelaySeconds: 20
             periodSeconds: 20
           volumeMounts:

@@ -199,6 +199,23 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
         归族:配置表单族(§6.5.3 第 ③)。左侧分组锚点 + 右侧分组表单 + 底部粘性保存条。
         保存条常显解决的是「改完中间某一项要滚到最底才能存,而且不知道改了几处」。
       */}
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
+          <p className="text-sm font-medium text-ink">未保存改动</p>
+          <p className="mt-1 text-lg font-medium text-ink">{dirtyCount} 项</p>
+          <p className="mt-1 text-xs text-ink-sub">保存条会在页面底部同步显示。</p>
+        </div>
+        <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
+          <p className="text-sm font-medium text-ink">已启用模块</p>
+          <p className="mt-1 text-lg font-medium text-ink">{modules.length} 项</p>
+          <p className="mt-1 text-xs text-ink-sub">关闭模块不会删除已有数据。</p>
+        </div>
+        <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
+          <p className="text-sm font-medium text-ink">当前登录方式</p>
+          <p className="mt-1 text-lg font-medium text-ink">{authModeLabel(authModeValue)}</p>
+          <p className="mt-1 text-xs text-ink-sub">需要外部认证时请继续完成认证配置。</p>
+        </div>
+      </div>
       <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
         <div className="min-w-0 lg:w-48 lg:shrink-0">
           <AnchorNav label="学校配置分组" items={SETTINGS_GROUPS} />

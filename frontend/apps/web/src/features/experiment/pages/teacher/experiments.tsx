@@ -9,6 +9,7 @@ import {
   CircleCheck,
   ClipboardCheck,
   LayoutTemplate,
+  MoreVertical,
   Pencil,
   Plus,
   Undo2,
@@ -26,7 +27,13 @@ import {
   DataPanel,
   FilterBar,
   FilterField,
+  IconButton,
   MetricStrip,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
   Modal,
   ModalBody,
   ModalContent,
@@ -328,6 +335,34 @@ export default function TeacherExperimentsPage() {
                   title: item.name,
                   meta: `${experimentCollabModeLabel(item.collab_mode)} · 检查点 ${item.components.checkpoints.length} · ${formatShortDateTime(item.updated_at)}`,
                   badge: <ExperimentStatusCell experiment={item} />,
+                  action: (
+                    <Menu>
+                      <MenuTrigger asChild>
+                        <IconButton variant="ghost" size="sm" icon={MoreVertical} aria-label={`${item.name} 的更多操作`} />
+                      </MenuTrigger>
+                      <MenuContent align="end">
+                        <MenuItem icon={Pencil} onSelect={() => navigate(`/teacher/experiments/${item.id}`)}>
+                          编排实验
+                        </MenuItem>
+                        <MenuItem
+                          icon={ClipboardCheck}
+                          onSelect={() => navigate(`/teacher/experiments/${item.id}/reports`)}
+                        >
+                          报告与小组
+                        </MenuItem>
+                        <MenuSeparator />
+                        {item.status === ExperimentStatus.PUBLISHED ? (
+                          <MenuItem icon={Undo2} onSelect={() => void unpublishExperiment(item)}>
+                            下架实验
+                          </MenuItem>
+                        ) : (
+                          <MenuItem icon={CircleCheck} onSelect={() => void validateExperiment(item)}>
+                            校验并发布
+                          </MenuItem>
+                        )}
+                      </MenuContent>
+                    </Menu>
+                  ),
                 })}
               />
             )}

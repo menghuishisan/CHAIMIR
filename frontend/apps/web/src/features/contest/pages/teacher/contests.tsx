@@ -195,7 +195,11 @@ export default function TeacherContestsPage() {
           <Button variant="ghost" size="sm" onClick={() => navigate(`/teacher/contests/${contest.id}`)}>
             管理赛事
           </Button>
-          <ContestActionMenu contest={contest} onRequest={(action) => setConfirm({ action, contest })} />
+          <ContestActionMenu
+            contest={contest}
+            onManage={() => navigate(`/teacher/contests/${contest.id}`)}
+            onRequest={(action) => setConfirm({ action, contest })}
+          />
         </div>
       ),
     },
@@ -296,6 +300,13 @@ export default function TeacherContestsPage() {
                       label={contestStatusLabel(item.status)}
                     />
                   ),
+                  action: (
+                    <ContestActionMenu
+                      contest={item}
+                      onManage={() => navigate(`/teacher/contests/${item.id}`)}
+                      onRequest={(action) => setConfirm({ action, contest: item })}
+                    />
+                  ),
                 })}
               />
             )}
@@ -345,6 +356,7 @@ export default function TeacherContestsPage() {
 
 interface ContestActionMenuProps {
   contest: Contest
+  onManage: () => void
   onRequest: (action: LifecycleAction) => void
 }
 
@@ -352,7 +364,7 @@ interface ContestActionMenuProps {
  * ContestActionMenu 按当前状态给出可执行的流转动作。
  * 归档是不可逆动作,与常规项用分隔线隔开。
  */
-function ContestActionMenu({ contest, onRequest }: ContestActionMenuProps) {
+function ContestActionMenu({ contest, onManage, onRequest }: ContestActionMenuProps) {
   const now = Date.now()
   const startAt = Date.parse(contest.start_at)
   const endAt = Date.parse(contest.end_at)
@@ -376,6 +388,9 @@ function ContestActionMenu({ contest, onRequest }: ContestActionMenuProps) {
         />
       </MenuTrigger>
       <MenuContent align="end">
+        <MenuItem icon={Trophy} onSelect={onManage}>
+          管理赛事
+        </MenuItem>
         {canPublish ? <MenuItem onSelect={() => onRequest('publish')}>发布赛事</MenuItem> : null}
         {canStart ? (
           <MenuItem icon={Play} onSelect={() => onRequest('start')}>

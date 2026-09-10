@@ -11,19 +11,21 @@ import {
   Badge,
   Breadcrumb,
   Button,
-  Card,
-  CardBody,
-  CardHeader,
   DataPanel,
   FilterBar,
   FilterField,
   FormField,
   Input,
   MetricStrip,
-  PageBody,
   PageHeader,
   PageScaffold,
   Pagination,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalDescription,
+  ModalHeader,
+  ModalTitle,
   SegmentedControl,
   StatusIndicator,
   Table,
@@ -57,6 +59,7 @@ const STATUS_FILTERS = [
 export default function StudentCoursesPage() {
   const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [joinOpen, setJoinOpen] = useState(false)
 
   const courses = usePagedResource<Course>(
     (params) =>
@@ -137,6 +140,11 @@ export default function StudentCoursesPage() {
         title="我的课程"
         description="这里是你已加入的课程。进入课程可以查看章节课时、作业和学习进度。"
         icon={BookOpen}
+        actions={
+          <Button variant="outline" leftIcon={TicketCheck} onClick={() => setJoinOpen(true)}>
+            加入课程
+          </Button>
+        }
       />
 
       {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是课程列表,不是这三个数字 */}
@@ -150,7 +158,7 @@ export default function StudentCoursesPage() {
         ]}
       />
 
-      <PageBody rail={<JoinCourseCard onJoined={courses.reload} />}>
+      <div className="min-w-0">
         {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
         <DataPanel
           label="课程列表"
@@ -180,7 +188,12 @@ export default function StudentCoursesPage() {
               resource={courses}
               emptyIcon={BookOpen}
               emptyTitle="还没有加入任何课程"
-              emptyDescription="向老师索取课程邀请码,在右侧填入即可加入课程开始学习。"
+              emptyDescription="向老师索取课程邀请码,填入后即可开始学习。"
+              emptyAction={
+                <Button variant="primary" leftIcon={TicketCheck} onClick={() => setJoinOpen(true)}>
+                  加入课程
+                </Button>
+              }
               skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
             >
               {(page) => (
@@ -200,26 +213,52 @@ export default function StudentCoursesPage() {
                         label={courseStatusLabel(course.status)}
                       />
                     ),
+                    action: (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => navigate(`/student/courses/${course.id}`)}
+                      >
+                        进入
+                      </Button>
+                    ),
                   })}
                 />
               )}
             </ResourceState>
         </DataPanel>
-      </PageBody>
+      </div>
+
+      <Modal open={joinOpen} onOpenChange={setJoinOpen}>
+        <ModalContent size="sm">
+          <ModalHeader>
+            <ModalTitle>加入新课程</ModalTitle>
+            <ModalDescription>老师会给出一串课程邀请码,填入后即可加入。</ModalDescription>
+          </ModalHeader>
+          <ModalBody>
+            <JoinCourseForm
+              onJoined={() => {
+                setJoinOpen(false)
+                courses.reload()
+              }}
+            />
+          </ModalBody>
+        </ModalContent>
+      </Modal>
     </PageScaffold>
   )
 }
 
-interface JoinCourseCardProps {
+interface JoinCourseFormProps {
   /** 加入成功后刷新课程列表 */
   onJoined: () => void
 }
 
 /**
- * JoinCourseCard 是页面级动作卡:邀请码加入课程。
+ * JoinCourseForm 是页面级动作表单:邀请码加入课程。
  * 邀请码是一次性短表单,提交即完成,无跨步骤中间态,故不落草稿(FE-7 只约束多步骤流程)。
  */
-function JoinCourseCard({ onJoined }: JoinCourseCardProps) {
+function JoinCourseForm({ onJoined }: JoinCourseFormProps) {
   const fieldId = useId()
   const [inviteCode, setInviteCode] = useState('')
   const [fieldError, setFieldError] = useState<string>()
@@ -250,28 +289,26 @@ function JoinCourseCard({ onJoined }: JoinCourseCardProps) {
   )
 
   return (
-    <Card>
-      <CardHeader
-        title="加入新课程"
-        description="老师会给出一串课程邀请码,填入后即可加入。"
-      />
-      <CardBody>
-        <form onSubmit={handleSubmit} noValidate>
-          <FormField label="课程邀请码" htmlFor={fieldId} required error={fieldError}>
-            <Input
-              id={fieldId}
-              value={inviteCode}
-              autoComplete="off"
-              placeholder="请输入邀请码"
-              invalid={Boolean(fieldError)}
-              onChange={(event) => setInviteCode(event.target.value)}
-            />
-          </FormField>
-          <Button type="submit" variant="primary" leftIcon={TicketCheck} loading={submitting} className="mt-4 w-full">
-            加入课程
-          </Button>
-        </form>
-      </CardBody>
-    </Card>
+    <form onSubmit={handleSubmit} noValidate>
+      <FormField label="课程邀请码" htmlFor={fieldId} required error={fieldError}>
+        <Input
+          id={fieldId}
+          value={inviteCode}
+          autoComplete="off"
+          placeholder="请输入邀请码"
+          invalid={Boolean(fieldError)}
+          onChange={(event) => setInviteCode(event.target.value)}
+        />
+      </FormField>
+      <Button
+        type="submit"
+        variant="primary"
+        leftIcon={TicketCheck}
+        loading={submitting}
+        className="mt-4 w-full"
+      >
+        加入课程
+      </Button>
+    </form>
   )
 }

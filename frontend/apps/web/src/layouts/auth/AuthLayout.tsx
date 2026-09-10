@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { Outlet, useLocation } from 'react-router'
+import { useReducedMotion } from '@chaimir/ui'
 import { AuthIntro } from './AuthIntro'
 
 /**
@@ -17,10 +18,16 @@ export default function AuthLayout() {
   const [displayLocation, setDisplayLocation] = useState(location)
   const [isTransitioning, setIsTransitioning] = useState(false)
   const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)
+  const reducedMotion = useReducedMotion()
 
   // 路由变化时触发淡出 → 切换内容 → 淡入
   useEffect(() => {
     if (location !== displayLocation) {
+      if (reducedMotion) {
+        setDisplayLocation(location)
+        setIsTransitioning(false)
+        return
+      }
       setIsTransitioning(true)
       // 淡出完成后切换内容(200ms 与 animate-fade-in 时长一致)
       timeoutRef.current = setTimeout(() => {
@@ -31,7 +38,7 @@ export default function AuthLayout() {
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
     }
-  }, [location, displayLocation])
+  }, [displayLocation, location, reducedMotion])
 
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden bg-substrate text-on-dark">
@@ -49,7 +56,9 @@ export default function AuthLayout() {
           <div className="relative w-full max-w-sm">
             {/* 路由内容切换点,带淡入淡出过渡(丝滑切换) */}
             <div
-              className={isTransitioning ? 'animate-fade-out' : 'animate-fade-in'}
+              className={
+                reducedMotion ? undefined : isTransitioning ? 'animate-fade-out' : 'animate-fade-in'
+              }
               key={displayLocation.pathname}
             >
               <Outlet />

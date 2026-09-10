@@ -15,7 +15,6 @@ ADD --checksum=sha256:d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93
 # 复用上游 foundry:1000:1000,缓存写入 runtime-state 而不是学生 workspace。
 # 内置多个经校验的 Solidity 编译器,实验按精确版本路径选择且不允许运行时联网下载。
 RUN apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 -y upgrade \
     && apt-get -o Acquire::Retries=3 install -y --no-install-recommends jq ca-certificates \
     && echo "${SOLC_0_8_20_SHA256}  /tmp/solc-0.8.20" | sha256sum -c - \
     && echo "${SOLC_0_8_24_SHA256}  /tmp/solc-0.8.24" | sha256sum -c - \

@@ -11,7 +11,6 @@ LABEL org.opencontainers.image.description="Chaimir wallet simulator tool image"
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && packages='python-3.13=3.13.14-r3 py3.13-pip=26.1.2-r1' \
-    && apk upgrade --no-cache \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \

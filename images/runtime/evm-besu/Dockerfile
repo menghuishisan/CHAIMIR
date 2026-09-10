@@ -82,6 +82,7 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
 COPY --from=patched-besu /opt/besu /opt/besu
 
 COPY entrypoint.sh /usr/local/bin/chaimir-besu-entrypoint
+COPY --chown=1000:1000 qbft-config.json /opt/besu/chaimir-qbft-config.json
 RUN chmod +x /usr/local/bin/chaimir-besu-entrypoint \
     && chown -R 1000:1000 /opt/besu
 

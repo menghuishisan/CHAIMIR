@@ -8,7 +8,7 @@
 // (教师侧它是批改中心内区块,校管侧它本身就是侧栏页,对齐清单 §3.3)。
 
 import { Scale } from 'lucide-react'
-import { Breadcrumb, Callout, PageHeader, PageScaffold } from '@chaimir/ui'
+import { Breadcrumb, PageHeader, PageScaffold } from '@chaimir/ui'
 import { GradeAppeals } from '../../components/GradeAppeals'
 
 /**
@@ -28,9 +28,6 @@ export default function SchoolAdminAppealsPage() {
           它在教师侧是批改中心的内区块,在校管侧是整页主体,两处同一实现 */}
       <GradeAppeals canRecompute />
 
-      <Callout tone="info" className="mt-4">
-        授课教师也能处理自己课程的申诉。这里能看到全校范围,便于跟进长时间未处理的申诉。
-      </Callout>
     </PageScaffold>
   )
 }
