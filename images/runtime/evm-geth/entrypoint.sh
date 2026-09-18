@@ -17,10 +17,28 @@ fi
 
 state_dir="/runtime-state/geth"
 if [ -n "${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-}" ] && ! geth account list --datadir "$state_dir" 2>/dev/null | grep -q '^Account #'; then
+  deployer_key="$CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY"
+  case "$deployer_key" in
+    0x*) deployer_key="${deployer_key#0x}" ;;
+    0X*) deployer_key="${deployer_key#0X}" ;;
+  esac
+  if [ "${#deployer_key}" -ne 64 ]; then
+    echo "CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY must be 64 hexadecimal characters" >&2
+    exit 2
+  fi
+  case "$deployer_key" in
+    *[!0-9a-fA-F]*)
+      echo "CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY must be 64 hexadecimal characters" >&2
+      exit 2
+      ;;
+  esac
   mkdir -p "$state_dir/keystore"
-  printf '%s\n' "$CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY" > "$state_dir/import.key"
-  geth account import --datadir "$state_dir" --password /dev/null "$state_dir/import.key" >/dev/null
-  rm -f "$state_dir/import.key"
+  key_file="$state_dir/import.key"
+  trap 'rm -f "$key_file"' EXIT HUP INT TERM
+  printf '%s' "$deployer_key" > "$key_file"
+  geth account import --datadir "$state_dir" --password /dev/null "$key_file" >/dev/null
+  rm -f "$key_file"
+  trap - EXIT HUP INT TERM
 fi
 
 # HTTP RPC 监听容器端口,真实对外入口由平台代理鉴权控制。

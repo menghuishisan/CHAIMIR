@@ -3,6 +3,13 @@
 set -eu
 : "${CHAIMIR_CHAIN_STATE_DIR:?CHAIMIR_CHAIN_STATE_DIR is required}"
 : "${CHAIMIR_RUNTIME_RPC_PORT:?CHAIMIR_RUNTIME_RPC_PORT is required}"
+: "${CHAIMIR_EVM_DEPLOYER_MNEMONIC:?CHAIMIR_EVM_DEPLOYER_MNEMONIC is required}"
+
+mnemonic_words=$(printf '%s' "$CHAIMIR_EVM_DEPLOYER_MNEMONIC" | awk '{print NF}')
+case "$mnemonic_words" in
+  12|15|18|21|24) ;;
+  *) echo "CHAIMIR_EVM_DEPLOYER_MNEMONIC 必须是有效长度的 BIP39 助记词" >&2; exit 2 ;;
+esac
 
 case "$CHAIMIR_RUNTIME_RPC_PORT" in
   ''|*[!0-9]*) echo "CHAIMIR_RUNTIME_RPC_PORT must be a valid TCP port" >&2; exit 2 ;;
@@ -15,7 +22,7 @@ fi
 # 将镜像内固定的多版本编译器复制到运行态 SVM 目录,避免把编译器缓存写入学生 workspace。
 seed_solidity_compilers() {
   svm_root="${HOME}/.svm"
-  for version in 0.8.20 0.8.24 0.8.26; do
+  for version in 0.8.15 0.8.19 0.8.20 0.8.24 0.8.25 0.8.26; do
     compiler="/usr/local/bin/solc-${version}"
     target="${svm_root}/${version}/solc-${version}"
     [ -x "$compiler" ] || { echo "缺少内置 Solidity 编译器 ${version}" >&2; exit 70; }
@@ -39,4 +46,5 @@ if [ ! -s "$state_file" ]; then
 fi
 
 # Anvil 默认会打印测试账户私钥和助记词,生产日志必须静默启动。
-exec anvil --quiet --host 0.0.0.0 --port "${CHAIMIR_RUNTIME_RPC_PORT}" --state "$state_file"
+# 组合显式传入的参数属于运行时契约,例如双链联动需要独立的 chain id。
+exec anvil --quiet --host 0.0.0.0 --port "${CHAIMIR_RUNTIME_RPC_PORT}" --state "$state_file" --mnemonic "$CHAIMIR_EVM_DEPLOYER_MNEMONIC" "$@"

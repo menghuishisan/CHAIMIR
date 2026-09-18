@@ -16,7 +16,7 @@
 - 镜像准入、组合准入和 runtime 原生动作准入彼此独立。L1 runtime 只表示暂未开放平台原生 `deploy/tx/query`,不代表不能作为 RPC、peer、REST 或其他能力提供者参与组合；只有安全/供应链阻断才使用 `supply_chain.deployable=false`。
 - 教师脚本、题目固化资产或链上依赖合约即可表达的轻量模拟能力,不得进入平台必需镜像清单。真实链下基础设施必须用真实镜像或官方薄封装,不得用 `*-mock` 服务冒充。
 - J2 链上断言、J3 Flag、J5 仿真检查点由 M3 后端策略统一承接,不得在 `images/judger` 下重复维护执行器镜像。镜像判题只保留需要独立工具链/沙箱命令的 J1 测试用例和 J4 静态扫描。
-- 容器内部端口优先沿用官方默认端口;生产禁止固定宿主机端口、`hostPort`、`hostNetwork`;本地开发宿主机映射必须可配置并默认绑定 `127.0.0.1`。
+- 容器内部端口优先沿用官方默认端口;所有运行目标禁止固定宿主机端口、`hostPort`、`hostNetwork`。
 - 学生可进入容器不得挂载密钥、判题私有数据、宿主机路径、ServiceAccount token、答案、flag 或其他用户数据。
 - PostgreSQL、Redis、S3 对象存储、NATS、CouchDB、Ingress、监控等平台运行期基础设施镜像也在本目录治理;是否有 Dockerfile 由 `source.type` 决定,不是由分类决定。Harbor 是供应链引导根，不是平台运行期或可编排镜像；其固定 chart、组件闭包、补丁与 OCI 引导证据只在 `deploy/charts/harbor/` 治理，不能写入本目录或正式 digest lock。
 
@@ -49,7 +49,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 -Scop
 
 ## 构建与候选锁
 
-完整功能测试、预发布和生产必须走同一套 Harbor + digest lock 机制。构建类镜像不得先落到 `local`、`chaimir/*:dev` 或其他临时命名空间再转换;构建命令必须直接使用与生产一致的 Harbor 分类命名空间,并从 Harbor 返回值生成候选锁:
+完整功能测试、预发布和生产必须走同一套 Harbor + digest lock 机制。构建类镜像不得先落到未纳入正式治理的临时命名空间、`chaimir/*:dev` 或其他临时引用再转换;构建命令必须直接使用生产一致的 Harbor 分类命名空间,并从 Harbor 返回值生成候选锁:
 
 完整镜像包、首次环境或发布验收使用下面的全量流程。日常源码修改不需要重复处理全部镜像,但不能因此降低被修改镜像的任何门禁。
 
@@ -64,7 +64,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/build-images.ps1 `
 
 脚本固定使用 `docker buildx build --push` 将镜像直接推入 `registry.chaimir.io`,并把 Registry 解析出的 digest 写入 `-DigestLockOut`。`-DigestLock` 同时作为构建依赖输入:例如 `base/judge-min` 依赖 `base/go-builder` 时,必须先让 `base/go-builder` 写入同一候选锁,后续镜像才能按 `registry.chaimir.io/base/go-builder@sha256:...` 构建。
 
-构建脚本会根据 Dockerfile 中的受控镜像参数做内部依赖拓扑排序。网络代理或 registry mirror 只能配置在 Docker Desktop、BuildKit 或 CI runner 传输层,脚本和仓库配置不维护本地专用镜像源。
+构建脚本会根据 Dockerfile 中的受控镜像参数做内部依赖拓扑排序。网络代理或 registry mirror 只能配置在 Docker Desktop、BuildKit 或 CI runner 传输层,脚本和仓库配置不维护专用镜像源。
 
 候选锁只能用于回拉和安全校验,不能直接作为正式发布锁。完成构建后必须用同一拉取脚本按 digest 拉回:
 
@@ -86,9 +86,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
 - 仅修改某个 `images/service/<name>` Dockerfile 或 manifest: 只选择对应的 `service/<name>`。
 - `base/go-builder`、`base/runtime-min`、`middleware/postgres` 变化: 根据 Dockerfile 的真实 `FROM` 依赖扩展到实际消费者,不受影响镜像不重复处理。
 
-前端镜像的日常构建还复用正式 BuildKit builder 上的两级缓存:依赖层使用 pnpm store cache,任务层使用挂载到 `/src/frontend/.turbo` 的 Turbo cache。`frontend/turbo.json` 只缓存各工作区真实产物 `dist/**`,并把构建期 `VITE_*` 配置纳入任务摘要;因此源码改动不会重新安装未变化的依赖,环境配置变化也不会恢复错误的旧静态资源。正式流水线必须复用持久化的项目 BuildKit builder,不得把缓存导出为运行镜像、临时 tag 或本地替代镜像;首次冷构建仍需完整执行 Vite 打包。
+前端镜像的日常构建还复用正式 BuildKit builder 上的两级缓存:依赖层使用 pnpm store cache,任务层使用挂载到 `/src/frontend/.turbo` 的 Turbo cache。`frontend/turbo.json` 只缓存各工作区真实产物 `dist/**`,并把构建期 `VITE_*` 配置纳入任务摘要;因此源码改动不会重新安装未变化的依赖,环境配置变化也不会恢复错误的旧静态资源。正式流水线必须复用持久化的项目 BuildKit builder,不得把缓存导出为运行镜像、临时 tag 或宿主机替代镜像;首次冷构建仍需完整执行 Vite 打包。
 
-构建资源必须与验收集群隔离:正式流水线使用独立的 Linux BuildKit runner 或独立 builder 节点,持久化 builder 本身的缓存和受控生命周期,不得让冷 Vite 打包与 Kind/Cilium 节点共享受限的 WSL 内存。Windows 本地仅用于复现项目入口和缓存命中,不能把暂停节点、临时提高 WSL 配额或宿主机工具链当作生产构建依赖;资源不足时应把同一不可变 Dockerfile 和 digest 锁交给正式 runner,不改变镜像来源或部署输入。
+构建资源必须与验收集群隔离:正式流水线使用独立的 Linux BuildKit runner 或独立 builder 节点,持久化 builder 本身的缓存和受控生命周期,不得让冷 Vite 打包与 Kind/Cilium 节点共享受限的 WSL 内存。Windows 宿主机仅用于复现项目入口和缓存命中,不能把暂停节点、临时提高 WSL 配额或宿主机工具链当作生产构建依赖;资源不足时应把同一不可变 Dockerfile 和 digest 锁交给正式 runner,不改变镜像来源或部署输入。
 
 选择性证明命令必须带 `-Images`、`-NoEnvWrite` 和 `-DigestFragmentsDir`;脚本只有在选定集合全部通过时才生成 `verified-images.lock`。再用 `images/sync-image-metadata.ps1 -FragmentsPath` 增量晋升正式锁、`deploy/base` 与资源所属 component 的镜像引用、`deploy/config/chaimir.env` 和存在时的环境 `backend/.env` 准入证明。未选镜像继续使用正式锁中的原 digest,不重复构建、拉取、扫描或签名。完成晋升后执行 `make dev-refresh`,检查只有受影响的工作负载滚动更新。
 

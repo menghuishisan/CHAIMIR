@@ -55,7 +55,7 @@ BEGIN
   EXECUTE format('GRANT %I TO %I', maintenance_role, session_user);
 END $$;`
 
-// main 分发数据库迁移、初始化和本地验收数据子命令。
+// main 分发数据库迁移、初始化和受控验收数据子命令。
 func main() {
 	if len(os.Args) == 2 && os.Args[1] == "--selftest" {
 		fmt.Fprintln(os.Stdout, "迁移命令自检通过")
@@ -70,7 +70,7 @@ func main() {
 // run 负责加载配置并按子命令执行部署期编排。
 func run() error {
 	if len(os.Args) != 2 {
-		return fmt.Errorf("用法: migrate [migrate|migrate-and-seed|seed-acceptance|reset-local]")
+		return fmt.Errorf("用法: migrate [migrate|migrate-and-seed|seed-acceptance]")
 	}
 	cfg, err := config.Load()
 	if err != nil {
@@ -87,17 +87,6 @@ func run() error {
 		}
 		return seed(ctx, cfg)
 	case "seed-acceptance":
-		return seedAcceptance(ctx, cfg)
-	case "reset-local":
-		if err := resetLocalDatabase(ctx, cfg); err != nil {
-			return err
-		}
-		if err := migrateAndGrant(ctx, cfg); err != nil {
-			return err
-		}
-		if err := seed(ctx, cfg); err != nil {
-			return err
-		}
 		return seedAcceptance(ctx, cfg)
 	default:
 		return fmt.Errorf("未知子命令: %s", os.Args[1])
@@ -202,52 +191,6 @@ func runMigrations(ctx context.Context, pg config.PostgresConfig) (resultErr err
 	}
 	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
 		return fmt.Errorf("执行数据库迁移失败: %w", err)
-	}
-	return nil
-}
-
-// resetLocalDatabase 只允许在本地/开发连接上执行删库重建,用于验收测试前清空状态。
-func resetLocalDatabase(ctx context.Context, cfg *config.Config) (resultErr error) {
-	if err := ensureLocalResetAllowed(cfg); err != nil {
-		return err
-	}
-	adminDB := cfg.Postgres
-	adminDB.Database = "postgres"
-	if err := db.WaitForPostgres(ctx, adminDB, privilegedUser(cfg.Postgres), privilegedPassword(cfg.Postgres)); err != nil {
-		return fmt.Errorf("等待本地管理数据库就绪失败: %w", err)
-	}
-	sqlDB, err := sql.Open("pgx", postgresURL(adminDB, privilegedUser(cfg.Postgres), privilegedPassword(cfg.Postgres)))
-	if err != nil {
-		return fmt.Errorf("打开本地重置数据库连接失败: %w", err)
-	}
-	defer closeSQLDatabase(sqlDB, "关闭本地重置数据库连接失败", &resultErr)
-	if _, err := sqlDB.ExecContext(ctx, "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()", cfg.Postgres.Database); err != nil {
-		return fmt.Errorf("断开目标库连接失败: %w", err)
-	}
-	if _, err := sqlDB.ExecContext(ctx, "DROP DATABASE IF EXISTS "+quoteIdentifier(cfg.Postgres.Database)); err != nil {
-		return fmt.Errorf("删除本地测试数据库失败: %w", err)
-	}
-	if _, err := sqlDB.ExecContext(ctx, "CREATE DATABASE "+quoteIdentifier(cfg.Postgres.Database)); err != nil {
-		return fmt.Errorf("创建本地测试数据库失败: %w", err)
-	}
-	slog.Info("local database reset completed", slog.String("database", cfg.Postgres.Database))
-	return nil
-}
-
-// ensureLocalResetAllowed 防止 reset-local 被误用于生产或非本机数据库。
-func ensureLocalResetAllowed(cfg *config.Config) error {
-	if !config.IsLocalLikeEnvironment(cfg.Server.AppEnv) {
-		return fmt.Errorf("reset-local 仅允许 APP_ENV 为 local/dev/development/test,当前 APP_ENV=%s", cfg.Server.AppEnv)
-	}
-	host := strings.ToLower(strings.TrimSpace(cfg.Postgres.Host))
-	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
-		return fmt.Errorf("reset-local 仅允许连接本机数据库,当前 PG_HOST=%s", cfg.Postgres.Host)
-	}
-	if strings.TrimSpace(cfg.Postgres.Database) == "" || strings.EqualFold(cfg.Postgres.Database, "postgres") {
-		return fmt.Errorf("reset-local 目标库名非法: %s", cfg.Postgres.Database)
-	}
-	if strings.TrimSpace(privilegedUser(cfg.Postgres)) == strings.TrimSpace(appRoleName) {
-		return fmt.Errorf("reset-local 需要 PG_PRIV_USER 指向数据库 owner/superuser,不能使用应用角色 %s", appRoleName)
 	}
 	return nil
 }

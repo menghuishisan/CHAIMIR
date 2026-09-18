@@ -1,4 +1,4 @@
-# image-attestations-generate 执行本地/私有化镜像扫描、签名、验证并生成后端沙箱准入证明。
+# image-attestations-generate 执行候选/私有化镜像扫描、签名、验证并生成后端沙箱准入证明。
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [string]$ConfigPath = "",
@@ -12,7 +12,8 @@ param(
     [switch]$GenerateKeyIfMissing,
     [switch]$NoEnvWrite,
     [int]$ToolMaxAttempts = 3,
-    [int]$ToolRetryDelaySeconds = 5
+    [int]$ToolRetryDelaySeconds = 5,
+    [int]$ToolTimeoutSeconds = 1800
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,6 +24,9 @@ if ($ToolMaxAttempts -lt 1) {
 }
 if ($ToolRetryDelaySeconds -lt 0) {
     throw "ToolRetryDelaySeconds 不能小于 0"
+}
+if ($ToolTimeoutSeconds -lt 1) {
+    throw "ToolTimeoutSeconds 必须大于等于 1"
 }
 
 # 统一拆分文档中的逗号镜像列表,保证选择性证明覆盖全部指定镜像。
@@ -75,25 +79,10 @@ if (-not [string]::IsNullOrWhiteSpace($DigestFragmentsDir)) {
     Remove-ArtifactIfPresent -Path (Join-Path $DigestFragmentsDir "verified-images.lock")
 }
 
-# Read-EnvFile 读取简单 KEY=VALUE 文件;只返回键值,不输出密钥内容。
+# Read-EnvFile 使用统一严格解析器读取 KEY=VALUE 文件,不输出键值内容。
 function Read-EnvFile {
     param([string]$Path)
-    $items = @{}
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return $items
-    }
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        $trimmed = $line.Trim()
-        if ($trimmed -eq "" -or $trimmed.StartsWith("#")) {
-            continue
-        }
-        $idx = $trimmed.IndexOf("=")
-        if ($idx -le 0) {
-            continue
-        }
-        $items[$trimmed.Substring(0, $idx).Trim()] = $trimmed.Substring($idx + 1).Trim()
-    }
-    return $items
+    return Read-ChaimirEnvFile -Path $Path
 }
 
 # Set-EnvValue 原地更新 env 文件中的单个键;缺失时追加到文件尾部。
@@ -224,6 +213,80 @@ function Get-TrivyHighCriticalCounts {
     return [pscustomobject]@{ High = $high; Critical = $critical }
 }
 
+# ConvertTo-ProcessArgument 将参数安全编码为 Windows 原生进程参数。
+function ConvertTo-ProcessArgument([string]$Value) {
+    if ($null -eq $Value -or $Value.Length -eq 0) { return '""' }
+    if ($Value -notmatch '[\s"]') { return $Value }
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    $slashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') { $slashes++; continue }
+        if ($character -eq '"') {
+            if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
+            [void]$builder.Append('\').Append('"')
+            $slashes = 0
+            continue
+        }
+        if ($slashes -gt 0) { [void]$builder.Append(('\' * $slashes) -join '') }
+        [void]$builder.Append($character)
+        $slashes = 0
+    }
+    if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+# Invoke-DockerProcess 以明确上限执行 Compose,防止供应链证明无限等待。
+function Invoke-DockerProcess {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+    )
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
+    $process.StartInfo.FileName = "docker.exe"
+    $process.StartInfo.Arguments = (($Arguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join " ")
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.CreateNoWindow = $true
+    # Compose 参数使用 deploy/ 下的受控相对路径;原生子进程必须显式继承该工作目录。
+    $process.StartInfo.WorkingDirectory = (Join-Path $RepoRoot "deploy")
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $process.StartInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
+    try {
+        if (-not $process.Start()) { throw "Docker CLI 启动失败" }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try {
+                & taskkill.exe /PID $process.Id /T /F | Out-Null
+            } catch {
+                Write-Warning ("Docker Compose 超时后的进程树终止失败: {0}" -f $_.Exception.Message)
+            }
+            try {
+                $process.Kill($true)
+            } catch {
+                Write-Warning ("Docker Compose 超时后的进程终止失败: {0}" -f $_.Exception.Message)
+            }
+            $stdout = $stdoutTask.GetAwaiter().GetResult()
+            $stderr = $stderrTask.GetAwaiter().GetResult()
+            $timeoutDetails = @(
+                ("Docker Compose 超时（{0} 秒）: {1}" -f $TimeoutSeconds, ($Arguments -join " ")),
+                $stdout,
+                $stderr
+            ) | Where-Object { $_ }
+            return [pscustomobject]@{ Code = 124; Text = ($timeoutDetails -join "`n").Trim() }
+        }
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        return [pscustomobject]@{ Code = $process.ExitCode; Text = ((@($stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim() }
+    } finally {
+        $process.Dispose()
+    }
+}
+
 # Invoke-ComposeTool 通过统一 Docker Compose 入口运行 Trivy/Cosign。
 function Invoke-ComposeTool {
     param(
@@ -248,8 +311,9 @@ function Invoke-ComposeTool {
             $env:SUPPLY_CHAIN_EVIDENCE_HOST_DIR = $script:evidenceHostDir
             $ErrorActionPreference = "Continue"
             for ($attempt = 1; $attempt -le $ToolMaxAttempts; $attempt++) {
-                & docker @args
-                $exitCode = $LASTEXITCODE
+                $result = Invoke-DockerProcess -Arguments $args -TimeoutSeconds $ToolTimeoutSeconds
+                if ($result.Text) { Write-Output $result.Text }
+                $exitCode = $result.Code
                 if ($exitCode -eq 0) {
                     return
                 }
@@ -272,28 +336,26 @@ function Invoke-ComposeTool {
     }
 }
 
-$config = Read-EnvFile -Path $ConfigPath
-$secret = Read-EnvFile -Path $SecretPath
-$registry = $config["SUPPLY_CHAIN_REGISTRY"]
-if ([string]::IsNullOrWhiteSpace($registry)) {
-    $registry = $config["IMAGE_REGISTRY"]
+$config = Read-ChaimirEnvFile -Path $ConfigPath -RequiredKeys @(
+    "SUPPLY_CHAIN_REGISTRY", "SUPPLY_CHAIN_REGISTRY_ENDPOINT", "SUPPLY_CHAIN_HARBOR_EXTERNAL_URL", "IMAGE_REGISTRY",
+    "SUPPLY_CHAIN_TRIVY_IMAGE", "SUPPLY_CHAIN_TRIVY_DB_REPOSITORY", "SUPPLY_CHAIN_TRIVY_JAVA_DB_REPOSITORY",
+    "SUPPLY_CHAIN_COSIGN_IMAGE", "SUPPLY_CHAIN_HELM_IMAGE"
+)
+$secret = Read-ChaimirEnvFile -Path $SecretPath -RequiredKeys @("COSIGN_PRIVATE_KEY_PASSWORD")
+$registry = Get-ChaimirCanonicalRegistry -Config $config
+# registryEndpoint 与规范 Registry 使用同一主机,禁止把端口转发或另一套地址写入证明结果。
+$registryEndpoint = $registry
+foreach ($toolImageKey in @("SUPPLY_CHAIN_TRIVY_IMAGE", "SUPPLY_CHAIN_COSIGN_IMAGE", "SUPPLY_CHAIN_HELM_IMAGE")) {
+    if ([string]$config[$toolImageKey] -notmatch '^[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$') {
+        throw "$toolImageKey 必须使用不可变 image@sha256 引用"
+    }
 }
-if ([string]::IsNullOrWhiteSpace($registry)) {
-    throw "缺少 SUPPLY_CHAIN_REGISTRY 或 IMAGE_REGISTRY"
+foreach ($trivyDatabaseKey in @("SUPPLY_CHAIN_TRIVY_DB_REPOSITORY", "SUPPLY_CHAIN_TRIVY_JAVA_DB_REPOSITORY")) {
+    if ([string]$config[$trivyDatabaseKey] -notmatch '^[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$') {
+        throw "$trivyDatabaseKey 必须使用不可变 image@sha256 引用"
+    }
 }
-# registryEndpoint 是供应链工具访问当前环境 Registry 的传输端点。
-# 业务准入证明仍使用无端口的规范 registry 地址，避免把本地 port-forward 写入运行时配置。
-$registryEndpoint = [string]$config["SUPPLY_CHAIN_REGISTRY_ENDPOINT"]
-if ([string]::IsNullOrWhiteSpace($registryEndpoint)) {
-    $registryEndpoint = $registry
-}
-$registryExternalUrl = [string]$config["SUPPLY_CHAIN_HARBOR_EXTERNAL_URL"]
-if ($registryExternalUrl.StartsWith("http://", [System.StringComparison]::OrdinalIgnoreCase) -or
-    $registryEndpoint.StartsWith("http://", [System.StringComparison]::OrdinalIgnoreCase) -or
-    $registry.StartsWith("http://", [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "供应链 Registry 必须使用 HTTPS,不允许 HTTP 或 insecure 参数"
-}
-$script:cosignPrivateKeyPassword = $secret["COSIGN_PRIVATE_KEY_PASSWORD"]
+$script:cosignPrivateKeyPassword = [string]$secret["COSIGN_PRIVATE_KEY_PASSWORD"]
 
 $cosignDirValue = $config["SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR"]
 if ([string]::IsNullOrWhiteSpace($cosignDirValue)) {
@@ -432,12 +494,13 @@ foreach ($item in $items) {
         continue
     }
     try {
-        $cosignVerifyArgs = @("verify", "--offline", "--key", "/cosign/cosign.pub")
+        # 私有基础设施不上传公共透明日志;保留公钥签名和 claims 验证,不使用不安全跳过参数。
+        $cosignVerifyArgs = @("verify", "--private-infrastructure", "--key", "/cosign/cosign.pub")
         $cosignVerifyArgs += $toolRef
         Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignVerifyArgs -Context "Cosign 验签 $canonicalRef" *>> $signLog
 
         $cosignVerifyAttestationArgs = @(
-            "verify-attestation", "--offline", "--key", "/cosign/cosign.pub", "--type", "cyclonedx"
+            "verify-attestation", "--private-infrastructure", "--key", "/cosign/cosign.pub", "--type", "cyclonedx"
         )
         $cosignVerifyAttestationArgs += $toolRef
         Invoke-ComposeTool -Tool "cosign" -ToolArgs $cosignVerifyAttestationArgs -Context "Cosign SBOM 验证 $canonicalRef" *>> $signLog

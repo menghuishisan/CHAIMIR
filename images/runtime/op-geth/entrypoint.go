@@ -1,5 +1,5 @@
-// entrypoint.go validates the platform runtime contract, initializes the
-// rollup genesis once, and starts the OP Geth execution and Engine APIs.
+// 本文件校验平台运行时契约,只初始化一次 rollup genesis,并启动 OP Geth
+// 执行 API 与 Engine API。
 package main
 
 import (
@@ -39,7 +39,7 @@ func main() {
 	}
 	marker := filepath.Join(dataDir, "chaimir-genesis-initialized")
 	if _, err := os.Stat(marker); os.IsNotExist(err) {
-		run("geth", "init", "--datadir", dataDir, genesis)
+		run("geth", "init", "--state.scheme", "hash", "--datadir", dataDir, genesis)
 		if err := os.WriteFile(marker, []byte(genesisHash+"\n"), 0600); err != nil {
 			fail("write OP Geth initialization marker: " + err.Error())
 		}
@@ -54,9 +54,9 @@ func main() {
 			fail("OP_GETH_GENESIS_PATH does not match the initialized runtime state")
 		}
 	}
-	// Engine API is reached through the generated Service DNS name; allow that
-	// Host header while keeping JWT authentication as the access control.
-	run("geth", "--datadir", dataDir, "--http", "--http.addr", "0.0.0.0", "--http.port", strconv.Itoa(rpcPort), "--http.api", "eth,net,web3,debug,txpool", "--http.vhosts", "*", "--authrpc.addr", "0.0.0.0", "--authrpc.port", strconv.Itoa(enginePort), "--authrpc.vhosts", "*", "--authrpc.jwtsecret", jwtPath)
+	// 受控链没有外部同步对等端,必须用完整执行模式接收 Beacon 通过 Engine API 提交的受控 payload。
+	// The Graph 等索引器会按事件所在区块执行历史 eth_call,因此执行层必须保留历史状态。
+	run("geth", "--syncmode", "full", "--gcmode", "archive", "--state.scheme", "hash", "--datadir", dataDir, "--http", "--http.addr", "0.0.0.0", "--http.port", strconv.Itoa(rpcPort), "--http.api", "eth,net,web3,debug,txpool", "--http.vhosts", "*", "--authrpc.addr", "0.0.0.0", "--authrpc.port", strconv.Itoa(enginePort), "--authrpc.vhosts", "*", "--authrpc.jwtsecret", jwtPath)
 }
 
 func required(name string) string {
@@ -79,14 +79,14 @@ func requiredPort(name string) int {
 	return parsed
 }
 
-// hashGenesis fingerprints the bounded, mounted genesis input so a persisted
-// runtime state can never be silently reused with a different chain definition.
+// hashGenesis 对有界的挂载 genesis 输入计算指纹,避免持久化运行态被不同链定义静默复用。
 func hashGenesis(path string) string {
 	file, err := os.Open(path)
 	if err != nil {
 		fail("open OP Geth genesis: " + err.Error())
 	}
-	const maxGenesisBytes = 4 * 1024 * 1024
+	// 受控 OP-Stack 的官方 L2 allocs 会使 genesis 超过普通教学链大小；仍保留有界读取，避免异常挂载造成无界内存消耗。
+	const maxGenesisBytes = 64 * 1024 * 1024
 	contents, err := io.ReadAll(io.LimitReader(file, maxGenesisBytes+1))
 	if closeErr := file.Close(); closeErr != nil {
 		fail("close OP Geth genesis: " + closeErr.Error())

@@ -13,8 +13,8 @@ import (
 func main() {
 	ledgerDir := required("CHAIMIR_SOLANA_LEDGER_DIR")
 	rpcPort := requiredPort("CHAIMIR_RUNTIME_RPC_PORT")
-	// runtime-state is an empty PVC on first start; the runtime owns creation of
-	// its ledger directory so platform selftest does not require a host-side seed.
+	// 首次启动时 runtime-state 是空 PVC;由运行时负责创建账本目录,
+	// 因此平台自检不需要主机侧 seed。
 	if err := os.MkdirAll(ledgerDir, 0o700); err != nil {
 		fmt.Fprintf(os.Stderr, "创建 Solana ledger 目录失败: %v\n", err)
 		os.Exit(1)
@@ -67,7 +67,7 @@ func required(key string) string {
 	return value
 }
 
-// requiredPort validates the runtime RPC port before invoking the validator.
+// requiredPort 在调用 validator 前校验运行时 RPC 端口。
 func requiredPort(key string) int {
 	value := required(key)
 	port, err := strconv.Atoi(value)

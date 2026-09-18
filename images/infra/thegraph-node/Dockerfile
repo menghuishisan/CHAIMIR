@@ -1,7 +1,9 @@
 # 本文件定义 The Graph 索引节点镜像,复用官方 graph-node 二进制并收紧运行层。
+ARG GO_BUILDER_IMAGE=invalid.invalid/base/go-builder:required
+
 FROM graphprotocol/graph-node:0.44.0@sha256:c14c6d8e2b2b1ed89f6a89babf48d807b18a43e372fda7fb495d3a9050b65b8b AS upstream
 
-FROM registry.chaimir.io/base/go-builder@sha256:fb0a1352643623882f008691aaa1459262c0c5e1030878dbdbc5e916a852a869 AS entrypoint-build
+FROM ${GO_BUILDER_IMAGE} AS entrypoint-build
 
 COPY entrypoint.go /src/entrypoint.go
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o /out/chaimir-thegraph-entrypoint /src/entrypoint.go

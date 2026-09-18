@@ -22,6 +22,10 @@ upstream:
   version: 3.13-alpine
   digest: sha256:399babc8b49529dabfd9c922f2b5eea81d611e4512e3ed250d75bd2e7683f4b0
   reuse_policy: self-developed-sidecar
+  runtime_packages:
+    - libuuid=2.42.3-r1
+    - libcrypto3=3.5.8-r0
+    - libssl3=3.5.8-r0
 env_keys:
   config:
     - CHAIMIR_LOG_PATH

@@ -20,7 +20,7 @@ USER root
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && for attempt in 1 2 3 4 5 6 7 8; do \
-        apk add --cache-dir /var/cache/apk --update-cache bash binutils ca-certificates ccache coreutils elfutils-dev gcc git linux-headers make musl-dev pkgconf python3 py3-jinja2 scapy && break; \
+        apk add --cache-dir /var/cache/apk --update-cache bash binutils ca-certificates ccache coreutils elfutils-dev gcc git linux-headers make musl-dev openssl=3.5.8-r0 pkgconf python3 py3-jinja2 scapy && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 3)); \
     done \

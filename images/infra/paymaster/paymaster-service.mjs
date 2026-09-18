@@ -121,7 +121,8 @@ function validateUserOperation(value) {
 }
 
 function standardPaymasterPrefix(validUntil, validAfter) {
-  return ethers.solidityPacked(["address", "uint48", "uint48"], [paymasterAddress, validUntil, validAfter]);
+  const encodedTimestamps = ethers.AbiCoder.defaultAbiCoder().encode(["uint48", "uint48"], [validUntil, validAfter]);
+  return ethers.solidityPacked(["address"], [paymasterAddress]) + encodedTimestamps.slice(2);
 }
 
 const contractProbeUserOperation = {
@@ -184,13 +185,17 @@ app.post("/sponsor", { preHandler: verifyServiceSignature }, async (request, rep
   const validUntil = BigInt(now + validitySeconds);
   if (validUntil > 0xffffffffffffn) return reply.code(503).send({ error: "validity_window_unavailable" });
   const unsignedPaymasterData = standardPaymasterPrefix(validUntil, validAfter);
-  const unsignedUserOperation = { ...userOperation, paymasterAndData: unsignedPaymasterData };
+  // 先用与最终签名等长的占位字节计算 paymaster hash，避免 ABI 动态字段偏移变化。
+  const unsignedUserOperation = { ...userOperation, paymasterAndData: `${unsignedPaymasterData}${"00".repeat(65)}` };
   try {
-    const userOperationHash = await entryPoint.getUserOpHash(unsignedUserOperation);
     const paymasterHash = await paymaster.getHash(unsignedUserOperation, validUntil, validAfter);
-    if (!ethers.isHexString(userOperationHash, 32) || !ethers.isHexString(paymasterHash, 32)) throw new Error("contract returned invalid hash");
+    if (!ethers.isHexString(paymasterHash, 32)) throw new Error("contract returned invalid paymaster hash");
     const signature = await signer.signMessage(ethers.getBytes(paymasterHash));
-    return { version: "0.6", entryPoint: entryPointAddress, paymaster: paymasterAddress, userOperationHash, paymasterHash, validUntil: validUntil.toString(), validAfter: validAfter.toString(), paymasterAndData: `${unsignedPaymasterData}${signature.slice(2)}` };
+    const paymasterAndData = `${unsignedPaymasterData}${signature.slice(2)}`;
+    // 先完成 paymaster 签名，再计算最终 UserOperation 哈希，保证账户签名覆盖完整的 paymasterAndData。
+    const userOperationHash = await entryPoint.getUserOpHash({ ...userOperation, paymasterAndData });
+    if (!ethers.isHexString(userOperationHash, 32)) throw new Error("contract returned invalid user operation hash");
+    return { version: "0.6", entryPoint: entryPointAddress, paymaster: paymasterAddress, userOperationHash, paymasterHash, validUntil: validUntil.toString(), validAfter: validAfter.toString(), paymasterAndData };
   } catch (error) {
     request.log.error({ err: error }, "paymaster contract interaction failed");
     return reply.code(503).send({ error: "paymaster_unavailable" });

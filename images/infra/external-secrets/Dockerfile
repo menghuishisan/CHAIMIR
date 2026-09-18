@@ -10,6 +10,7 @@ RUN curl --fail --location --retry 5 --retry-all-errors --connect-timeout 20 --m
     && tar -xzf /tmp/external-secrets.tar.gz -C /src --strip-components=1 \
     && rm -f /tmp/external-secrets.tar.gz
 RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}"; fi \
+    && go get google.golang.org/grpc@v1.83.2 \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false \
       -ldflags='-s -w' -o /out/external-secrets-linux-amd64 ./main.go
 

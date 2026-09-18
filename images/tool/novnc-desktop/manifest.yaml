@@ -21,6 +21,14 @@ upstream:
   image: alpine:3.23
   version: "3.23"
   digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+  runtime_packages:
+    - giflib=5.2.2-r2
+    - libblkid=2.41.6-r1
+    - libcrypto3=3.5.8-r0
+    - libexpat=2.8.4-r0
+    - libmount=2.41.6-r1
+    - libssl3=3.5.8-r0
+    - libuuid=2.41.6-r1
   reuse_policy: thin-wrapper
 data_driven: true
 capabilities:

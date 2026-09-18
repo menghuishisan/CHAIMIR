@@ -5,7 +5,7 @@
   },
   "overrides": {
     "ws": "8.21.0",
-    "fast-uri": "3.1.5",
+    "fast-uri": "3.1.6",
     "find-my-way": "9.7.0"
   }
 }

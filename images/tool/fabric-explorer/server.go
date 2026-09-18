@@ -229,7 +229,7 @@ func requiredFile(key string) string {
 	return value
 }
 
-// requiredEndpoint accepts only the host:port form used by Fabric CLI flags.
+// requiredEndpoint 只接受 Fabric CLI 参数使用的 host:port 格式。
 func requiredEndpoint(key string) string {
 	value := requiredConfig(key)
 	if strings.Contains(value, "://") || strings.ContainsAny(value, "/?#@") {

@@ -22,6 +22,9 @@ upstream:
   version: 24-alpine3.23
   digest: sha256:595398b0081eacda8e1c4c5b97b76cd1020e4d58a8ebcb4843b9bca1e79e7436
   reuse_policy: self-developed-toolchain
+  runtime_packages:
+    - libcrypto3=3.5.8-r0
+    - libssl3=3.5.8-r0
 data_driven: true
 capabilities:
   provides:

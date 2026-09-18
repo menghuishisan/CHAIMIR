@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# 建库初始化总入口(本地开发 / 私有化交付用)。
+# 建库初始化总入口(受控部署初始化用)。
 # 依据 docs/总-部署架构设计.md §十:初始化脚本负责编排建库、RLS、角色和初始化数据。
 # 业务规则与迁移/授权实现统一委托 backend/cmd/migrate,避免脚本内保留第二套逻辑。
 #
 # 用法:
-#   PG_HOST=127.0.0.1 PG_PORT=5432 PG_DATABASE=chaimir PG_PRIV_USER=postgres PG_PRIV_PASSWORD="<owner口令>" \
+#   PG_HOST=<数据库地址> PG_PORT=5432 PG_DATABASE=chaimir PG_PRIV_USER=postgres PG_PRIV_PASSWORD="<owner口令>" \
 #   PG_PASSWORD="<app角色口令>" \
 #   bash scripts/db/init.sh
 #
@@ -22,19 +22,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 echo "[1/1] 执行数据库迁移与应用角色授权..."
-if command -v chaimir-migrate >/dev/null 2>&1; then
-  (
-    cd "$ROOT/backend"
-    chaimir-migrate migrate
-  )
-elif command -v go >/dev/null 2>&1; then
-  (
-    cd "$ROOT/backend"
-    go run ./cmd/migrate migrate
-  )
-else
-  echo "未找到 chaimir-migrate 或 go,无法执行统一迁移入口。" >&2
+if ! command -v chaimir-migrate >/dev/null 2>&1; then
+  echo "未找到 chaimir-migrate,无法执行统一迁移入口。" >&2
   exit 1
 fi
+(
+  cd "$ROOT/backend"
+  chaimir-migrate migrate
+)
 
 echo "建库初始化完成:迁移已应用,chaimir_app 角色就绪。"

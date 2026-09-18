@@ -2,7 +2,7 @@
 
 M4 扩展仿真包通用运行器镜像。教师(`teacher_<id>__`)与第三方(`org_<id>__`)提交的仿真包全部在本镜像内执行。
 
-## 它是运行器,不是某个仿真的镜像
+## 镜像职责
 
 镜像内只有平台自己的装配器与 `stdio-json` 协议实现,**不含任何仿真算法**。新增一个教师扩展包不新增镜像 —— 包正文由后端按会话投递。这与 `sim/<package-code>` 恰好相反(后者把算法固化在镜像里),两者职责不可混用。
 
@@ -20,12 +20,13 @@ M4 扩展仿真包通用运行器镜像。教师(`teacher_<id>__`)与第三方(`
 
 ## 协议
 
-一次 exec = 从标准输入读一行 JSON 命令 → 向标准输出写一行 JSON 响应 → 进程退出。三条命令:
+一次 exec = 从标准输入读一行 JSON 命令 → 向标准输出写一行 JSON 响应 → 进程退出。四条命令:
 
 | 命令 | 用途 | 响应 |
 | --- | --- | --- |
 | `init` | 装配包并产出 tick=0 首帧 | `{ok,descriptor,snapshot}` |
 | `apply` | 从 seed + 已有事件重放到当前位置,再执行下一条事件 | `{ok,descriptor,snapshot}` |
+| `restore` | 从已持久化快照恢复会话并继续执行 | `{ok,descriptor,snapshot}` |
 | `verify` | 上架前隔离预览:同 seed 双跑逐帧比对 + 回传样例帧 | `{ok,determinism,frames}` |
 
 **容器不常驻会话状态**:状态由后端在每条命令里带回,容器每次从 `seed + events` 重放。代价是重放开销(受包声明 `max_events` 约束),换来的是容器崩溃、Pod 重建、后端重启都不影响过程可复现,容器侧也无需维护会话生命周期。
@@ -40,6 +41,50 @@ M4 扩展仿真包通用运行器镜像。教师(`teacher_<id>__`)与第三方(`
 
 入口模块只接受 `.mjs`:归档内没有 `package.json` 时 Node 按 CJS 解析 `.js`,而扩展包必须默认导出 `SimPackage`(ESM 语义),允许 `.js` 会让"能不能装配"取决于归档里有没有 `type:module`。
 
-## 能力目录登记
+## 能力边界与能力目录登记
 
 能力编号 `sim-package-runner`,digest、命令、受控环境变量、资源与 I/O 上限统一登记在 `SIM_BACKEND_STDIO_ADAPTERS_JSON`;节点规模与执行步数使用仿真包已审核的 `scale_limit`。服务端按 `author_type` 自动为教师/第三方包绑定该能力,教师提交表单不含"运行方式"字段。单租户并发受 `SIM_BACKEND_MAX_CONCURRENT_SESSIONS_PER_TENANT` 约束,超限返回 `42005`。
+
+## 合法 runtime / provider
+
+本镜像是 M4 后端 stdio-json 运行器，不绑定链 runtime 或外部 provider；仿真包正文由平台会话投递。未声明的 provider、网络出口和跨镜像能力均不支持。
+
+## bindings 与 links
+
+本镜像不声明外部 binding 或 link；后端投递通道不是网络 binding。CompositionSpec 不得为本镜像添加未声明依赖。
+
+## 端口与服务
+
+本镜像无对外端口和服务，采用一次性 stdio-json 命令进程；不能通过 HTTP 探活判断仿真业务成功。
+
+## command / args 语义
+
+容器入口由构建阶段生成的 stdio-json runner 固定提供，具体 command、参数、资源和 I/O 上限以 `SIM_BACKEND_STDIO_ADAPTERS_JSON` 与 WorkloadSpec 为准，不使用 generic fallback。
+
+## 初始化材料与运行时注入
+
+本镜像不声明 `init_assets`，不内置仿真包、租户材料、协议材料或私有文件。仿真 bundle 由平台文件服务按会话通过标准输入投递，并在容器内按审核记录的 SHA-256 校验；镜像不访问对象存储。
+
+## Secret / KMS
+
+本镜像不声明 Secret 环境键和 `secrets_required`，运行时不得注入密钥。bundle、seed 和事件由后端逐次投递，容器不持有会话长期状态。
+
+## 持久化与隔离边界
+
+持久化边界为会话临时 `/tmp/sim-bundle`，不作为平台长期数据；根文件系统、网络、资源和 workspace 挂载以对应 WorkloadSpec 为准。该 stdio 进程没有 HTTP readiness，进程启动不等于仿真业务成功。
+
+## 安全边界
+
+容器使用独立命名空间、deny-all 网络、non-root、只读根文件系统、资源硬限和执行超时；不持有平台凭据，不允许未声明的外部访问。
+
+## readiness / health
+
+本镜像没有 HTTP readiness；只有 stdio-json 协议响应通过后端 TeachingFrame 校验才可视为可用。
+
+## 清理
+
+会话结束后删除容器、临时卷、网络和投递材料，保留平台长期对象；不使用 broad prune。
+
+## 验收条件
+
+验收必须使用 `init`、`apply`、`restore`、`verify` 的真实 stdio-json 流程，校验 bundle 哈希、完整教学帧、确定性和非法响应拒绝；结束后删除会话容器、临时卷、网络及投递材料，不使用 broad prune。

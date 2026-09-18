@@ -1,7 +1,72 @@
 # runtime/evm-besu
 
-本镜像封装 Hyperledger Besu 单节点 QBFT 教学链,用于企业 EVM、联盟 EVM 和权限链教学实验。首次启动时,入口在私有 `runtime-state` 中调用官方 generator 生成唯一 validator key 和 genesis,然后启动可出块的链；生成的节点材料不进入镜像、manifest 或仓库。模板只包含公开的开发测试账户地址和余额,交易仍由外部工具镜像或学生代码签名后通过 JSON-RPC 提交。镜像只负责容器内 Besu 进程和 `8545` JSON-RPC 端口,外部访问由 M2 控制面代理并鉴权。
+## 镜像职责
 
-QBFT genesis 固定启用 London 和 Shanghai fork,与项目离线提供的 Solidity 编译器兼容。`/runtime-state/besu/chaimir-qbft` 是受控初始化目录；该目录已存在但不完整、genesis 缺失、validator 数量不为 1 或节点密钥为空时,入口严格失败,不会回退到无出块的 dev/Ethash 网络。运行数据位于同一 runtime-state 卷内,重启后复用已生成材料。
+Hyperledger Besu 企业 EVM 教学运行时镜像。
 
-构建阶段只替换官方 Besu 上游中需要安全升级的 Netty/Jackson JAR。`patch-artifacts.sha256` 固定所有 55 个下载件的官方 SHA256, Dockerfile 在每次下载后逐件校验；摘要文件自身的 SHA256 也登记在 manifest 中。摘要校验失败时构建必须失败,不得继续生成镜像。
+## 能力边界
+
+- 支持 capability：chain-runtime, evm-json-rpc, enterprise-evm
+- 明确不支持：manifest 未声明的能力、协议动作和跨镜像联动；入口和编排必须严格失败，不使用 generic fallback。
+- conflicts：无；cardinality：one；placement：sandbox。
+
+## 合法 runtime / provider
+
+- 生态或适配范围：evm
+- 必需 provider 能力：无。
+- provider 只能通过 manifest 能力和显式 CompositionSpec link 选择；多个候选必须显式指定，不能按名称猜测。
+
+## bindings 与 links
+
+- 必需 bindings：无。
+- 必需 links：无；本镜像不声明跨组件 link。
+- binding 的 endpoint、协议、配置键和启动前置以 manifest 为准；缺失、重复、错误能力或错误 provider 均拒绝编排。
+
+## 端口与服务
+
+- rpc：8545/TCP，暴露边界 proxy，用途：Besu JSON-RPC。
+- 组件：无 resource_spec 组件。
+
+## command / args 语义
+
+- 镜像默认 ENTRYPOINT：["/usr/local/bin/chaimir-besu-entrypoint"]；manifest 未覆盖组件 command/args，使用该入口语义。
+
+## 初始化材料与运行时注入
+
+- 镜像层不内置租户、链、协议或私有材料；声明的 init_assets：无。
+- genesis、rollup、checkpoint、Hyperlane、Chainlink、合约或 subgraph 材料必须由平台受控对象存储、初始化资产和 CompositionSpec 注入并校验来源及 SHA-256；缺失时严格失败。
+- QBFT genesis 的预置部署账户为平台统一 EVM 部署账户 `0xfdaf0ea969c98d0a8410d76bac4ac8838d13c9d4`，地址不是密钥；真实签名仍只能来自平台 Secret/KMS 的 `CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY`。轮换该 Secret 时必须按同一材料生成流程重新生成 genesis。
+- 数据卷声明：无顶层 data_volumes 声明。
+
+## Secret / KMS
+
+- Secret 环境键：无。
+- 必需材料映射：无；该镜像不得自行生成或写入密钥。
+- Secret 只来自平台 Secret/KMS 运行时注入，不能写入 Dockerfile、manifest、README、镜像层或测试输出。
+
+## 持久化与隔离边界
+
+- 持久化目录：由组件 mount_domains 决定；未声明持久化数据时不得自行落盘。
+- 组件挂载与文件系统：无
+## 安全边界
+
+- 安全声明：{"run_as_non_root":true,"read_only_root_filesystem":true,"allow_privilege_escalation":false,"privileged":false,"host_network":false,"automount_service_account_token":false,"drop_capabilities":["ALL"],"network_policy":"deny-all"}
+- student_access：{"enabled":false,"shell":"none","allowed_mounts":[]}。
+- 网络只允许 manifest binding/link 所需目标，默认拒绝；禁止宿主机路径、hostNetwork、ServiceAccount token 和越权写入。
+
+## readiness / health
+
+- 未声明组件 readiness probe；容器运行不等于就绪或业务成功。
+- 镜像自检 besu-version：["/opt/besu/bin/besu","--version"]。
+- 镜像自检 qbft-bootstrap-generation：["sh","-c","tmp=\"$(mktemp -d)\" && /opt/besu/bin/besu operator generate-blockchain-config --config-file=/opt/besu/chaimir-qbft-config.json --to=\"$tmp\" --private-key-file-name=key.priv --public-key-file-name=key.pub && test -s \"$tmp/genesis.json\" && test \"$(find \"$tmp/keys\" -type f -name key.priv | wc -l | tr -d ' ')\" -eq 1 && rm -rf \"$tmp\""]。
+
+## 清理
+
+- 验收后按 CompositionSpec 所属租户/实例和项目 owner 标签删除容器、Pod、Service、NetworkPolicy、临时卷、Secret 投影和临时材料；保留平台长期资源。
+- 不使用 broad prune，不删除 kind-chaimir-cilium 节点、正式锁引用或其他项目资源。
+
+## 验收条件
+
+- 先按 digest lock 启动合法 CompositionSpec，核对 command/args、bindings、links、材料和 Secret 投影，再执行 manifest selftest。
+- selftest 只证明镜像布局和声明入口正确；协议、链、存储、索引、签名或跨镜像能力必须追加真实 provider 联动、正向业务、错误输入拒绝、重启/持久化（若声明）和清理证据。
+- 未执行或只完成探活的项目不得标记为业务通过。

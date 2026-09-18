@@ -22,13 +22,13 @@ images:
     digest: sha256:9f8e59b58d1b00931b12a03dbbcc014d7ca3a2aadecfdb5361f16fe07b1d9e08
   - name: chaimir/middleware/nats
     newName: registry.chaimir.io/middleware/nats
-    digest: sha256:9a2e624d079bfebee7ffd905b562af915991ed3644cb10737934cd4c0e35feda
+    digest: sha256:5041fe78edc2dc3211187e8ef7cb852cab27353dcf529f2d1e74229ba004af42
   - name: chaimir/middleware/postgres
     newName: registry.chaimir.io/middleware/postgres
-    digest: sha256:ea605021430638bf1d7f2aee0e3586a91797852de6bbd18e08cd106c6c36147b
+    digest: sha256:add149e1cf6d4114afb91ce12d1a50b6c177fb7a6ebdf2289846a468302274c4
   - name: chaimir/middleware/redis
     newName: registry.chaimir.io/middleware/redis
-    digest: sha256:c9ca7f5ce2e7f762128903c4684cffa38019f81fd2fd965dabbb30481e742fc4
+    digest: sha256:172154d66e7ed5c9367fc683c6d7ea1a9756f3eaa3dacefadd3c108e6a547425
 
 # 注:chaimir-data-config(PG 库名/用户等非密值)由 deploy/config 这个 config component
 #   从「唯一」env 源 chaimir.env 统一生成,本 component 不再单独生成,避免重复定义。

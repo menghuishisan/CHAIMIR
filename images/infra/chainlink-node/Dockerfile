@@ -19,6 +19,7 @@ RUN echo "${CHAINLINK_SOURCE_SHA256}  /tmp/chainlink-source.tar.gz" | sha256sum 
 WORKDIR /src/chainlink
 RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}"; fi \
     && go mod edit -require=golang.org/x/mod@v0.40.0 \
+    && go get google.golang.org/grpc@v1.83.2 \
     && go mod download \
     && go mod tidy \
     && test "$(go list -m -f '{{.Version}}' golang.org/x/mod)" = "v0.40.0" \
@@ -35,7 +36,9 @@ RUN rm -f /usr/local/bin/chainlink-* /usr/local/bin/aptos /usr/local/bin/consens
     && mkdir -p /chainlink /workspace \
     && chown -R 1000:1000 /chainlink /workspace
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/chaimir-chainlink-entrypoint
+COPY --chmod=0755 healthcheck.sh /usr/local/bin/chaimir-chainlink-healthcheck
 USER 1000:1000
 WORKDIR /workspace
 EXPOSE 6688
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 CMD ["/usr/local/bin/chaimir-chainlink-healthcheck"]
 ENTRYPOINT ["/usr/local/bin/chaimir-chainlink-entrypoint"]

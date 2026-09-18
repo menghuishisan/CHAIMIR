@@ -15,7 +15,7 @@ if [ ! -f "$HYP_BASE_CONFIG" ]; then
 fi
 mkdir -p "$HYP_DB"
 /usr/local/bin/chaimir-hyperlane-config
-export CONFIG_FILES=/runtime-state/hyperlane/merged-config.json
+export CONFIG_FILES=/tmp/chaimir-hyperlane/merged-config.json
 
 if [ "$#" -eq 0 ]; then
   set -- /app/relayer

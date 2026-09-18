@@ -459,19 +459,23 @@ func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID
 			retErr = apperr.ErrContestSandboxUnavailable.WithCause(recycleErr)
 		}
 	}()
+	runtimeInstance := strings.TrimSpace(snapshot.Spec.WorkspaceRuntimeInstance)
+	if runtimeInstance == "" {
+		return nil, apperr.ErrContestVulnProblemInvalid
+	}
 	for _, step := range validationSteps(problem.DraftBody, "init_steps") {
-		if err := s.runVulnChainStep(ctx, tenantID, info.SandboxID, sourceRef, step); err != nil {
+		if err := s.runVulnChainStep(ctx, tenantID, info.SandboxID, sourceRef, runtimeInstance, step); err != nil {
 			return nil, err
 		}
 	}
 	if positive {
 		for _, step := range validationSteps(problem.DraftBody, "positive_steps") {
-			if err := s.runVulnChainStep(ctx, tenantID, info.SandboxID, sourceRef, step); err != nil {
+			if err := s.runVulnChainStep(ctx, tenantID, info.SandboxID, sourceRef, runtimeInstance, step); err != nil {
 				return nil, err
 			}
 		}
 	}
-	results, err := s.checkVulnAssertions(ctx, tenantID, info.SandboxID, sourceRef, validationSteps(problem.DraftBody, "assertions"), positive)
+	results, err := s.checkVulnAssertions(ctx, tenantID, info.SandboxID, sourceRef, runtimeInstance, validationSteps(problem.DraftBody, "assertions"), positive)
 	if err != nil {
 		return nil, err
 	}
@@ -479,16 +483,16 @@ func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID
 }
 
 // runVulnChainStep 调用 M2 链能力执行预验证步骤。
-func (s *Service) runVulnChainStep(ctx context.Context, tenantID, sandboxID int64, sourceRef string, step map[string]any) error {
+func (s *Service) runVulnChainStep(ctx context.Context, tenantID, sandboxID int64, sourceRef, runtimeInstance string, step map[string]any) error {
 	switch strings.ToLower(strings.TrimSpace(jsonx.StringFromAny(step["op"]))) {
 	case VulnChainOperationDeploy:
-		_, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Payload: jsonx.ObjectFromAny(step["payload"])})
+		_, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, RuntimeInstance: runtimeInstance, Payload: jsonx.ObjectFromAny(step["payload"])})
 		return err
 	case VulnChainOperationTx:
-		_, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Payload: jsonx.ObjectFromAny(step["payload"])})
+		_, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, RuntimeInstance: runtimeInstance, Payload: jsonx.ObjectFromAny(step["payload"])})
 		return err
 	case VulnChainOperationReset:
-		return s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef})
+		return s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, RuntimeInstance: runtimeInstance})
 	case VulnChainOperationQuery, "":
 		return nil
 	default:
@@ -497,7 +501,7 @@ func (s *Service) runVulnChainStep(ctx context.Context, tenantID, sandboxID int6
 }
 
 // checkVulnAssertions 检查正向应通过、反向应全部不通过的断言集合。
-func (s *Service) checkVulnAssertions(ctx context.Context, tenantID, sandboxID int64, sourceRef string, assertions []map[string]any, positive bool) ([]map[string]any, error) {
+func (s *Service) checkVulnAssertions(ctx context.Context, tenantID, sandboxID int64, sourceRef, runtimeInstance string, assertions []map[string]any, positive bool) ([]map[string]any, error) {
 	if len(assertions) == 0 {
 		return nil, apperr.ErrContestVulnProblemInvalid
 	}
@@ -507,7 +511,7 @@ func (s *Service) checkVulnAssertions(ctx context.Context, tenantID, sandboxID i
 		if err != nil {
 			return nil, apperr.ErrContestVulnProblemInvalid.WithCause(err)
 		}
-		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, Target: assertion.Target})
+		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: tenantID, SandboxID: sandboxID, SourceRef: sourceRef, RuntimeInstance: runtimeInstance, Target: assertion.Target})
 		if err != nil {
 			return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
 		}

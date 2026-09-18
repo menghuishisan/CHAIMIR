@@ -12,7 +12,15 @@ LABEL org.opencontainers.image.title="infra/bridge-relayer"
 LABEL org.opencontainers.image.description="Chaimir Hyperlane bridge relayer image"
 
 USER root
-RUN apt-get -o Acquire::Retries=5 update \
+RUN for attempt in 1 2 3 4 5 6 7 8; do \
+        rm -rf /var/lib/apt/lists/*; \
+        if apt-get -o Acquire::Retries=5 update; then break; fi; \
+        if [ "$attempt" -eq 8 ]; then exit 1; fi; \
+        sleep $((attempt * 5)); \
+    done \
+    && DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+        libssl3=3.0.2-0ubuntu1.29 \
+        openssl=3.0.2-0ubuntu1.29 \
     && groupadd --gid 1000 chaimir \
     && useradd --uid 1000 --gid 1000 --home-dir /workspace --create-home --shell /usr/sbin/nologin chaimir \
     && mkdir -p /workspace /runtime-state /hyperlane-config \

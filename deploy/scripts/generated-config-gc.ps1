@@ -50,7 +50,7 @@ function Add-PodSpecReferences {
 
 # Get-CurrentReferences 汇总当前控制器模板和真实 Pod 的配置引用,避免删除滚动中的旧版本。
 function Get-CurrentReferences {
-    $raw = & kubectl --context $Context get deployment,statefulset,daemonset,job,cronjob,pod -A -o json
+    $raw = & kubectl --context $Context --request-timeout=30s get deployment,statefulset,daemonset,job,cronjob,pod -A -o json
     if ($LASTEXITCODE -ne 0) {
         throw "读取工作负载配置引用失败"
     }
@@ -78,7 +78,7 @@ function Remove-UnreferencedGeneratedResources {
         @{ Namespace = "chaimir-data"; Kind = "secret"; Prefix = "chaimir-data-secret-" }
     )
     foreach ($rule in $rules) {
-        $raw = & kubectl --context $Context -n $rule.Namespace get $rule.Kind -o json
+        $raw = & kubectl --context $Context --request-timeout=30s -n $rule.Namespace get $rule.Kind -o json
         if ($LASTEXITCODE -ne 0) {
             throw "读取 $($rule.Namespace) 的 $($rule.Kind) 失败"
         }
@@ -91,7 +91,7 @@ function Remove-UnreferencedGeneratedResources {
             throw "$($rule.Namespace) 的 $($rule.Prefix) 未找到当前引用,拒绝清理"
         }
         foreach ($name in @($candidates | Where-Object { -not $References.Contains("$($rule.Namespace)|$($rule.Kind)|$_") })) {
-            & kubectl --context $Context -n $rule.Namespace delete $rule.Kind $name
+            & kubectl --context $Context --request-timeout=30s -n $rule.Namespace delete $rule.Kind $name --wait=true --timeout=120s
             if ($LASTEXITCODE -ne 0) {
                 throw "删除未引用资源 $($rule.Namespace)/$name 失败"
             }

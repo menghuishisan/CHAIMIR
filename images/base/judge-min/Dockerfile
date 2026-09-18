@@ -14,7 +14,7 @@ LABEL org.opencontainers.image.description="Chaimir minimal judge runner base im
 # 安装证书和基础 shell 工具,满足判题执行器拉取受控依赖与执行脚本的最小需要。
 USER root
 COPY --from=normalizer-build /out/normalize-result /usr/local/bin/normalize-result
-RUN apk add --no-cache ca-certificates bash coreutils \
+RUN apk add --no-cache ca-certificates=20260611-r0 bash coreutils openssl=3.5.8-r0 \
     && addgroup -S chaimir \
     && adduser -S -G chaimir -h /workspace chaimir \
     && chmod 0755 /usr/local/bin/normalize-result

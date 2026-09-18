@@ -1,4 +1,4 @@
-# 本文件定义 Aptos Move 本地网运行时镜像,从官方工具镜像提取 Aptos CLI 到干净运行层。
+# 本文件定义 Aptos Move 单节点教学网络运行时镜像,从官方工具镜像提取 Aptos CLI 到干净运行层。
 FROM aptoslabs/tools:aptos-node-v1.46.2@sha256:af715f809bd12769ba53750f81a1eb8384b312babd472ef6216001652600a326 AS aptos-tools
 
 FROM debian:13.5-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2 AS runtime-libs

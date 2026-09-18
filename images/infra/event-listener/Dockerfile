@@ -8,6 +8,7 @@ WORKDIR /app
 COPY package.json package-lock.json /app/
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund --fetch-timeout=60000 --fetch-retries=3 \
     && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /root/.npm
+RUN apk add --no-cache openssl=3.5.8-r0
 COPY event-listener.mjs /app/event-listener.mjs
 RUN chown -R 1000:1000 /app
 

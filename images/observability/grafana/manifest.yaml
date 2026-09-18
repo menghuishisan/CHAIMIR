@@ -14,26 +14,35 @@ labels:
   chaimir.io/sensitivity: observability
   chaimir.io/scope: observability
   chaimir.io/source: platform-built
-description: Grafana 监控看板官方 distroless 镜像。
+description: Grafana 监控看板官方 distroless 镜像,Prometheus 数据源由核心服务提供。
 source:
   type: platform-built
 upstream:
   registry: docker.io
   image: grafana/grafana
-  version: "13.2.0"
-  digest: sha256:08e6ab6d67a5e21e6540724d3673a572840a43b1ba02d03922d0a21a7dbb38f9
-  upstream_tag: 13.2.0-distroless
+  version: "13.1.6"
+  digest: sha256:99ec731555ea3be88a491da7cc28a5801b0240309e4e15e1cac4a592b099ec14
+  upstream_tag: 13.1.6-distroless
   source_repository: https://github.com/grafana/grafana
-  source_commit: f681b1359f6a0b8ecb9f2c49a88ac72b75bde73b
-  source_archive: https://codeload.github.com/grafana/grafana/tar.gz/f681b1359f6a0b8ecb9f2c49a88ac72b75bde73b
-  source_sha256: 8ea494789b17d13d7e6032ff158af581d512b9ba3c7e99fae33ba5c19e78a9bd
-  builder_image: golang:1.26.6-alpine
-  builder_digest: sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83
+  source_commit: 25d4f6c5c796b3a1390163406484ade5bd150851
+  source_archive: https://codeload.github.com/grafana/grafana/tar.gz/25d4f6c5c796b3a1390163406484ade5bd150851
+  source_sha256: e59bc214c9c424b927c6c5ea97c594802d756d83dad92c5e7feafea4ba043614
+  tempo_source_archive: https://codeload.github.com/grafana/tempo/tar.gz/refs/tags/v2.10.3
+  tempo_source_sha256: f4f95d0f9cb035789645503185670be311c29fd3ea3d3443c302936f6b8993f7
+  builder_image: registry.chaimir.io/base/go-builder
+  builder_digest: sha256:46d92c9696e24102dd211235153b05362a58a9f3d2068a5384f8dde7c1bccfac
   sanitize_image: alpine:3.24.1
   sanitize_digest: sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
-  runtime_image: gcr.io/distroless/static-debian13
-  runtime_digest: sha256:f2ea2709ac8db56323cbd7d014277f32cb572d9ea124b0076f7aafe5980678fe
+  runtime_image: gcr.io/distroless/base-nossl-debian13
+  runtime_digest: sha256:8c563c1fb5e120606f0d85733049775faed6192e2bd2223ef283a5393eec22b9
+  build_base_arg: GO_BUILDER_IMAGE
+  build_base_image: registry.chaimir.io/base/go-builder
+  build_base_digest: sha256:46d92c9696e24102dd211235153b05362a58a9f3d2068a5384f8dde7c1bccfac
   reuse_policy: source-rebuild
+  security_rebuild:
+    github.com/apache/thrift: v0.24.0
+    github.com/grafana/tempo: v2.10.3 (fixed source, module path normalized to /v2 in builder)
+    google.golang.org/grpc: v1.83.2
   license: AGPL-3.0
 private_delivery:
   offline_bundle: true

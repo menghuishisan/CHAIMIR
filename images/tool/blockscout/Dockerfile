@@ -12,7 +12,7 @@ ENV MIX_ENV=prod
 ENV MIX_HOME=/opt/mix
 ENV DISABLE_WEBAPP=false
 ENV ADMIN_PANEL_ENABLED=false
-# Blockscout does not use OpenCV contrib modules; use the exact NIF artifact required by v11.2.8.
+# Blockscout 不使用 OpenCV contrib 模块;使用 v11.2.8 所需的固定 NIF 产物。
 ENV EVISION_ENABLE_CONTRIB=false
 ENV ELIXIR_MAKE_CACHE_DIR=/tmp/evision-cache
 
@@ -84,7 +84,16 @@ ENV RELEASE_VERSION=11.2.8
 ENV BLOCKSCOUT_VERSION=v11.2.8.+commit.01a56de2
 
 USER root
-RUN apk --no-cache --update add jq curl \
+# 最终运行基座的系统库必须显式锁定到当前 Alpine 3.22 修复版本。
+RUN apk --no-cache --update add \
+    jq \
+    curl \
+    libcrypto3=3.5.8-r0 \
+    libssl3=3.5.8-r0 \
+    openssl=3.5.8-r0 \
+    musl=1.2.5-r12 \
+    musl-utils=1.2.5-r12 \
+    zlib=1.3.2-r0 \
     && addgroup --system --gid ${BLOCKSCOUT_GID} ${BLOCKSCOUT_GROUP} \
     && adduser --system --uid ${BLOCKSCOUT_UID} --ingroup ${BLOCKSCOUT_GROUP} --disabled-password ${BLOCKSCOUT_USER}
 COPY --from=blockscout-build --chown=${BLOCKSCOUT_USER}:${BLOCKSCOUT_GROUP} /opt/release/blockscout /app

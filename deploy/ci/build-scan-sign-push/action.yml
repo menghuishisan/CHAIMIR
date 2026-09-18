@@ -219,11 +219,11 @@ runs:
         cosign public-key --key "$key_file" > "$public_key_file"
         cosign sign --yes --key "$key_file" --tlog-upload=false \
           "${{ steps.digest.outputs.digest_ref }}"
-        cosign verify --offline --key "$public_key_file" \
+        cosign verify --private-infrastructure --key "$public_key_file" \
           "${{ steps.digest.outputs.digest_ref }}"
         cosign attest --yes --key "$key_file" --type cyclonedx \
           --predicate "$RUNNER_TEMP/chaimir-image-sbom.cdx.json" \
           --tlog-upload=false \
           "${{ steps.digest.outputs.digest_ref }}"
-        cosign verify-attestation --offline --key "$public_key_file" --type cyclonedx \
+        cosign verify-attestation --private-infrastructure --key "$public_key_file" --type cyclonedx \
           "${{ steps.digest.outputs.digest_ref }}"

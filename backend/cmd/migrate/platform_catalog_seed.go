@@ -34,9 +34,11 @@ type platformRuntimeManifest struct {
 	GenesisBaked                       bool              `json:"genesis_baked"`
 	Infra                              map[string]any    `json:"infra"`
 	Runtime                            struct {
-		Eco          string `json:"eco"`
-		AdapterLevel int16  `json:"adapter_level"`
-		Workload     struct {
+		Eco                   string         `json:"eco"`
+		AdapterLevel          int16          `json:"adapter_level"`
+		RuntimeConfigRequired bool           `json:"runtime_config_required"`
+		CommandSchema         map[string]any `json:"command_schema"`
+		Workload              struct {
 			Env            []workload.EnvVarSpec    `json:"env"`
 			InitContainers []workload.ComponentSpec `json:"init_containers"`
 		} `json:"workload"`
@@ -74,15 +76,16 @@ type platformJudgerManifest struct {
 	Build                              map[string]any       `json:"build"`
 	SupplyChain                        map[string]any       `json:"supply_chain"`
 	Judger                             struct {
-		Type             string                `json:"type"`
-		RuntimeCode      string                `json:"runtime_code"`
-		GenesisRef       string                `json:"genesis_ref"`
-		Command          []string              `json:"command"`
-		ExecTarget       string                `json:"exec_target"`
-		Env              []workload.EnvVarSpec `json:"env"`
-		SuiteArchiveName string                `json:"suite_archive_name"`
-		Modes            []string              `json:"modes"`
-		OutputContract   map[string]any        `json:"output_contract"`
+		Type                string                `json:"type"`
+		RuntimeCode         string                `json:"runtime_code"`
+		GenesisRef          string                `json:"genesis_ref"`
+		Command             []string              `json:"command"`
+		ExecTarget          string                `json:"exec_target"`
+		Env                 []workload.EnvVarSpec `json:"env"`
+		SuiteArchiveName    string                `json:"suite_archive_name"`
+		Modes               []string              `json:"modes"`
+		OutputContract      map[string]any        `json:"output_contract"`
+		LeaksExpectedValues bool                  `json:"leaks_expected_values"`
 	} `json:"judger"`
 	Security  toolManifestSecurity  `json:"security"`
 	Selftest  map[string]any        `json:"selftest"`
@@ -106,9 +109,12 @@ type platformInfraManifest struct {
 	Network                            map[string]any       `json:"network"`
 	Capabilities                       manifestCapabilities `json:"capabilities"`
 	Infra                              struct {
-		EcoTags      []string          `json:"eco_tags"`
-		Bindings     []manifestBinding `json:"bindings"`
-		ResourceSpec map[string]any    `json:"resource_spec"`
+		EcoTags               []string          `json:"eco_tags"`
+		Bindings              []manifestBinding `json:"bindings"`
+		Roles                 []string          `json:"roles"`
+		RuntimeConfigRequired bool              `json:"runtime_config_required"`
+		CommandSchema         map[string]any    `json:"command_schema"`
+		ResourceSpec          map[string]any    `json:"resource_spec"`
 	} `json:"infra"`
 	Ports           []toolManifestPort          `json:"ports"`
 	Security        toolManifestSecurity        `json:"security"`
@@ -284,14 +290,17 @@ func syncPlatformRuntime(ctx context.Context, tx pgx.Tx, root string) error {
 		if err := execJSON(ctx, tx, `INSERT INTO runtime (id,code,name,eco,adapter_level,adapter_spec,capability_impl,selftest_status,selftest_detail,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name,eco=EXCLUDED.eco,adapter_level=EXCLUDED.adapter_level,adapter_spec=EXCLUDED.adapter_spec,capability_impl=EXCLUDED.capability_impl,selftest_status=CASE WHEN runtime.adapter_spec IS DISTINCT FROM EXCLUDED.adapter_spec OR runtime.adapter_level IS DISTINCT FROM EXCLUDED.adapter_level OR runtime.capability_impl IS DISTINCT FROM EXCLUDED.capability_impl THEN EXCLUDED.selftest_status ELSE runtime.selftest_status END,selftest_detail=CASE WHEN runtime.adapter_spec IS DISTINCT FROM EXCLUDED.adapter_spec OR runtime.adapter_level IS DISTINCT FROM EXCLUDED.adapter_level OR runtime.capability_impl IS DISTINCT FROM EXCLUDED.capability_impl THEN EXCLUDED.selftest_detail ELSE runtime.selftest_detail END,status=CASE WHEN runtime.adapter_spec IS DISTINCT FROM EXCLUDED.adapter_spec OR runtime.adapter_level IS DISTINCT FROM EXCLUDED.adapter_level OR runtime.capability_impl IS DISTINCT FROM EXCLUDED.capability_impl THEN EXCLUDED.status ELSE runtime.status END,updated_at=now()`, runtimeID, m.Name, m.Description, m.Runtime.Eco, m.Runtime.AdapterLevel, spec, capabilityImpl, selftestStatus, detail, status); err != nil {
 			return fmt.Errorf("同步运行时 %s 失败: %w", m.Name, err)
 		}
-		if strings.TrimSpace(imageURL) == "" {
-			imageURL = "unverified://" + m.Image
+		if !proven {
+			if err := execJSON(ctx, tx, `DELETE FROM runtime_image WHERE id=$1 AND runtime_id=$2`, imageID, runtimeID); err != nil {
+				return fmt.Errorf("删除未证明的运行时镜像 %s 失败: %w", m.Name, err)
+			}
+			continue
 		}
 		imageStatus := int16(1)
-		if status == 3 || !proven {
+		if status == 3 {
 			imageStatus = 2
 		}
-		genesisBaked := m.GenesisBaked && proven
+		genesisBaked := m.GenesisBaked
 		// 镜像 digest 更新会改变 version,稳定主键冲突时必须整体更新原记录。
 		if err := execJSON(ctx, tx, `INSERT INTO runtime_image (id,runtime_id,image_url,version,status,genesis_baked) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (id) DO UPDATE SET runtime_id=EXCLUDED.runtime_id,image_url=EXCLUDED.image_url,version=EXCLUDED.version,status=EXCLUDED.status,genesis_baked=EXCLUDED.genesis_baked`, imageID, runtimeID, imageURL, imageVersionFromURL(imageURL), imageStatus, genesisBaked); err != nil {
 			return fmt.Errorf("同步运行时镜像 %s 失败: %w", m.Name, err)
@@ -556,6 +565,7 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 	}
 	store := sandbox.NewStore(database)
 	var items []catalogJudger
+	genesisRefs := map[string]string{}
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -568,6 +578,7 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 		if m.Category != "judger" || m.Name != entry.Name() || m.Image != "judger/"+entry.Name() {
 			return fmt.Errorf("判题器 manifest 标识不一致: %s", path)
 		}
+		genesisRefs[m.Name] = strings.TrimSpace(m.Judger.GenesisRef)
 		imageURL, proven := platformProof(m.Image)
 		if !manifestDeployable(m.SupplyChain) {
 			return fmt.Errorf("判题器 %s 已声明不可部署,必须先完成安全替代实现", m.Name)
@@ -621,7 +632,11 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 		if compileErr != nil {
 			return fmt.Errorf("编译链上断言组合快照失败: %w", compileErr)
 		}
-		onchainResource = judge.JudgerResourceSpec{CompositionSnapshot: snapshot, GenesisRef: "genesis/evm-foundry/acceptance.json", TimeoutSec: 60, MaxRetries: 1}
+		genesisRef := strings.TrimSpace(genesisRefs["testcase-evm"])
+		if genesisRef == "" {
+			return fmt.Errorf("onchain-assert 缺少 testcase-evm manifest 的 genesis_ref")
+		}
+		onchainResource = judge.JudgerResourceSpec{CompositionSnapshot: snapshot, GenesisRef: genesisRef, TimeoutSec: 60, MaxRetries: 1}
 	}
 	items = append(items, catalogJudger{id: platformJudgerID("onchain-assert"), code: "onchain-assert", name: "链上状态断言判题器", typ: 2, executorRef: "m3-backend-strategy", runtimeNeeded: true, defaultTimeout: 60, resource: onchainResource})
 	return database.WithPrivilegedTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -636,6 +651,26 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 		}
 		return nil
 	})
+}
+
+// platformJudgerManifestForCode 从镜像 manifest 读取指定判题器,保证业务种子复用同一材料契约。
+func platformJudgerManifestForCode(root, code string) (platformJudgerManifest, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return platformJudgerManifest{}, fmt.Errorf("判题器 code 不能为空")
+	}
+	path := filepath.Join(root, "judger", code, "manifest.yaml")
+	var manifest platformJudgerManifest
+	if err := readPlatformManifest(path, &manifest); err != nil {
+		return platformJudgerManifest{}, err
+	}
+	if manifest.Category != "judger" || manifest.Name != code || manifest.Image != "judger/"+code {
+		return platformJudgerManifest{}, fmt.Errorf("判题器 manifest 标识不一致: %s", path)
+	}
+	if strings.TrimSpace(manifest.Judger.GenesisRef) == "" {
+		return platformJudgerManifest{}, fmt.Errorf("判题器 %s 未声明 genesis_ref", code)
+	}
+	return manifest, nil
 }
 
 // platformRuntimeReadyForJudger 判断运行时是否已完成真实平台自检，未通过时不得冻结判题器快照。

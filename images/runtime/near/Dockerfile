@@ -1,4 +1,4 @@
-# 本文件定义 NEAR 本地网运行时镜像。
+# 本文件定义 NEAR 单节点教学网络运行时镜像。
 FROM nearprotocol/nearcore:2.2.1@sha256:66c87335fb18b7311e5f619c45b544743336d993bdc4c077430d6541743ae8a8
 
 LABEL org.opencontainers.image.title="runtime/near"

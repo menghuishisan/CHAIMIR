@@ -43,13 +43,21 @@ foreach ($name in $contract.Keys) {
 if (-not (Test-Path -LiteralPath $PostgresCertificatePath -PathType Leaf)) { throw "缺少 PostgreSQL TLS 证书" }
 if (-not (Test-Path -LiteralPath $PostgresPrivateKeyPath -PathType Leaf)) { throw "缺少 PostgreSQL TLS 私钥" }
 
-& kubectl --context $Context create namespace chaimir-secrets --dry-run=client -o yaml | & kubectl --context $Context apply -f - | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "创建密钥源命名空间失败" }
+$namespaceYaml = & kubectl --context $Context --request-timeout=30s create namespace chaimir-secrets --dry-run=client -o yaml
+if ($LASTEXITCODE -ne 0) { throw "生成密钥源命名空间清单失败" }
+$namespacePath = Join-Path ([IO.Path]::GetTempPath()) ("chaimir-secrets-namespace-" + [Guid]::NewGuid().ToString("N") + ".yaml")
+[IO.File]::WriteAllText($namespacePath, ($namespaceYaml -join "`n"), [Text.UTF8Encoding]::new($false))
+try {
+    & kubectl --context $Context --request-timeout=30s apply -f $namespacePath | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "创建密钥源命名空间失败" }
+} finally {
+    if (Test-Path -LiteralPath $namespacePath) { Remove-Item -LiteralPath $namespacePath -Force }
+}
 # Kubernetes CLI 不允许 --from-env-file 与 --from-file 混用;统一构造一个
-# Secret data 映射,确保环境变量和 TLS 文件仍落在同一个受控密钥源。
+# Secret data 映射,只发布契约文件声明的键,避免旧的契约外值进入集群。
 $secretData = @{}
-foreach ($entry in $values.GetEnumerator()) {
-    $secretData[$entry.Key] = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$entry.Value))
+foreach ($name in $contract.Keys) {
+    $secretData[$name] = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes([string]$values[$name]))
 }
 $secretData["POSTGRES_TLS_CERTIFICATE"] = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $PostgresCertificatePath)))
 $secretData["POSTGRES_TLS_PRIVATE_KEY"] = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $PostgresPrivateKeyPath)))
@@ -60,6 +68,12 @@ $secretManifest = @{
     type = "Opaque"
     data = $secretData
 } | ConvertTo-Json -Depth 10 -Compress
-$secretManifest | & kubectl --context $Context apply -f - | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "更新密钥源失败" }
+$secretManifestPath = Join-Path ([IO.Path]::GetTempPath()) ("chaimir-secrets-" + [Guid]::NewGuid().ToString("N") + ".json")
+[IO.File]::WriteAllText($secretManifestPath, $secretManifest, [Text.UTF8Encoding]::new($false))
+try {
+    & kubectl --context $Context --request-timeout=30s apply -f $secretManifestPath | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "更新密钥源失败" }
+} finally {
+    if (Test-Path -LiteralPath $secretManifestPath) { Remove-Item -LiteralPath $secretManifestPath -Force }
+}
 Write-Output "密钥源已更新;敏感值未输出"

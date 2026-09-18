@@ -215,14 +215,16 @@ export ORDERER_FILELEDGER_LOCATION="${LEDGER_ROOT}/orderer"
 export ORDERER_CONSENSUS_WALDIR="${LEDGER_ROOT}/orderer/etcdraft/wal"
 export ORDERER_CONSENSUS_SNAPDIR="${LEDGER_ROOT}/orderer/etcdraft/snapshot"
 export CORE_PEER_ID=peer0.org1.chaimir.local
-export CORE_PEER_ADDRESS=127.0.0.1:7051
+# peer 对外通过编排器创建的 Service 暴露；进程自身必须监听容器所有地址。
+export CORE_PEER_ADDRESS=0.0.0.0:7051
 export CORE_PEER_LISTENADDRESS=0.0.0.0:7051
 export CORE_PEER_CHAINCODEADDRESS=127.0.0.1:7052
 export CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
 export CORE_PEER_LOCALMSPID=Org1MSP
 export CORE_PEER_MSPCONFIGPATH="${CRYPTO_ROOT}/peerOrganizations/org1.chaimir.local/users/Admin@org1.chaimir.local/msp"
 export CORE_PEER_FILESYSTEMPATH="${LEDGER_ROOT}/peer"
-export CORE_PEER_GOSSIP_EXTERNALENDPOINT=127.0.0.1:7051
+# 单节点运行时不声明不可达的回环 gossip 地址；跨容器访问由 binding 注入 Service DNS。
+unset CORE_PEER_GOSSIP_EXTERNALENDPOINT
 export CORE_PEER_TLS_ENABLED=true
 export CORE_PEER_TLS_CERT_FILE="${PEER_TLS_CERT}"
 export CORE_PEER_TLS_KEY_FILE="${PEER_TLS_KEY}"
@@ -253,15 +255,14 @@ cleanup_processes() {
 trap cleanup_processes EXIT INT TERM
 
 for attempt in $(seq 1 30); do
-  # Channel creation may finish as soon as the orderer is ready, while the
-  # peer is still opening its ledger. Keep creation and joining in the same
-  # bounded state machine, and retry only the operation that is not ready.
+  # orderer 就绪后 channel 创建可能立即完成,而 peer 仍在打开账本。
+  # 创建和加入必须处于同一个有界状态机中,只重试尚未就绪的操作。
   if [[ ! -s "${ROOT}/channel.block" ]]; then
-    if ! peer channel create -o 127.0.0.1:7050 -c "${CHANNEL_NAME}" -f "${ROOT}/channel.tx" --outputBlock "${ROOT}/channel.block" --tls --cafile "${ORDERER_TLS_ROOT_CA}" --clientauth --certfile "${ORDERER_TLS_CLIENT_CERT}" --keyfile "${ORDERER_TLS_CLIENT_KEY}" --ordererTLSHostnameOverride orderer >>"${CHANNEL_CREATE_LOG}" 2>&1; then
+    if ! CORE_PEER_ADDRESS=127.0.0.1:7051 peer channel create -o 127.0.0.1:7050 -c "${CHANNEL_NAME}" -f "${ROOT}/channel.tx" --outputBlock "${ROOT}/channel.block" --tls --cafile "${ORDERER_TLS_ROOT_CA}" --clientauth --certfile "${ORDERER_TLS_CLIENT_CERT}" --keyfile "${ORDERER_TLS_CLIENT_KEY}" --ordererTLSHostnameOverride orderer >>"${CHANNEL_CREATE_LOG}" 2>&1; then
       echo "channel create 尚未就绪,将在有界重试中继续" >>"${CHANNEL_CREATE_LOG}"
     fi
   fi
-  if [[ -s "${ROOT}/channel.block" ]] && peer channel join -b "${ROOT}/channel.block" >>"${CHANNEL_JOIN_LOG}" 2>&1; then
+  if [[ -s "${ROOT}/channel.block" ]] && CORE_PEER_ADDRESS=127.0.0.1:7051 peer channel join -b "${ROOT}/channel.block" >>"${CHANNEL_JOIN_LOG}" 2>&1; then
     break
   fi
   sleep 1

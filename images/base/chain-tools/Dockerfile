@@ -13,7 +13,7 @@ LABEL org.opencontainers.image.title="base/chain-tools"
 LABEL org.opencontainers.image.description="Chaimir blockchain toolchain base image"
 
 # 安装通用链实验工具,避免每个运行时镜像重复安装同一批基础命令。
-RUN apk add --no-cache ca-certificates curl=8.20.0-r0 jq bash git openssl tar findutils coreutils \
+RUN apk add --no-cache ca-certificates curl=8.22.0-r0 libexpat=2.8.4-r0 jq=1.8.2-r0 bash git openssl tar findutils coreutils \
     && addgroup -g 1000 -S chaimir \
     && adduser -u 1000 -G chaimir -h /workspace -s /sbin/nologin -S chaimir \
     && chown -R 1000:1000 /workspace

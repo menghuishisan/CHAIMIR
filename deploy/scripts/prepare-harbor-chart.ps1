@@ -1,12 +1,16 @@
-# prepare-harbor-chart 下载并修补固定 Harbor chart，再从已签名的引导证据生成仅含 digest 的 values。
+# prepare-harbor-chart 校验并解包受控 Harbor chart，再从已签名的引导证据生成仅含 digest 的 values。
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path,
     [string]$ConfigPath = "",
     [string]$EvidencePath = "",
-    [string]$OutputDirectory = ""
+    [string]$OutputDirectory = "",
+    [int]$DockerTimeoutSeconds = 300
 )
 
 $ErrorActionPreference = "Stop"
+if ($DockerTimeoutSeconds -lt 1) {
+    throw "DockerTimeoutSeconds 必须大于等于 1"
+}
 
 # Resolve-RepoPath 将仓库相对路径限制在当前 Chaimir 工作区内。
 function Resolve-RepoPath {
@@ -26,24 +30,10 @@ function Resolve-RepoPath {
     return $resolved
 }
 
-# Read-EnvFile 读取部署配置而不输出其中的敏感值。
+# Read-EnvFile 使用统一严格解析器读取部署配置,不输出其中的敏感值。
 function Read-EnvFile {
     param([string]$Path)
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        throw "缺少部署配置: $Path"
-    }
-    $items = @{}
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        $trimmed = $line.Trim()
-        if ($trimmed -eq "" -or $trimmed.StartsWith("#")) {
-            continue
-        }
-        $separator = $trimmed.IndexOf("=")
-        if ($separator -gt 0) {
-            $items[$trimmed.Substring(0, $separator).Trim()] = $trimmed.Substring($separator + 1).Trim()
-        }
-    }
-    return $items
+    return Read-ChaimirEnvFile -Path $Path
 }
 
 # Get-RequiredConfigValue 统一拒绝缺失或空白的供应链配置。
@@ -95,7 +85,74 @@ function Resolve-EvidenceFile {
     return $resolved
 }
 
-# Invoke-CosignVerifyBlob 用固定 Cosign 工具镜像验证不上传透明日志的离线签名。
+# ConvertTo-ProcessArgument 将参数安全编码为 Windows 原生进程参数。
+function ConvertTo-ProcessArgument([string]$Value) {
+    if ($null -eq $Value -or $Value.Length -eq 0) { return '""' }
+    if ($Value -notmatch '[\s"]') { return $Value }
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    $slashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') { $slashes++; continue }
+        if ($character -eq '"') {
+            if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
+            [void]$builder.Append('\').Append('"')
+            $slashes = 0
+            continue
+        }
+        if ($slashes -gt 0) { [void]$builder.Append(('\' * $slashes) -join '') }
+        [void]$builder.Append($character)
+        $slashes = 0
+    }
+    if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+# Invoke-DockerBounded 以明确上限执行 Cosign,防止签名验证无限等待。
+function Invoke-DockerBounded {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+    )
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
+    $process.StartInfo.FileName = "docker.exe"
+    $process.StartInfo.Arguments = (($Arguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join " ")
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.CreateNoWindow = $true
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $process.StartInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
+    try {
+        if (-not $process.Start()) { throw "Docker CLI 启动失败" }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try {
+                & taskkill.exe /PID $process.Id /T /F | Out-Null
+            } catch {
+                Write-Warning ("Cosign 超时后的进程树终止失败: {0}" -f $_.Exception.Message)
+            }
+            try {
+                $process.Kill($true)
+            } catch {
+                Write-Warning ("Cosign 超时后的进程终止失败: {0}" -f $_.Exception.Message)
+            }
+            $stdout = $stdoutTask.GetAwaiter().GetResult()
+            $stderr = $stderrTask.GetAwaiter().GetResult()
+            return [pscustomobject]@{ Code = 124; Text = ((@(("Docker CLI 超时（{0} 秒）: {1}" -f $TimeoutSeconds, ($Arguments -join " ")), $stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim() }
+        }
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        return [pscustomobject]@{ Code = $process.ExitCode; Text = ((@($stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim() }
+    } finally {
+        $process.Dispose()
+    }
+}
+
+# Invoke-CosignVerifyBlob 用固定 Cosign 工具镜像在私有基础设施模式下验证不上传公共透明日志的签名。
 function Invoke-CosignVerifyBlob {
     param(
         [string]$CosignImage,
@@ -113,12 +170,13 @@ function Invoke-CosignVerifyBlob {
         "-v", "$CosignDirectory`:/cosign:ro",
         "--entrypoint", "cosign",
         $CosignImage,
-        "verify-blob", "--offline", "--key", "/cosign/cosign.pub",
+        "verify-blob", "--private-infrastructure", "--key", "/cosign/cosign.pub",
         "--signature", "/evidence/$signatureName", "/evidence/$blobName"
     )
-    & docker @arguments
-    if ($LASTEXITCODE -ne 0) {
-        throw "Cosign 验证失败: $Description"
+    $result = Invoke-DockerBounded -Arguments $arguments -TimeoutSeconds $DockerTimeoutSeconds
+    if ($result.Text) { Write-Output $result.Text }
+    if ($result.Code -ne 0) {
+        throw "Cosign 验证失败: $Description; $($result.Text)"
     }
 }
 
@@ -232,15 +290,97 @@ function Patch-HarborChart {
         throw "chart 数据库权限补丁目标数量错误"
     }
     $databaseText = $databaseText -replace $unsafePattern, $safeCommand
+    # Harbor DB 镜像把版本号放在 Entrypoint 参数中，普通 Container.Args 无法传入 postgres 配置。
+    # 包装器仍执行官方入口；在 initdb 创建配置后写入一次集群内监听配置，再等待原进程接管。
+    $databaseArgsSource = "        {{- end }}`n        livenessProbe:"
+    $databaseArgsTarget = @'
+        {{- end }}
+        command: ["/bin/bash", "-ec"]
+        args:
+          - |
+            set -eu
+            /docker-entrypoint.sh 15 18 &
+            entrypoint_pid=$!
+            config_path="${PGDATA}/pg18/postgresql.conf"
+            while [ ! -f "$config_path" ]; do
+              if ! kill -0 "$entrypoint_pid" 2>/dev/null; then
+                wait "$entrypoint_pid"
+                exit $?
+              fi
+              sleep 1
+            done
+            if ! grep -qx "listen_addresses = '*'" "$config_path"; then
+              printf "\nlisten_addresses = '*'\n" >> "$config_path"
+            fi
+            wait "$entrypoint_pid"
+        livenessProbe:
+'@.TrimEnd("`r", "`n")
+    if ([regex]::Matches($databaseText, [regex]::Escape($databaseArgsSource)).Count -ne 1) {
+        throw "chart 数据库监听参数补丁目标数量错误"
+    }
+    $databaseText = $databaseText.Replace($databaseArgsSource, $databaseArgsTarget)
+    $databaseEnvSource = "          - name: PGDATA`n            value: `"/var/lib/postgresql/data/pgdata`"`n{{- with .Values.database.internal.extraEnvVars }}"
+    $databaseEnvTarget = @'
+          - name: PGDATA
+            value: "/var/lib/postgresql/data/pgdata"
+          - name: POSTGRES_INITDB_ARGS
+            value: "--pwfile=/run/harbor-db-password/POSTGRES_PASSWORD --auth-local=scram-sha-256 --auth-host=scram-sha-256"
+          - name: PGPASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: "{{ template "harbor.database" . }}"
+                key: POSTGRES_PASSWORD
+{{- with .Values.database.internal.extraEnvVars }}
+'@.TrimEnd("`r", "`n")
+    if ([regex]::Matches($databaseText, [regex]::Escape($databaseEnvSource)).Count -ne 1) {
+        throw "chart 数据库 SCRAM 环境补丁目标数量错误"
+    }
+    $databaseText = $databaseText.Replace($databaseEnvSource, $databaseEnvTarget)
+    $databaseMountSource = "        - name: shm-volume`n          mountPath: /dev/shm`n      volumes:"
+    $databaseMountTarget = @'
+        - name: shm-volume
+          mountPath: /dev/shm
+        - name: database-password
+          mountPath: /run/harbor-db-password
+          readOnly: true
+      volumes:
+'@.TrimEnd("`r", "`n")
+    if ([regex]::Matches($databaseText, [regex]::Escape($databaseMountSource)).Count -ne 1) {
+        throw "chart 数据库密码挂载补丁目标数量错误"
+    }
+    $databaseText = $databaseText.Replace($databaseMountSource, $databaseMountTarget)
+    $databaseVolumeSource = "      - name: shm-volume`n        emptyDir:`n          medium: Memory`n          sizeLimit: {{ .Values.database.internal.shmSizeLimit }}"
+    $databaseVolumeTarget = @'
+      - name: shm-volume
+        emptyDir:
+          medium: Memory
+          sizeLimit: {{ .Values.database.internal.shmSizeLimit }}
+      - name: database-password
+        secret:
+          secretName: "{{ template "harbor.database" . }}"
+          defaultMode: 288
+          items:
+            - key: POSTGRES_PASSWORD
+              path: POSTGRES_PASSWORD
+'@.TrimEnd("`r", "`n")
+    if ([regex]::Matches($databaseText, [regex]::Escape($databaseVolumeSource)).Count -ne 1) {
+        throw "chart 数据库密码卷补丁目标数量错误"
+    }
+    $databaseText = $databaseText.Replace($databaseVolumeSource, $databaseVolumeTarget)
     [System.IO.File]::WriteAllText($databasePath, $databaseText, [System.Text.UTF8Encoding]::new($false))
 }
 
 $RepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
+Import-Module (Join-Path $RepoRoot "images\\lib\\ImageMetadata.psm1") -Force
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path $RepoRoot "deploy\config\chaimir.env"
 }
 $ConfigPath = [System.IO.Path]::GetFullPath($ConfigPath)
-$config = Read-EnvFile -Path $ConfigPath
+$config = Read-ChaimirEnvFile -Path $ConfigPath -RequiredKeys @(
+    "SUPPLY_CHAIN_REGISTRY", "SUPPLY_CHAIN_REGISTRY_ENDPOINT", "SUPPLY_CHAIN_HARBOR_EXTERNAL_URL", "IMAGE_REGISTRY",
+    "SUPPLY_CHAIN_COSIGN_IMAGE", "SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR"
+)
+$registry = Get-ChaimirCanonicalRegistry -Config $config
 $lockPath = Join-Path $RepoRoot "deploy\charts\harbor\bootstrap.lock.json"
 $lock = Get-Content -LiteralPath $lockPath -Raw | ConvertFrom-Json
 
@@ -270,7 +410,7 @@ if ($chartRepository.TrimEnd("/") -ne ([string]$lock.chart.repository).TrimEnd("
 }
 
 $cosignImage = Get-RequiredConfigValue -Config $config -Key "SUPPLY_CHAIN_COSIGN_IMAGE"
-if ($cosignImage -notmatch "@sha256:[0-9a-f]{64}$") {
+if ($cosignImage -notmatch "^[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$") {
     throw "SUPPLY_CHAIN_COSIGN_IMAGE 必须固定 digest"
 }
 $cosignDirectory = Resolve-RepoPath -BasePath (Join-Path $RepoRoot "deploy") -Path (Get-RequiredConfigValue -Config $config -Key "SUPPLY_CHAIN_COSIGN_KEY_HOST_DIR") -Description "Cosign 密钥目录"
@@ -291,7 +431,6 @@ $bundleSignaturePath = Resolve-EvidenceFile -EvidenceDirectory $evidenceDirector
 Assert-Sha256 -Path $bundlePath -Expected ([string]$evidence.bundle.sha256) -Description "Harbor OCI 引导包"
 Invoke-CosignVerifyBlob -CosignImage $cosignImage -EvidenceDirectory $evidenceDirectory -CosignDirectory $cosignDirectory -BlobPath $bundlePath -SignaturePath $bundleSignaturePath -Description "Harbor OCI 引导包"
 
-$registry = (Get-RequiredConfigValue -Config $config -Key "SUPPLY_CHAIN_REGISTRY").TrimEnd("/")
 $expectedComponents = @($lock.topology.components)
 $evidenceComponents = @($evidence.components)
 if ($evidenceComponents.Count -ne $expectedComponents.Count) {
@@ -339,13 +478,15 @@ foreach ($expected in $expectedComponents) {
     Add-ImageValues -Lines $generatedValues -DeclaredPaths $declaredPaths -ValuesPath ([string]$expected.values_path) -Repository $repository -Digest $digest
 }
 
-if (Test-Path -LiteralPath $OutputDirectory) {
-    Remove-Item -LiteralPath $OutputDirectory -Recurse -Force
-}
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $archivePath = Join-Path $OutputDirectory "harbor-$chartVersion.tgz"
-Invoke-WebRequest -Uri "$($lock.chart.repository.TrimEnd('/'))/harbor-$chartVersion.tgz" -OutFile $archivePath
+# Harbor 是供应链启动根；安装阶段只接受已由签名 bootstrap 证据约束的本地固定归档，
+# 禁止在恢复或部署时从公网重新下载 chart，避免引入未审计的传输输入。
 Assert-Sha256 -Path $archivePath -Expected ([string]$lock.chart.archive_sha256) -Description "Harbor chart 归档"
+$chartDirectory = Join-Path $OutputDirectory "harbor"
+if (Test-Path -LiteralPath $chartDirectory) {
+    Remove-Item -LiteralPath $chartDirectory -Recurse -Force
+}
 try {
     # Windows bsdtar treats a drive-letter path as a remote archive; extract from the output directory.
     Push-Location $OutputDirectory
@@ -357,7 +498,6 @@ try {
 finally {
     Pop-Location
 }
-$chartDirectory = Join-Path $OutputDirectory "harbor"
 if (-not (Test-Path -LiteralPath (Join-Path $chartDirectory "Chart.yaml") -PathType Leaf)) {
     throw "Harbor chart 归档结构非法"
 }

@@ -37,11 +37,15 @@ env_keys:
     - CHAIMIR_CHAINLINK_DATABASE_NAME
     - CHAIMIR_CHAINLINK_DATABASE_USER
     - CHAINLINK_CHAIN_ID
+    - CHAINLINK_GAS_PRICE_MAX_WEI
+    - CHAINLINK_VRF_GAS_LIMIT
   secret:
     - POSTGRES_PASSWORD
     - CHAINLINK_KEYSTORE_PASSWORD
     - CHAINLINK_API_EMAIL
     - CHAINLINK_API_PASSWORD
+    - CHAINLINK_TLS_CERT_B64
+    - CHAINLINK_TLS_KEY_B64
 secrets_required:
   - component: infra
     env: POSTGRES_PASSWORD
@@ -63,6 +67,16 @@ secrets_required:
     secret_key: CHAINLINK_API_PASSWORD
     source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
+  - component: infra
+    env: CHAINLINK_TLS_CERT_B64
+    secret_key: CHAINLINK_TLS_CERT_B64
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
+  - component: infra
+    env: CHAINLINK_TLS_KEY_B64
+    secret_key: CHAINLINK_TLS_KEY_B64
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
 data_driven: true
 capabilities:
   provides:
@@ -77,11 +91,19 @@ capabilities:
   config_schema:
     type: object
     additionalProperties: false
-    required: [chain_id]
+    required: [chain_id, gas_price_max_wei, vrf_gas_limit]
     properties:
       chain_id:
         type: integer
         x-chaimir-env: infra/CHAINLINK_CHAIN_ID
+      gas_price_max_wei:
+        type: string
+        pattern: '^[0-9]+$'
+        x-chaimir-env: infra/CHAINLINK_GAS_PRICE_MAX_WEI
+      vrf_gas_limit:
+        type: integer
+        minimum: 1
+        x-chaimir-env: infra/CHAINLINK_VRF_GAS_LIMIT
   student_access: private
 infra:
   eco_tags:
@@ -98,9 +120,13 @@ infra:
           - name: CHAIMIR_CHAINLINK_DATABASE_USER
             value: chainlink
         ports:
-          - name: http
+          - name: https
             container_port: 6688
             service_port: 6688
+            protocol: TCP
+          - name: p2p
+            container_port: 6690
+            service_port: 6690
             protocol: TCP
         resources:
           requests:
@@ -116,17 +142,25 @@ infra:
         writable_mount_domains:
           - runtime-state
         readiness_probe:
-          type: tcp
-          port: http
+          type: exec
+          command:
+            - /usr/local/bin/chaimir-chainlink-healthcheck
           period_seconds: 2
           failure_threshold: 30
     services:
-      - name: infra-chainlink-node-http
+      - name: infra-chainlink-node-https
         component: infra
         ports:
-          - name: http
+          - name: https
             port: 6688
-            target_port: http
+            target_port: https
+            protocol: TCP
+      - name: infra-chainlink-node-p2p
+        component: infra
+        ports:
+          - name: p2p
+            port: 6690
+            target_port: p2p
             protocol: TCP
   bindings:
     - name: execution_chain
@@ -148,11 +182,16 @@ infra:
     - vrf
     - automation
 ports:
-  - name: http
+  - name: https
     container_port: 6688
     protocol: TCP
     expose: internal
-    purpose: Chainlink node API
+    purpose: Chainlink node HTTPS API
+  - name: p2p
+    container_port: 6690
+    protocol: TCP
+    expose: internal
+    purpose: Chainlink OCR2/P2P v2 node communication
 security:
   run_as_non_root: true
   read_only_root_filesystem: false

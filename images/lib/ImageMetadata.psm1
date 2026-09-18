@@ -98,6 +98,149 @@ function Get-ChaimirImageCatalog {
     return $catalog
 }
 
+# Read-ChaimirEnvFile 严格读取项目 KEY=VALUE 配置,拒绝非法行、重复键和必填空值。
+function Read-ChaimirEnvFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [string[]]$RequiredKeys = @()
+    )
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "缺少项目配置文件: $Path"
+    }
+    $values = @{}
+    $lineNumber = 0
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        $lineNumber++
+        $trimmed = ([string]$line).Trim()
+        if ($trimmed.Length -eq 0 -or $trimmed.StartsWith("#")) {
+            continue
+        }
+        if ($trimmed -notmatch '^([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
+            throw "项目配置包含非法行: ${Path}:$lineNumber"
+        }
+        $name = $Matches[1]
+        $value = $Matches[2]
+        if ($values.ContainsKey($name)) {
+            throw ("项目配置包含重复键: {0}:{1}:{2}" -f $Path, $lineNumber, $name)
+        }
+        $values[$name] = $value
+    }
+    foreach ($name in $RequiredKeys) {
+        if (-not $values.ContainsKey($name) -or [string]::IsNullOrWhiteSpace([string]$values[$name])) {
+            throw "项目配置缺少必填值: $name"
+        }
+    }
+    return $values
+}
+
+# Get-ChaimirCanonicalRegistry 校验镜像、供应链端点和 Harbor 外部 URL 为同一 HTTPS 入口。
+function Get-ChaimirCanonicalRegistry {
+    param([Parameter(Mandatory = $true)][hashtable]$Config)
+
+    foreach ($name in @("SUPPLY_CHAIN_REGISTRY", "SUPPLY_CHAIN_REGISTRY_ENDPOINT", "SUPPLY_CHAIN_HARBOR_EXTERNAL_URL", "IMAGE_REGISTRY")) {
+        if (-not $Config.ContainsKey($name) -or [string]::IsNullOrWhiteSpace([string]$Config[$name])) {
+            throw "统一配置缺少 $name"
+        }
+    }
+    $registry = ([string]$Config["SUPPLY_CHAIN_REGISTRY"]).TrimEnd("/").ToLowerInvariant()
+    $endpoint = ([string]$Config["SUPPLY_CHAIN_REGISTRY_ENDPOINT"]).TrimEnd("/").ToLowerInvariant()
+    $imageRegistry = ([string]$Config["IMAGE_REGISTRY"]).TrimEnd("/").ToLowerInvariant()
+    if ($registry -notmatch '^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$' -or
+        $endpoint -notmatch '^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$' -or
+        $imageRegistry -notmatch '^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$') {
+        throw "统一 Registry 必须是无协议、无端口的 DNS 主机名"
+    }
+    $externalUrl = [Uri]([string]$Config["SUPPLY_CHAIN_HARBOR_EXTERNAL_URL"])
+    if ($externalUrl.Scheme -ne "https" -or -not $externalUrl.IsDefaultPort -or
+        $externalUrl.AbsolutePath -ne "/" -or $externalUrl.Query.Length -ne 0 -or $externalUrl.Fragment.Length -ne 0) {
+        throw "SUPPLY_CHAIN_HARBOR_EXTERNAL_URL 必须是标准 HTTPS 443 根地址"
+    }
+    $externalHost = $externalUrl.Host.TrimEnd(".").ToLowerInvariant()
+    if ($registry -ne $endpoint -or $registry -ne $imageRegistry -or $registry -ne $externalHost) {
+        throw "镜像 Registry、供应链端点、Harbor 外部 URL 必须统一为同一主机"
+    }
+    if ($Config.ContainsKey("SUPPLY_CHAIN_REGISTRY_HOST_ALIAS") -and
+        ([string]$Config["SUPPLY_CHAIN_REGISTRY_HOST_ALIAS"]).TrimEnd("/").ToLowerInvariant() -ne $registry) {
+        throw "SUPPLY_CHAIN_REGISTRY_HOST_ALIAS 必须与统一 Registry 一致"
+    }
+    return $registry
+}
+
+# ConvertTo-ChaimirProcessArgument 将参数安全编码为 Windows 原生进程参数。
+function ConvertTo-ChaimirProcessArgument {
+    param([AllowNull()][string]$Value)
+    if ($null -eq $Value -or $Value.Length -eq 0) { return '""' }
+    if ($Value -notmatch '[\s"]') { return $Value }
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    $slashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') { $slashes++; continue }
+        if ($character -eq '"') {
+            if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
+            [void]$builder.Append('\').Append('"')
+            $slashes = 0
+            continue
+        }
+        if ($slashes -gt 0) { [void]$builder.Append(('\' * $slashes) -join '') }
+        [void]$builder.Append($character)
+        $slashes = 0
+    }
+    if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+# Invoke-ChaimirDocker 以明确超时执行 Docker CLI,并保留可定位的标准输出与错误。
+function Invoke-ChaimirDocker {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [int]$TimeoutSeconds = 300
+    )
+    if ($TimeoutSeconds -lt 1) { throw "Docker CLI 超时必须大于等于 1 秒" }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
+    $process.StartInfo.FileName = "docker.exe"
+    $process.StartInfo.Arguments = (($Arguments | ForEach-Object { ConvertTo-ChaimirProcessArgument ([string]$_) }) -join " ")
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.CreateNoWindow = $true
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $process.StartInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
+    try {
+        if (-not $process.Start()) { throw "Docker CLI 启动失败" }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try {
+                & taskkill.exe /PID $process.Id /T /F | Out-Null
+            } catch {
+                Write-Warning ("Docker CLI 超时后的进程树终止失败: {0}" -f $_.Exception.Message)
+            }
+            try {
+                $process.Kill($true)
+            } catch {
+                Write-Warning ("Docker CLI 超时后的进程终止失败: {0}" -f $_.Exception.Message)
+            }
+            $stdout = $stdoutTask.GetAwaiter().GetResult()
+            $stderr = $stderrTask.GetAwaiter().GetResult()
+            return [pscustomobject]@{
+                Code = 124
+                Text = ((@(("Docker CLI 超时（{0} 秒）" -f $TimeoutSeconds), $stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim()
+            }
+        }
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        return [pscustomobject]@{
+            Code = $process.ExitCode
+            Text = ((@($stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim()
+        }
+    } finally {
+        $process.Dispose()
+    }
+}
+
 # Get-ChaimirInternalImageBuildArguments 返回内部构建镜像参数到逻辑镜像名的唯一映射。
 function Get-ChaimirInternalImageBuildArguments {
     return [ordered]@{
@@ -199,4 +342,4 @@ function Write-ChaimirDigestLock {
     [System.IO.File]::WriteAllText($Path, $contents, [System.Text.ASCIIEncoding]::new())
 }
 
-Export-ModuleMember -Function Get-ChaimirYamlValue, Get-ChaimirTopLevelYamlValue, Get-ChaimirYamlBlock, Get-ChaimirImageSourceType, Get-ChaimirImageCatalog, Get-ChaimirInternalImageBuildArguments, Resolve-ChaimirImageBuildPaths, Read-ChaimirDigestLock, Write-ChaimirDigestLock
+Export-ModuleMember -Function Get-ChaimirYamlValue, Get-ChaimirTopLevelYamlValue, Get-ChaimirYamlBlock, Get-ChaimirImageSourceType, Get-ChaimirImageCatalog, Read-ChaimirEnvFile, Get-ChaimirCanonicalRegistry, Invoke-ChaimirDocker, Get-ChaimirInternalImageBuildArguments, Resolve-ChaimirImageBuildPaths, Read-ChaimirDigestLock, Write-ChaimirDigestLock

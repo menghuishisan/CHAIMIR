@@ -139,7 +139,7 @@ existing-workloads-wait: ## 等待已部署的生产安全组件与平台工作�
 	kubectl -n chaimir-system rollout status deployment/chaimir-frontend --timeout=180s
 	kubectl -n chaimir-system rollout status deployment/chaimir-sandbox-rbac-provisioner --timeout=180s
 	@for daemonset in $$(kubectl -n chaimir-prepull get daemonset -o name); do kubectl -n chaimir-prepull rollout status $$daemonset --timeout=900s || exit 1; done
-	@curl.exe --fail --silent --show-error https://www.chaimir.io/healthz >/dev/null
+	@curl.exe --fail --silent --show-error --cacert "$(TLS_DIR)/tls.crt" https://www.chaimir.io/healthz >/dev/null
 
 # ---- External Secrets Operator ----
 .PHONY: external-secrets-up
@@ -241,10 +241,11 @@ ingress-up: ## 安装 ingress-nginx 并打 namespace 标签(供 NetworkPolicy �
 			--namespace "$$SUPPLY_CHAIN_INGRESS_NGINX_NAMESPACE" --create-namespace \
 			--server-side=false \
 			-f "/workspace/$$SUPPLY_CHAIN_INGRESS_NGINX_VALUES_PATH" \
+			--set-string controller.image.tag=v1.15.1 \
 			--set-string controller.image.digest="$$INGRESS_NGINX_DIGEST" \
 			--set-string controller.admissionWebhooks.patch.image.registry=registry.chaimir.io \
 			--set-string controller.admissionWebhooks.patch.image.image=ingress/kube-webhook-certgen \
-			--set-string controller.admissionWebhooks.patch.image.tag= \
+			--set-string controller.admissionWebhooks.patch.image.tag=v1.6.9 \
 			--set-string controller.admissionWebhooks.patch.image.digest="$$INGRESS_WEBHOOK_CERTGEN_DIGEST" \
 			--rollback-on-failure --wait --timeout 5m'
 	kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
@@ -465,10 +466,14 @@ supply-chain-tools-check: supply-chain-image-input-check ## 通过 Docker 容器
 
 .PHONY: harbor-up
 harbor-up: supply-chain-secret-check ## 验证已签名 bootstrap bundle 后经容器化 Helm 安装固定 Harbor chart
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/ensure-harbor-database-password.ps1 -SecretPath "$(SUPPLY_CHAIN_SECRET_FILE)"
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/cilium-cluster.ps1 -Action HarborTls
 	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_KUBECONFIG_HOST_PATH=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_KUBECONFIG_HOST_PATH"; exit 1; }
 	@test -n "$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_KUBECONFIG_HOST_PATH=//p' $(SUPPLY_CHAIN_CONFIG))" || { echo "请先在 $(SUPPLY_CHAIN_CONFIG) 填写 SUPPLY_CHAIN_HARBOR_KUBECONFIG_HOST_PATH"; exit 1; }
 	@test -n "$$(sed -n 's/^HARBOR_ADMIN_PASSWORD=//p' $(SUPPLY_CHAIN_SECRET_FILE))" || { echo "请先在 $(SUPPLY_CHAIN_SECRET_FILE) 填写 HARBOR_ADMIN_PASSWORD"; exit 1; }
+	@test -n "$$(sed -n 's/^HARBOR_DATABASE_PASSWORD=//p' $(SUPPLY_CHAIN_SECRET_FILE))" || { echo "请先在 $(SUPPLY_CHAIN_SECRET_FILE) 填写 HARBOR_DATABASE_PASSWORD"; exit 1; }
 	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/prepare-harbor-chart.ps1 -RepoRoot "$$(cd .. && pwd)" -ConfigPath "$(SUPPLY_CHAIN_CONFIG)"
+	powershell -NoProfile -ExecutionPolicy Bypass -File scripts/preload-harbor-bootstrap.ps1 -RepoRoot "$$(cd .. && pwd)" -ConfigPath "$(SUPPLY_CHAIN_CONFIG)"
 	# Harbor release 字段若被历史 kubectl-patch 占用，必须由容器化 Helm 的 SSA 收回，禁止手工 patch 或资源替换。
 	SUPPLY_CHAIN_KUBECONFIG_HOST_PATH="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_KUBECONFIG_HOST_PATH=//p' $(SUPPLY_CHAIN_CONFIG))" \
 	SUPPLY_CHAIN_HARBOR_RELEASE_NAME="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_RELEASE_NAME=//p' $(SUPPLY_CHAIN_CONFIG))" \
@@ -476,7 +481,8 @@ harbor-up: supply-chain-secret-check ## 验证已签名 bootstrap bundle 后经�
 	SUPPLY_CHAIN_HARBOR_VALUES_PATH="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_VALUES_PATH=//p' $(SUPPLY_CHAIN_CONFIG))" \
 	SUPPLY_CHAIN_HARBOR_EXTERNAL_URL="$$(sed -n 's/^SUPPLY_CHAIN_HARBOR_EXTERNAL_URL=//p' $(SUPPLY_CHAIN_CONFIG))" \
 	HARBOR_ADMIN_PASSWORD="$$(sed -n 's/^HARBOR_ADMIN_PASSWORD=//p' $(SUPPLY_CHAIN_SECRET_FILE))" \
-		docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm --entrypoint sh helm -lc 'helm upgrade --install --server-side=true --force-conflicts "$$SUPPLY_CHAIN_HARBOR_RELEASE_NAME" /workspace/.tmp/harbor-bootstrap/chart/harbor --namespace "$$SUPPLY_CHAIN_HARBOR_NAMESPACE" --create-namespace -f "/workspace/$$SUPPLY_CHAIN_HARBOR_VALUES_PATH" -f /workspace/.tmp/harbor-bootstrap/chart/bootstrap-images.values.yaml --set-string externalURL="$$SUPPLY_CHAIN_HARBOR_EXTERNAL_URL" --set-string harborAdminPassword="$$HARBOR_ADMIN_PASSWORD"'
+	HARBOR_DATABASE_PASSWORD="$$(sed -n 's/^HARBOR_DATABASE_PASSWORD=//p' $(SUPPLY_CHAIN_SECRET_FILE))" \
+		docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm --entrypoint sh helm -lc 'helm upgrade --install --server-side=true --force-conflicts "$$SUPPLY_CHAIN_HARBOR_RELEASE_NAME" /workspace/.tmp/harbor-bootstrap/chart/harbor --namespace "$$SUPPLY_CHAIN_HARBOR_NAMESPACE" --create-namespace -f "/workspace/$$SUPPLY_CHAIN_HARBOR_VALUES_PATH" -f /workspace/.tmp/harbor-bootstrap/chart/bootstrap-images.values.yaml --set-string externalURL="$$SUPPLY_CHAIN_HARBOR_EXTERNAL_URL" --set-string harborAdminPassword="$$HARBOR_ADMIN_PASSWORD" --set-string database.internal.password="$$HARBOR_DATABASE_PASSWORD"'
 
 .PHONY: harbor-projects-ensure
 harbor-projects-ensure: supply-chain-secret-check ## 按镜像分类创建 Harbor project 和供应链 robot

@@ -373,7 +373,7 @@ foreach ($entry in $catalog.Values) {
     $lines = Get-Content -LiteralPath $entry.Manifest
     $contents = Get-Content -LiteralPath $entry.Manifest -Raw
     if ($contents -match '(?m)^local_dev:\s*$') {
-        $errors.Add("manifest 不得包含本地专用 local_dev 配置,生产契约必须唯一: $relative")
+        $errors.Add("manifest 不得包含专用 local_dev 配置,生产契约必须唯一: $relative")
     }
     $supplyChainLines = Get-ChaimirYamlBlock -Path $entry.Manifest -BlockName "supply_chain"
     if ((Get-ChaimirYamlValue -Lines $supplyChainLines -Key "pull_by_digest") -ne "true") {
@@ -440,7 +440,7 @@ foreach ($image in $lock.Keys) {
     }
 }
 
-# 本地/私有化静态证明不得引用已阻断、已删除或与正式锁不一致的旧 digest。
+# 候选/正式静态证明不得引用已阻断、已删除或与正式锁不一致的旧 digest。
 # 候选锁在正式构建前可能尚未拥有对应的签名/扫描证明；只有显式传入
 # -SkipPlatformAttestations 时才跳过这一段。正式入口不传该开关，仍强制执行完整门禁。
 if (-not $SkipPlatformAttestations) {

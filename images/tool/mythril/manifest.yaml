@@ -28,6 +28,8 @@ upstream:
   runtime: cgr.dev/chainguard/wolfi-base
   runtime_version: "2026-08-26"
   runtime_digest: sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
+  runtime_packages:
+    - python-3.10=3.10.21-r6
   reuse_policy: pypi-source-build
 data_driven: true
 toolchain:

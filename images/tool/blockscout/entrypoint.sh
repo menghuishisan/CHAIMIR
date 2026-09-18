@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# This entrypoint validates Blockscout runtime dependencies before starting the web service.
+# 本入口在启动 Web 服务前校验 Blockscout 的运行时依赖。
 set -eu
 
 : "${CHAIMIR_BLOCKSCOUT_DATABASE_ADDRESS:?CHAIMIR_BLOCKSCOUT_DATABASE_ADDRESS is required}"

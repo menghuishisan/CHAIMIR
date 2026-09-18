@@ -13,6 +13,8 @@ import (
 	"chaimir/internal/modules/experiment"
 	"chaimir/internal/modules/sandbox"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/storage"
+	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/crypto"
 
@@ -28,13 +30,27 @@ type acceptanceImageAttestation struct {
 }
 
 const (
-	acceptanceInitCodeRef   = "s3://chaimir-code/910000000000000001/sandbox/init/lab-reentrancy-foundry/workspace.tar"
-	acceptanceInitScriptRef = "s3://chaimir-code/910000000000000001/sandbox/init/lab-reentrancy-foundry/init.sh"
-
 	// 验收仿真会话挂在这个内置场景上,它由 sim.SyncBuiltinPackages 入库,此处只按 code 定位。
 	acceptanceSimPackageCode    = "builtin__runtime-gas-metering"
 	acceptanceSimPackageVersion = "1.0.0"
 )
+
+// acceptanceContestComposition 返回解题赛、攻防赛和漏洞预验证共用的唯一运行时声明。
+// 访问配置由调用方明确传入,镜像版本继续从受控证明清单推导,不维护第二套版本号。
+func acceptanceContestComposition(refs acceptanceMaterialRefs, id string, profile contracts.SandboxAccessProfile) contracts.SandboxCompositionSpec {
+	return contracts.SandboxCompositionSpec{
+		ID: id,
+		Runtimes: []contracts.CompositionRuntimeRef{{
+			InstanceCode: "source-chain",
+			Code:         "evm-foundry",
+			ImageVersion: platformRuntimeImageVersion("evm-foundry"),
+		}},
+		WorkspaceRuntimeInstance: "source-chain",
+		AccessProfile:            profile,
+		InitCodeRef:              refs.InitCodeRef,
+		InitScriptRef:            refs.InitScriptRef,
+	}
+}
 
 // verifiedImageURL 从受控平台证明清单选择不可变 digest 地址；验收业务和正式目录共用同一准入口径。
 func verifiedImageURL(image string) (string, error) {
@@ -315,8 +331,17 @@ ON CONFLICT (composition_digest) DO UPDATE SET snapshot=EXCLUDED.snapshot, statu
 }
 
 // seedSandboxRows 写入历史沙箱和工具行,用于沙箱详情、鉴权和历史记录查询。
-func seedSandboxRows(ctx context.Context, tx pgx.Tx) error {
+func seedSandboxRows(ctx context.Context, tx pgx.Tx, refs acceptanceMaterialRefs) error {
 	spec := contracts.SandboxCompositionSpec{ID: "sandbox:acceptance:reentrancy-a", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", Tools: []contracts.CompositionComponentRef{{Code: "code-server", Selection: "explicit"}}, AccessProfile: contracts.SandboxAccessExperiment}
+	archive, err := acceptanceExperimentArchive()
+	if err != nil {
+		return err
+	}
+	codeKey, err := acceptanceSandboxWorkspaceKey()
+	if err != nil {
+		return err
+	}
+	codeHash := crypto.SHA256Hex(archive)
 	composition, err := acceptanceCompositionSnapshot(ctx, tx, spec)
 	if err != nil {
 		return err
@@ -335,12 +360,12 @@ INSERT INTO sandbox (
 	keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains,
 	snapshot_created_at, snapshot_expire_at, keep_alive_until, expire_at
 ) VALUES (
-		$1,$2,'chaimir-acceptance-sandbox-a','sandbox:acceptance:reentrancy-a','sandbox:acceptance:reentrancy-a',$10,$3,'experiment',$4,ARRAY[$5]::BIGINT[],$6,$7,
-	false,true,'910000000000000001/sandbox/code/910000000000001021/workspace.tar','6d0f2d2a4f7a7b7b6b0e0e9f7c8a1c2d3e4f506172839405162738495a6b7c8d',$8,$9,'snapshots/acceptance/reentrancy-a.tar','["workspace"]'::jsonb,
-	now(),now() + interval '7 days',NULL,now() + interval '2 hours'
+		$1,$2,'chaimir-acceptance-sandbox-a','experiment:2026:instance:910000000000006021','experiment:2026:instance:910000000000006021',$10,$3,'experiment',$4,ARRAY[$5]::BIGINT[],$6,$7,
+		false,false,$11,$12,$8,$9,NULL,'[]'::jsonb,
+	NULL,NULL,NULL,now() + interval '2 hours'
 )
 ON CONFLICT (id) DO UPDATE SET namespace=EXCLUDED.namespace, source_ref=EXCLUDED.source_ref, scope_ref=EXCLUDED.scope_ref, composition_digest=EXCLUDED.composition_digest, composition_snapshot=EXCLUDED.composition_snapshot, access_profile=EXCLUDED.access_profile, owner_account_id=EXCLUDED.owner_account_id, shared_account_ids=EXCLUDED.shared_account_ids, phase=EXCLUDED.phase, status=EXCLUDED.status, keep_alive=EXCLUDED.keep_alive, snapshot_enabled=EXCLUDED.snapshot_enabled, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, init_code_ref=EXCLUDED.init_code_ref, init_script_ref=EXCLUDED.init_script_ref, snapshot_ref=EXCLUDED.snapshot_ref, snapshot_domains=EXCLUDED.snapshot_domains, snapshot_created_at=EXCLUDED.snapshot_created_at, snapshot_expire_at=EXCLUDED.snapshot_expire_at, keep_alive_until=EXCLUDED.keep_alive_until, expire_at=EXCLUDED.expire_at, updated_at=now()`,
-		acceptanceIDs.Sandbox, acceptanceIDs.TenantID, compositionSnapshot, acceptanceIDs.StudentA, acceptanceIDs.StudentB, contracts.SandboxPhaseFullyReady, contracts.SandboxStatusDestroyed, acceptanceInitCodeRef, acceptanceInitScriptRef, digest); err != nil {
+		acceptanceIDs.Sandbox, acceptanceIDs.TenantID, compositionSnapshot, acceptanceIDs.StudentA, acceptanceIDs.StudentB, contracts.SandboxPhaseFullyReady, contracts.SandboxStatusDestroyed, refs.InitCodeRef, refs.InitScriptRef, digest, codeKey, codeHash); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
@@ -350,18 +375,96 @@ ON CONFLICT (tenant_id, sandbox_id, tool_id) DO UPDATE SET access_endpoint=EXCLU
 		acceptanceIDs.SandboxTool, acceptanceIDs.TenantID, acceptanceIDs.Sandbox); err != nil {
 		return err
 	}
-	return execJSON(ctx, tx, `
-INSERT INTO sandbox_event (id, tenant_id, sandbox_id, event_type, detail)
-VALUES ($1,$2,$3,'create','{"seed":"acceptance","status":"ready"}'::jsonb)
-ON CONFLICT (id) DO UPDATE SET event_type=EXCLUDED.event_type, detail=EXCLUDED.detail`,
-		acceptanceIDs.SandboxEvent, acceptanceIDs.TenantID, acceptanceIDs.Sandbox)
+	if err := execJSON(ctx, tx, `
+	INSERT INTO sandbox_event (id, tenant_id, sandbox_id, event_type, detail)
+	VALUES ($1,$2,$3,'create','{"seed":"acceptance","status":"ready"}'::jsonb)
+	ON CONFLICT (id) DO UPDATE SET event_type=EXCLUDED.event_type, detail=EXCLUDED.detail`,
+		acceptanceIDs.SandboxEvent, acceptanceIDs.TenantID, acceptanceIDs.Sandbox); err != nil {
+		return err
+	}
+	return seedAcceptanceContestSandboxRows(ctx, tx, refs)
+}
+
+// seedAcceptanceContestSandboxRows 写入竞赛历史执行环境,引用与业务 source_ref 和组合快照保持一致。
+// 历史环境已按真实生命周期清理,因此只作为判题结果和提交记录的可追溯引用,不会冒充当前运行资源。
+func seedAcceptanceContestSandboxRows(ctx context.Context, tx pgx.Tx, refs acceptanceMaterialRefs) error {
+	items := []struct {
+		id          int64
+		namespace   string
+		sourceRef   string
+		access      contracts.SandboxAccessProfile
+		composition contracts.SandboxCompositionSpec
+	}{
+		{acceptanceIDs.SandboxContestSolve, "chaimir-acceptance-contest-solve", "contest:2026:solve:ZA2026-001", contracts.SandboxAccessContestSolve, acceptanceContestComposition(refs, "contest:acceptance:solve", contracts.SandboxAccessContestSolve)},
+		{acceptanceIDs.SandboxBattle, "chaimir-acceptance-battle", "contest:2026:battle:acceptance-001", contracts.SandboxAccessContestBattle, acceptanceContestComposition(refs, "contest:acceptance:battle", contracts.SandboxAccessContestBattle)},
+	}
+	for _, item := range items {
+		snapshot, err := acceptanceCompositionSnapshot(ctx, tx, item.composition)
+		if err != nil {
+			return err
+		}
+		if err := seedPublishedComposition(ctx, tx, snapshot); err != nil {
+			return err
+		}
+		snapshotJSON, err := jsonb(snapshot)
+		if err != nil {
+			return fmt.Errorf("编码竞赛历史沙箱组合快照失败: %w", err)
+		}
+		codeKey, err := storage.ObjectKey(acceptanceIDs.TenantID, "sandbox", "code", ids.Format(item.id), "workspace.tar")
+		if err != nil {
+			return fmt.Errorf("生成竞赛历史沙箱工作区对象 key 失败: %w", err)
+		}
+		if err := execJSON(ctx, tx, `
+INSERT INTO sandbox (
+    id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status,
+    keep_alive, snapshot_enabled, code_storage_key, code_hash, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains,
+    snapshot_created_at, snapshot_expire_at, keep_alive_until, expire_at
+) VALUES (
+    $1,$2,$3,$4,$4,$5,$6,$7,$8,'{}'::BIGINT[],$9,$10,false,false,$11,NULL,NULL,NULL,NULL,'[]'::jsonb,NULL,NULL,NULL,now() + interval '2 hours'
+)
+ON CONFLICT (id) DO UPDATE SET namespace=EXCLUDED.namespace, source_ref=EXCLUDED.source_ref, scope_ref=EXCLUDED.scope_ref, composition_digest=EXCLUDED.composition_digest,
+    composition_snapshot=EXCLUDED.composition_snapshot, access_profile=EXCLUDED.access_profile, owner_account_id=EXCLUDED.owner_account_id,
+    shared_account_ids=EXCLUDED.shared_account_ids, phase=EXCLUDED.phase, status=EXCLUDED.status, keep_alive=EXCLUDED.keep_alive,
+    snapshot_enabled=EXCLUDED.snapshot_enabled, code_storage_key=EXCLUDED.code_storage_key, code_hash=NULL, init_code_ref=NULL,
+    init_script_ref=NULL, snapshot_ref=NULL, snapshot_domains='[]'::jsonb, snapshot_created_at=NULL, snapshot_expire_at=NULL,
+    keep_alive_until=NULL, expire_at=EXCLUDED.expire_at, updated_at=now()`,
+			item.id, acceptanceIDs.TenantID, item.namespace, item.sourceRef, snapshot.Digest, snapshotJSON, item.access, acceptanceIDs.StudentA,
+			contracts.SandboxPhaseFullyReady, contracts.SandboxStatusDestroyed, codeKey); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // seedJudgeRows 写入教学与对抗赛的已完成判题任务和脱敏结果,用于详情、重判与回放测试。
-func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
+func seedJudgeRows(ctx context.Context, tx pgx.Tx, refs acceptanceMaterialRefs) error {
+	evmGenesisRef, err := acceptanceEVMGenesisRef()
+	if err != nil {
+		return err
+	}
 	judgerImageURL, err := verifiedImageURL("judger/testcase-evm")
 	if err != nil {
 		return err
+	}
+	teachingSubmissionHash, err := acceptanceContestAssetHash(refs.TeachingSubmissionRef, refs)
+	if err != nil {
+		return err
+	}
+	contestSubmissionHash, err := acceptanceContestAssetHash(refs.ContestSubmissionRef, refs)
+	if err != nil {
+		return err
+	}
+	experimentCode, err := acceptanceExperimentArchive()
+	if err != nil {
+		return err
+	}
+	experimentCodeHash := crypto.SHA256Hex(experimentCode)
+	var contestVersionHash, battleVersionHash string
+	if err := tx.QueryRow(ctx, `SELECT version_hash FROM content_item WHERE tenant_id=$1 AND code=$2 AND version=$3`, acceptanceIDs.TenantID, "ctf-reentrancy-vault", "1.0.0").Scan(&contestVersionHash); err != nil {
+		return fmt.Errorf("读取解题赛内容版本摘要失败: %w", err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT version_hash FROM content_item WHERE tenant_id=$1 AND code=$2 AND version=$3`, acceptanceIDs.TenantID, "battle-reentrancy-duel", "1.0.0").Scan(&battleVersionHash); err != nil {
+		return fmt.Errorf("读取攻防赛内容版本摘要失败: %w", err)
 	}
 	judgeComposition := contracts.SandboxCompositionSpec{ID: "judge:acceptance", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}
 	judgeSnapshot, err := acceptanceCompositionSnapshot(ctx, tx, judgeComposition)
@@ -386,11 +489,11 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
 		"judger_code":                 "testcase-evm",
 		"judger_type":                 1,
 		"judger_version":              judgerImageURL,
-		"suite_ref":                   "s3://chaimir-code/910000000000000001/judge/suites/ctf-reentrancy-vault/public-regression.tar.gz",
-		"suite_archive_name":          "public-regression.tar.gz",
-		"version_hash":                "acceptance-version-hash",
+		"suite_ref":                   refs.JudgeSuiteRef,
+		"suite_archive_name":          "public-regression.tar",
+		"version_hash":                contestVersionHash,
 		"composition_snapshot":        judgeSnapshot,
-		"genesis_ref":                 "genesis/evm-foundry/acceptance.json",
+		"genesis_ref":                 evmGenesisRef,
 		"command":                     []string{"run-evm-tests"},
 		"exec_target":                 "sandbox/testcase-evm",
 		"execution_sidecars":          []workload.ComponentSpec{acceptanceEVMJudgerSidecar(judgerImageURL)},
@@ -398,8 +501,8 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx) error {
 		"max_retries":                 1,
 		"max_score":                   100,
 		"expectation":                 map[string]any{"public": true},
-		"sanitized_code_archive_name": "submission.zip",
-		"sanitized_code_archive_ref":  "s3://chaimir-code/acceptance/submissions/S20260001/reentrancy-fixed.zip",
+		"sanitized_code_archive_name": "reentrancy-fixed.tar",
+		"sanitized_code_archive_ref":  refs.TeachingSanitizedRef,
 	})
 	if err != nil {
 		return fmt.Errorf("编码判题输入快照失败: %w", err)
@@ -415,19 +518,107 @@ INSERT INTO judge_task (
 	target_sandbox_ref, priority, status, retry_count, max_retries
 ) VALUES (
 	$1,$2,(SELECT id FROM judger WHERE code='testcase-evm'),'teaching:2026:submission-item:910000000000005041-910000000000005032',$3,$4,'teaching',$2,$5,'ctf-reentrancy-vault:1.0.0',
-	's3://chaimir-code/acceptance/submissions/S20260001/reentrancy-fixed.zip','6d0f2d2a4f7a7b7b6b0e0e9f7c8a1c2d3e4f506172839405162738495a6b7c8d',
-	$6,2,'sandbox:acceptance:reentrancy-a',5,$7,0,1
+	$7,$8,
+		$6,1,NULL,5,$9,0,1
 )
 
 ON CONFLICT (tenant_id, source_ref, problem_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_tenant_id=EXCLUDED.submitter_tenant_id, submitter_id=EXCLUDED.submitter_id, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
-		acceptanceIDs.JudgeTask, acceptanceIDs.TenantID, acceptanceIDs.TeacherMain, acceptanceIDs.Course, acceptanceIDs.StudentA, snapshot, contracts.JudgeTaskStatusDone); err != nil {
+		acceptanceIDs.JudgeTask, acceptanceIDs.TenantID, acceptanceIDs.TeacherMain, acceptanceIDs.Course, acceptanceIDs.StudentA, snapshot, refs.TeachingSubmissionRef, teachingSubmissionHash, contracts.JudgeTaskStatusDone); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO judge_result (id, task_id, tenant_id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge)
-VALUES ($1,$2,$3,1,true,92,100,$4,'sandbox:acceptance:reentrancy-a',now(),false)
+VALUES ($1,$2,$3,1,true,92,100,$4,'sandbox:910000000000001021',now(),false)
 ON CONFLICT (tenant_id, task_id, version) DO UPDATE SET passed=EXCLUDED.passed, score=EXCLUDED.score, max_score=EXCLUDED.max_score, details=EXCLUDED.details, judge_sandbox_ref=EXCLUDED.judge_sandbox_ref, judged_at=EXCLUDED.judged_at, is_rejudge=EXCLUDED.is_rejudge`,
 		acceptanceIDs.JudgeResult, acceptanceIDs.JudgeTask, acceptanceIDs.TenantID, details); err != nil {
+		return err
+	}
+	for _, checkpoint := range []struct {
+		taskID       int64
+		resultID     int64
+		checkpointID string
+		score        int
+		maxScore     int
+		actual       string
+	}{
+		{acceptanceIDs.ExperimentJudgeTaskA, acceptanceIDs.ExperimentJudgeResultA, "withdraw-guard", 60, 60, "公开测试套件中的存取款断言全部通过"},
+		{acceptanceIDs.ExperimentJudgeTaskB, acceptanceIDs.ExperimentJudgeResultB, "attack-regression", 40, 40, "修复版本的攻击回归断言全部通过"},
+	} {
+		sourceRef := fmt.Sprintf("experiment:2026:instance:%s:checkpoint:%s", ids.Format(acceptanceIDs.ExperimentInstance), checkpoint.checkpointID)
+		sanitizedRef := refs.ExperimentSanitizedARef
+		if checkpoint.taskID == acceptanceIDs.ExperimentJudgeTaskB {
+			sanitizedRef = refs.ExperimentSanitizedBRef
+		}
+		input, err := jsonb(map[string]any{
+			"item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "checkpoint_id": checkpoint.checkpointID,
+			"trace_id": "trace-acceptance-experiment-" + checkpoint.checkpointID, "judger_code": "testcase-evm", "judger_type": 1,
+			"judger_version": judgerImageURL, "suite_ref": refs.JudgeSuiteRef, "code_storage_key": refs.InitCodeRef,
+			"sanitized_code_archive_name": "submission.tar", "sanitized_code_archive_ref": sanitizedRef,
+			"code_hash": experimentCodeHash, "composition_snapshot": judgeSnapshot, "exec_target": "sandbox/testcase-evm",
+			"timeout_sec": 60, "max_retries": 1, "max_score": checkpoint.maxScore,
+			"checkpoint": checkpoint.checkpointID,
+		})
+		if err != nil {
+			return fmt.Errorf("编码实验检查点判题输入快照失败: %w", err)
+		}
+		if err := execJSON(ctx, tx, `
+INSERT INTO judge_task (
+    id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope,
+    submitter_tenant_id, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode,
+    target_sandbox_ref, priority, status, retry_count, max_retries
+) VALUES (
+    $1,$2,(SELECT id FROM judger WHERE code='testcase-evm'),$3,$4,$5,'experiment',$2,$6,'ctf-reentrancy-vault:1.0.0',
+		$7,$8,$9,1,NULL,5,$10,0,1
+)
+ON CONFLICT (tenant_id, source_ref, problem_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_tenant_id=EXCLUDED.submitter_tenant_id, submitter_id=EXCLUDED.submitter_id, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
+			checkpoint.taskID, acceptanceIDs.TenantID, sourceRef, acceptanceIDs.TeacherMain, acceptanceIDs.Course, acceptanceIDs.StudentA, refs.InitCodeRef, experimentCodeHash, input, contracts.JudgeTaskStatusDone); err != nil {
+			return err
+		}
+		checkpointDetails, err := jsonb([]contracts.JudgeResultDetail{{Case: checkpoint.checkpointID, Passed: true, ExpectedLabel: "实验检查点通过", Actual: checkpoint.actual}})
+		if err != nil {
+			return fmt.Errorf("编码实验检查点判题结果失败: %w", err)
+		}
+		if err := execJSON(ctx, tx, `
+INSERT INTO judge_result (id, task_id, tenant_id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge)
+		VALUES ($1,$2,$3,1,true,$4,$5,$6,'sandbox:910000000000001021',now(),false)
+ON CONFLICT (tenant_id, task_id, version) DO UPDATE SET passed=EXCLUDED.passed, score=EXCLUDED.score, max_score=EXCLUDED.max_score, details=EXCLUDED.details, judge_sandbox_ref=EXCLUDED.judge_sandbox_ref, judged_at=EXCLUDED.judged_at, is_rejudge=EXCLUDED.is_rejudge`,
+			checkpoint.resultID, checkpoint.taskID, acceptanceIDs.TenantID, checkpoint.score, checkpoint.maxScore, checkpointDetails); err != nil {
+			return err
+		}
+	}
+	contestSolveInput, err := jsonb(map[string]any{
+		"item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "trace_id": "trace-acceptance-contest-solve",
+		"judger_code": "testcase-evm", "judger_type": 1, "judger_version": judgerImageURL,
+		"suite_ref": refs.JudgeSuiteRef, "submission_ref": refs.ContestSubmissionRef,
+		"sanitized_code_archive_name": "submission.tar", "sanitized_code_archive_ref": refs.ContestSanitizedRef,
+		"version_hash": contestVersionHash, "composition_snapshot": judgeSnapshot, "exec_target": "sandbox/testcase-evm",
+		"timeout_sec": 60, "max_retries": 1, "max_score": 100, "expectation": map[string]any{"public": true},
+	})
+	if err != nil {
+		return fmt.Errorf("编码解题赛判题输入快照失败: %w", err)
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO judge_task (
+    id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope,
+    submitter_tenant_id, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode,
+    target_sandbox_ref, priority, status, retry_count, max_retries
+) VALUES (
+    $1,$2,(SELECT id FROM judger WHERE code='testcase-evm'),'contest:2026:solve:ZA2026-001',$3,0,'contest',$2,$4,'ctf-reentrancy-vault:1.0.0',
+	$5,$6,$7,1,NULL,8,$8,0,1
+)
+ON CONFLICT (tenant_id, source_ref, problem_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_tenant_id=EXCLUDED.submitter_tenant_id, submitter_id=EXCLUDED.submitter_id, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
+		acceptanceIDs.ContestJudgeTask, acceptanceIDs.TenantID, acceptanceIDs.TeacherMain, acceptanceIDs.StudentA, refs.ContestSubmissionRef, contestSubmissionHash, contestSolveInput, contracts.JudgeTaskStatusDone); err != nil {
+		return err
+	}
+	contestSolveDetails, err := jsonb([]contracts.JudgeResultDetail{{Case: "public-visible-tests", Passed: true, ExpectedLabel: "公开判题套件通过", Actual: "全部公开断言通过"}})
+	if err != nil {
+		return fmt.Errorf("编码解题赛判题结果详情失败: %w", err)
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO judge_result (id, task_id, tenant_id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge)
+	VALUES ($1,$2,$3,1,true,100,100,$4,'sandbox:910000000000001031',now(),false)
+ON CONFLICT (tenant_id, task_id, version) DO UPDATE SET passed=EXCLUDED.passed, score=EXCLUDED.score, max_score=EXCLUDED.max_score, details=EXCLUDED.details, judge_sandbox_ref=EXCLUDED.judge_sandbox_ref, judged_at=EXCLUDED.judged_at, is_rejudge=EXCLUDED.is_rejudge`,
+		acceptanceIDs.ContestJudgeResult, acceptanceIDs.ContestJudgeTask, acceptanceIDs.TenantID, contestSolveDetails); err != nil {
 		return err
 	}
 	battleSnapshot, err := jsonb(map[string]any{
@@ -437,14 +628,14 @@ ON CONFLICT (tenant_id, task_id, version) DO UPDATE SET passed=EXCLUDED.passed, 
 		"judger_code":          "onchain-assert",
 		"judger_type":          2,
 		"judger_version":       "m3-backend-strategy",
+		"version_hash":         battleVersionHash,
 		"composition_snapshot": battleCompositionSnapshot,
-		"genesis_ref":          "genesis/evm-foundry/acceptance.json",
+		"genesis_ref":          evmGenesisRef,
+		"sandbox_source_ref":   "contest:2026:battle:acceptance-001",
 		"timeout_sec":          60,
 		"max_retries":          1,
 		"max_score":            1,
-		"expectation": map[string]any{
-			"assertions": []map[string]any{{"label": "攻击交易应被拒绝", "target": "receipt", "field": "status", "op": "eq", "value": 0}},
-		},
+		"expectation":          acceptanceBattleJudgeExpectation(),
 	})
 	if err != nil {
 		return fmt.Errorf("编码对抗判题输入快照失败: %w", err)
@@ -456,71 +647,102 @@ INSERT INTO judge_task (
 	target_sandbox_ref, priority, status, retry_count, max_retries
 ) VALUES (
 	$1,$2,(SELECT id FROM judger WHERE code='onchain-assert'),'contest:2026:battle:acceptance-001',$3,0,'contest',$2,$4,'battle-reentrancy-vault:1.0.0',
-	's3://chaimir-code/acceptance/battle/replay-a.zip',$5,$6,1,'sandbox:acceptance-battle-001',5,$7,0,1
+	'','',$5,2,'910000000000001041',5,$6,0,1
 )
 
 ON CONFLICT (tenant_id, source_ref, problem_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_tenant_id=EXCLUDED.submitter_tenant_id, submitter_id=EXCLUDED.submitter_id, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
-		acceptanceIDs.BattleJudgeTask, acceptanceIDs.TenantID, acceptanceIDs.TeacherMain, acceptanceIDs.StudentA, strings.Repeat("a", 64), battleSnapshot, contracts.JudgeTaskStatusDone); err != nil {
+		acceptanceIDs.BattleJudgeTask, acceptanceIDs.TenantID, acceptanceIDs.TeacherMain, acceptanceIDs.StudentA, battleSnapshot, contracts.JudgeTaskStatusDone); err != nil {
 		return err
 	}
-	battleDetails, err := jsonb([]contracts.JudgeResultDetail{{Case: "防御合约阻止重复提款", Passed: true, ExpectedLabel: "攻击交易应被拒绝", Actual: "攻击交易已回滚"}})
+	battleDetails, err := jsonb([]contracts.JudgeResultDetail{{Case: "防御合约阻止重复提款", Passed: true, ExpectedLabel: "攻击交易应被拒绝", Actual: "defense_win", Hint: "攻击交易已回滚,守方获胜"}})
 	if err != nil {
 		return fmt.Errorf("编码对抗判题结果详情失败: %w", err)
 	}
-	battleReplay, err := jsonb(contracts.JudgeReplayTrace{Actions: []contracts.JudgeReplayAction{{
-		Seq: 1, Op: "deploy",
-		Payload: map[string]any{"artifact": "VaultDefense"},
-		Output:  map[string]any{"address": "0x1000000000000000000000000000000000000001"},
-	}}})
+	battleReplay, err := jsonb(contracts.JudgeReplayTrace{Actions: acceptanceBattleReplayActions()})
 	if err != nil {
 		return fmt.Errorf("编码对抗判题回放轨迹失败: %w", err)
 	}
 	return execJSON(ctx, tx, `
 INSERT INTO judge_result (id, task_id, tenant_id, version, passed, score, max_score, details, replay_trace, judge_sandbox_ref, judged_at, is_rejudge)
-VALUES ($1,$2,$3,1,true,1,1,$4,$5,'sandbox:acceptance-battle-001',now() - interval '10 minutes',false)
+	VALUES ($1,$2,$3,1,true,1,1,$4,$5,'sandbox:910000000000001041',now() - interval '10 minutes',false)
 ON CONFLICT (tenant_id, task_id, version) DO UPDATE SET passed=EXCLUDED.passed, score=EXCLUDED.score, max_score=EXCLUDED.max_score, details=EXCLUDED.details, replay_trace=EXCLUDED.replay_trace, judge_sandbox_ref=EXCLUDED.judge_sandbox_ref, judged_at=EXCLUDED.judged_at, is_rejudge=EXCLUDED.is_rejudge`,
 		acceptanceIDs.BattleJudgeResult, acceptanceIDs.BattleJudgeTask, acceptanceIDs.TenantID, battleDetails, battleReplay)
 }
 
 // seedContentRows 写入内容库、题库和试卷数据。
-func seedContentRows(ctx context.Context, tx pgx.Tx) error {
-	bodyLab, err := jsonb(map[string]any{"summary": "使用 Foundry 复现可重入漏洞并完成修复。", "steps": []string{"审计 withdraw 调用顺序", "编写攻击合约", "应用 checks-effects-interactions 修复"}})
+func seedContentRows(ctx context.Context, tx pgx.Tx, refs acceptanceMaterialRefs) error {
+	bodyLab, err := jsonb(acceptanceExperimentTemplateBody(refs))
 	if err != nil {
 		return fmt.Errorf("编码实验内容正文失败: %w", err)
 	}
+	solveComposition := acceptanceContestComposition(refs, "contest:acceptance:solve", contracts.SandboxAccessContestSolve)
+	battleComposition := acceptanceContestComposition(refs, "contest:acceptance:battle", contracts.SandboxAccessContestBattle)
+	vulnComposition := acceptanceContestComposition(refs, "contest:acceptance:vulnerability", contracts.SandboxAccessVulnerabilityPrevalidate)
 	bodyContest, err := jsonb(map[string]any{
-		"title":      "Reentrancy Vault 攻击题",
-		"scenario":   "给定简化金库合约,提交能够触发资金重复提取的最小攻击代码。",
-		"statement":  "请提交题面要求的答案,系统会按题目声明的答案键进行判定。",
-		"submit_key": "answer",
-		"flag_rule":  "链上余额断言通过后计分",
+		"title":     "Reentrancy Vault 修复题",
+		"scenario":  "给定存在外部调用顺序缺陷的简化金库合约,提交完整修复归档,使正常存取款继续可用并严格拒绝重入提款。",
+		"statement": "请提交一个离线 Foundry 工程归档,必须包含 src/ReentrancyVault.sol。公开判题套件会验证正常存款、正常提款、重入尝试被拒绝以及既有资金不被改变;不得依赖网络或题外合约。",
+		"objective": "完成 checks-effects-interactions 修复,保证提款状态先于外部转账更新,并保持余额账本与实际余额一致。",
+		"submission_contract": map[string]any{
+			"format":           "tar",
+			"root_files":       []string{"foundry.toml", "src/ReentrancyVault.sol"},
+			"required_sources": []string{"src/ReentrancyVault.sol"},
+			"compiler":         "/usr/local/bin/solc-0.8.20",
+			"offline":          true,
+			"required_contract": map[string]any{
+				"name":             "ReentrancyVault",
+				"functions":        []string{"deposit() payable", "withdraw()"},
+				"observable_state": []string{"balances(address)", "address.balance"},
+			},
+		},
+		"init_contracts": []map[string]any{{
+			"name":            "ReentrancyVault",
+			"source_file":     "src/ReentrancyVault.sol",
+			"initial_balance": "0",
+			"initialization":  "由公开测试部署并通过 deposit 建立余额",
+		}},
+		"composition": solveComposition,
 		"judge_config": map[string]any{
 			"judger_code": "testcase-evm",
-			"suite_ref":   "s3://chaimir-code/910000000000000001/judge/suites/ctf-reentrancy-vault/public-regression.tar.gz",
+			"suite_ref":   refs.JudgeSuiteRef,
 			"max_score":   100,
-			"expectation": map[string]any{"public": true, "flag_input_key": "answer"},
+			"expectation": map[string]any{"public": true, "mode": "offline-public-suite"},
 		},
 	})
 	if err != nil {
 		return fmt.Errorf("编码竞赛题正文失败: %w", err)
 	}
 	bodyBattle, err := jsonb(map[string]any{
-		"scenario": "攻方提交攻击归档,守方提交防御归档;系统在隔离对局沙箱恢复双方参战物并用链上断言判定是否攻破。",
-		"battle":   map[string]any{"rule": "attack-defense", "execution_profile": "contest-battle", "entry_roles": []int16{1, 2}, "replay_profile": map[string]any{"mode": "full"}},
+		"title":     "Reentrancy Vault 攻防对局题",
+		"scenario":  "攻方提交攻击归档,守方提交防御归档;系统在隔离对局沙箱恢复双方参战物,执行真实部署、存款、攻击和提款交易,按攻击是否造成二次提款判定胜负。",
+		"statement": "攻方必须提交可编译的攻击归档,守方必须提交可编译的防御归档。对局只使用题目锁定的 EVM 组合和离线工具链,回放保存全部链上动作、回执和材料摘要。攻击调用触发第二次提款表示攻方获胜;攻击调用可以正常完成但未发生第二次提款,且守方仍可正常提款,表示守方获胜。",
+		"init_contracts": []map[string]any{{
+			"name":        "VaultDefense",
+			"role":        "defense",
+			"source_file": "src/VaultDefense.sol",
+			"functions":   []string{"deposit() payable", "withdraw()"},
+		}, {
+			"name":        "ReentrancyAttack",
+			"role":        "attack",
+			"source_file": "src/ReentrancyAttack.sol",
+			"functions":   []string{"attack()"},
+		}},
+		"composition": battleComposition,
+		"battle":      map[string]any{"rule": "attack-defense", "execution_profile": "contest-battle", "entry_roles": []int16{1, 2}, "replay_profile": map[string]any{"mode": "full"}},
 		"judge_config": map[string]any{
 			"judger_code": "onchain-assert",
-			"max_score":   100,
-			"expectation": map[string]any{
-				"assertions": []map[string]any{
-					{"label": "本地链已进入可判定状态", "target": "chainId", "field": "chain_id", "op": "eq", "value": 31337, "expected_label": "链 ID 应为验收本地链"},
-				},
-			},
+			"max_score":   1,
+			"expectation": acceptanceBattleJudgeExpectation(),
 		},
 	})
 	if err != nil {
 		return fmt.Errorf("编码攻防题正文失败: %w", err)
 	}
-	bodyTheory, err := jsonb(map[string]any{"question": "解释拜占庭容错共识中安全性和活性的取舍。", "choices": []string{"只提高出块速度", "在部分节点作恶时仍保持一致性", "取消交易签名", "跳过网络传播"}})
+	bodyVuln, err := jsonb(acceptanceVulnerabilityDraftBody(vulnComposition, refs))
+	if err != nil {
+		return fmt.Errorf("编码漏洞题正文失败: %w", err)
+	}
+	bodyTheory, err := jsonb(acceptanceTheoryBody())
 	if err != nil {
 		return fmt.Errorf("编码理论题正文失败: %w", err)
 	}
@@ -531,16 +753,19 @@ ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, sort=EXCLUDED.sort, deleted_a
 		acceptanceIDs.ContentCat, acceptanceIDs.TenantID); err != nil {
 		return err
 	}
-	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentLab, "lab-reentrancy-foundry", "1.0.0", 1, "Foundry 可重入漏洞复现实验", 2, bodyLab, []string{}); err != nil {
+	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentLab, "lab-reentrancy-foundry", "1.0.0", 1, "Foundry 可重入漏洞复现实验", 2, bodyLab, []string{"judge_config"}); err != nil {
 		return err
 	}
-	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentContest, "ctf-reentrancy-vault", "1.0.0", 2, "Reentrancy Vault 攻击题", 3, bodyContest, []string{"flag_rule", "judge_config"}); err != nil {
+	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentContest, "ctf-reentrancy-vault", "1.0.0", 2, "Reentrancy Vault 修复题", 3, bodyContest, []string{"judge_config"}); err != nil {
 		return err
 	}
 	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentBattle, "battle-reentrancy-duel", "1.0.0", 2, "Reentrancy Vault 攻防对局题", 3, bodyBattle, []string{"judge_config"}); err != nil {
 		return err
 	}
-	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentTheory, "quiz-bft-safety-liveness", "1.0.0", 3, "BFT 安全性与活性理解题", 2, bodyTheory, []string{}); err != nil {
+	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentVuln, "VULN-910000000000008042", "1.0.0", 2, "Vault withdraw 可重入漏洞", 1, bodyVuln, []string{"judge_config"}); err != nil {
+		return err
+	}
+	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentTheory, "quiz-bft-safety-liveness", "1.0.0", 3, "BFT 安全性与活性理解题", 2, bodyTheory, []string{"answer"}); err != nil {
 		return err
 	}
 	criteria, err := jsonb(map[string]any{})
@@ -575,6 +800,52 @@ ON CONFLICT (tenant_id, paper_id, seq) DO UPDATE SET item_code=EXCLUDED.item_cod
 	return nil
 }
 
+// acceptanceExperimentTemplateBody 构造可由 M7 引用的完整实验模板材料。
+func acceptanceExperimentTemplateBody(refs acceptanceMaterialRefs) map[string]any {
+	composition := acceptanceExperimentTemplateComposition()
+	return map[string]any{
+		"description":     "使用 Foundry 在受控 EVM runtime 中复现可重入漏洞,完成 checks-effects-interactions 修复并提交实验报告。",
+		"summary":         "使用 Foundry 复现可重入漏洞并完成修复。",
+		"steps":           []string{"审计 withdraw 调用顺序", "编写攻击合约", "应用 checks-effects-interactions 修复"},
+		"composition":     composition,
+		"init_code_ref":   refs.InitCodeRef,
+		"init_script_ref": refs.InitScriptRef,
+		"sim_package_ref": map[string]any{"code": acceptanceSimPackageCode, "version": acceptanceSimPackageVersion},
+		"judge_config": map[string]any{
+			"checkpoints": []map[string]any{
+				{"id": "withdraw-guard", "judger_code": "testcase-evm", "item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "score": 60, "mode": "fresh"},
+				{"id": "attack-regression", "judger_code": "testcase-evm", "item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "score": 40, "mode": "fresh"},
+			},
+		},
+	}
+}
+
+// acceptanceExperimentTemplateComposition 返回实验模板和实例共同使用的最终组合声明。
+func acceptanceExperimentTemplateComposition() contracts.SandboxCompositionSpec {
+	return contracts.SandboxCompositionSpec{
+		ID: "lab-foundry",
+		Runtimes: []contracts.CompositionRuntimeRef{{
+			InstanceCode: "source-chain",
+			Code:         "evm-foundry",
+			ImageVersion: platformRuntimeImageVersion("evm-foundry"),
+		}},
+		WorkspaceRuntimeInstance: "source-chain",
+		Tools:                    []contracts.CompositionComponentRef{{Code: "code-server", Selection: "explicit"}},
+		AccessProfile:            contracts.SandboxAccessExperiment,
+	}
+}
+
+// acceptanceTheoryBody 构造符合题库最终理论题契约的完整题面和答案材料。
+func acceptanceTheoryBody() map[string]any {
+	return map[string]any{
+		"statement":   "在部分节点作恶时,拜占庭容错共识需要优先保证哪项性质?",
+		"q_type":      "single_choice",
+		"options":     []string{"只提高出块速度", "在部分节点作恶时仍保持一致性", "取消交易签名", "跳过网络传播"},
+		"answer":      "在部分节点作恶时仍保持一致性",
+		"explanation": "安全性要求诚实节点对同一高度保持一致状态;活性则要求在网络条件满足时继续推进,两者不能通过取消签名或跳过传播获得。",
+	}
+}
+
 // upsertContentItem 幂等写入内容条目及正文。
 func upsertContentItem(ctx context.Context, tx pgx.Tx, id int64, code, version string, itemType int16, title string, difficulty int16, body []byte, sensitive []string) error {
 	versionHash := crypto.SHA256Hex(body)
@@ -595,7 +866,7 @@ ON CONFLICT (item_id) DO UPDATE SET body=EXCLUDED.body, sensitive_fields=EXCLUDE
 // seedTeachingRows 写入课程、课节、作业、提交、讨论和课程成绩。
 // 课程不写 cover_ref:种子只写库不往 ObjectStorage 放字节,编个引用会让封面「有引用但取不到」;
 // 留空则走设计好的纸材质回落,真实封面在验收时经上传入口产生(同 seedAcceptanceTenant 的说明)。
-func seedTeachingRows(ctx context.Context, tx pgx.Tx) error {
+func seedTeachingRows(ctx context.Context, tx pgx.Tx, refs acceptanceMaterialRefs) error {
 	schedule, err := jsonb(map[string]any{"items": []map[string]any{{"weekday": 2, "time": "13:30-15:05", "room": "链安实验室 A302"}}})
 	if err != nil {
 		return fmt.Errorf("编码课程排课配置失败: %w", err)
@@ -667,7 +938,11 @@ ON CONFLICT (tenant_id, assignment_id, seq) DO UPDATE SET item_code=EXCLUDED.ite
 		acceptanceIDs.AssignmentItem, acceptanceIDs.TenantID, acceptanceIDs.Assignment); err != nil {
 		return err
 	}
-	submissionRef, err := jsonb(map[string]any{"bucket": "chaimir-code", "key": "acceptance/submissions/S20260001/reentrancy-fixed.zip"})
+	teachingSubmissionObject, err := storage.ParseObjectRef(refs.TeachingSubmissionRef)
+	if err != nil {
+		return fmt.Errorf("解析作业提交对象引用失败: %w", err)
+	}
+	submissionRef, err := jsonb(map[string]any{"bucket": teachingSubmissionObject.Bucket, "key": teachingSubmissionObject.Key})
 	if err != nil {
 		return fmt.Errorf("编码提交存储引用失败: %w", err)
 	}
@@ -698,7 +973,7 @@ ON CONFLICT (tenant_id, lesson_id, student_id) DO UPDATE SET status=EXCLUDED.sta
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO discussion_post (id, tenant_id, course_id, author_id, content, is_pinned)
-VALUES ($1,$2,$3,$4,'重入攻击复现时请先确认本地链快照已重置,避免旧状态影响断言。',true)
+VALUES ($1,$2,$3,$4,'重入攻击复现时请先确认验收链快照已重置,避免旧状态影响断言。',true)
 ON CONFLICT (id) DO UPDATE SET content=EXCLUDED.content, is_pinned=EXCLUDED.is_pinned, deleted_at=NULL`,
 		acceptanceIDs.Discussion, acceptanceIDs.TenantID, acceptanceIDs.Course, acceptanceIDs.TeacherAssist); err != nil {
 		return err
@@ -747,13 +1022,13 @@ ON CONFLICT (id) DO UPDATE SET chapter_id=EXCLUDED.chapter_id, title=EXCLUDED.ti
 }
 
 // acceptanceExperimentComponents 构造与 M7 最终领域模型一致的验收组件 JSON。
-func acceptanceExperimentComponents(envComposition contracts.SandboxCompositionSnapshot) ([]byte, error) {
+func acceptanceExperimentComponents(envComposition contracts.SandboxCompositionSnapshot, refs acceptanceMaterialRefs) ([]byte, error) {
 	return jsonb(map[string]any{
 		"envs": []map[string]any{{
 			"id":                         "lab-foundry",
 			"composition_snapshot":       envComposition,
-			"init_code_ref":              acceptanceInitCodeRef,
-			"init_script_ref":            acceptanceInitScriptRef,
+			"init_code_ref":              refs.InitCodeRef,
+			"init_script_ref":            refs.InitScriptRef,
 			"snapshot_enabled":           false,
 			"snapshot_retention_minutes": 0,
 			"keep_alive":                 true,
@@ -763,19 +1038,83 @@ func acceptanceExperimentComponents(envComposition contracts.SandboxCompositionS
 			{"id": "withdraw-guard", "judger": "testcase-evm", "item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "score": 60, "mode": "fresh", "env_id": "lab-foundry"},
 			{"id": "attack-regression", "judger": "testcase-evm", "item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "score": 40, "mode": "fresh", "env_id": "lab-foundry"},
 		},
+		"sims": []map[string]any{{
+			"id": "gas-metering", "package_code": acceptanceSimPackageCode, "version": acceptanceSimPackageVersion,
+			"seed": 2026061901, "params": map[string]any{"gas_limit": 42_000, "scenario": "classroom-demo"},
+		}},
 		"stages": []map[string]any{
-			{"stage": 1, "title": "漏洞复现与修复", "description": "使用 Foundry 复现可重入攻击并完成修复。", "components": map[string]any{"envs": []string{"lab-foundry"}}},
+			{"stage": 1, "title": "漏洞复现与修复", "description": "使用 Foundry 复现可重入攻击并完成修复。", "components": map[string]any{"envs": []string{"lab-foundry"}, "sims": []string{"gas-metering"}}},
 		},
 	})
 }
 
+// acceptanceVulnerabilityDraftBody 构造可由 M2/M3 真实执行的漏洞题草稿,步骤只引用受控归档和明确运行时动作。
+func acceptanceVulnerabilityDraftBody(composition contracts.SandboxCompositionSpec, refs acceptanceMaterialRefs) map[string]any {
+	assertion := map[string]any{
+		"label":          "攻击应触发两次重入回调",
+		"target":         "counter:last",
+		"field":          "value",
+		"op":             "eq",
+		"value":          2,
+		"expected_label": "重入计数应为 2",
+	}
+	return map[string]any{
+		"scenario":        "在受控 EVM runtime 中验证可重入漏洞修复前后的链上行为。",
+		"contract":        "src/ReentrancyVault.sol",
+		"weakness":        "external call before balance update",
+		"composition":     composition,
+		"init_code_ref":   refs.InitCodeRef,
+		"init_script_ref": refs.InitScriptRef,
+		"init_steps": []map[string]any{
+			{"op": "deploy", "payload": map[string]any{"contract_ref": "vault", "compile": true, "project_dir": "/workspace", "artifact": "out/ReentrancyVault.sol/ReentrancyVault.json"}},
+			{"op": "tx", "payload": map[string]any{"target_ref": "vault", "data": "0xd0e30db0", "value": "2000000000000000000"}},
+			{"op": "deploy", "payload": map[string]any{"contract_ref": "attack", "compile": true, "project_dir": "/workspace", "artifact": "out/ReentrancyProbe.sol/ReentrancyProbe.json", "constructor_args": []map[string]any{{"type": "address", "target_ref": "vault"}}}},
+		},
+		"positive_steps": []map[string]any{
+			{"op": "tx", "payload": map[string]any{"target_ref": "attack", "data": "0x9e5faafc", "value": "1000000000000000000"}},
+		},
+		"assertions": []map[string]any{assertion},
+		"judge_config": map[string]any{
+			"judger_code": "onchain-assert",
+			"max_score":   100,
+			"expectation": map[string]any{"assertions": []map[string]any{assertion}},
+		},
+	}
+}
+
+// acceptanceBattleJudgeExpectation 统一对抗赛公开正文和已完成判题快照的链上步骤与胜负断言。
+func acceptanceBattleJudgeExpectation() map[string]any {
+	return map[string]any{
+		"chain_steps": acceptanceBattleChainSteps(),
+		"assertions": []map[string]any{{
+			"label":          "守方合约应拒绝二次提款",
+			"target":         "counter:last",
+			"field":          "value",
+			"op":             "eq",
+			"value":          1,
+			"expected_label": "攻击仅触发一次回调,守方仍可正常提款",
+		}},
+	}
+}
+
+// acceptanceBattleChainSteps 构造由 M3 在对局沙箱中真实执行的完整攻防序列。
+func acceptanceBattleChainSteps() []map[string]any {
+	return []map[string]any{
+		{"op": "deploy", "payload": map[string]any{"contract_ref": "defense", "compile": true, "project_dir": "/workspace/battle/entry_b", "artifact": "out/VaultDefense.sol/VaultDefense.json"}},
+		{"op": "tx", "payload": map[string]any{"target_ref": "defense", "data": "0xd0e30db0", "value": "1000000000000000000"}},
+		{"op": "deploy", "payload": map[string]any{"contract_ref": "attack", "compile": true, "project_dir": "/workspace/battle/entry_a", "artifact": "out/ReentrancyAttack.sol/ReentrancyAttack.json", "constructor_args": []map[string]any{{"type": "address", "target_ref": "defense"}}}},
+		{"op": "tx", "payload": map[string]any{"target_ref": "attack", "data": "0x9e5faafc", "value": "1000000000000000000"}},
+		{"op": "tx", "payload": map[string]any{"target_ref": "defense", "data": "0x3ccfd60b"}},
+	}
+}
+
 // seedExperimentRows 写入实验定义、分组、实例、检查点和报告。
-func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
+func seedExperimentRows(ctx context.Context, tx pgx.Tx, refs acceptanceMaterialRefs, reportBucket string) error {
 	groupConfig, err := jsonb(map[string]any{"size": 2, "roles": []string{"leader", "member"}})
 	if err != nil {
 		return fmt.Errorf("编码实验分组配置失败: %w", err)
 	}
-	envSpec := contracts.SandboxCompositionSpec{ID: "lab-foundry", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", Tools: []contracts.CompositionComponentRef{{Code: "code-server", Selection: "explicit"}}, AccessProfile: contracts.SandboxAccessExperiment}
+	envSpec := acceptanceExperimentTemplateComposition()
 	envComposition, err := acceptanceCompositionSnapshot(ctx, tx, envSpec)
 	if err != nil {
 		return err
@@ -783,7 +1122,7 @@ func seedExperimentRows(ctx context.Context, tx pgx.Tx) error {
 	if err := seedPublishedComposition(ctx, tx, envComposition); err != nil {
 		return err
 	}
-	components, err := acceptanceExperimentComponents(envComposition)
+	components, err := acceptanceExperimentComponents(envComposition, refs)
 	if err != nil {
 		return fmt.Errorf("编码实验组件配置失败: %w", err)
 	}
@@ -843,27 +1182,49 @@ ON CONFLICT (tenant_id, group_id, student_id) DO UPDATE SET role=EXCLUDED.role`,
 	}
 	if err := execJSON(ctx, tx, `
 	INSERT INTO experiment_instance (id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, score, finished_at)
-	VALUES ($1,$2,$3,$4,$5,'experiment:2026:reentrancy:instance-a','experiment:2026:reentrancy:instance-a',$6,$7,4,88.50,now())
+		VALUES ($1,$2,$3,$4,$5,'experiment:2026:reentrancy:instance-a','experiment:2026:reentrancy:instance-a',$6,$7,4,128.50,now())
 	ON CONFLICT (id) DO UPDATE SET experiment_id=EXCLUDED.experiment_id, owner_account_id=EXCLUDED.owner_account_id, group_id=EXCLUDED.group_id, source_ref=EXCLUDED.source_ref, scope_ref=EXCLUDED.scope_ref, sandbox_refs=EXCLUDED.sandbox_refs, sim_session_refs=EXCLUDED.sim_session_refs, status=EXCLUDED.status, score=EXCLUDED.score, finished_at=EXCLUDED.finished_at, last_active_at=now()`,
 		acceptanceIDs.ExperimentInstance, acceptanceIDs.TenantID, acceptanceIDs.Experiment, acceptanceIDs.StudentA, acceptanceIDs.ExperimentGroup, sandboxRefs, simRefs); err != nil {
 		return err
 	}
-	checkpointDetail, err := jsonb(map[string]any{"assertion": "withdraw balance cannot be drained twice", "passed_cases": 7, "total_cases": 8})
+	checkpointDetail, err := jsonb(map[string]any{"assertion": "withdraw balance cannot be drained twice", "passed_cases": 8, "total_cases": 8})
 	if err != nil {
 		return fmt.Errorf("编码实验检查点详情失败: %w", err)
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO checkpoint_result (id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score, detail_ref, binding_output)
-VALUES ($1,$2,$3,'withdraw-guard','judge:acceptance:withdraw-guard',true,60.00,'reports/acceptance/checkpoints/withdraw-guard.json',$4)
+VALUES ($1,$2,$3,'withdraw-guard',$5,true,60.00,$6,$4)
 ON CONFLICT (tenant_id, instance_id, checkpoint_id) DO UPDATE SET judge_task_ref=EXCLUDED.judge_task_ref, passed=EXCLUDED.passed, score=EXCLUDED.score, detail_ref=EXCLUDED.detail_ref, binding_output=EXCLUDED.binding_output, judged_at=now()`,
-		acceptanceIDs.CheckpointResult, acceptanceIDs.TenantID, acceptanceIDs.ExperimentInstance, checkpointDetail); err != nil {
+		acceptanceIDs.CheckpointResult, acceptanceIDs.TenantID, acceptanceIDs.ExperimentInstance, checkpointDetail, ids.Format(acceptanceIDs.ExperimentJudgeTaskA), fmt.Sprintf("judge:%04d:result:%s", timex.Now().Year(), ids.Format(acceptanceIDs.ExperimentJudgeTaskA))); err != nil {
+		return err
+	}
+	checkpointDetailB, err := jsonb(map[string]any{"assertion": "修复后攻击交易回滚", "passed_cases": 8, "total_cases": 8})
+	if err != nil {
+		return fmt.Errorf("编码实验第二检查点详情失败: %w", err)
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO checkpoint_result (id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score, detail_ref, binding_output)
+VALUES ($1,$2,$3,'attack-regression',$5,true,40.00,$6,$4)
+ON CONFLICT (tenant_id, instance_id, checkpoint_id) DO UPDATE SET judge_task_ref=EXCLUDED.judge_task_ref, passed=EXCLUDED.passed, score=EXCLUDED.score, detail_ref=EXCLUDED.detail_ref, binding_output=EXCLUDED.binding_output, judged_at=now()`,
+		acceptanceIDs.CheckpointResult+1, acceptanceIDs.TenantID, acceptanceIDs.ExperimentInstance, checkpointDetailB, ids.Format(acceptanceIDs.ExperimentJudgeTaskB), fmt.Sprintf("judge:%04d:result:%s", timex.Now().Year(), ids.Format(acceptanceIDs.ExperimentJudgeTaskB))); err != nil {
+		return err
+	}
+	reportRef, err := acceptanceExperimentReportRef(reportBucket)
+	if err != nil {
+		return err
+	}
+	if err := execJSON(ctx, tx, `
+INSERT INTO experiment_report (id, tenant_id, instance_id, student_id, content_ref, manual_score, comment, status)
+VALUES ($1,$2,$3,$4,$5,28.50,'报告对调用栈和余额变化分析完整。',2)
+ON CONFLICT (tenant_id, instance_id, student_id) DO UPDATE SET content_ref=EXCLUDED.content_ref, manual_score=EXCLUDED.manual_score, comment=EXCLUDED.comment, status=EXCLUDED.status, submitted_at=now()`,
+		acceptanceIDs.ExperimentReport, acceptanceIDs.TenantID, acceptanceIDs.ExperimentInstance, acceptanceIDs.StudentA, reportRef); err != nil {
 		return err
 	}
 	return execJSON(ctx, tx, `
-INSERT INTO experiment_report (id, tenant_id, instance_id, student_id, content_ref, manual_score, comment, status)
-VALUES ($1,$2,$3,$4,'reports/acceptance/S20260001/reentrancy-report.pdf',28.50,'报告对调用栈和余额变化分析完整。',2)
-ON CONFLICT (tenant_id, instance_id, student_id) DO UPDATE SET content_ref=EXCLUDED.content_ref, manual_score=EXCLUDED.manual_score, comment=EXCLUDED.comment, status=EXCLUDED.status, submitted_at=now()`,
-		acceptanceIDs.ExperimentReport, acceptanceIDs.TenantID, acceptanceIDs.ExperimentInstance, acceptanceIDs.StudentA)
+INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
+VALUES ($1,$2,$3,$4,$5,128.50,1,'trace-acceptance-experiment-score',now(),3,0,NULL,now(),now(),'',NULL)
+ON CONFLICT (tenant_id, instance_id, score_revision) DO UPDATE SET experiment_id=EXCLUDED.experiment_id, student_id=EXCLUDED.student_id, score=EXCLUDED.score, trace_id=EXCLUDED.trace_id, scored_at=EXCLUDED.scored_at, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, last_error=NULL, updated_at=now(), lease_token='', lease_until=NULL`,
+		acceptanceIDs.ExperimentScoreOutbox, acceptanceIDs.TenantID, acceptanceIDs.Experiment, acceptanceIDs.ExperimentInstance, acceptanceIDs.StudentA)
 }
 
 // seedSimRows 写入验收用的仿真会话、动作、检查点和分享码。
@@ -939,15 +1300,59 @@ ON CONFLICT (id) DO UPDATE SET school_name=EXCLUDED.school_name, school_type=EXC
 }
 
 // seedContestRows 写入解题赛、队伍、提交、榜单和漏洞题素材。
-func seedContestRows(ctx context.Context, tx pgx.Tx) error {
+func seedContestRows(ctx context.Context, tx pgx.Tx, refs acceptanceMaterialRefs) error {
+	solveComposition := acceptanceContestComposition(refs, "contest:acceptance:solve", contracts.SandboxAccessContestSolve)
+	solveSnapshot, err := acceptanceCompositionSnapshot(ctx, tx, solveComposition)
+	if err != nil {
+		return err
+	}
+	battleComposition := acceptanceContestComposition(refs, "contest:acceptance:battle", contracts.SandboxAccessContestBattle)
+	battleSnapshot, err := acceptanceCompositionSnapshot(ctx, tx, battleComposition)
+	if err != nil {
+		return err
+	}
+	vulnComposition := acceptanceContestComposition(refs, "contest:acceptance:vulnerability", contracts.SandboxAccessVulnerabilityPrevalidate)
+	vulnSnapshot, err := acceptanceCompositionSnapshot(ctx, tx, vulnComposition)
+	if err != nil {
+		return err
+	}
+	for _, snapshot := range []contracts.SandboxCompositionSnapshot{solveSnapshot, battleSnapshot, vulnSnapshot} {
+		if err := seedPublishedComposition(ctx, tx, snapshot); err != nil {
+			return err
+		}
+	}
+	solveSnapshotJSON, err := jsonb(solveSnapshot)
+	if err != nil {
+		return fmt.Errorf("编码解题赛组合快照失败: %w", err)
+	}
+	battleSnapshotJSON, err := jsonb(battleSnapshot)
+	if err != nil {
+		return fmt.Errorf("编码攻防赛组合快照失败: %w", err)
+	}
+	vulnSnapshotJSON, err := jsonb(vulnSnapshot)
+	if err != nil {
+		return fmt.Errorf("编码漏洞题组合快照失败: %w", err)
+	}
+	contestSubmissionRef, err := storage.ParseObjectRef(refs.ContestSubmissionRef)
+	if err != nil {
+		return fmt.Errorf("解析解题赛提交对象引用失败: %w", err)
+	}
+	battleEntryAHash, err := acceptanceContestAssetHash(refs.BattleEntryARef, refs)
+	if err != nil {
+		return err
+	}
+	battleEntryBHash, err := acceptanceContestAssetHash(refs.BattleEntryBRef, refs)
+	if err != nil {
+		return err
+	}
 	rules, err := jsonb(map[string]any{"scoring": "static", "allowed_languages": []string{"solidity"}, "appeal_minutes": 20})
 	if err != nil {
 		return fmt.Errorf("编码竞赛规则失败: %w", err)
 	}
-	signupStart := time.Date(2026, 11, 1, 8, 0, 0, 0, time.UTC)
-	signupEnd := time.Date(2026, 11, 8, 18, 0, 0, 0, time.UTC)
-	start := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
-	end := time.Date(2026, 11, 10, 17, 0, 0, 0, time.UTC)
+	signupStart := time.Date(2026, 8, 1, 8, 0, 0, 0, time.UTC)
+	signupEnd := time.Date(2026, 8, 30, 18, 0, 0, 0, time.UTC)
+	start := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 12, 31, 17, 0, 0, 0, time.UTC)
 	if err := execJSON(ctx, tx, `
 INSERT INTO contest (id, tenant_id, organizer_id, name, mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status)
 VALUES ($1,$2,$3,'2026 链安新生攻防挑战赛',1,1,$4,$5,$6,$7,30,$8,3)
@@ -956,10 +1361,10 @@ ON CONFLICT (id) DO UPDATE SET organizer_id=EXCLUDED.organizer_id, name=EXCLUDED
 		return err
 	}
 	if err := execJSON(ctx, tx, `
-INSERT INTO contest_problem (id, tenant_id, contest_id, item_code, item_version, score, seq)
-VALUES ($1,$2,$3,'ctf-reentrancy-vault','1.0.0',500,1)
-ON CONFLICT (tenant_id, contest_id, item_code, item_version) DO UPDATE SET score=EXCLUDED.score, seq=EXCLUDED.seq`,
-		acceptanceIDs.ContestProblem, acceptanceIDs.TenantID, acceptanceIDs.Contest); err != nil {
+	INSERT INTO contest_problem (id, tenant_id, contest_id, item_code, item_version, score, seq, composition_digest, composition_snapshot)
+	VALUES ($1,$2,$3,'ctf-reentrancy-vault','1.0.0',500,1,$4,$5)
+	ON CONFLICT (tenant_id, contest_id, item_code, item_version) DO UPDATE SET score=EXCLUDED.score, seq=EXCLUDED.seq, composition_digest=EXCLUDED.composition_digest, composition_snapshot=EXCLUDED.composition_snapshot`,
+		acceptanceIDs.ContestProblem, acceptanceIDs.TenantID, acceptanceIDs.Contest, solveSnapshot.Digest, solveSnapshotJSON); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
@@ -976,15 +1381,15 @@ ON CONFLICT (tenant_id, team_id, member_tenant_id, account_id) DO UPDATE SET is_
 		acceptanceIDs.TeamAMember, acceptanceIDs.TenantID, acceptanceIDs.TeamA, acceptanceIDs.StudentA); err != nil {
 		return err
 	}
-	contentRef, err := jsonb(map[string]any{"bucket": "chaimir-code", "key": "acceptance/contest/ZA2026/reentrancy-solve.zip"})
+	contentRef, err := jsonb(map[string]any{"bucket": contestSubmissionRef.Bucket, "key": contestSubmissionRef.Key})
 	if err != nil {
 		return fmt.Errorf("编码竞赛提交内容引用失败: %w", err)
 	}
 	if err := execJSON(ctx, tx, `
-	INSERT INTO solve_submission (id, tenant_id, contest_id, problem_id, team_id, submitter_tenant_id, submitter_id, content_ref, source_ref, scope_ref, passed, score, sandbox_ref)
-	VALUES ($1,$2,$3,$4,$5,$2,$6,$7,'contest:2026:solve:ZA2026-001','contest:2026:solve:ZA2026-001',true,500,'sandbox:contest:ZA2026-001')
-	ON CONFLICT (tenant_id, source_ref) DO UPDATE SET submitter_tenant_id=EXCLUDED.submitter_tenant_id, submitter_id=EXCLUDED.submitter_id, content_ref=EXCLUDED.content_ref, scope_ref=EXCLUDED.scope_ref, passed=EXCLUDED.passed, score=EXCLUDED.score, sandbox_ref=EXCLUDED.sandbox_ref`,
-		acceptanceIDs.SolveSubmission, acceptanceIDs.TenantID, acceptanceIDs.Contest, acceptanceIDs.ContestProblem, acceptanceIDs.TeamA, acceptanceIDs.StudentA, contentRef); err != nil {
+	INSERT INTO solve_submission (id, tenant_id, contest_id, problem_id, team_id, submitter_tenant_id, submitter_id, content_ref, source_ref, scope_ref, judge_task_ref, passed, score, sandbox_ref)
+		VALUES ($1,$2,$3,$4,$5,$2,$6,$7,'contest:2026:solve:ZA2026-001','contest:2026:solve:ZA2026-001',$8,true,500,'910000000000001031')
+	ON CONFLICT (tenant_id, source_ref) DO UPDATE SET submitter_tenant_id=EXCLUDED.submitter_tenant_id, submitter_id=EXCLUDED.submitter_id, content_ref=EXCLUDED.content_ref, scope_ref=EXCLUDED.scope_ref, judge_task_ref=EXCLUDED.judge_task_ref, passed=EXCLUDED.passed, score=EXCLUDED.score, sandbox_ref=EXCLUDED.sandbox_ref`,
+		acceptanceIDs.SolveSubmission, acceptanceIDs.TenantID, acceptanceIDs.Contest, acceptanceIDs.ContestProblem, acceptanceIDs.TeamA, acceptanceIDs.StudentA, contentRef, ids.Format(acceptanceIDs.ContestJudgeTask)); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
@@ -1014,18 +1419,18 @@ ON CONFLICT (tenant_id, contest_id, snapshot_status) DO UPDATE SET ranking=EXCLU
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO contest (id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status)
-VALUES ($1,$2,$3,'2026 链安攻防回放验收赛',2,2,1,$4,$5,$6,$7,0,$8,5)
+VALUES ($1,$2,$3,'2026 链安攻防验收赛',2,2,1,$4,$5,$6,$7,0,$8,3)
 ON CONFLICT (id) DO UPDATE SET organizer_id=EXCLUDED.organizer_id, name=EXCLUDED.name, mode=EXCLUDED.mode, match_mode=EXCLUDED.match_mode, team_mode=EXCLUDED.team_mode, signup_start=EXCLUDED.signup_start, signup_end=EXCLUDED.signup_end, start_at=EXCLUDED.start_at, end_at=EXCLUDED.end_at, freeze_minutes=EXCLUDED.freeze_minutes, rules=EXCLUDED.rules, status=EXCLUDED.status, deleted_at=NULL, updated_at=now()`,
 		acceptanceIDs.BattleContest, acceptanceIDs.TenantID, acceptanceIDs.TeacherMain,
-		time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC), time.Date(2026, 7, 7, 18, 0, 0, 0, time.UTC),
-		time.Date(2026, 7, 8, 9, 0, 0, 0, time.UTC), time.Date(2026, 7, 8, 17, 0, 0, 0, time.UTC), battleConfig); err != nil {
+		time.Date(2026, 8, 1, 8, 0, 0, 0, time.UTC), time.Date(2026, 8, 30, 18, 0, 0, 0, time.UTC),
+		time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC), time.Date(2026, 12, 31, 17, 0, 0, 0, time.UTC), battleConfig); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
-INSERT INTO contest_problem (id, tenant_id, contest_id, item_code, item_version, score, battle_config, battle_rule, seq)
-VALUES ($1,$2,$3,'battle-reentrancy-duel','1.0.0',100,$4,1,1)
-ON CONFLICT (tenant_id, contest_id, item_code, item_version) DO UPDATE SET score=EXCLUDED.score, battle_config=EXCLUDED.battle_config, battle_rule=EXCLUDED.battle_rule, seq=EXCLUDED.seq`,
-		acceptanceIDs.BattleContestProblem, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, battleConfig); err != nil {
+	INSERT INTO contest_problem (id, tenant_id, contest_id, item_code, item_version, score, battle_config, battle_rule, seq, composition_digest, composition_snapshot)
+	VALUES ($1,$2,$3,'battle-reentrancy-duel','1.0.0',100,$4,1,1,$5,$6)
+	ON CONFLICT (tenant_id, contest_id, item_code, item_version) DO UPDATE SET score=EXCLUDED.score, battle_config=EXCLUDED.battle_config, battle_rule=EXCLUDED.battle_rule, seq=EXCLUDED.seq, composition_digest=EXCLUDED.composition_digest, composition_snapshot=EXCLUDED.composition_snapshot`,
+		acceptanceIDs.BattleContestProblem, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, battleConfig, battleSnapshot.Digest, battleSnapshotJSON); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
@@ -1058,43 +1463,43 @@ ON CONFLICT (tenant_id, team_id, member_tenant_id, account_id) DO UPDATE SET is_
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO battle_entry (id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at)
-VALUES ($1,$2,$3,$4,$5,2,'s3://chaimir-code/acceptance/battle/replay-a.zip',$6,1,true,now() - interval '20 minutes')
-ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUDED.problem_id, team_id=EXCLUDED.team_id, role=EXCLUDED.role, artifact_ref=EXCLUDED.artifact_ref, artifact_hash=EXCLUDED.artifact_hash, version_no=EXCLUDED.version_no, is_active=EXCLUDED.is_active, submitted_at=EXCLUDED.submitted_at`,
-		acceptanceIDs.BattleEntryA, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleTeamA, strings.Repeat("a", 64)); err != nil {
+	VALUES ($1,$2,$3,$4,$5,2, $6,$7,1,true,now() - interval '20 minutes')
+	ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUDED.problem_id, team_id=EXCLUDED.team_id, role=EXCLUDED.role, artifact_ref=EXCLUDED.artifact_ref, artifact_hash=EXCLUDED.artifact_hash, version_no=EXCLUDED.version_no, is_active=EXCLUDED.is_active, submitted_at=EXCLUDED.submitted_at`,
+		acceptanceIDs.BattleEntryA, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleTeamA, refs.BattleEntryARef, battleEntryAHash); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO battle_entry (id, tenant_id, contest_id, problem_id, team_id, role, artifact_ref, artifact_hash, version_no, is_active, submitted_at)
-VALUES ($1,$2,$3,$4,$5,1,'s3://chaimir-code/acceptance/battle/replay-b.zip',$6,1,true,now() - interval '19 minutes')
-ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUDED.problem_id, team_id=EXCLUDED.team_id, role=EXCLUDED.role, artifact_ref=EXCLUDED.artifact_ref, artifact_hash=EXCLUDED.artifact_hash, version_no=EXCLUDED.version_no, is_active=EXCLUDED.is_active, submitted_at=EXCLUDED.submitted_at`,
-		acceptanceIDs.BattleEntryB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleTeamB, strings.Repeat("b", 64)); err != nil {
+	VALUES ($1,$2,$3,$4,$5,1, $6,$7,1,true,now() - interval '19 minutes')
+	ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUDED.problem_id, team_id=EXCLUDED.team_id, role=EXCLUDED.role, artifact_ref=EXCLUDED.artifact_ref, artifact_hash=EXCLUDED.artifact_hash, version_no=EXCLUDED.version_no, is_active=EXCLUDED.is_active, submitted_at=EXCLUDED.submitted_at`,
+		acceptanceIDs.BattleEntryB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleTeamB, refs.BattleEntryBRef, battleEntryBHash); err != nil {
 		return err
 	}
 	scoreDelta, err := jsonb(map[string]any{
 		"team_a": ids.Format(acceptanceIDs.BattleTeamA), "team_b": ids.Format(acceptanceIDs.BattleTeamB),
-		"rating_a_before": 1200, "rating_b_before": 1200, "rating_a_after": 1216, "rating_b_after": 1184,
-		"delta_a": 16, "delta_b": -16, "k_factor": 32, "result": 1,
+		"rating_a_before": 1200, "rating_b_before": 1200, "rating_a_after": 1184, "rating_b_after": 1216,
+		"delta_a": -16, "delta_b": 16, "k_factor": 32, "result": 2,
 	})
 	if err != nil {
 		return fmt.Errorf("编码对局积分变更失败: %w", err)
 	}
 	if err := execJSON(ctx, tx, `
 	INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at)
-	VALUES ($1,$2,$3,$4,$5,$6,'contest:2026:battle:acceptance-001','contest:2026:battle:acceptance-001','sandbox:acceptance-battle-001',$8,1,$7,NULL,3,now() - interval '18 minutes',now() - interval '10 minutes')
+		VALUES ($1,$2,$3,$4,$5,$6,'contest:2026:battle:acceptance-001','contest:2026:battle:acceptance-001','910000000000001041',$8,2,$7,NULL,3,now() - interval '18 minutes',now() - interval '10 minutes')
 	ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUDED.problem_id, entry_a_id=EXCLUDED.entry_a_id, entry_b_id=EXCLUDED.entry_b_id, scope_ref=EXCLUDED.scope_ref, sandbox_ref=EXCLUDED.sandbox_ref, judge_task_ref=EXCLUDED.judge_task_ref, result=EXCLUDED.result, score_delta=EXCLUDED.score_delta, status=EXCLUDED.status, matched_at=EXCLUDED.matched_at, finished_at=EXCLUDED.finished_at`,
 		acceptanceIDs.BattleMatch, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleEntryA, acceptanceIDs.BattleEntryB, scoreDelta, ids.Format(acceptanceIDs.BattleJudgeTask)); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO ladder_rank (id, tenant_id, contest_id, team_id, score, solved_count, last_solve_at, rank)
-VALUES ($1,$2,$3,$4,1216.00,0,now() - interval '10 minutes',1)
+VALUES ($1,$2,$3,$4,1184.00,0,now() - interval '10 minutes',2)
 ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, team_id=EXCLUDED.team_id, score=EXCLUDED.score, solved_count=EXCLUDED.solved_count, last_solve_at=EXCLUDED.last_solve_at, rank=EXCLUDED.rank, updated_at=now()`,
 		acceptanceIDs.BattleLadderRankA, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleTeamA); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO ladder_rank (id, tenant_id, contest_id, team_id, score, solved_count, last_solve_at, rank)
-VALUES ($1,$2,$3,$4,1184.00,0,now() - interval '10 minutes',2)
+VALUES ($1,$2,$3,$4,1216.00,0,now() - interval '10 minutes',1)
 ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, team_id=EXCLUDED.team_id, score=EXCLUDED.score, solved_count=EXCLUDED.solved_count, last_solve_at=EXCLUDED.last_solve_at, rank=EXCLUDED.rank, updated_at=now()`,
 		acceptanceIDs.BattleLadderRankB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleTeamB); err != nil {
 		return err
@@ -1110,15 +1515,23 @@ ON CONFLICT (tenant_id, id) DO UPDATE SET type=EXCLUDED.type, name=EXCLUDED.name
 		acceptanceIDs.VulnSource, acceptanceIDs.TenantID, sourceConfig); err != nil {
 		return err
 	}
-	draftBody, err := jsonb(map[string]any{"contract": "Vault.sol", "weakness": "external call before balance update", "chain": "local-anvil"})
+	draft := acceptanceVulnerabilityDraftBody(vulnSnapshot.Spec, refs)
+	draftBody, err := jsonb(draft)
 	if err != nil {
 		return fmt.Errorf("编码竞赛草稿正文失败: %w", err)
 	}
+	prevalidateDetail, err := jsonb(map[string]any{
+		"positive": map[string]any{"passed": true, "assertions": draft["assertions"]},
+		"negative": map[string]any{"passed": true, "assertions": draft["assertions"]},
+	})
+	if err != nil {
+		return fmt.Errorf("编码漏洞题预验证详情失败: %w", err)
+	}
 	return execJSON(ctx, tx, `
-INSERT INTO vuln_problem (id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, content_item_code, content_item_version, status)
-VALUES ($1,$2,$3,'CL-REENTRANCY-2026-001','Vault withdraw 可重入漏洞',1,1,$4,2,'{"positive":"passed","negative":"passed"}'::jsonb,'ctf-reentrancy-vault','1.0.0',2)
-ON CONFLICT (id) DO UPDATE SET source_id=EXCLUDED.source_id, external_ref=EXCLUDED.external_ref, title=EXCLUDED.title, level=EXCLUDED.level, runtime_mode=EXCLUDED.runtime_mode, draft_body=EXCLUDED.draft_body, prevalidate_status=EXCLUDED.prevalidate_status, prevalidate_detail=EXCLUDED.prevalidate_detail, content_item_code=EXCLUDED.content_item_code, content_item_version=EXCLUDED.content_item_version, status=EXCLUDED.status, updated_at=now()`,
-		acceptanceIDs.VulnProblem, acceptanceIDs.TenantID, acceptanceIDs.VulnSource, draftBody)
+INSERT INTO vuln_problem (id, tenant_id, source_id, external_ref, title, level, runtime_mode, draft_body, prevalidate_status, prevalidate_detail, composition_digest, composition_snapshot, init_code_ref, init_script_ref, content_item_code, content_item_version, status)
+VALUES ($1,$2,$3,'CL-REENTRANCY-2026-001','Vault withdraw 可重入漏洞',1,1,$4,2,$5,$6,$7,$8,$9,'VULN-910000000000008042','1.0.0',2)
+ON CONFLICT (id) DO UPDATE SET source_id=EXCLUDED.source_id, external_ref=EXCLUDED.external_ref, title=EXCLUDED.title, level=EXCLUDED.level, runtime_mode=EXCLUDED.runtime_mode, draft_body=EXCLUDED.draft_body, prevalidate_status=EXCLUDED.prevalidate_status, prevalidate_detail=EXCLUDED.prevalidate_detail, composition_digest=EXCLUDED.composition_digest, composition_snapshot=EXCLUDED.composition_snapshot, init_code_ref=EXCLUDED.init_code_ref, init_script_ref=EXCLUDED.init_script_ref, content_item_code=EXCLUDED.content_item_code, content_item_version=EXCLUDED.content_item_version, status=EXCLUDED.status, updated_at=now()`,
+		acceptanceIDs.VulnProblem, acceptanceIDs.TenantID, acceptanceIDs.VulnSource, draftBody, prevalidateDetail, vulnSnapshot.Digest, vulnSnapshotJSON, refs.InitCodeRef, refs.InitScriptRef)
 }
 
 // seedContestReplayRows 绑定已写入对象存储的历史回放归档引用。
@@ -1160,7 +1573,7 @@ ON CONFLICT (tenant_id, announcement_id, account_id) DO UPDATE SET read_at=now()
 }
 
 // seedGradeRows 写入成绩中心等级、学期、审核、申诉、预警和成绩单。
-func seedGradeRows(ctx context.Context, tx pgx.Tx) error {
+func seedGradeRows(ctx context.Context, tx pgx.Tx, reportBucket string) error {
 	mapping, err := jsonb([]map[string]any{{"min": 90, "grade": "A", "gpa": 4.0}, {"min": 80, "grade": "B", "gpa": 3.0}, {"min": 60, "grade": "C", "gpa": 2.0}, {"min": 0, "grade": "F", "gpa": 0.0}})
 	if err != nil {
 		return fmt.Errorf("编码等级映射失败: %w", err)
@@ -1223,11 +1636,15 @@ ON CONFLICT (id) DO UPDATE SET type=EXCLUDED.type, detail=EXCLUDED.detail, statu
 		acceptanceIDs.AcademicWarning, acceptanceIDs.TenantID, acceptanceIDs.StudentC, acceptanceIDs.Semester, detail); err != nil {
 		return err
 	}
+	transcriptRef, err := acceptanceTranscriptRef(reportBucket)
+	if err != nil {
+		return err
+	}
 	return execJSON(ctx, tx, `
 INSERT INTO transcript_record (id, tenant_id, student_id, scope, semester_id, pdf_ref)
-VALUES ($1,$2,$3,1,$4,'reports/acceptance/transcripts/S20260001-2026-1.pdf')
+VALUES ($1,$2,$3,1,$4,$5)
 ON CONFLICT (id) DO UPDATE SET scope=EXCLUDED.scope, semester_id=EXCLUDED.semester_id, pdf_ref=EXCLUDED.pdf_ref, generated_at=now()`,
-		acceptanceIDs.Transcript, acceptanceIDs.TenantID, acceptanceIDs.StudentA, acceptanceIDs.Semester)
+		acceptanceIDs.Transcript, acceptanceIDs.TenantID, acceptanceIDs.StudentA, acceptanceIDs.Semester, transcriptRef)
 }
 
 // seedIsolationGradeRows 为 SaaS 隔离租户提供空数据态所需的最小成绩配置。
@@ -1292,7 +1709,7 @@ ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, metric=EXCLUDED.metric, condi
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO alert_event (id, rule_id, tenant_id, level, message, status, handler_id, handled_at)
-VALUES ($1,$2,$3,2,'验收环境曾出现沙箱排队超过 180 秒,已扩容本地工作节点。',2,$4,now())
+VALUES ($1,$2,$3,2,'验收环境曾出现沙箱排队超过 180 秒,已扩容受控工作节点。',2,$4,now())
 ON CONFLICT (id) DO UPDATE SET level=EXCLUDED.level, message=EXCLUDED.message, status=EXCLUDED.status, handler_id=EXCLUDED.handler_id, handled_at=EXCLUDED.handled_at`,
 		acceptanceIDs.AlertEvent, acceptanceIDs.AlertRule, acceptanceIDs.TenantID, acceptanceIDs.SchoolAdmin); err != nil {
 		return err
@@ -1308,27 +1725,28 @@ ON CONFLICT (scope, tenant_id, stat_date) WHERE tenant_id IS NOT NULL DO UPDATE 
 		acceptanceIDs.Statistics, acceptanceIDs.TenantID, metrics); err != nil {
 		return err
 	}
-	return execJSON(ctx, tx, `
-INSERT INTO backup_record (id, type, storage_ref, size_bytes, status, started_at, finished_at)
-VALUES ($1,1,'backups/local/chaimir-acceptance-20260619.dump',73400320,2,now() - interval '1 hour',now() - interval '58 minutes')
-ON CONFLICT (id) DO UPDATE SET storage_ref=EXCLUDED.storage_ref, size_bytes=EXCLUDED.size_bytes, status=EXCLUDED.status, started_at=EXCLUDED.started_at, finished_at=EXCLUDED.finished_at`,
-		acceptanceIDs.BackupRecord)
+	// 备份记录只能由真实 service/cron 生成 manifest 后写入,不在种子中伪造成功状态。
+	return execJSON(ctx, tx, `DELETE FROM backup_record WHERE id=$1`, acceptanceIDs.BackupRecord)
 }
 
 // seedTransferRows 写入一个成功导出任务,用于统一 transfer API 和下载授权测试。
-func seedTransferRows(ctx context.Context, tx pgx.Tx) error {
+func seedTransferRows(ctx context.Context, tx pgx.Tx, reportBucket string) error {
+	artifactRef, err := acceptanceTransferArtifactRef(reportBucket)
+	if err != nil {
+		return err
+	}
 	return execJSON(ctx, tx, `
 INSERT INTO transfer_task (
 	id, tenant_id, account_id, channel, subject, status, content_type, file_name,
 	attempt_count, max_attempts, last_error, artifact_ref, artifact_size,
 	artifact_content_type, artifact_file_name, completed_at
 ) VALUES (
-	$1,$2,$3,'export','audit-log-export','succeeded','text/csv','audit-log-acceptance.csv',
-	1,3,'','s3://chaimir-report/910000000000000001/transfer/export/910000000000013001/audit-log-acceptance.csv',2048,
-	'text/csv','audit-log-acceptance.csv',now()
+	$1,$2,$3,'export','audit-log-export','succeeded','text/csv; charset=utf-8','audit-log-acceptance.csv',
+	1,3,'',$4,$5,
+	'text/csv; charset=utf-8','audit-log-acceptance.csv',now()
 )
 ON CONFLICT (id) DO UPDATE SET account_id=EXCLUDED.account_id, channel=EXCLUDED.channel, subject=EXCLUDED.subject, status=EXCLUDED.status, content_type=EXCLUDED.content_type, file_name=EXCLUDED.file_name, attempt_count=EXCLUDED.attempt_count, max_attempts=EXCLUDED.max_attempts, last_error=EXCLUDED.last_error, artifact_ref=EXCLUDED.artifact_ref, artifact_size=EXCLUDED.artifact_size, artifact_content_type=EXCLUDED.artifact_content_type, artifact_file_name=EXCLUDED.artifact_file_name, completed_at=EXCLUDED.completed_at, updated_at=now()`,
-		acceptanceIDs.TransferTask, acceptanceIDs.TenantID, acceptanceIDs.SchoolAdmin)
+		acceptanceIDs.TransferTask, acceptanceIDs.TenantID, acceptanceIDs.SchoolAdmin, artifactRef, int64(len(acceptanceTransferArtifact())))
 }
 
 // seedAuditRows 写入一条系统审计记录,便于审计列表接口有可核对数据。
@@ -1338,8 +1756,8 @@ func seedAuditRows(ctx context.Context, tx pgx.Tx) error {
 		return fmt.Errorf("编码审计详情失败: %w", err)
 	}
 	return execJSON(ctx, tx, `
-INSERT INTO audit_log (id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id)
-VALUES ($1,$2,$3,2,'acceptance.seed.apply','identity.tenant',$2,$4,'127.0.0.1','trace-acceptance-seed-20260619')
-ON CONFLICT (id) DO UPDATE SET actor_id=EXCLUDED.actor_id, actor_role=EXCLUDED.actor_role, action=EXCLUDED.action, target_type=EXCLUDED.target_type, target_id=EXCLUDED.target_id, detail=EXCLUDED.detail, ip=EXCLUDED.ip, trace_id=EXCLUDED.trace_id`,
+INSERT INTO audit_log (id, tenant_id, actor_id, actor_role, action, target_type, target_id, detail, ip, trace_id, created_at)
+VALUES ($1,$2,$3,2,'acceptance.seed.apply','identity.tenant',$2,$4,'127.0.0.1','trace-acceptance-seed-20260619',TIMESTAMPTZ '2026-06-19 12:00:00+00')
+ON CONFLICT (id) DO UPDATE SET actor_id=EXCLUDED.actor_id, actor_role=EXCLUDED.actor_role, action=EXCLUDED.action, target_type=EXCLUDED.target_type, target_id=EXCLUDED.target_id, detail=EXCLUDED.detail, ip=EXCLUDED.ip, trace_id=EXCLUDED.trace_id, created_at=EXCLUDED.created_at`,
 		acceptanceIDs.AuditEntry, acceptanceIDs.TenantID, acceptanceIDs.SchoolAdmin, detail)
 }

@@ -73,10 +73,11 @@ func runAdapter(action string) error {
 	if endpoint == "" {
 		return errors.New("未配置 CHAIMIR_CHAIN_RPC_URL")
 	}
+	timeout := time.Duration(requiredInt("CHAIMIR_HTTP_TIMEOUT_SECONDS")) * time.Second
 	var out map[string]any
 	switch action {
 	case "deploy", "tx":
-		out, err = adapterPost(endpoint+"/"+action, payload)
+		out, err = adapterPost(endpoint+"/"+action, payload, timeout)
 	case "query":
 		target, ok := payload["target"].(string)
 		if !ok || strings.TrimSpace(target) == "" {
@@ -86,7 +87,7 @@ func runAdapter(action string) error {
 		if queryErr != nil {
 			return queryErr
 		}
-		out, err = adapterGet(queryURL)
+		out, err = adapterGet(queryURL, timeout)
 	default:
 		return fmt.Errorf("未登记的教学链适配器动作: %s", action)
 	}
@@ -119,22 +120,22 @@ func adapterQueryURL(endpoint, target string) (string, error) {
 }
 
 // adapterPost 向教学链提交 JSON 并严格要求 JSON 对象响应。
-func adapterPost(endpoint string, payload map[string]any) (map[string]any, error) {
+func adapterPost(endpoint string, payload map[string]any, timeout time.Duration) (map[string]any, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("编码适配器请求失败: %w", err)
 	}
-	return adapterJSONRequest(http.MethodPost, endpoint, body)
+	return adapterJSONRequest(http.MethodPost, endpoint, body, timeout)
 }
 
 // adapterGet 查询教学链只读端点并严格要求 JSON 对象响应。
-func adapterGet(endpoint string) (map[string]any, error) {
-	return adapterJSONRequest(http.MethodGet, endpoint, nil)
+func adapterGet(endpoint string, timeout time.Duration) (map[string]any, error) {
+	return adapterJSONRequest(http.MethodGet, endpoint, nil, timeout)
 }
 
 // adapterJSONRequest 执行有界 HTTP 请求,底层错误只返回给运行时内部日志。
-func adapterJSONRequest(method, endpoint string, body []byte) (map[string]any, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+func adapterJSONRequest(method, endpoint string, body []byte, timeout time.Duration) (map[string]any, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	var reader io.Reader
 	if body != nil {
@@ -147,7 +148,7 @@ func adapterJSONRequest(method, endpoint string, body []byte) (map[string]any, e
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	resp, err := (&http.Client{Timeout: timeout}).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("教学链请求失败: %w", err)
 	}
@@ -357,7 +358,7 @@ func requiredInt(key string) int {
 	return parsed
 }
 
-// requiredPort validates the HTTP listener port separately from body limits.
+// requiredPort 独立校验 HTTP 监听端口,不与请求体大小限制混用。
 func requiredPort(key string) int {
 	value := required(key)
 	parsed, err := strconv.Atoi(value)

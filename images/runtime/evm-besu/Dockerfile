@@ -3,7 +3,7 @@ FROM hyperledger/besu:26.6.1@sha256:ac85d23b4250308ce5f6d004fff7fa6779f82932d1ba
 
 FROM cgr.dev/chainguard/wolfi-base@sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c AS patched-besu
 
-ARG NETTY_VERSION=4.2.16.Final
+ARG NETTY_VERSION=4.2.17.Final
 ARG JACKSON_VERSION=2.21.4
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
@@ -33,13 +33,6 @@ RUN set -eux; \
         echo "${expected}  ${old}.patched" | sha256sum -c -; \
         mv "${old}.patched" "${old}"; \
     done; \
-    expected="$(awk '$2 == "netty-transport-sctp-4.2.17.Final.jar" { print $1; exit }' /usr/local/share/chaimir/patch-artifacts.sha256)"; \
-    test -n "${expected}"; \
-    curl -fL --retry 10 --retry-all-errors --connect-timeout 20 --retry-delay 3 \
-        "https://repo.maven.apache.org/maven2/io/netty/netty-transport-sctp/4.2.17.Final/netty-transport-sctp-4.2.17.Final.jar" \
-        -o "netty-transport-sctp-4.2.10.Final.jar.sctp-patched"; \
-    echo "${expected}  netty-transport-sctp-4.2.10.Final.jar.sctp-patched" | sha256sum -c -; \
-    mv "netty-transport-sctp-4.2.10.Final.jar.sctp-patched" "netty-transport-sctp-4.2.10.Final.jar"; \
     expected="$(awk '$2 == "jackson-core-2.21.4.jar" { print $1; exit }' /usr/local/share/chaimir/patch-artifacts.sha256)"; \
     test -n "${expected}"; \
     curl -fL --retry 10 --retry-all-errors --connect-timeout 20 --retry-delay 3 \

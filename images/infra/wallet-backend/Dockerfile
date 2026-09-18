@@ -16,6 +16,7 @@ LABEL org.opencontainers.image.description="Chaimir wallet backend service"
 
 WORKDIR /app
 RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+RUN apk add --no-cache openssl=3.5.8-r0
 COPY --from=deps --chown=1000:1000 /app /app
 
 ENV HOME=/app

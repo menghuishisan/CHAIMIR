@@ -12,9 +12,9 @@ import (
 )
 
 var (
-	networkPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
+	networkPattern  = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 	databasePattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
-	userPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+	userPattern     = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 	passwordPattern = regexp.MustCompile(`^[A-Za-z0-9_.~-]+$`)
 )
 
@@ -48,8 +48,8 @@ func main() {
 	}
 }
 
-// normalizeDatabaseAddress accepts the TCP endpoint emitted by a binding and
-// rejects credentials, paths, and alternate schemes before building the URL.
+// normalizeDatabaseAddress 接收 binding 生成的 TCP endpoint,
+// 在构造 URL 前拒绝凭据、路径和其他 scheme。
 func normalizeDatabaseAddress(raw string) (string, bool) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
@@ -65,7 +65,7 @@ func normalizeDatabaseAddress(raw string) (string, bool) {
 	return parsed.Host, true
 }
 
-// requireHTTPURL enforces the HTTP binding contract before graph-node parses it.
+// requireHTTPURL 在 graph-node 解析前强制执行 HTTP binding 契约。
 func requireHTTPURL(name, raw string) {
 	parsed, err := url.Parse(raw)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || !hasExplicitPort(raw) {

@@ -92,6 +92,21 @@ ARG NO_PROXY
 LABEL org.opencontainers.image.title="service/frontend"
 LABEL org.opencontainers.image.description="Chaimir frontend static asset service"
 
+# 运行基座按 manifest 显式锁定 Alpine 安全包版本，避免上游 digest 内的旧系统包进入最终镜像。
+RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
+        if apk add --no-cache --timeout 300 \
+            c-ares=1.34.8-r0 \
+            curl=8.22.0-r0 \
+            libcurl=8.22.0-r0 \
+            libcrypto3=3.5.8-r0 \
+            libexpat=2.8.4-r0 \
+            libssl3=3.5.8-r0 \
+            libuuid=2.41.6-r1; then break; fi; \
+        if [ "${attempt}" -eq 8 ]; then echo "安全包安装失败" >&2; exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done
+
 # Nginx 官方镜像默认监听 80;平台内部统一使用容器端口 8080,避免 root 绑定低端口。
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \

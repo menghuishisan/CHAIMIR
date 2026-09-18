@@ -10,12 +10,15 @@ $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ([string]::IsNullOrWhiteSpace($HpaPath)) { $HpaPath = Join-Path $scriptDirectory '..\overlays\prod-saas\hpa.yaml' }
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) { $ConfigPath = Join-Path $scriptDirectory '..\config\chaimir.env' }
 $hpa = Get-Content -Raw -LiteralPath (Resolve-Path $HpaPath)
-$config = Get-Content -LiteralPath (Resolve-Path $ConfigPath)
+Import-Module (Join-Path $scriptDirectory '..\..\images\lib\ImageMetadata.psm1') -Force
+$config = Read-ChaimirEnvFile -Path (Resolve-Path -LiteralPath $ConfigPath) -RequiredKeys @(
+    'PG_APP_MAX_CONNS', 'PG_PRIV_MAX_CONNS', 'PG_DATABASE_MAX_CONNECTIONS', 'PG_RESERVED_CONNECTIONS', 'PG_CONNECTION_SAFETY_MARGIN'
+)
 
 function Read-RequiredInt([string]$Name) {
-    $line = $config | Where-Object { $_ -match "^$Name=" } | Select-Object -First 1
-    if (-not $line) { throw "缺少配置 $Name" }
-    $value = [int]($line -replace "^$Name=", '')
+    $text = [string]$config[$Name]
+    if ($text -notmatch '^[0-9]+$') { throw "配置 $Name 必须为非负整数" }
+    $value = [int]$text
     if ($value -lt 0) { throw "配置 $Name 必须为非负整数" }
     return $value
 }

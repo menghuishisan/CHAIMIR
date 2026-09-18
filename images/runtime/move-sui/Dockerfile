@@ -1,4 +1,4 @@
-# 本文件定义 Sui Move 本地网运行时镜像。
+# 本文件定义 Sui Move 单节点教学网络运行时镜像。
 FROM mysten/sui-tools:086c222823a48f5136eedf969e9d489dc265e714@sha256:d1e192fbe98813eeed37ac3ac994497e3b3efd173c814ea67ff81096097ec035 AS sui-tools
 
 FROM debian:13.5-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2 AS runtime-libs

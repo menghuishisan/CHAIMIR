@@ -6,7 +6,8 @@ controller:
   image:
     registry: registry.chaimir.io
     image: ingress/ingress-nginx
-    tag: ""
+    # 官方 Chart 要求 tag 字段存在;digest 仍是镜像内容的唯一身份。
+    tag: "v1.15.1"
     digest: ""
     pullPolicy: IfNotPresent
     runAsNonRoot: true
@@ -57,7 +58,8 @@ controller:
         image: ingress/kube-webhook-certgen
         # The standard ingress entrypoint injects the digest from images/image-digests.lock.
         # The chart intentionally has no usable image fallback; missing digest input must fail.
-        tag: ""
+        # 官方 Chart 要求 tag 字段存在;digest 仍是镜像内容的唯一身份。
+        tag: "v1.6.9"
         digest: ""
         pullPolicy: IfNotPresent
 

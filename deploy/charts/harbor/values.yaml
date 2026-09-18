@@ -103,6 +103,8 @@ registry:
 
 database:
   internal:
+    # 密码只能由 harbor-up 从供应链 Secret 注入；空值必须使安装失败，禁止 chart 默认 changeit。
+    password: ""
     resources:
       requests:
         cpu: 500m

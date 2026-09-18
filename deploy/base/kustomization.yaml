@@ -37,16 +37,16 @@ components:
 images:
   - name: chaimir/backend
     newName: registry.chaimir.io/service/backend
-    digest: sha256:1b0d4f7f1d832dda4d0b4e0526ccfe557d6d9c9158dc9dbfd9a6a15f54548692
+    digest: sha256:0a888c912e7c549ba5a81ea8b82a961155e18b552f6a462c2840f8ca135c5093
   - name: chaimir/frontend
     newName: registry.chaimir.io/service/frontend
-    digest: sha256:4ad1b6c61785c6c4c717e475c34d87f52814f796de6d299063b34fb0d873cb04
+    digest: sha256:91598284e8e93cd0b8a98b7b7068bd3abaac9a4da679650dc01d34784e3b650f
   - name: chaimir/migrate
     newName: registry.chaimir.io/service/migrate
-    digest: sha256:a6e95a04a848416f9faf0ac51fb9fd759270142dfcceb693a7e96886095d6707
+    digest: sha256:14c8468644c9c267867722d9de64d123823efeb0cece095d020557a6233a4143
   - name: chaimir/cron
     newName: registry.chaimir.io/service/cron
-    digest: sha256:dbe9e318e4007e5cf27243e162d9a3fe5d4652fa4b8c987ecf74121e79f2047a
+    digest: sha256:63dce78ea0236ad2cbfd3de9daea97c7f1fe39563214e5f1598e10de9886c0ef
 
 # generator 默认行为:加哈希后缀(配置变更触发滚动)。
 generatorOptions:

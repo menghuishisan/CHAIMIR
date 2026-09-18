@@ -24,6 +24,9 @@ upstream:
   runtime: alpine:3.23
   runtime_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
   reuse_policy: official-static-binary-on-supported-base
+  runtime_packages:
+    - libcrypto3=3.5.8-r0
+    - libssl3=3.5.8-r0
   config_assets:
     - url: https://github.com/FISCO-BCOS/FISCO-BCOS/releases/download/v3.11.0/build_chain.sh
       sha256: 288efe6154b3bf40e6849448b496bee92517c917f3dd8a82a47dfcbabbd30364

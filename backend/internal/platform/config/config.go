@@ -125,7 +125,7 @@ type NATSConfig struct {
 // ObjectStorageConfig 描述 S3 兼容对象存储连接和桶命名。
 type ObjectStorageConfig struct {
 	Endpoint                string
-	UseSSL                  bool
+	Secure                  bool
 	Region                  string
 	AccessKey               string
 	SecretKey               string
@@ -136,6 +136,20 @@ type ObjectStorageConfig struct {
 	PingTimeoutSeconds      int
 	DownloadGrantTTLSeconds int
 	StreamGrantTTLSeconds   int
+}
+
+// parseObjectStorageEndpoint 解析唯一的 S3 endpoint 契约，scheme 同时决定客户端是否启用 TLS。
+func parseObjectStorageEndpoint(raw string) (string, bool, error) {
+	value := strings.TrimSpace(raw)
+	parsed, err := url.Parse(value)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" || parsed.Port() == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", false, fmt.Errorf("OBJECT_STORAGE_ENDPOINT 必须是带 http 或 https scheme 及端口的 S3 endpoint")
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil || port < 1 || port > 65535 {
+		return "", false, fmt.Errorf("OBJECT_STORAGE_ENDPOINT 端口必须在 1 到 65535 之间")
+	}
+	return parsed.Host, parsed.Scheme == "https", nil
 }
 
 // AuthConfig 描述 JWT、服务签名和敏感数据加密密钥。
@@ -597,9 +611,13 @@ func Load() (*Config, error) {
 		FlushTimeoutMs:       reqInt("NATS_FLUSH_TIMEOUT_MS"),
 		DeadLetterPrefix:     req("NATS_DEAD_LETTER_PREFIX"),
 	}
+	objectStorageEndpoint, objectStorageSecure, objectStorageEndpointErr := parseObjectStorageEndpoint(req("OBJECT_STORAGE_ENDPOINT"))
+	if objectStorageEndpointErr != nil {
+		errs = append(errs, objectStorageEndpointErr.Error())
+	}
 	c.ObjectStorage = ObjectStorageConfig{
-		Endpoint:                req("OBJECT_STORAGE_ENDPOINT"),
-		UseSSL:                  reqBool("OBJECT_STORAGE_USE_SSL"),
+		Endpoint:                objectStorageEndpoint,
+		Secure:                  objectStorageSecure,
 		Region:                  req("OBJECT_STORAGE_REGION"),
 		AccessKey:               req("OBJECT_STORAGE_ACCESS_KEY"),
 		SecretKey:               req("OBJECT_STORAGE_SECRET_KEY"),
@@ -959,8 +977,8 @@ func Load() (*Config, error) {
 	if c.Postgres.StartupRetryIntervalMilliseconds <= 0 {
 		errs = append(errs, "PG_STARTUP_RETRY_INTERVAL_MILLISECONDS 必须大于 0")
 	}
-	if strings.EqualFold(strings.TrimSpace(c.Postgres.SSLMode), "disable") && !IsLocalLikeEnvironment(c.Server.AppEnv) {
-		errs = append(errs, "生产或预发布环境 PG_SSLMODE 不得为 disable")
+	if strings.EqualFold(strings.TrimSpace(c.Postgres.SSLMode), "disable") {
+		errs = append(errs, "PG_SSLMODE 不得为 disable")
 	}
 	if c.NATS.ReconnectWaitSeconds <= 0 {
 		errs = append(errs, "NATS_RECONNECT_WAIT_SECONDS 必须大于 0")
@@ -1385,8 +1403,8 @@ func Load() (*Config, error) {
 				errs = append(errs, "SMS_HTTP_ENDPOINT_SCOPE=public 时不得配置 SMS_HTTP_CLUSTER_CIDRS")
 			}
 		case "cluster":
-			if !IsLocalLikeEnvironment(c.Server.AppEnv) {
-				errs = append(errs, "SMS_HTTP_ENDPOINT_SCOPE=cluster 只能在 APP_ENV=local/dev/test 时使用")
+			if !IsAcceptanceEnvironment(c.Server.AppEnv) {
+				errs = append(errs, "SMS_HTTP_ENDPOINT_SCOPE=cluster 只能在 APP_ENV=test 时使用")
 			}
 			if len(c.SMS.ClusterCIDRs) == 0 {
 				errs = append(errs, "SMS_HTTP_ENDPOINT_SCOPE=cluster 时必须配置 SMS_HTTP_CLUSTER_CIDRS")
@@ -1439,14 +1457,9 @@ func parseCIDRPrefixes(raw string) ([]netip.Prefix, error) {
 	return prefixes, nil
 }
 
-// IsLocalLikeEnvironment 判断配置是否处于本地或测试环境,用于限制验收和开发专用能力。
-func IsLocalLikeEnvironment(appEnv string) bool {
-	switch strings.ToLower(strings.TrimSpace(appEnv)) {
-	case "local", "dev", "development", "test":
-		return true
-	default:
-		return false
-	}
+// IsAcceptanceEnvironment 判断配置是否为受控验收环境,用于限制验收夹具和集群短信夹具。
+func IsAcceptanceEnvironment(appEnv string) bool {
+	return strings.EqualFold(strings.TrimSpace(appEnv), "test")
 }
 
 // validKubernetesNamePrefix 校验 M4 动态命名空间前缀可安全拼接十进制会话编号。

@@ -19,12 +19,28 @@ USER root
 RUN mkdir -p /out && chown 1000:1000 /out
 USER 1000:1000
 RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
-    && git clone --branch "${NATS_VERSION}" --depth 1 https://github.com/nats-io/nats-server.git /src/nats-server \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
+        rm -rf /src/nats-server; \
+        if git clone --branch "${NATS_VERSION}" --depth 1 https://github.com/nats-io/nats-server.git /src/nats-server; then break; fi; \
+        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done \
     && test "$(git -C /src/nats-server rev-parse HEAD)" = "${NATS_COMMIT}"
 WORKDIR /src/nats-server
 RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}"; fi \
-    && go build -trimpath -ldflags "-s -w" -o /out/nats-server ./main.go
+    && grep -qxF 'golang.org/x/crypto v0.55.0 h1:+KWHjbgOaAQ66dh/YlkZKHlz9ZUlq61AFirAR9ntP8M=' go.sum || echo 'golang.org/x/crypto v0.55.0 h1:+KWHjbgOaAQ66dh/YlkZKHlz9ZUlq61AFirAR9ntP8M=' >> go.sum \
+    && grep -qxF 'golang.org/x/crypto v0.55.0/go.mod h1:uq0V9dE/fzQuJtbnL+2EhWOE63vo164FY8xqEnV9xis=' go.sum || echo 'golang.org/x/crypto v0.55.0/go.mod h1:uq0V9dE/fzQuJtbnL+2EhWOE63vo164FY8xqEnV9xis=' >> go.sum \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
+        if go get golang.org/x/crypto@v0.55.0; then break; fi; \
+        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done \
+    && for attempt in 1 2 3 4 5 6 7 8; do \
+        if go build -trimpath -ldflags "-s -w" -o /out/nats-server ./main.go; then break; fi; \
+        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
+        sleep $((attempt * 3)); \
+    done
 
 FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 
@@ -38,7 +54,7 @@ LABEL org.opencontainers.image.description="Chaimir NATS middleware built from o
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && for attempt in 1 2 3 4 5 6 7 8; do \
-        apk add --cache-dir /var/cache/apk --update-cache ca-certificates && break; \
+        apk add --cache-dir /var/cache/apk --update-cache ca-certificates openssl=3.5.8-r0 && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 3)); \
     done \

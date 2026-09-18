@@ -21,14 +21,33 @@ upstream:
   source_repo: https://github.com/ipfs-cluster/ipfs-cluster
   source_ref: v1.1.6
   version: v1.1.6
+  source_commit: 2182e887ef378f906455784396f1011df968822c
+  source_archive: https://codeload.github.com/ipfs-cluster/ipfs-cluster/tar.gz/2182e887ef378f906455784396f1011df968822c
+  source_sha256: 5984cc8afe316016b372d50db865b30189f8f8e8d661123ef194dbd1f61c455f
   runtime_image: gcr.io/distroless/static-debian12:nonroot
   runtime_digest: sha256:b7bb25d9f7c31d2bdd1982feb4dafcaf137703c7075dbe2febb41c24212b946f
+  build_base_arg: GO_BUILDER_IMAGE
+  build_base_image: registry.chaimir.io/base/go-builder
+  build_base_digest: sha256:46d92c9696e24102dd211235153b05362a58a9f3d2068a5384f8dde7c1bccfac
   reuse_policy: rebuild-official-release-source
+  security_rebuild:
+    golang.org/x/crypto: v0.55.0
+    golang.org/x/net: v0.58.0
+    golang.org/x/text: v0.41.0
+    google.golang.org/grpc: v1.83.2
 data_driven: true
 env_keys:
   config:
     - CHAIMIR_IPFS_API_URL
-  secret: []
+    - CHAIMIR_IPFS_CLUSTER_TRUSTED_PEERS
+  secret:
+    - CHAIMIR_IPFS_CLUSTER_SECRET
+secrets_required:
+  - component: infra
+    env: CHAIMIR_IPFS_CLUSTER_SECRET
+    secret_key: CHAIMIR_IPFS_CLUSTER_SECRET
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
 capabilities:
   provides:
     - decentralized-storage
@@ -39,7 +58,13 @@ capabilities:
   conflicts: []
   cardinality: many
   placement: sandbox
-  config_schema: {}
+  config_schema:
+    type: object
+    properties:
+      trusted_peers:
+        type: string
+        description: 逗号分隔的官方 IPFS Cluster peer ID；留空时仅信任当前官方 identity。
+        x-chaimir-env: infra/CHAIMIR_IPFS_CLUSTER_TRUSTED_PEERS
   student_access: private
 infra:
   runtime_config_required: true
@@ -83,6 +108,10 @@ infra:
             container_port: 9096
             service_port: 9096
             protocol: TCP
+          - name: pin-api
+            container_port: 9097
+            service_port: 9097
+            protocol: TCP
         resources:
           requests:
             cpu: 250m
@@ -116,6 +145,13 @@ infra:
             port: 9095
             target_port: api
             protocol: TCP
+      - name: infra-ipfs-cluster-pin-api
+        component: infra
+        ports:
+          - name: pin-api
+            port: 9097
+            target_port: pin-api
+            protocol: TCP
 ports:
   - name: cluster-api
     container_port: 9094
@@ -132,6 +168,11 @@ ports:
     protocol: TCP
     expose: internal
     purpose: IPFS Cluster peer transport
+  - name: pin-api
+    container_port: 9097
+    protocol: TCP
+    expose: internal
+    purpose: IPFS Cluster pinning API
 security:
   run_as_non_root: true
   read_only_root_filesystem: false

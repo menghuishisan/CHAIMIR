@@ -20,10 +20,16 @@ toolchain:
   language: solidity
   offline: true
   compiler_versions:
+    - version: 0.8.15
+      executable: /usr/local/bin/solc-0.8.15
+    - version: 0.8.19
+      executable: /usr/local/bin/solc-0.8.19
     - version: 0.8.20
       executable: /usr/local/bin/solc-0.8.20
     - version: 0.8.24
       executable: /usr/local/bin/solc-0.8.24
+    - version: 0.8.25
+      executable: /usr/local/bin/solc-0.8.25
     - version: 0.8.26
       executable: /usr/local/bin/solc-0.8.26
 source:
@@ -33,17 +39,20 @@ upstream:
   version: v1.7.1
   digest: sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
   reuse_policy: thin-wrapper
+  runtime_packages:
+    - openssl=3.0.2-0ubuntu1.29
+    - libssl3=3.0.2-0ubuntu1.29
 env_keys:
   config:
     - CHAIMIR_CHAIN_RPC_URL
     - CHAIMIR_RUNTIME_RPC_PORT
     - CHAIMIR_CHAIN_STATE_DIR
   secret:
-    - CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
+    - CHAIMIR_EVM_DEPLOYER_MNEMONIC
 secrets_required:
   - component: runtime
-    env: CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
-    secret_key: CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY
+    env: CHAIMIR_EVM_DEPLOYER_MNEMONIC
+    secret_key: CHAIMIR_EVM_DEPLOYER_MNEMONIC
     source: deploy/config/chaimir.env
     runtime_value: secret-or-payload
 data_driven: true
@@ -118,7 +127,7 @@ selftest:
       command:
         - sh
         - -lc
-        - 'set -eu; for version in 0.8.20 0.8.24 0.8.26; do case "$(/usr/local/bin/solc-${version} --version)" in *"Version: ${version}"*) ;; *) exit 1 ;; esac; done'
+        - 'set -eu; for version in 0.8.15 0.8.19 0.8.20 0.8.24 0.8.25 0.8.26; do case "$(/usr/local/bin/solc-${version} --version)" in *"Version: ${version}"*) ;; *) exit 1 ;; esac; done'
 capability_selftest:
   deploy_payload:
     bytecode: "0x6005600c60003960056000f3600060005500"

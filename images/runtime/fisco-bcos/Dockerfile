@@ -26,7 +26,7 @@ LABEL org.opencontainers.image.description="Chaimir FISCO BCOS teaching runtime"
 
 USER root
 
-RUN apk add --no-cache bash gcompat
+RUN apk add --no-cache bash gcompat libcrypto3=3.5.8-r0 libssl3=3.5.8-r0
 
 COPY entrypoint.sh /usr/local/bin/chaimir-fisco-entrypoint
 COPY fisco-config-init.sh /usr/local/bin/chaimir-fisco-config-init

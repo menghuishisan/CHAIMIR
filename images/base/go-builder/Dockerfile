@@ -1,22 +1,19 @@
 # 本文件定义 Go 构建基座镜像,供 Chaimir 后端和 Go 工具镜像多阶段构建复用。
-FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+FROM golang:1.26.6-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83
 
 LABEL org.opencontainers.image.title="base/go-builder"
 LABEL org.opencontainers.image.description="Chaimir Go builder base image"
 
-ARG GO_VERSION=go1.26.6
-ARG GO_SHA256=708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89
-
-# 构建基座必须应用发行版安全更新,并用官方 SHA256 校验 Go 工具链。
-RUN apk add --no-cache ca-certificates curl=8.20.0-r0 git \
-    && curl -fL --retry 8 --retry-all-errors --retry-delay 3 --connect-timeout 30 --max-time 600 \
-        -o /tmp/go.tar.gz "https://go.dev/dl/${GO_VERSION}.linux-amd64.tar.gz" \
-    && echo "${GO_SHA256}  /tmp/go.tar.gz" | sha256sum -c - \
-    && tar -C /usr/local -xzf /tmp/go.tar.gz \
-    && rm -f /tmp/go.tar.gz \
+# 官方固定 digest 已经包含 Go;项目构建链要求的 make、git 和 curl 在同一固定 Alpine 仓库内显式锁定安装。
+RUN apk add --no-cache \
+        ca-certificates=20260611-r0 \
+        curl=8.22.0-r0 \
+        git=2.54.0-r0 \
+        make=4.4.1-r4 \
+        openssl=3.5.8-r0 \
     && addgroup -g 1000 -S chaimir \
     && adduser -u 1000 -G chaimir -h /src -s /sbin/nologin -S chaimir \
-    && mkdir -p /go /src /out /tmp/go-cache \
+    && mkdir -p /src /out /tmp/go-cache \
     && chown -R 1000:1000 /go /src /out /tmp/go-cache
 
 # 统一构建工作目录,减少各服务镜像重复创建目录逻辑。

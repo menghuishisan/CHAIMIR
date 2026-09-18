@@ -8,20 +8,24 @@ param(
     [string]$DigestLockOut = "",
     [string]$Tag = "",
     [string[]]$Images = @(),
+    [string[]]$CleanupCandidateDigestLockPaths = @(),
+    [string[]]$CleanupKeepTags = @(),
     [string]$Platform = "linux/amd64",
     [string]$BuildxBuilder = $env:BUILDX_BUILDER,
     [string]$BuildNetwork = $env:SUPPLY_CHAIN_BUILD_NETWORK,
     [int]$MaxAttempts = 3,
     [int]$RetryDelaySeconds = 10,
+    [int]$BuildTimeoutSeconds = 1800,
     [switch]$NoCache
 )
 
 $ErrorActionPreference = "Stop"
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 # 从项目配置加载供应链网络参数,避免构建时遗漏代理导致依赖重复下载。
 $projectConfigPath = Join-Path (Split-Path -Parent $PSScriptRoot) "deploy\config\chaimir.env"
+$projectConfig = @{}
 if (Test-Path -LiteralPath $projectConfigPath) {
-    $projectConfig = @{}
     foreach ($line in Get-Content -LiteralPath $projectConfigPath) {
         if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)\s*$') {
             $projectConfig[$Matches[1]] = $Matches[2]
@@ -33,9 +37,32 @@ if (Test-Path -LiteralPath $projectConfigPath) {
             [Environment]::SetEnvironmentVariable($key, $projectConfig[$key], "Process")
         }
     }
+    if ([string]::IsNullOrWhiteSpace($DockerConfig) -and $projectConfig.ContainsKey("SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR")) {
+        $dockerConfigValue = $projectConfig["SUPPLY_CHAIN_DOCKER_CONFIG_HOST_DIR"]
+        $DockerConfig = if ([IO.Path]::IsPathRooted($dockerConfigValue)) {
+            $dockerConfigValue
+        } else {
+            Join-Path (Join-Path $repoRoot "deploy") $dockerConfigValue
+        }
+    }
 }
 if (-not [string]::IsNullOrWhiteSpace($env:GO_MODULE_PROXY)) {
     $env:GO_MODULE_PROXY = $env:GO_MODULE_PROXY -replace '\|', ','
+}
+
+# 供应链 Registry 使用项目维护的 canonical CA;客户端必须显式校验证书链,不得退回 insecure。
+$registryCaHostPath = $env:SUPPLY_CHAIN_REGISTRY_CA_HOST_PATH
+if ([string]::IsNullOrWhiteSpace($registryCaHostPath) -and $projectConfig.ContainsKey("SUPPLY_CHAIN_REGISTRY_CA_HOST_PATH")) {
+    $registryCaHostPath = $projectConfig["SUPPLY_CHAIN_REGISTRY_CA_HOST_PATH"]
+}
+if (-not [string]::IsNullOrWhiteSpace($registryCaHostPath) -and -not [IO.Path]::IsPathRooted($registryCaHostPath)) {
+    $registryCaHostPath = Join-Path (Join-Path $repoRoot "deploy") $registryCaHostPath
+}
+if ([string]::IsNullOrWhiteSpace($registryCaHostPath) -or -not (Test-Path -LiteralPath $registryCaHostPath -PathType Leaf)) {
+    throw "缺少供应链 Registry canonical CA,拒绝在未校验证书链的情况下构建: $registryCaHostPath"
+}
+if ($BuildTimeoutSeconds -le 0) {
+    throw "BuildTimeoutSeconds 必须为正数"
 }
 
 Import-Module (Join-Path $PSScriptRoot "lib\ImageMetadata.psm1") -Force
@@ -115,33 +142,144 @@ function Invoke-DockerCli {
     & docker @baseArguments @Arguments
 }
 
+# ConvertTo-ProcessArgument 按 Windows 原生参数规则转义单个参数,供有界 Docker 进程调用复用。
+function ConvertTo-ProcessArgument([string]$Value) {
+    if ($null -eq $Value -or $Value.Length -eq 0) { return '""' }
+    if ($Value -notmatch '[\s"]') { return $Value }
+    $builder = [Text.StringBuilder]::new()
+    [void]$builder.Append('"')
+    $slashes = 0
+    foreach ($character in $Value.ToCharArray()) {
+        if ($character -eq '\') { $slashes++; continue }
+        if ($character -eq '"') {
+            if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
+            [void]$builder.Append('\').Append('"')
+            $slashes = 0
+            continue
+        }
+        if ($slashes -gt 0) { [void]$builder.Append(('\' * $slashes) -join '') }
+        [void]$builder.Append($character)
+        $slashes = 0
+    }
+    if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2)) -join '') }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+# Invoke-DockerCliWithTimeout 让构建在 Docker daemon 或网络无响应时有界返回,不允许无限等待。
+function Invoke-DockerCliWithTimeout {
+    param(
+        [string[]]$Arguments,
+        [int]$TimeoutSeconds
+    )
+    $baseArguments = @()
+    if (-not [string]::IsNullOrWhiteSpace($DockerConfig)) {
+        $baseArguments += @('--config', $DockerConfig)
+    }
+    $cliArguments = @($baseArguments + $Arguments)
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
+    $process.StartInfo.FileName = 'docker.exe'
+    $process.StartInfo.Arguments = (($cliArguments | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) }) -join ' ')
+    $process.StartInfo.UseShellExecute = $false
+    $process.StartInfo.CreateNoWindow = $true
+    $process.StartInfo.RedirectStandardOutput = $true
+    $process.StartInfo.RedirectStandardError = $true
+    $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $process.StartInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
+    try {
+        if (-not $process.Start()) { throw 'Docker CLI 启动失败' }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            # buildx 可能由 Docker CLI 派生子进程,只终止父进程会留下无主构建任务。
+            try { & taskkill.exe /PID $process.Id /T /F | Out-Null } catch {}
+            try { $process.Kill($true) } catch { try { $process.Kill() } catch {} }
+            $stdout = $stdoutTask.GetAwaiter().GetResult()
+            $stderr = $stderrTask.GetAwaiter().GetResult()
+            return [pscustomobject]@{
+                Code = 124
+                Text = ("Docker build 超时（{0} 秒）: {1}`n{2}`n{3}" -f $TimeoutSeconds, ($cliArguments -join ' '), $stdout, $stderr).Trim()
+            }
+        }
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        return [pscustomobject]@{ Code = $process.ExitCode; Text = ((@($stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim() }
+    } finally {
+        $process.Dispose()
+    }
+}
+
 # Get-DockerConfigBasicAuth 从 Docker config.json 读取 registry basic auth。
 function Get-DockerConfigBasicAuth {
     param([string]$RegistryHost)
-    if ([string]::IsNullOrWhiteSpace($DockerConfig)) {
-        return $null
+    $effectiveDockerConfig = $DockerConfig
+    if ([string]::IsNullOrWhiteSpace($effectiveDockerConfig)) {
+        $effectiveDockerConfig = Join-Path $env:USERPROFILE ".docker"
     }
-    $configPath = Join-Path $DockerConfig "config.json"
+    $configPath = Join-Path $effectiveDockerConfig "config.json"
     if (-not (Test-Path -LiteralPath $configPath)) {
         return $null
     }
     $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-    if (-not $config.auths) {
-        return $null
-    }
-    foreach ($property in $config.auths.PSObject.Properties) {
-        $name = $property.Name
-        if ($name -eq $RegistryHost -or $name -eq "http://$RegistryHost" -or $name -eq "https://$RegistryHost") {
-            $auth = $property.Value.auth
-            if (-not [string]::IsNullOrWhiteSpace($auth)) {
-                return $auth
+    if ($config.auths) {
+        foreach ($property in $config.auths.PSObject.Properties) {
+            $name = $property.Name
+            if ($name -eq $RegistryHost -or $name -eq "http://$RegistryHost" -or $name -eq "https://$RegistryHost") {
+                $auth = $property.Value.auth
+                if (-not [string]::IsNullOrWhiteSpace($auth)) {
+                    return $auth
+                }
             }
         }
     }
-    return $null
+
+    # Docker Desktop 默认把凭据交给 credential helper,不能只读取 config.json.auths。
+    $helperName = ""
+    if ($config.credHelpers) {
+        foreach ($property in $config.credHelpers.PSObject.Properties) {
+            $name = $property.Name
+            if ($name -eq $RegistryHost -or $name -eq "http://$RegistryHost" -or $name -eq "https://$RegistryHost") {
+                $helperName = [string]$property.Value
+                break
+            }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($helperName)) {
+        $helperName = [string]$config.credsStore
+    }
+    if ([string]::IsNullOrWhiteSpace($helperName)) {
+        return $null
+    }
+    $helper = Get-Command "docker-credential-$helperName" -ErrorAction SilentlyContinue
+    if (-not $helper) {
+        return $null
+    }
+    $savedErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "SilentlyContinue"
+        $credentialOutput = @($RegistryHost | & $helper.Source get 2>$null)
+        $credentialExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $savedErrorActionPreference
+    }
+    if ($credentialExitCode -ne 0 -or $credentialOutput.Count -eq 0) {
+        return $null
+    }
+    try {
+        $credential = ($credentialOutput -join "`n") | ConvertFrom-Json
+    } catch {
+        return $null
+    }
+    $username = [string]$credential.Username
+    $secret = [string]$credential.Secret
+    if ([string]::IsNullOrWhiteSpace($username) -or [string]::IsNullOrWhiteSpace($secret)) {
+        return $null
+    }
+    return [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("$username`:$secret"))
 }
 
-# Get-RemoteDigestFromRegistryV2 从 registry manifest header 读取不可变 digest。
+# Get-RemoteDigestFromRegistryV2 使用 canonical CA 从 Registry manifest header 读取不可变 digest。
 function Get-RemoteDigestFromRegistryV2 {
     param([string]$TaggedRef)
     if ($TaggedRef -notmatch "^([^/]+)/(.+):([^/:]+)$") {
@@ -164,19 +302,49 @@ function Get-RemoteDigestFromRegistryV2 {
         Accept = "application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json"
     }
     $basicAuth = Get-DockerConfigBasicAuth -RegistryHost $registryHost
+    $basicCredential = ""
     if (-not [string]::IsNullOrWhiteSpace($basicAuth)) {
-        $headers["Authorization"] = "Basic $basicAuth"
+        try { $basicCredential = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($basicAuth)) } catch { throw "供应链 Registry Docker 凭据不是合法 Basic auth 编码" }
+        if ($basicCredential -notmatch '^[^:]+:.+$') { throw "供应链 Registry Docker 凭据格式无效" }
     }
-    try {
-        $response = Invoke-WebRequest -UseBasicParsing -Method Head -Uri "$registryBaseUri/v2/$repository/manifests/$tag" -Headers $headers -TimeoutSec 30
-    } catch {
-        throw "读取刚推送镜像的 Registry digest 失败: $TaggedRef; $($_.Exception.Message)"
+    $curlArguments = @(
+        "--silent", "--show-error", "--head", "--connect-timeout", "10", "--max-time", "30",
+        "--cacert", $registryCaHostPath,
+        "--header", "Accept: $($headers["Accept"])"
+    )
+    if (-not [string]::IsNullOrWhiteSpace($basicCredential)) { $curlArguments += @("--user", $basicCredential) }
+    $curlArguments += "$registryBaseUri/v2/$repository/manifests/$tag"
+    $lastResponse = ""
+    $bearerToken = ""
+    for ($attempt = 1; $attempt -le 6; $attempt++) {
+        $savedCurlPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            $responseLines = @(& curl.exe @curlArguments 2>&1)
+            $curlExitCode = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $savedCurlPreference }
+        $headerText = ($responseLines | ForEach-Object { [string]$_ }) -join "`n"
+        $digestMatch = [regex]::Match($headerText, '(?im)^Docker-Content-Digest:\s*(sha256:[0-9a-f]{64})\s*$')
+        if ($curlExitCode -eq 0 -and $digestMatch.Success) { return $digestMatch.Groups[1].Value }
+        if ([string]::IsNullOrWhiteSpace($bearerToken)) {
+            $authMatch = [regex]::Match($headerText, '(?im)WWW-Authenticate:\s*Bearer\s+realm="([^"]+)"[^\r\n]*service="([^"]+)"[^\r\n]*scope="([^"]+)"')
+            if ($authMatch.Success) {
+                $tokenUri = $authMatch.Groups[1].Value + "?service=" + [uri]::EscapeDataString($authMatch.Groups[2].Value) + "&scope=" + [uri]::EscapeDataString($authMatch.Groups[3].Value)
+                $tokenOutput = @(& curl.exe --silent --show-error --connect-timeout 10 --max-time 30 --cacert $registryCaHostPath $tokenUri 2>&1)
+                $tokenExitCode = $LASTEXITCODE
+                if ($tokenExitCode -ne 0) { throw "供应链 Registry Bearer token 获取失败: $($tokenOutput -join ' ')" }
+                try { $tokenPayload = ($tokenOutput -join "`n") | ConvertFrom-Json } catch { throw "供应链 Registry Bearer token 响应不是合法 JSON" }
+                $bearerToken = if (-not [string]::IsNullOrWhiteSpace([string]$tokenPayload.token)) { [string]$tokenPayload.token } else { [string]$tokenPayload.access_token }
+                if ([string]::IsNullOrWhiteSpace($bearerToken)) { throw "供应链 Registry Bearer token 响应缺少 token" }
+                $curlArguments += @("--header", "Authorization: Bearer $bearerToken")
+                continue
+            }
+        }
+        $lastResponse = (($responseLines | ForEach-Object { [string]$_ }) -join " ").Trim()
+        if ($attempt -lt 6) { Start-Sleep -Seconds 2 }
     }
-    $digest = $response.Headers["Docker-Content-Digest"]
-    if ($digest -notmatch "^sha256:[0-9a-f]{64}$") {
-        throw "Registry 未返回合法 Docker-Content-Digest: $TaggedRef"
-    }
-    return $digest
+    $authState = if (-not [string]::IsNullOrWhiteSpace($basicCredential)) { "present" } else { "missing" }
+    throw "读取刚推送镜像的 Registry digest 失败: $TaggedRef; auth=$authState; $lastResponse"
 }
 
 # Get-RegistryDigest 解析刚推送到 Harbor 的 tag digest。
@@ -191,21 +359,15 @@ function Invoke-DockerBuildWithRetry {
         [string[]]$Arguments,
         [string]$Image
     )
+    $exitCode = 1
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         Write-Host "Docker build attempt [$attempt/$MaxAttempts] $Image"
         # 保留 BuildKit 的完整输出,便于只对“已导出 manifest 但 Harbor 传输失败”做
         # 标准 Docker push 重试;编译或校验失败绝不能拿本地旧标签冒充新构建。
-        $savedErrorActionPreference = $ErrorActionPreference
-        try {
-            # PowerShell 5.1 会把 native stderr 转成错误记录;捕获 Docker 输出时必须暂时
-            # 允许其继续流出,否则 Stop 策略会在 BuildKit 返回最终退出码前中断脚本。
-            $ErrorActionPreference = "Continue"
-            $buildOutput = @(Invoke-DockerCli -Arguments $Arguments 2>&1)
-            $buildExitCode = $LASTEXITCODE
-        } finally {
-            $ErrorActionPreference = $savedErrorActionPreference
-        }
-        $buildOutput | ForEach-Object { Write-Host ([string]$_) }
+        $buildResult = Invoke-DockerCliWithTimeout -Arguments $Arguments -TimeoutSeconds $BuildTimeoutSeconds
+        $buildExitCode = $buildResult.Code
+        $buildOutput = @($buildResult.Text)
+        if (-not [string]::IsNullOrWhiteSpace($buildResult.Text)) { Write-Host $buildResult.Text }
         if ($buildExitCode -eq 0) {
             return
         }
@@ -224,8 +386,8 @@ function Invoke-DockerBuildWithRetry {
                 }
             }
         }
-        $manifestExported = $buildText -match "(?m)exporting manifest sha256:[0-9a-f]{64}" -and
-            $buildText -match "(?m)naming to $([regex]::Escape($tagRef)) done"
+        # BuildKit 的不同版本对 naming 行是否追加 done 输出不一致;manifest 行本身已足以证明本地产物已导出。
+        $manifestExported = $buildText -match "(?m)exporting manifest sha256:[0-9a-f]{64}"
         $networkPushFailure = $buildText -match "(?i)(failed to fetch oauth token|failed to do request|TLS handshake timeout|timeout awaiting response headers)"
         if ($manifestExported -and $networkPushFailure -and -not [string]::IsNullOrWhiteSpace($tagRef)) {
             $savedErrorActionPreference = $ErrorActionPreference
@@ -257,7 +419,7 @@ function Invoke-DockerBuildWithRetry {
             Start-Sleep -Seconds $RetryDelaySeconds
         }
     }
-    throw "docker build 失败: $Image, exit=$LASTEXITCODE"
+    throw "docker build 失败: $Image, exit=$exitCode"
 }
 
 $rootPath = (Resolve-Path -LiteralPath $Root).Path
@@ -373,7 +535,18 @@ foreach ($item in $selected) {
         if ($item.DockerfileText -notmatch "(?m)^\s*ARG\s+$([regex]::Escape($buildBaseArgument))\b") {
             throw "$($item.Image): upstream.build_base_arg 未在 Dockerfile 声明: $buildBaseArgument"
         }
-        $buildArguments[$buildBaseArgument] = Get-PinnedUpstreamRef -ManifestPath $item.Manifest -ImageKey "build_base_image" -DigestKey "build_base_digest"
+        # 内部构建基座必须跟随本次候选 digest 锁;外部构建基座必须直接使用 manifest
+        # 中单独锁定的不可变引用,两者都不能退回可变 tag。
+        $buildBaseImage = Get-ChaimirYamlValue -Lines $upstream -Key "build_base_image"
+        $logicalBuildBaseImage = $lockedArgumentImages[$buildBaseArgument]
+        if (-not [string]::IsNullOrWhiteSpace($logicalBuildBaseImage)) {
+            $buildArguments[$buildBaseArgument] = Get-LockedRef -DigestLockItems $digestLockItems -Image $logicalBuildBaseImage
+        } else {
+            if ([string]::IsNullOrWhiteSpace($buildBaseImage)) {
+                throw "$($item.Image): upstream.build_base_image 不能为空: $buildBaseArgument"
+            }
+            $buildArguments[$buildBaseArgument] = Get-PinnedUpstreamRef -ManifestPath $item.Manifest -ImageKey "build_base_image" -DigestKey "build_base_digest"
+        }
     }
     if ($item.Image -eq "service/frontend") {
         $frontendEnvPath = Join-Path $repoRoot "frontend\.env"
@@ -461,15 +634,16 @@ foreach ($item in $selected) {
     Write-Host "Locked $($item.Image) $($digestLockItems[$item.Image])"
 }
 
-$cleanupArgs = @(
-    "-RepoRoot", $repoRoot,
-    "-Registry", $Registry,
-    "-DigestLockPath", $DigestLock,
-    "-CandidateDigestLockPath", $DigestLockOut,
-    "-KeepTags", $Tag,
-    "-Apply"
-)
-& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "cleanup-local-images.ps1") @cleanupArgs
+$formalDigestLock = Join-Path $repoRoot "images\image-digests.lock"
+$cleanupCandidateLocks = @($DigestLock, $DigestLockOut) + @($CleanupCandidateDigestLockPaths) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+$cleanupKeepTags = @($Tag) + @($CleanupKeepTags) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "cleanup-local-images.ps1") `
+    -RepoRoot $repoRoot `
+    -Registry $Registry `
+    -DigestLockPath $formalDigestLock `
+    -CandidateDigestLockPath ($cleanupCandidateLocks -join ',') `
+    -KeepTags ($cleanupKeepTags -join ',') `
+    -Apply
 if ($LASTEXITCODE -ne 0) {
     throw "构建成功但项目镜像清理失败,拒绝继续: exit=$LASTEXITCODE"
 }

@@ -5,7 +5,11 @@ LABEL org.opencontainers.image.title="middleware/postgres"
 LABEL org.opencontainers.image.description="Chaimir PostgreSQL middleware thin wrapper"
 
 USER root
-RUN rm -f /usr/local/bin/gosu \
+RUN apk add --no-cache \
+        c-ares=1.34.8-r0 \
+        libuuid=2.42.3-r1 \
+        openssl=3.5.8-r0 \
+    && rm -f /usr/local/bin/gosu \
     && mkdir -p /var/lib/postgresql/data /var/run/postgresql \
     && chown -R postgres:postgres /var/lib/postgresql /var/run/postgresql
 

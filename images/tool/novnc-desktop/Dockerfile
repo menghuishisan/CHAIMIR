@@ -7,7 +7,13 @@ LABEL org.opencontainers.image.description="Chaimir noVNC desktop tool image"
 RUN apk add --no-cache \
         bash \
         ca-certificates \
+        giflib=5.2.2-r2 \
+        libblkid=2.41.6-r1 \
+        libcrypto3=3.5.8-r0 \
+        libexpat=2.8.4-r0 \
         fluxbox \
+        libmount=2.41.6-r1 \
+        libssl3=3.5.8-r0 \
         nginx=1.28.3-r7 \
         openbox \
         supervisor \
@@ -18,6 +24,7 @@ RUN apk add --no-cache \
         xkeyboard-config \
         xorg-server-common \
         xvfb \
+        libuuid=2.41.6-r1 \
         novnc \
     && addgroup -g 1000 chaimir \
     && adduser -D -u 1000 -G chaimir -h /workspace -s /sbin/nologin chaimir \

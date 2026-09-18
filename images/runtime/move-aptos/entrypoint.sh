@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# 本脚本启动 Aptos 本地测试网。
+# 本脚本启动 Aptos 受控教学测试网。
 set -eu
 
 export HOME=/runtime-state/aptos

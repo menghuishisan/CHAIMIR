@@ -9,6 +9,8 @@ import (
 )
 
 const ipfsBin = "/usr/local/bin/ipfs"
+const configInitBin = "/usr/local/bin/chaimir-ipfs-config-init"
+const initConfigPath = "/runtime-state/ipfs-init-config.json"
 
 // main 在启动 daemon 前确保 Kubo repo 已初始化并关闭默认遥测。
 func main() {
@@ -40,8 +42,14 @@ func prepareRepo() error {
 	}
 
 	if _, err := os.Stat(os.Getenv("IPFS_PATH") + "/config"); os.IsNotExist(err) {
-		if err := runIPFS("init", "--profile=server"); err != nil {
+		if err := runCommand(configInitBin, initConfigPath); err != nil {
 			return err
+		}
+		if err := runIPFS("init", "--profile=server", initConfigPath); err != nil {
+			return err
+		}
+		if err := os.Remove(initConfigPath); err != nil {
+			return fmt.Errorf("remove temporary init config: %w", err)
 		}
 	} else if err != nil {
 		return fmt.Errorf("stat repo config: %w", err)
@@ -61,6 +69,18 @@ func prepareRepo() error {
 		if err := runIPFS(setting...); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// runCommand 执行镜像内受控工具;工具缺失或退出失败都直接返回,不使用兼容入口。
+func runCommand(binary string, args ...string) error {
+	cmd := exec.Command(binary, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("run %s %v: %w", binary, args, err)
 	}
 	return nil
 }

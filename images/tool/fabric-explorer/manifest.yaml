@@ -22,6 +22,9 @@ upstream:
   version: v2.5.16
   runtime: alpine:3.23
   runtime_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+  runtime_packages:
+    - libcrypto3=3.5.8-r0
+    - libssl3=3.5.8-r0
   reuse_policy: native-cli-wrapper
 env_keys:
   config:

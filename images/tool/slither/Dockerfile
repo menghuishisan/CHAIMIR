@@ -23,7 +23,7 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && rm -f /var/cache/apk/* \
     && for attempt in 1 2 3 4 5 6 7 8; do \
-        apk add --cache-dir /var/cache/apk --update-cache bash ca-certificates gcompat git libstdc++ py3-pip python3 wget && break; \
+        apk add --cache-dir /var/cache/apk --update-cache bash ca-certificates curl=8.22.0-r0 gcompat git libexpat=2.8.4-r0 libstdc++ openssl=3.5.8-r0 py3-pip python3 wget && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 3)); \
     done \
@@ -45,9 +45,10 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     && /opt/slither/bin/pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
         "pip==25.3" \
         "setuptools==80.0.0" \
-        "wheel==0.46.0" \
+        "wheel==0.46.2" \
         "slither-analyzer==0.11.3" \
         "aiohttp==3.14.3" \
+    && /opt/slither/bin/pip uninstall --yes setuptools wheel \
     && rm -rf /opt/slither/lib/python3.12/site-packages/pip /opt/slither/lib/python3.12/site-packages/pip-*.dist-info \
     && apk del py3-pip \
     && /opt/slither/bin/slither --version >/dev/null \

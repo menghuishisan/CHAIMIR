@@ -19,18 +19,14 @@ source:
   type: build-base
 upstream:
   components:
-    - image: library/alpine
-      registry: docker.io
-      version: "3.23"
-      digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
     - image: go
-      registry: https://go.dev/dl
-      version: go1.26.6
-      digest: sha256:708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89
-  release_url: https://go.dev/dl/go1.26.6.linux-amd64.tar.gz
-  sha256: 708effb774be8237570d0add163225abbdfaf4fca28b2611df167beba4feef89
+      registry: docker.io
+      version: "1.26.6-alpine"
+      digest: sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83
+  release_url: https://hub.docker.com/_/golang
+  sha256: 3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83
   version: go1.26.6
-  reuse_policy: official-release-toolchain
+  reuse_policy: official-docker-builder
 data_driven: false
 capabilities:
   - build-base

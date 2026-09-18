@@ -21,8 +21,8 @@ RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}";
     && for attempt in 1 2 3 4 5; do \
         go get \
           golang.org/x/crypto@v0.55.0 \
-          golang.org/x/net@v0.57.0 \
-          google.golang.org/grpc@v1.83.1 \
+          golang.org/x/net@v0.58.0 \
+          google.golang.org/grpc@v1.83.2 \
           golang.org/x/text@v0.41.0 \
           go.opentelemetry.io/otel/sdk@v1.44.0 \
         && go mod tidy \
@@ -40,9 +40,9 @@ LABEL org.opencontainers.image.description="Chaimir go-ethereum private-chain ru
 USER root
 RUN for attempt in 1 2 3 4 5; do \
       apk add --no-cache \
-         'libcrypto3=3.6.3-r5' \
-         'libssl3=3.6.3-r5' \
-         bash ca-certificates curl jq \
+         'libcrypto3=3.5.8-r0' \
+         'libssl3=3.5.8-r0' \
+         bash ca-certificates 'curl=8.22.0-r0' jq \
       && break; \
       if [ "${attempt}" -eq 5 ]; then exit 1; fi; \
       sleep $((attempt * 3)); \

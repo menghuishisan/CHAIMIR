@@ -31,12 +31,14 @@ upstream:
   license: GPL-3.0
   reuse_policy: source-rebuild
   builder_image: base/go-builder
-  builder_digest: sha256:fb0a1352643623882f008691aaa1459262c0c5e1030878dbdbc5e916a852a869
+  builder_digest: sha256:46d92c9696e24102dd211235153b05362a58a9f3d2068a5384f8dde7c1bccfac
   runtime_image: alpine:3.23
   runtime_digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
 build:
   context: images/runtime/op-geth
   dockerfile: Dockerfile
+  args:
+    GO_BUILDER_IMAGE: registry.chaimir.io/base/go-builder@sha256:46d92c9696e24102dd211235153b05362a58a9f3d2068a5384f8dde7c1bccfac
 data_driven: true
 capabilities:
   provides:
@@ -89,9 +91,11 @@ runtime:
     executable: geth
     required_args:
       - init
+      - --state.scheme
       - --authrpc.jwtsecret
       - --authrpc.addr
       - --authrpc.port
+      - --gcmode
       - --http
       - --http.api
     forbidden_args:

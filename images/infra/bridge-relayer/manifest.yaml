@@ -108,7 +108,7 @@ secrets_required:
   - component: infra
     env: HYP_DEFAULTSIGNER_KEY
     secret_key: HYP_DEFAULTSIGNER_KEY
-    source: external-kms
+    source: deploy/config/chaimir.env
     runtime_value: secret-or-kms
 ports: []
 security:
@@ -123,7 +123,7 @@ security:
   network_policy: deny-all
 security_exceptions:
   - field: writable_mounts
-    reason: Hyperlane relayer 需要写入组合生成的配置覆盖文件和数据库状态;只允许写入 runtime-state,签名材料仍来自 Secret。
+    reason: Hyperlane relayer 的数据库状态写入 runtime-state;含 signer Secret 的配置覆盖文件仅写入临时 /tmp 并限制为 0600,不持久化。
     writable_mounts:
       - runtime-state
 student_access:

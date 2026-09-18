@@ -8,10 +8,28 @@ action="${1:-}"
 rpc_url="$CHAIMIR_CHAIN_RPC_URL"
 state_dir="$CHAIMIR_CHAIN_STATE_DIR"
 last_contract_file="$state_dir/last-contract-address"
+contracts_dir="$state_dir/contracts"
 
 fail() {
   echo "$1" >&2
   exit "${2:-1}"
+}
+
+contract_path() {
+  contract_ref="$1"
+  case "$contract_ref" in
+    ''|*[!A-Za-z0-9._-]*) fail "contract_ref must contain only letters, digits, dot, underscore, or hyphen" 22 ;;
+  esac
+  printf '%s/%s' "$contracts_dir" "$contract_ref"
+}
+
+resolve_contract_ref() {
+  contract_ref="$1"
+  contract_file="$(contract_path "$contract_ref")"
+  [ -f "$contract_file" ] || fail "target_ref has no previous deployment" 66
+  contract_address="$(tr -d '[:space:]' < "$contract_file")"
+  [ "$contract_address" != "" ] || fail "target_ref deployment address is empty" 66
+  printf '%s' "$contract_address"
 }
 
 read_payload() {
@@ -31,13 +49,44 @@ case "$action" in
     bytecode="$(printf '%s' "$payload" | json_string '.bytecode')"
     project_dir="$(printf '%s' "$payload" | json_string '.project_dir')"
     artifact="$(printf '%s' "$payload" | json_string '.artifact')"
+    contract_ref="$(printf '%s' "$payload" | json_string '.contract_ref')"
+    compile="$(printf '%s' "$payload" | jq -r 'if has("compile") then .compile else false end')"
+    case "$compile" in
+      true|false) ;;
+      *) fail "deploy payload compile must be a boolean" 22 ;;
+    esac
     private_key="$(printf '%s' "$payload" | json_string '.private_key')"
     from="$(printf '%s' "$payload" | json_string '.from')"
     [ -n "$private_key" ] || private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-}"
+    if [ -z "$private_key" ] && [ -z "$from" ] && [ -n "${CHAIMIR_EVM_DEPLOYER_MNEMONIC:-}" ]; then
+      # 统一 Secret 契约只注入助记词,由运行时在受控容器内派生首个解锁账户。
+      from="$(cast wallet address --mnemonic "$CHAIMIR_EVM_DEPLOYER_MNEMONIC" --account 0)"
+    fi
     if [ -z "$bytecode" ] && [ -n "$project_dir" ] && [ -n "$artifact" ]; then
       bytecode="$(jq -r '.bytecode.object // .bytecode // empty' "$project_dir/$artifact")"
     fi
     [ -n "$bytecode" ] || fail "deploy payload requires bytecode or project_dir plus artifact" 22
+    if [ "$compile" = "true" ]; then
+      [ -n "$project_dir" ] || fail "deploy payload compile requires project_dir" 22
+      [ -n "$artifact" ] || fail "deploy payload compile requires artifact" 22
+      compile_log="$(mktemp)"
+      if ! forge build --root "$project_dir" --offline >"$compile_log" 2>&1; then
+        cat "$compile_log" >&2
+        rm -f "$compile_log"
+        fail "forge build failed" 70
+      fi
+      rm -f "$compile_log"
+      bytecode="$(jq -r '.bytecode.object // .bytecode // empty' "$project_dir/$artifact")"
+      [ -n "$bytecode" ] || fail "compiled deploy artifact has no bytecode" 70
+    fi
+    constructor_args="$(printf '%s' "$payload" | jq -c 'if has("constructor_args") then .constructor_args else [] end')"
+    printf '%s' "$constructor_args" | jq -e 'type == "array" and all(.[]; type == "object" and .type == "address" and (.target_ref | type == "string") and (.target_ref | length > 0))' >/dev/null || fail "constructor_args must contain address target_ref entries" 22
+    for constructor_arg in $(printf '%s' "$constructor_args" | jq -c '.[]'); do
+      target_ref="$(printf '%s' "$constructor_arg" | jq -r '.target_ref')"
+      target_address="$(resolve_contract_ref "$target_ref")"
+      encoded_args="$(cast abi-encode 'constructor(address)' "$target_address")"
+      bytecode="${bytecode}${encoded_args#0x}"
+    done
     if [ -n "$private_key" ]; then
       output="$(cast send --rpc-url "$rpc_url" --private-key "$private_key" --create "$bytecode" --json)"
     elif [ -n "$from" ]; then
@@ -49,20 +98,66 @@ case "$action" in
     [ -n "$address" ] || fail "deploy did not return contract address" 70
     mkdir -p "$state_dir"
     printf '%s' "$address" > "$last_contract_file"
+    if [ -n "$contract_ref" ]; then
+      contract_file="$(contract_path "$contract_ref")"
+      mkdir -p "$contracts_dir"
+      printf '%s' "$address" > "$contract_file"
+    fi
     jq -cn --arg contract_address "$address" --argjson receipt "$output" \
       '{contract_address:$contract_address,receipt:$receipt}'
     ;;
   tx)
     payload="$(read_payload)"
     to="$(printf '%s' "$payload" | json_string '.to')"
+    target_ref="$(printf '%s' "$payload" | json_string '.target_ref')"
     data="$(printf '%s' "$payload" | json_string '.data')"
     value="$(printf '%s' "$payload" | json_string '.value')"
     private_key="$(printf '%s' "$payload" | json_string '.private_key')"
     from="$(printf '%s' "$payload" | json_string '.from')"
-    [ -n "$to" ] || [ ! -f "$last_contract_file" ] || to="$(cat "$last_contract_file")"
+    expect_revert="$(printf '%s' "$payload" | jq -r 'if has("expect_revert") then .expect_revert else false end')"
+    case "$expect_revert" in
+      true) ;;
+      false) ;;
+      *) fail "tx payload expect_revert must be a boolean" 22 ;;
+    esac
+    if [ -n "$target_ref" ]; then
+      [ -z "$to" ] || fail "tx payload must use either to or target_ref" 22
+      to="$(resolve_contract_ref "$target_ref")"
+    elif [ -z "$to" ] && [ -f "$last_contract_file" ]; then
+      to="$(cat "$last_contract_file")"
+    fi
     [ -n "$private_key" ] || private_key="${CHAIMIR_EVM_DEPLOYER_PRIVATE_KEY:-}"
+    if [ -z "$private_key" ] && [ -z "$from" ] && [ -n "${CHAIMIR_EVM_DEPLOYER_MNEMONIC:-}" ]; then
+      # 交易与部署必须使用同一受控账户,不得要求业务层复制或暴露私钥。
+      from="$(cast wallet address --mnemonic "$CHAIMIR_EVM_DEPLOYER_MNEMONIC" --account 0)"
+    fi
     [ -n "$to" ] || fail "tx payload requires to or a previous deployment" 22
     [ -n "$data" ] || fail "tx payload requires data" 22
+    if [ "$expect_revert" = "true" ]; then
+      [ -n "$from" ] || fail "expect_revert requires an unlocked from account" 22
+      gas_limit="$(printf '%s' "$payload" | json_string '.gas_limit')"
+      case "$gas_limit" in
+        ''|*[!0-9]*) fail "expect_revert requires a decimal gas_limit" 22 ;;
+      esac
+      [ "$gas_limit" -gt 0 ] || fail "expect_revert gas_limit must be positive" 22
+      value="${value:-0}"
+      value_hex="$(cast to-hex "$value")"
+      gas_hex="$(cast to-hex "$gas_limit")"
+      tx_params="$(jq -cn --arg from "$from" --arg to "$to" --arg data "$data" --arg value "$value_hex" --arg gas "$gas_hex" '[{from:$from,to:$to,data:$data,value:$value,gas:$gas}]')"
+      rpc_response="$(cast rpc --rpc-url "$rpc_url" --raw eth_sendTransaction "$tx_params")"
+      tx_hash="$(printf '%s' "$rpc_response" | jq -r 'if type == "string" then . else .result // empty end')"
+      [ -n "$tx_hash" ] || fail "expected-revert transaction did not return a hash" 70
+      receipt=""
+      for _ in $(seq 1 60); do
+        receipt="$(cast receipt --rpc-url "$rpc_url" --json "$tx_hash" 2>/dev/null || true)"
+        if printf '%s' "$receipt" | jq -e '.status != null' >/dev/null 2>&1; then
+          jq -cn --argjson receipt "$receipt" '{receipt:$receipt}'
+          exit 0
+        fi
+        sleep 1
+      done
+      fail "expected-revert transaction receipt timeout" 124
+    fi
     if [ -n "$private_key" ] && [ -n "$value" ]; then
       output="$(cast send --rpc-url "$rpc_url" --private-key "$private_key" --value "$value" "$to" "$data" --json)"
     elif [ -n "$private_key" ]; then
@@ -98,6 +193,16 @@ case "$action" in
         address="${target#code:}"
         value="$(cast code --rpc-url "$rpc_url" "$address")"
         jq -cn --arg target "$target" --arg code "$value" '{target:$target,code:$code}'
+        ;;
+      counter:last)
+        [ -f "$last_contract_file" ] || fail "counter:last requires a previous deployment" 66
+        address="$(tr -d '[:space:]' < "$last_contract_file")"
+        [ -n "$address" ] || fail "last deployment address is empty" 66
+        value="$(cast call --rpc-url "$rpc_url" "$address" 'reentryCount()(uint256)')"
+        case "$value" in
+          ''|*[!0-9]*) fail "reentryCount result is not an unsigned integer" 70 ;;
+        esac
+        jq -cn --arg target "$target" --argjson value "$value" '{target:$target,value:$value}'
         ;;
       *)
         fail "unsupported query target" 22

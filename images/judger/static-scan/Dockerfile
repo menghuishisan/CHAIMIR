@@ -20,7 +20,7 @@ LABEL org.opencontainers.image.description="Chaimir static scan judger image"
 USER root
 RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && for attempt in 1 2 3 4 5; do \
-        if apk add --no-cache --timeout 300 bash ca-certificates gcompat git libstdc++ py3-pip 'py3-setuptools=80.9.0-r2' python3; then break; fi; \
+        if apk add --no-cache --timeout 300 bash ca-certificates curl=8.22.0-r0 gcompat git libstdc++ openssl=3.5.8-r0 py3-pip 'py3-setuptools=80.9.0-r2' python3; then break; fi; \
         if [ "$attempt" -eq 5 ]; then echo "apk package installation failed after 5 attempts" >&2; exit 1; fi; \
         sleep 3; \
     done \
@@ -28,10 +28,11 @@ RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${N
     && /opt/slither/bin/pip install --index-url "${PIP_INDEX_URL}" --no-cache-dir --timeout 300 --retries 8 \
         "pip==25.3" \
         "setuptools==80.0.0" \
-        "wheel==0.46.0" \
+        "wheel==0.46.2" \
         "msgpack==1.2.1" \
         "slither-analyzer==0.11.3" \
         "aiohttp==3.14.3" \
+    && /opt/slither/bin/pip uninstall --yes setuptools wheel \
     && rm -rf /opt/slither/lib/python3.12/site-packages/pip /opt/slither/lib/python3.12/site-packages/pip-*.dist-info \
     && apk del py3-pip py3-setuptools \
     && /opt/slither/bin/slither --version >/dev/null \

@@ -35,6 +35,7 @@ env_keys:
   config:
     - PG_DATABASE
     - PG_PORT
+    - POSTGRES_INITDB_ARGS
   secret:
     - PG_PRIV_USER
     - PG_PRIV_PASSWORD

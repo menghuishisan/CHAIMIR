@@ -4,6 +4,7 @@ ARG RUNTIME_IMAGE=invalid.invalid/base/runtime-min:required
 ARG GO_MODULE_PROXY=
 
 FROM ${GO_BUILDER_IMAGE} AS builder
+ARG GO_MODULE_PROXY
 
 WORKDIR /src
 

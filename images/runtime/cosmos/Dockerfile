@@ -36,14 +36,14 @@ RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}";
     && go get \
         github.com/ethereum/go-ethereum@v1.16.9 \
         github.com/hashicorp/go-getter@v1.8.6 \
-        go.opentelemetry.io/otel@v1.43.0 \
-        go.opentelemetry.io/otel/sdk@v1.43.0 \
+        go.opentelemetry.io/otel@v1.44.0 \
+        go.opentelemetry.io/otel/sdk@v1.44.0 \
         github.com/shamaton/msgpack/v2@v2.4.1 \
         github.com/bytedance/sonic@v1.15.0 \
         golang.org/x/crypto@v0.55.0 \
-        golang.org/x/net@v0.57.0 \
+        golang.org/x/net@v0.58.0 \
         golang.org/x/text@v0.41.0 \
-        google.golang.org/grpc@v1.82.1 \
+        google.golang.org/grpc@v1.83.2 \
     && go mod tidy \
     && CGO_CFLAGS="-D__BLST_PORTABLE__" go build -trimpath -tags "netgo" -ldflags "-s -w" -o /out/gaiad ./cmd/gaiad \
     && find /go/pkg/mod -name "libwasmvm.x86_64.so" -type f -print -exec cp {} /out/libwasmvm.x86_64.so \;
@@ -249,7 +249,7 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/chaimir-cosmos-ent
 FROM cgr.dev/chainguard/glibc-dynamic@sha256:d0046044cd28948d3380eb0d98709dc7e63f98161fe7105135e1025650bad17a
 
 LABEL org.opencontainers.image.title="runtime/cosmos"
-LABEL org.opencontainers.image.description="Chaimir Cosmos SDK local chain runtime built from official Gaia source"
+LABEL org.opencontainers.image.description="Chaimir Cosmos SDK 教学链运行时,基于官方 Gaia 源码构建"
 
 COPY --from=build --chown=1000:1000 /out/rootfs/ /
 COPY --from=build --chown=1000:1000 /out/gaiad /usr/local/bin/gaiad

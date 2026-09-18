@@ -3,12 +3,16 @@ param(
     [string]$RepoRoot = "",
     [string]$Registry = $env:IMAGE_REGISTRY,
     [string]$DigestLockPath = "",
-    [string]$CandidateDigestLockPath = "",
+    [string[]]$CandidateDigestLockPath = @(),
     [string[]]$KeepTags = @(),
     [switch]$Apply
 )
 
 $ErrorActionPreference = "Stop"
+# Docker 的“目标不存在”通过退出码表达；不能让 PowerShell 将原生 stderr 提前升级为脚本异常。
+if ($null -ne (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue)) {
+    $PSNativeCommandUseErrorActionPreference = $false
+}
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 }
@@ -23,14 +27,42 @@ Import-Module (Join-Path $PSScriptRoot "lib\ImageMetadata.psm1") -Force
 $registryHost = ($Registry -replace "^https?://", "").TrimEnd('/')
 $catalog = Get-ChaimirImageCatalog -ImagesRoot (Join-Path $RepoRoot "images")
 $formal = Read-ChaimirDigestLock -Path $DigestLockPath -Required
-$candidate = @{}
-if (-not [string]::IsNullOrWhiteSpace($CandidateDigestLockPath)) {
-    $candidate = Read-ChaimirDigestLock -Path $CandidateDigestLockPath -Required
+# KeepTags 既支持 PowerShell 数组,也接受脚本边界传入的逗号串;统一展开后再比较,避免子进程参数序列化丢失保护标签。
+$KeepTags = @($KeepTags | ForEach-Object {
+    ([string]$_ -split ',') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+}) | Select-Object -Unique
+$candidateLockPaths = @($CandidateDigestLockPath | ForEach-Object {
+    ([string]$_ -split ',') | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+}) | Select-Object -Unique
+$candidateRefs = [System.Collections.Generic.List[string]]::new()
+foreach ($candidatePath in $candidateLockPaths) {
+    if ([string]::IsNullOrWhiteSpace($candidatePath)) {
+        continue
+    }
+    $candidateItems = Read-ChaimirDigestLock -Path $candidatePath -Required
+    foreach ($entry in $candidateItems.GetEnumerator()) {
+        $candidateRefs.Add("$registryHost/$($entry.Key)@$($entry.Value)")
+    }
 }
 
 $protectedRefs = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-foreach ($entry in @($formal.GetEnumerator()) + @($candidate.GetEnumerator())) {
+foreach ($entry in $formal.GetEnumerator()) {
     [void]$protectedRefs.Add("$registryHost/$($entry.Key)@$($entry.Value)")
+}
+foreach ($candidateRef in $candidateRefs) {
+    [void]$protectedRefs.Add($candidateRef)
+}
+
+function Test-ChaimirDockerImageReference([string]$Reference) {
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        # Docker 将“本机未缓存摘要”写到 stderr;这只是清理筛选结果,不是脚本异常。
+        $ErrorActionPreference = "Continue"
+        docker image inspect $Reference 2>$null | Out-Null
+        return $LASTEXITCODE -eq 0
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
 }
 
 # 运行中或已停止但仍保留的容器都可能是验收证据,其镜像不得由本机清理删除。
@@ -58,8 +90,7 @@ $availableProtectedRefs = [System.Collections.Generic.HashSet[string]]::new([Str
 $unavailableProtectedCount = 0
 foreach ($candidateRef in @($protectedRefs | ForEach-Object { [string]$_ })) {
     $immutableRef = [string]$candidateRef
-    docker image inspect $immutableRef | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+    if (Test-ChaimirDockerImageReference $immutableRef) {
         [void]$availableProtectedRefs.Add($immutableRef)
     } else {
         $unavailableProtectedCount++
@@ -99,11 +130,14 @@ foreach ($image in $images) {
         $skipped.Add("$ref (referenced by container)")
         continue
     }
+    # Docker Desktop 对按 digest 导入的镜像可能同时把不可变引用暴露在 RepoTags 和 RepoDigests;
+    # 两者都必须参与保护判断,否则清理会把锁定镜像误判成 dangling 对象。
     $repoDigests = @($inspect[0].RepoDigests)
+    $imageReferences = @($inspect[0].RepoTags) + $repoDigests
     $protectedImageRefs = [System.Collections.Generic.List[string]]::new()
-    foreach ($repoDigest in $repoDigests) {
-        if ($protectedRefs.Contains([string]$repoDigest)) {
-            $protectedImageRefs.Add([string]$repoDigest)
+    foreach ($imageReference in $imageReferences) {
+        if ($protectedRefs.Contains([string]$imageReference)) {
+            $protectedImageRefs.Add([string]$imageReference)
         }
     }
     if ($protectedImageRefs.Count -gt 0) {
@@ -125,10 +159,22 @@ foreach ($image in $images) {
         })
         if ($removableRefs.Count -eq 0) {
             $removableRefs = @($ref)
+        } elseif ($ref -notin $removableRefs) {
+            # 临时 tag 与 RepoDigest 是两个独立引用,必须同时删除,否则旧候选 tag 会继续占用本机镜像空间。
+            $removableRefs += $ref
         }
         foreach ($removableRef in $removableRefs) {
+            # 删除前重新确认精确引用;并发清理已经删除的目标视为幂等成功。
+            if (-not (Test-ChaimirDockerImageReference $removableRef)) {
+                $skipped.Add("$removableRef (already absent)")
+                continue
+            }
             docker image rm $removableRef | Out-Null
             if ($LASTEXITCODE -ne 0) {
+                if (-not (Test-ChaimirDockerImageReference $removableRef)) {
+                    $skipped.Add("$removableRef (removed concurrently)")
+                    continue
+                }
                 throw "删除临时镜像失败: $removableRef"
             }
             $removed.Add([string]$removableRef)
@@ -140,8 +186,7 @@ foreach ($image in $images) {
 
 # 清理前后都验证正式和候选不可变引用,防止误删最后一个 digest 引用。
 foreach ($immutableRef in $protectedRefSnapshot) {
-    docker image inspect $immutableRef | Out-Null
-    if ($LASTEXITCODE -ne 0) {
+    if (-not (Test-ChaimirDockerImageReference $immutableRef)) {
         throw "清理后不可变镜像引用不可访问: $immutableRef"
     }
 }

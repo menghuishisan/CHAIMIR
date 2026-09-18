@@ -29,6 +29,13 @@ upstream:
   build_base_image: hexpm/elixir
   build_base_version: 1.19.4-erlang-27.3.4.6-alpine-3.22.2
   build_base_digest: sha256:31a23456941cff0f9b2aa5083e42d3371538e6e7032fc49185f6f4e87bcaacdd
+  runtime_packages:
+    - libcrypto3=3.5.8-r0
+    - libssl3=3.5.8-r0
+    - openssl=3.5.8-r0
+    - musl=1.2.5-r12
+    - musl-utils=1.2.5-r12
+    - zlib=1.3.2-r0
 env_keys:
   config:
     - CHAIMIR_BLOCKSCOUT_DATABASE_ADDRESS
@@ -107,7 +114,7 @@ tool:
           - name: ETHEREUM_JSONRPC_VARIANT
             value: geth
           - name: ECTO_SSL_MODE
-            value: disable
+            value: require
           - name: PORT
             value: "4000"
           - name: DISABLE_EXCHANGE_RATES

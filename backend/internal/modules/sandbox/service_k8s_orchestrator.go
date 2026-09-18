@@ -1841,6 +1841,8 @@ func runtimePodSpecs(plan RuntimePlan) []workload.PodSpec {
 		declared := declaredContainerMap(plan.Runtime.AdapterSpec)
 		seen := map[string]struct{}{}
 		for podIndex := range pods {
+			// 编译快照中的 Pod 名已经带实例前缀,运行时自检计划可能仍保留声明式原名;两者统一到同一 K8s 名称。
+			pods[podIndex].Name = runtimePodName(plan.InstanceCode, pods[podIndex].Name)
 			for containerIndex := range pods[podIndex].Containers {
 				container := &pods[podIndex].Containers[containerIndex]
 				// Explicit pod topology stores reference-only containers; resolve each
@@ -1880,6 +1882,16 @@ func runtimePodSpecs(plan RuntimePlan) []workload.PodSpec {
 		name += "-sandbox"
 	}
 	return []workload.PodSpec{{Name: name, Containers: containers}}
+}
+
+// runtimePodName 生成运行时实例唯一的 Pod 名,并使已编译拓扑重复读取时保持幂等。
+func runtimePodName(instanceCode, podName string) string {
+	instanceCode = strings.TrimSpace(instanceCode)
+	podName = strings.TrimSpace(podName)
+	if instanceCode == "" || podName == "" || strings.HasPrefix(podName, instanceCode+"-") {
+		return podName
+	}
+	return instanceCode + "-" + podName
 }
 
 // runtimePlanForPod 根据唯一 Pod 角色定位所属运行时实例,避免用第一个运行时解释其他实例容器。

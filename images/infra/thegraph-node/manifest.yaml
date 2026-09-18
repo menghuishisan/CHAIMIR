@@ -25,11 +25,14 @@ upstream:
   runtime_digest: sha256:777e96cf322c46bc32aca926c263624c4dc8d7cf37e2fa65ba2c7e697318ebbb
   build_bases:
     - image: registry.chaimir.io/base/go-builder
-      digest: sha256:fb0a1352643623882f008691aaa1459262c0c5e1030878dbdbc5e916a852a869
+      digest: sha256:46d92c9696e24102dd211235153b05362a58a9f3d2068a5384f8dde7c1bccfac
       role: entrypoint-builder
     - image: docker.io/library/alpine
       digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
       role: runtime-state-stage
+  build_base_arg: GO_BUILDER_IMAGE
+  build_base_image: registry.chaimir.io/base/go-builder
+  build_base_digest: sha256:46d92c9696e24102dd211235153b05362a58a9f3d2068a5384f8dde7c1bccfac
   reuse_policy: thin-wrapper
 data_driven: true
 env_keys:
@@ -113,7 +116,7 @@ infra:
         image_url: "@self"
         env:
           - name: CHAIMIR_GRAPH_NETWORK
-            value: local
+            value: chaimir
           - name: CHAIMIR_GRAPH_POSTGRES_DB
             value: graph
           - name: CHAIMIR_GRAPH_POSTGRES_USER

@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# 本脚本启动 Sui 本地网络。
+# 本脚本启动 Sui 单节点教学网络。
 set -eu
 : "${CHAIMIR_SUI_CONFIG_DIR:?CHAIMIR_SUI_CONFIG_DIR is required}"
 

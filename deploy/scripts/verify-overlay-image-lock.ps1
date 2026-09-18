@@ -25,21 +25,6 @@ if (Get-Content -LiteralPath $overlayKustomization | Where-Object { $_ -match "^
 Import-Module (Join-Path $RepoRoot "images\lib\ImageMetadata.psm1") -Force
 $digests = Read-ChaimirDigestLock -Path $DigestLockPath -Required
 
-# Read-ImageRegistry 从统一非密配置源读取规范镜像仓库地址。
-function Read-ImageRegistry {
-    param([string]$Path)
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        if ($line -match "^IMAGE_REGISTRY=(.+)$") {
-            $value = $Matches[1].Trim()
-            if ($value -notmatch "^[^\s/:]+(?::[0-9]+)?(?:/[^\s/]+)*$") {
-                throw "IMAGE_REGISTRY 格式非法"
-            }
-            return $value.TrimEnd("/")
-        }
-    }
-    throw "统一配置缺少 IMAGE_REGISTRY"
-}
-
 # Resolve-LockedDigest 保证部署集合中的每个服务都有合法不可变 digest。
 function Resolve-LockedDigest {
     param([string]$LogicalImage)
@@ -53,7 +38,10 @@ function Resolve-LockedDigest {
     return $digest
 }
 
-$registry = Read-ImageRegistry -Path (Join-Path $RepoRoot "deploy\config\chaimir.env")
+$config = Read-ChaimirEnvFile -Path (Join-Path $RepoRoot "deploy\config\chaimir.env") -RequiredKeys @(
+    "SUPPLY_CHAIN_REGISTRY", "SUPPLY_CHAIN_REGISTRY_ENDPOINT", "SUPPLY_CHAIN_HARBOR_EXTERNAL_URL", "IMAGE_REGISTRY"
+)
+$registry = Get-ChaimirCanonicalRegistry -Config $config
 $services = @("service/backend", "service/frontend", "service/migrate", "service/cron")
 $expected = @{}
 foreach ($logicalImage in $services) {

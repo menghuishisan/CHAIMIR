@@ -9,6 +9,7 @@ from typing import Any
 
 from eth_abi import encode
 from eth_abi.exceptions import EncodingError, ParseError
+from eth_abi.grammar import parse as parse_abi_type
 from eth_utils import function_signature_to_4byte_selector, to_hex
 
 def required_positive_int(name: str) -> int:
@@ -25,9 +26,10 @@ def required_positive_int(name: str) -> int:
     return value
 
 
-PORT = required_positive_int("CHAIMIR_IMAGE_PORT")
-MAX_BODY_BYTES = required_positive_int("CHAIMIR_MAX_BODY_BYTES")
-HTTP_TIMEOUT_SECONDS = required_positive_int("CHAIMIR_HTTP_TIMEOUT_SECONDS")
+# 运行参数在真正启动 HTTP 服务时读取,使纯函数自检可以在无服务配置的环境中执行。
+PORT = 0
+MAX_BODY_BYTES = 0
+HTTP_TIMEOUT_SECONDS = 0
 MAX_HEADER_BYTES = 16 * 1024
 MAX_HEADER_COUNT = 64
 INDEX_HTML = """<!doctype html>
@@ -122,6 +124,7 @@ def abi_methods(abi: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for field in inputs:
             if not isinstance(field, dict) or not isinstance(field.get("type"), str) or not field["type"]:
                 raise ValueError("abi function input declaration is invalid")
+            validate_abi_type(field["type"])
         methods.append(
             {
                 "name": item["name"],
@@ -130,6 +133,16 @@ def abi_methods(abi: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return methods
+
+
+def validate_abi_type(type_name: str) -> None:
+    """校验 ABI 类型确实是 eth-abi 支持的 Solidity 基础类型。"""
+    if type_name.startswith("tuple"):
+        raise ValueError("tuple ABI types are unsupported")
+    try:
+        parse_abi_type(type_name)
+    except ParseError as exc:
+        raise ValueError("abi type is invalid") from exc
 
 
 def build_call_data(abi: list[dict[str, Any]], method_name: str, args: list[Any]) -> dict[str, Any]:
@@ -146,6 +159,8 @@ def build_call_data(abi: list[dict[str, Any]], method_name: str, args: list[Any]
     if not isinstance(inputs, list) or not all(isinstance(field, dict) and isinstance(field.get("type"), str) and field["type"] for field in inputs):
         raise ValueError("abi function input declaration is invalid")
     types = [field["type"] for field in inputs]
+    for type_name in types:
+        validate_abi_type(type_name)
     if len(args) != len(types):
         raise ValueError("argument count mismatch")
     signature = f"{method_name}({','.join(types)})"
@@ -260,5 +275,14 @@ class BoundedThreadingHTTPServer(ThreadingHTTPServer):
         return request, client_address
 
 
-if __name__ == "__main__":
+def run_server() -> None:
+    """读取运行配置并启动合约交互服务。"""
+    global PORT, MAX_BODY_BYTES, HTTP_TIMEOUT_SECONDS
+    PORT = required_positive_int("CHAIMIR_IMAGE_PORT")
+    MAX_BODY_BYTES = required_positive_int("CHAIMIR_MAX_BODY_BYTES")
+    HTTP_TIMEOUT_SECONDS = required_positive_int("CHAIMIR_HTTP_TIMEOUT_SECONDS")
     BoundedThreadingHTTPServer(("0.0.0.0", PORT), ContractUIHandler).serve_forever()
+
+
+if __name__ == "__main__":
+    run_server()

@@ -1,9 +1,7 @@
 # 本文件定义 ClamAV clamd 的安全运行镜像,基于官方 Alpine 运行层保留 INSTREAM 扫描能力。
 FROM docker.io/clamav/clamav@sha256:594d54aff5ad3b1a5211d67cdc6d49a9a332276da35d821c3dd4cf6c4cdf6237
 
-RUN apk add --no-cache \
-    'libcrypto3=3.6.3-r5' \
-    'libssl3=3.6.3-r5'
+# 官方固定基础镜像已经包含与运行层匹配的加密依赖，不在构建期强行升级系统包。
 
 LABEL org.opencontainers.image.title="middleware/clamav"
 LABEL org.opencontainers.image.description="Chaimir ClamAV middleware on the official ClamAV Alpine runtime"

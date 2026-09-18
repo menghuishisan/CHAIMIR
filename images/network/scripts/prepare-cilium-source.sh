@@ -13,12 +13,12 @@ printf '%s %s\n' "$source_commit" "1970-01-01T00:00:00Z" > GIT_VERSION
 # `go mod tidy` 为测试包拉取整个依赖图，并保持其余官方 vendor 不变。
 go mod edit -require=golang.org/x/text@v0.39.0
 go mod edit -require=golang.org/x/crypto@v0.55.0
-go mod edit -require=google.golang.org/grpc@v1.83.1
+go mod edit -require=google.golang.org/grpc@v1.83.2
 gopath="$(go env GOPATH)"
 for module in \
   "golang.org/x/text@v0.39.0" \
   "golang.org/x/crypto@v0.55.0" \
-  "google.golang.org/grpc@v1.83.1"; do
+  "google.golang.org/grpc@v1.83.2"; do
   for attempt in 1 2 3 4 5 6 7 8; do
     if go mod download "$module"; then
       break
@@ -32,10 +32,10 @@ done
 rm -rf vendor/golang.org/x/text vendor/golang.org/x/crypto vendor/google.golang.org/grpc
 cp -R "$gopath/pkg/mod/golang.org/x/text@v0.39.0" vendor/golang.org/x/text
 cp -R "$gopath/pkg/mod/golang.org/x/crypto@v0.55.0" vendor/golang.org/x/crypto
-cp -R "$gopath/pkg/mod/google.golang.org/grpc@v1.83.1" vendor/google.golang.org/grpc
+cp -R "$gopath/pkg/mod/google.golang.org/grpc@v1.83.2" vendor/google.golang.org/grpc
 sed -i 's/^# golang.org\/x\/text v[0-9].*$/# golang.org\/x\/text v0.39.0/' vendor/modules.txt
 sed -i 's/^# golang.org\/x\/crypto v[0-9].*$/# golang.org\/x\/crypto v0.55.0/' vendor/modules.txt
-sed -i 's/^# google.golang.org\/grpc v[0-9].*$/# google.golang.org\/grpc v1.83.1/' vendor/modules.txt
+sed -i 's/^# google.golang.org\/grpc v[0-9].*$/# google.golang.org\/grpc v1.83.2/' vendor/modules.txt
 grep -q '^# golang.org/x/text v0.39.0$' vendor/modules.txt
 grep -q '^# golang.org/x/crypto v0.55.0$' vendor/modules.txt
-grep -q '^# google.golang.org/grpc v1.83.1$' vendor/modules.txt
+grep -q '^# google.golang.org/grpc v1.83.2$' vendor/modules.txt

@@ -15,7 +15,7 @@ ARG PIP_INDEX_URL=https://pypi.org/simple
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
-    && packages='ca-certificates curl gcc git libstdc++ make python-3.10=3.10.21-r1 python-3.10-dev py3.10-pip' \
+    && packages='ca-certificates curl gcc git libstdc++ make python-3.10=3.10.21-r6 python-3.10-dev py3.10-pip' \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
@@ -41,7 +41,7 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     && /opt/mythril/bin/pip install --no-cache-dir --index-url "${PIP_INDEX_URL}" \
         "mythril==0.24.8" \
         "setuptools==80.9.0" \
-        "urllib3==2.6.0" \
+        "urllib3==2.7.0" \
         "cryptography==50.0.0" \
         "requests==2.32.5" \
     && rm -rf \
@@ -67,7 +67,7 @@ LABEL org.opencontainers.image.description="Chaimir Mythril symbolic execution t
 
 RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
-    && packages='ca-certificates libstdc++ python-3.10=3.10.21-r1' \
+    && packages='ca-certificates libstdc++ python-3.10=3.10.21-r6' \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         apk add --cache-dir /var/cache/apk --update-cache ${packages} && break; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \

@@ -29,8 +29,8 @@ function requiredPositiveInteger(name) {
   return value;
 }
 
-// parseAllowedDomains keeps the signed-message domain allowlist identical to
-// the value supplied by CompositionSpec; malformed entries must stop startup.
+// parseAllowedDomains 保证签名消息域白名单与 CompositionSpec 提供的值完全一致;
+// 格式错误必须阻止启动。
 function parseAllowedDomains(value) {
   const domains = value.split(",");
   const result = new Set();

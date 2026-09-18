@@ -39,17 +39,20 @@ capabilities:
   config_schema:
     type: object
     additionalProperties: false
-    required: [network, data_dir, checkpoint_sync_url]
+    required: [testnet_dir, data_dir, checkpoint_state_path, checkpoint_block_path]
     properties:
-      network:
+      testnet_dir:
         type: string
-        x-chaimir-env: infra/BEACON_NETWORK
+        x-chaimir-env: infra/BEACON_TESTNET_DIR
       data_dir:
         type: string
         x-chaimir-env: infra/BEACON_DATA_DIR
-      checkpoint_sync_url:
+      checkpoint_state_path:
         type: string
-        x-chaimir-env: infra/BEACON_CHECKPOINT_SYNC_URL
+        x-chaimir-env: infra/BEACON_CHECKPOINT_STATE_PATH
+      checkpoint_block_path:
+        type: string
+        x-chaimir-env: infra/BEACON_CHECKPOINT_BLOCK_PATH
   student_access: private
 infra:
   eco_tags: [evm]
@@ -58,12 +61,14 @@ infra:
       - name: infra
         image_url: "@self"
         env:
-          - name: BEACON_NETWORK
-            value: mainnet
+          - name: BEACON_TESTNET_DIR
+            value: /runtime-state/beacon-testnet
           - name: BEACON_DATA_DIR
             value: /runtime-state/lighthouse
-          - name: BEACON_CHECKPOINT_SYNC_URL
-            value: ""
+          - name: BEACON_CHECKPOINT_STATE_PATH
+            value: /runtime-state/beacon-testnet/genesis.ssz
+          - name: BEACON_CHECKPOINT_BLOCK_PATH
+            value: /runtime-state/beacon-testnet/genesis-block.ssz
           - name: BEACON_HTTP_PORT
             value: "5052"
         ports:
@@ -109,14 +114,15 @@ infra:
   roles: [beacon, consensus-api-provider]
   command_schema:
     executable: lighthouse
-    required_args: [beacon_node, --execution-endpoint, --http, --http-address, --http-port]
+    required_args: [beacon_node, --testnet-dir, --execution-endpoint, --checkpoint-state, --checkpoint-block, --http, --http-address, --http-port]
     forbidden_args: [validator, account]
 env_keys:
   config:
     - BEACON_EXECUTION_ENDPOINT
-    - BEACON_NETWORK
     - BEACON_DATA_DIR
-    - BEACON_CHECKPOINT_SYNC_URL
+    - BEACON_TESTNET_DIR
+    - BEACON_CHECKPOINT_STATE_PATH
+    - BEACON_CHECKPOINT_BLOCK_PATH
     - BEACON_HTTP_PORT
   secret:
     - BEACON_EXECUTION_JWT

@@ -3,6 +3,8 @@ package sandbox
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -1637,9 +1639,10 @@ func rewriteRuntimeExecTarget(target string, podNames map[string]string) string 
 	return target
 }
 
-// compositionRuleName 为连接生成稳定且可审计的网络策略名称。
+// compositionRuleName 为连接生成稳定且可审计的网络策略名称;同一目标的不同绑定保持规则名独立。
 func compositionRuleName(link contracts.CompositionLink) string {
-	value := strings.Join([]string{link.SourceComponent, link.SourceEndpoint, link.TargetComponent, link.TargetEndpoint}, "-")
+	binding, _ := parseCompositionBinding(link.ConfigBinding)
+	value := strings.Join([]string{link.SourceComponent, binding.Name, link.SourceEndpoint, link.TargetComponent, link.TargetEndpoint}, "-")
 	value = strings.ToLower(strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
 			return r
@@ -1648,7 +1651,9 @@ func compositionRuleName(link contracts.CompositionLink) string {
 	}, value))
 	value = strings.Trim(value, "-")
 	if len(value) > 50 {
-		value = value[:50]
+		sum := sha256.Sum256([]byte(value))
+		suffix := hex.EncodeToString(sum[:4])
+		value = strings.TrimRight(value[:50-len(suffix)-1], "-") + "-" + suffix
 	}
 	return "link-" + value
 }

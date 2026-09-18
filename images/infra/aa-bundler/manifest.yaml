@@ -29,6 +29,8 @@ env_keys:
     - NETWORK
     - RPC_PORT
     - METRICS_PORT
+    - ENABLED_ENTRY_POINTS
+    - CHAIN_SPEC
   secret:
     - SIGNER_PRIVATE_KEYS
 secrets_required:
@@ -62,6 +64,10 @@ infra:
             value: "3000"
           - name: METRICS_PORT
             value: "8080"
+          - name: ENABLED_ENTRY_POINTS
+            value: v0.6
+          - name: CHAIN_SPEC
+            value: /runtime-state/public-assets/erc4337/chain-spec.toml
         ports:
           - name: http
             container_port: 3000
@@ -85,6 +91,8 @@ infra:
           failure_threshold: 30
         read_only_root_filesystem: true
         mount_workspace: false
+        mount_domains:
+          - runtime-state
         ephemeral_mounts:
           - name: bundler-tmp
             mount_path: /tmp

@@ -19,7 +19,7 @@ configMapGenerator:
       - PG_HOST=postgres.staging-data.internal
       - REDIS_HOST=redis.staging-data.internal
       - NATS_URL=nats://nats.staging-data.internal:4222
-      - OBJECT_STORAGE_ENDPOINT=rustfs.staging-data.internal:9000
+      - OBJECT_STORAGE_ENDPOINT=https://rustfs.staging-data.internal:9000
       - UPLOAD_VIRUS_SCAN_ADDRESS=clamav.staging-data.internal:3310
 
 # 预发布双副本(轻量验证伸缩)。

@@ -1,4 +1,4 @@
-# 本文件定义 Solana 本地测试链运行时镜像,复用官方已验证运行层并统一 Chaimir 入口。
+# 本文件定义 Solana 受控教学链运行时镜像,复用官方已验证运行层并统一 Chaimir 入口。
 FROM solanalabs/solana:v1.18.26@sha256:098806e64d44bccdbedbf07c2edabd1c850b92c8a4a0f81eba9c789034813db6 AS solana-upstream
 
 FROM golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 AS adapter-build

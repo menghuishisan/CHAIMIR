@@ -14,7 +14,7 @@ labels:
   chaimir.io/sensitivity: student-runtime
   chaimir.io/scope: sandbox
   chaimir.io/source: thin-wrapper
-description: Aptos Move 本地网教学运行时镜像。
+description: Aptos Move 单节点教学网络运行时镜像。
 source:
   type: thin-wrapper
 upstream:

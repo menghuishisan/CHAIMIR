@@ -49,11 +49,24 @@ FROM cgr.dev/chainguard/glibc-dynamic@sha256:d0046044cd28948d3380eb0d98709dc7e63
 LABEL org.opencontainers.image.title="runtime/evm-hardhat"
 LABEL org.opencontainers.image.description="Chaimir Hardhat EVM teaching runtime"
 ENV HOME=/runtime-state/hardhat-home
+ENV LD_LIBRARY_PATH=/lib/x86_64-linux-gnu
 
 # 最终层只保留运行所需的 glibc、Node、Foundry、Hardhat、Solidity 和 jq,不携带 Debian 包管理数据库。
 COPY --from=build /bin/sh /bin/sh
 COPY --from=build /bin/dash /bin/dash
 COPY --from=build /usr/bin/env /usr/bin/env
+# 保留判题与工作区工具链需要的最小 POSIX 文件操作命令,避免下游镜像依赖未声明的宿主工具。
+COPY --from=build /usr/bin/cat /usr/bin/cat
+COPY --from=build /usr/bin/chmod /usr/bin/chmod
+COPY --from=build /usr/bin/chown /usr/bin/chown
+COPY --from=build /usr/bin/cp /usr/bin/cp
+COPY --from=build /usr/bin/grep /usr/bin/grep
+COPY --from=build /usr/bin/mkdir /usr/bin/mkdir
+COPY --from=build /usr/bin/rm /usr/bin/rm
+COPY --from=build /lib/x86_64-linux-gnu/libacl.so.1 /lib/x86_64-linux-gnu/libacl.so.1
+COPY --from=build /lib/x86_64-linux-gnu/libattr.so.1 /lib/x86_64-linux-gnu/libattr.so.1
+COPY --from=build /lib/x86_64-linux-gnu/libselinux.so.1 /lib/x86_64-linux-gnu/libselinux.so.1
+COPY --from=build /lib/x86_64-linux-gnu/libpcre2-8.so.0 /lib/x86_64-linux-gnu/libpcre2-8.so.0
 COPY --from=build /usr/lib/x86_64-linux-gnu/libstdc++.so.6* /usr/lib/x86_64-linux-gnu/
 COPY --from=build /usr/lib/x86_64-linux-gnu/libgcc_s.so.1 /usr/lib/x86_64-linux-gnu/
 COPY --from=build /usr/local/bin/node /usr/local/bin/node

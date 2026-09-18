@@ -68,7 +68,7 @@ ARG PROMETHEUS_VERSION=3.12.0
 ARG PROMETHEUS_COMMIT=9f27dffc1f93ca23287972f632025879f2d1c658
 ARG GO_MODULE_PROXY=https://proxy.golang.org,direct
 
-# Keep the source build within the local Docker Engine memory envelope.
+# 将源码构建限制在受控 Docker Engine 的内存边界内。
 ENV GOMEMLIMIT=768MiB \
     GOGC=50 \
     GOPROXY=${GO_MODULE_PROXY}
@@ -79,7 +79,7 @@ RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 \
     --mount=type=cache,target=/tmp/go-cache,uid=1000,gid=1000 \
     export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && for attempt in 1 2 3 4 5 6 7 8; do \
-        if timeout 900 go get golang.org/x/crypto@v0.55.0 golang.org/x/text@v0.41.0 google.golang.org/grpc@v1.82.1; then \
+        if timeout 1800 go get golang.org/x/crypto@v0.55.0 golang.org/x/text@v0.41.0 google.golang.org/grpc@v1.83.2; then \
             break; \
         fi; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
@@ -87,13 +87,13 @@ RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 \
     done \
     && common_ldflags="-s -w -X github.com/prometheus/common/version.Version=${PROMETHEUS_VERSION} -X github.com/prometheus/common/version.Revision=${PROMETHEUS_COMMIT} -X github.com/prometheus/common/version.Branch=HEAD -X github.com/prometheus/common/version.BuildUser=chaimir -X github.com/prometheus/common/version.BuildDate=19700101-00:00:00" \
     && ( \
-        timeout 900 env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=1 go build -p=1 -tags netgo,builtinassets -trimpath -ldflags="${common_ldflags}" -o /out/prometheus ./cmd/prometheus & \
+        timeout 1800 env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=1 go build -p=1 -tags netgo,builtinassets -trimpath -ldflags="${common_ldflags}" -o /out/prometheus ./cmd/prometheus & \
         build_pid=$!; \
         while kill -0 "$build_pid" 2>/dev/null; do echo "prometheus-go-build heartbeat"; sleep 30; done; \
         wait "$build_pid" \
     ) \
     && ( \
-        timeout 900 env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=1 go build -p=1 -tags netgo,builtinassets -trimpath -ldflags="${common_ldflags}" -o /out/promtool ./cmd/promtool & \
+        timeout 1800 env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=1 go build -p=1 -tags netgo,builtinassets -trimpath -ldflags="${common_ldflags}" -o /out/promtool ./cmd/promtool & \
         build_pid=$!; \
         while kill -0 "$build_pid" 2>/dev/null; do echo "prometheus-promtool-build heartbeat"; sleep 30; done; \
         wait "$build_pid" \

@@ -14,28 +14,32 @@ ARG KUBO_VERSION=v0.42.0
 ARG KUBO_COMMIT=969853d9609b3a261ef4e41a5eec437188c09ffe
 ARG GO_MODULE_PROXY=
 
-RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
-    && for attempt in 1 2 3 4 5 6 7 8; do \
-        rm -rf /src/kubo; \
-        if git -c http.version=HTTP/1.1 clone --branch "${KUBO_VERSION}" --depth 1 https://github.com/ipfs/kubo.git /src/kubo; then break; fi; \
-        if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
-        sleep $((attempt * 5)); \
-    done
+# 代理环境下限制 Go 依赖图并发,并固定 HTTP/1.1 传输,避免大规模模块下载被截断。
+ENV GOMAXPROCS=2
+ENV GODEBUG=http2client=0
+
+ADD --chown=1000:1000 --checksum=sha256:f470cd7a554261f22ac19634efc6e3123ef4282fb1cd0d66222e9d40346cf7fa https://codeload.github.com/ipfs/kubo/tar.gz/969853d9609b3a261ef4e41a5eec437188c09ffe /tmp/kubo.tar.gz
+RUN mkdir -p /src/kubo \
+    && tar -xzf /tmp/kubo.tar.gz --strip-components=1 -C /src/kubo \
+    && rm -f /tmp/kubo.tar.gz
 WORKDIR /src/kubo
-RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
+COPY config-init.go /src/kubo/cmd/chaimir-ipfs-config-init/main.go
+RUN --mount=type=cache,target=/go/pkg,uid=1000,gid=1000 \
+    --mount=type=cache,target=/tmp/go-cache,uid=1000,gid=1000 \
+    export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${NO_PROXY}" \
     && if [ -n "${GO_MODULE_PROXY}" ]; then export GOPROXY="${GO_MODULE_PROXY}"; fi \
-    && test "$(git rev-parse HEAD)" = "${KUBO_COMMIT}" \
     && for attempt in 1 2 3 4 5 6 7 8; do \
         if go get \
             golang.org/x/crypto@v0.55.0 \
-            golang.org/x/net@v0.57.0 \
+            golang.org/x/net@v0.58.0 \
             golang.org/x/text@v0.41.0 \
-            google.golang.org/grpc@v1.82.1; then break; fi; \
+            google.golang.org/grpc@v1.83.2; then break; fi; \
         if [ "${attempt}" -eq 8 ]; then exit 1; fi; \
         sleep $((attempt * 5)); \
     done \
     && go mod tidy \
-    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/ipfs ./cmd/ipfs
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/ipfs ./cmd/ipfs \
+    && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o /out/chaimir-ipfs-config-init ./cmd/chaimir-ipfs-config-init
 
 FROM ${GO_BUILDER_IMAGE} AS entrypoint-build
 
@@ -59,6 +63,7 @@ LABEL org.opencontainers.image.description="Chaimir IPFS Kubo node image"
 
 # IPFS 数据目录由 runtime-state 卷承载,镜像内不写入业务数据。
 COPY --from=kubo-build /out/ipfs /usr/local/bin/ipfs
+COPY --from=kubo-build /out/chaimir-ipfs-config-init /usr/local/bin/chaimir-ipfs-config-init
 COPY --from=entrypoint-build /src/chaimir-ipfs-entrypoint /usr/local/bin/chaimir-ipfs-entrypoint
 COPY --chown=1000:1000 --from=dirs /out/runtime-state /runtime-state
 COPY --chown=1000:1000 --from=dirs /out/workspace /workspace

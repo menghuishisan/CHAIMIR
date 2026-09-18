@@ -1,6 +1,6 @@
 # 本文件负责创建无默认 CNI 的 Kind 集群、安装正式 Cilium、执行网络数据面验收并维护外部 HTTPS 入口。
 param(
-    [ValidateSet("Up", "Start", "Check", "Edge", "Stop", "Down")]
+    [ValidateSet("Up", "Start", "Check", "Edge", "HarborTls", "Stop", "Down")]
     [string]$Action = "Up",
     [string]$ClusterName = "chaimir-cilium",
     [string]$DependencyContext = "docker-desktop"
@@ -13,7 +13,6 @@ $kindSha256 = "0bcb2d1cfedc1912d664014db716937e8a0e843e91c6807b4db2025dbc8989fa"
 $kindDownloadUrl = "https://github.com/kubernetes-sigs/kind/releases/download/$kindVersion/kind-windows-amd64"
 $nodeImage = "kindest/node:v1.36.1@sha256:3489c7674813ba5d8b1a9977baea8a6e553784dab7b84759d1014dbd78f7ebd5"
 $ciliumChart = "oci://quay.io/cilium/charts/cilium@sha256:906ce40d35daad838d12add8a5ba7033e767767f51799a93c7eace2cec9cdc05"
-$registryHost = "registry.chaimir.io"
 $runtimeContext = "kind-$ClusterName"
 $imagePullSecret = "chaimir-harbor-pull"
 
@@ -35,6 +34,7 @@ $runtimeKubeconfigPath = Join-Path $deployRoot "config\supply-chain.kubeconfig"
 $dependencyKubeconfigPath = Join-Path $deployRoot "config\harbor.kubeconfig"
 $tmpRoot = Join-Path $repoRoot ".tmp\cilium-cluster"
 $kindPath = Join-Path $repoRoot ".tmp\tools\kind\$kindVersion\kind.exe"
+Import-Module (Join-Path $repoRoot "images\lib\ImageMetadata.psm1") -Force
 
 # Invoke-Native 执行外部命令并把非零退出码转换为明确错误。
 function Invoke-Native {
@@ -64,12 +64,14 @@ function Write-Utf8NoBom {
 function Get-LockedDigest {
     param([Parameter(Mandatory = $true)][string]$LogicalImage)
 
-    foreach ($line in Get-Content -LiteralPath $digestLockPath) {
-        if ($line -match '^\s*([^#\s]+)\s+(sha256:[0-9a-f]{64})\s*$' -and $Matches[1] -eq $LogicalImage) {
-            return $Matches[2]
-        }
+    if (-not $digestItems.ContainsKey($LogicalImage)) {
+        throw "权威镜像锁缺少 $LogicalImage"
     }
-    throw "权威镜像锁缺少 $LogicalImage"
+    $digest = [string]$digestItems[$LogicalImage]
+    if ($digest -notmatch '^sha256:[0-9a-f]{64}$') {
+        throw "权威镜像锁中的 $LogicalImage digest 非法"
+    }
+    return $digest
 }
 
 # Ensure-CanonicalTls 使用正式锁定的链工具检查并轮换 canonical 证书,不依赖宿主机工具或临时镜像。
@@ -77,7 +79,7 @@ function Ensure-CanonicalTls {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $registryCAPath) | Out-Null
     New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
     $chainToolsDigest = Get-LockedDigest -LogicalImage "base/chain-tools"
-    $chainToolsImage = "registry.chaimir.io/base/chain-tools@$chainToolsDigest"
+    $chainToolsImage = "$registryHost/base/chain-tools@$chainToolsDigest"
     $tlsDirectory = Split-Path -Parent $registryCAPath
     $certificateScript = @'
 set -eu
@@ -85,7 +87,7 @@ if [ -s /out/tls.key ] && [ -s /out/tls.crt ] \
   && openssl x509 -in /out/tls.crt -checkend 86400 -noout \
   && openssl x509 -in /out/tls.crt -noout -ext subjectAltName | grep -q 'DNS:www.chaimir.io' \
   && openssl x509 -in /out/tls.crt -noout -ext subjectAltName | grep -q 'DNS:tools.chaimir.io' \
-  && openssl x509 -in /out/tls.crt -noout -ext subjectAltName | grep -q 'DNS:registry.chaimir.io' \
+  && openssl x509 -in /out/tls.crt -noout -ext subjectAltName | grep -Fq "DNS:$1" \
   && test "$(openssl x509 -in /out/tls.crt -pubkey -noout | openssl pkey -pubin -outform DER | openssl dgst -sha256)" = "$(openssl pkey -in /out/tls.key -pubout | openssl pkey -pubin -outform DER | openssl dgst -sha256)"; then
   exit 0
 fi
@@ -93,9 +95,8 @@ umask 077
 openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
   -keyout /out/tls.key -out /out/tls.crt \
   -subj '/CN=www.chaimir.io' \
-  -addext 'subjectAltName=DNS:www.chaimir.io,DNS:tools.chaimir.io,DNS:registry.chaimir.io' >/dev/null 2>&1
-# Docker Desktop bind mounts use the Windows ACL of the canonical directory;
-# chmod is not supported on that mount and would make a successful rotation fail.
+  -addext "subjectAltName=DNS:www.chaimir.io,DNS:tools.chaimir.io,DNS:$1" >/dev/null 2>&1
+# Docker Desktop bind mount 使用 Windows ACL;该挂载不支持 chmod,否则成功轮换会被误判失败。
 '@
     $scriptPath = Join-Path $tmpRoot "ensure-canonical-tls.sh"
     Write-Utf8NoBom -Path $scriptPath -Content $certificateScript
@@ -103,8 +104,8 @@ openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
         Invoke-Native -FilePath "docker" -Arguments @(
             "run", "--rm", "--pull", "never", "--network", "none", "--entrypoint", "sh",
             "--mount", "type=bind,source=$tlsDirectory,target=/out",
-            "--mount", "type=bind,source=$tmpRoot,target=/work,readonly", $chainToolsImage,
-            "/work/ensure-canonical-tls.sh"
+             "--mount", "type=bind,source=$tmpRoot,target=/work,readonly", $chainToolsImage,
+             "/work/ensure-canonical-tls.sh", $registryHost
         )
     } finally {
         if (Test-Path -LiteralPath $scriptPath) {
@@ -124,7 +125,7 @@ function Sync-CanonicalTlsSecret {
 
     New-Item -ItemType Directory -Force -Path $tmpRoot | Out-Null
     if ($CreateNamespace) {
-        $namespaceYaml = & kubectl --context $Context create namespace $Namespace --dry-run=client -o yaml
+        $namespaceYaml = & kubectl --context $Context --request-timeout=30s create namespace $Namespace --dry-run=client -o yaml
         if ($LASTEXITCODE -ne 0) {
             throw "生成 TLS 目标 namespace YAML 失败: $Context/$Namespace"
         }
@@ -133,7 +134,7 @@ function Sync-CanonicalTlsSecret {
         Invoke-Native -FilePath "kubectl" -Arguments @("--context", $Context, "apply", "-f", $namespacePath)
     }
 
-    $secretYaml = & kubectl --context $Context -n $Namespace create secret tls $Name --cert=$registryCAPath --key=$registryKeyPath --dry-run=client -o yaml
+    $secretYaml = & kubectl --context $Context --request-timeout=30s -n $Namespace create secret tls $Name --cert=$registryCAPath --key=$registryKeyPath --dry-run=client -o yaml
     if ($LASTEXITCODE -ne 0) {
         throw "生成 canonical TLS Secret YAML 失败: $Context/$Namespace/$Name"
     }
@@ -211,19 +212,33 @@ function Assert-DependencyRegistry {
 
 # Remove-LegacyWorkloads 删除旧 Kindnet 集群中的平台测试资源,只保留 Harbor 与外部入口。
 function Remove-LegacyWorkloads {
-    & kubectl --context $DependencyContext delete validatingwebhookconfiguration,mutatingwebhookconfiguration -l app.kubernetes.io/instance=policy-controller --ignore-not-found=true
-    if ($LASTEXITCODE -ne 0) {
-        throw "删除旧签名准入 webhook 失败"
+    foreach ($resourceType in @("validatingwebhookconfiguration", "mutatingwebhookconfiguration")) {
+        $legacyWebhooks = @(& kubectl --context $DependencyContext --request-timeout=30s get $resourceType -l app.kubernetes.io/instance=policy-controller -o name)
+        if ($LASTEXITCODE -ne 0) {
+            throw "读取旧签名准入 webhook 失败: resource=$resourceType"
+        }
+        if ($legacyWebhooks.Count -gt 0) {
+            Invoke-Native -FilePath "kubectl" -Arguments (@("--context", $DependencyContext, "delete", $resourceType) + $legacyWebhooks)
+        }
     }
-    & kubectl --context $DependencyContext delete clusterimagepolicy --all --ignore-not-found=true 2>$null
+    $clusterImagePolicyResource = @(& kubectl --context $DependencyContext --request-timeout=30s api-resources --verbs=list --namespaced=false -o name | Where-Object { $_ -eq "clusterimagepolicies" })
     if ($LASTEXITCODE -ne 0) {
-        throw "删除旧签名准入策略失败"
+        throw "读取旧签名准入策略资源类型失败"
+    }
+    if ($clusterImagePolicyResource.Count -gt 0) {
+        $legacyPolicies = @(& kubectl --context $DependencyContext --request-timeout=30s get clusterimagepolicies -o name)
+        if ($LASTEXITCODE -ne 0) {
+            throw "读取旧签名准入策略失败"
+        }
+        if ($legacyPolicies.Count -gt 0) {
+            Invoke-Native -FilePath "kubectl" -Arguments (@("--context", $DependencyContext, "delete", "clusterimagepolicies") + $legacyPolicies)
+        }
     }
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $DependencyContext, "delete", "validatingadmissionpolicybinding", "-l", "app.kubernetes.io/part-of=chaimir", "--ignore-not-found=true")
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $DependencyContext, "delete", "validatingadmissionpolicy", "-l", "app.kubernetes.io/part-of=chaimir", "--ignore-not-found=true")
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $DependencyContext, "delete", "namespace", "chaimir-system", "chaimir-data", "chaimir-prepull", "cosign-system", "monitoring", "--ignore-not-found=true", "--wait=true", "--timeout=300s")
 
-    $remaining = @(& kubectl --context $DependencyContext get namespace chaimir-system chaimir-data chaimir-prepull cosign-system monitoring --ignore-not-found -o name)
+    $remaining = @(& kubectl --context $DependencyContext --request-timeout=30s get namespace chaimir-system chaimir-data chaimir-prepull cosign-system monitoring --ignore-not-found -o name)
     if ($LASTEXITCODE -ne 0 -or $remaining.Count -gt 0) {
         throw "旧 Kindnet 集群仍残留 Chaimir 业务资源: $($remaining -join ',')"
     }
@@ -282,7 +297,7 @@ function Wait-KubernetesApi {
     do {
         $previousErrorActionPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        & kubectl --context $runtimeContext get --raw=/readyz 2>$null | Out-Null
+        & kubectl --context $runtimeContext --request-timeout=30s get --raw=/readyz 2>$null | Out-Null
         $readyExitCode = $LASTEXITCODE
         $ErrorActionPreference = $previousErrorActionPreference
         if ($readyExitCode -eq 0) {
@@ -310,7 +325,7 @@ function Approve-KubeletServingCertificates {
     $staleCsrNames = [System.Collections.Generic.List[string]]::new()
     $nodeIPs = @{}
     foreach ($node in $nodes) {
-        $nodeRaw = & kubectl --context $runtimeContext get node $node -o json
+        $nodeRaw = & kubectl --context $runtimeContext --request-timeout=30s get node $node -o json
         if ($LASTEXITCODE -ne 0) {
             throw "读取 $node 失败"
         }
@@ -324,7 +339,7 @@ function Approve-KubeletServingCertificates {
 
     $deadline = (Get-Date).AddSeconds(180)
     do {
-        $csrRaw = & kubectl --context $runtimeContext get certificatesigningrequests -o json
+        $csrRaw = & kubectl --context $runtimeContext --request-timeout=30s get certificatesigningrequests -o json
         if ($LASTEXITCODE -ne 0) {
             throw "读取 kubelet 服务证书请求失败"
         }
@@ -552,17 +567,22 @@ cat "$temporary_hosts" >/etc/hosts
         }
     }
 
+    Sync-RegistryPullSecrets
+}
+
+# Sync-RegistryPullSecrets 将当前受控 Harbor 凭据同步到所有运行集群工具命名空间。
+function Sync-RegistryPullSecrets {
     Wait-KubernetesApi
     foreach ($namespace in @("kube-system", "ingress-nginx", "cosign-system")) {
         # 使用 kubectl 原生忽略 NotFound,按资源输出判断是否需要创建,避免 Windows PowerShell 的原生 stderr/退出码差异。
-        $namespaceResource = @(& kubectl --context $runtimeContext get namespace $namespace --ignore-not-found=true -o name)
+        $namespaceResource = @(& kubectl --context $runtimeContext --request-timeout=30s get namespace $namespace --ignore-not-found=true -o name)
         if ($LASTEXITCODE -ne 0) {
             throw "探测 namespace $namespace 失败"
         }
         if ($namespaceResource.Count -eq 0) {
             Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "create", "namespace", $namespace)
         }
-        $pullSecretYaml = & kubectl --context $runtimeContext -n $namespace create secret generic $imagePullSecret --from-file=".dockerconfigjson=$dockerConfigPath" --type=kubernetes.io/dockerconfigjson --dry-run=client -o yaml
+        $pullSecretYaml = & kubectl --context $runtimeContext --request-timeout=30s -n $namespace create secret generic $imagePullSecret --from-file=".dockerconfigjson=$dockerConfigPath" --type=kubernetes.io/dockerconfigjson --dry-run=client -o yaml
         if ($LASTEXITCODE -ne 0) {
             throw "生成 $namespace Harbor 拉取凭据失败"
         }
@@ -580,6 +600,8 @@ function Restore-RegistryOnNodes {
         throw "未找到可恢复的 Kind 节点"
     }
 
+    $canonicalCaHash = (Get-FileHash -LiteralPath $registryCAPath -Algorithm SHA256).Hash.ToLowerInvariant()
+
     foreach ($node in $nodes) {
         foreach ($requiredPath in @(
             "/etc/containerd/certs.d/$registryHost/ca.crt",
@@ -591,6 +613,16 @@ function Restore-RegistryOnNodes {
             if ($LASTEXITCODE -ne 0) {
                 throw "$node 缺少已引导的 registry 配置 $requiredPath;请执行 make dev-up 修复集群基线"
             }
+        }
+
+        $nodeCaHash = ((& docker exec $node sha256sum "/etc/containerd/certs.d/$registryHost/ca.crt") -split '\s+')[0].Trim().ToLowerInvariant()
+        if ($LASTEXITCODE -ne 0 -or $nodeCaHash -notmatch '^[0-9a-f]{64}$') {
+            throw "$node 无法读取 registry canonical CA 摘要"
+        }
+        if ($nodeCaHash -ne $canonicalCaHash) {
+            # 节点证书文件可能在宿主 TLS 轮换后仍保留旧内容;同步受控证书并重启 containerd 使新 CA 立即生效。
+            Invoke-Native -FilePath "docker" -Arguments @("cp", $registryCAPath, "${node}:/etc/containerd/certs.d/$registryHost/ca.crt")
+            Invoke-Native -FilePath "docker" -Arguments @("exec", $node, "systemctl", "restart", "containerd")
         }
 
         Invoke-Native -FilePath "docker" -Arguments @("exec", $node, "/usr/local/sbin/chaimir-registry-hosts")
@@ -620,6 +652,8 @@ function Restore-RegistryOnNodes {
             throw "$node 的 containerd 仍引用节点回环代理"
         }
     }
+
+    Sync-RegistryPullSecrets
 }
 
 # Configure-RegistryPodDns 为集群 Pod 配置 canonical Harbor split-DNS,并用真实 Pod 解析验证结果。
@@ -639,7 +673,7 @@ function Configure-RegistryPodDns {
         throw "Pod DNS 收到非法宿主机网关: $gateway"
     }
 
-    $corefile = (& kubectl --context $runtimeContext -n kube-system get configmap coredns -o 'jsonpath={.data.Corefile}') -join "`n"
+    $corefile = (& kubectl --context $runtimeContext --request-timeout=30s -n kube-system get configmap coredns -o 'jsonpath={.data.Corefile}') -join "`n"
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($corefile)) {
         throw "读取 CoreDNS Corefile 失败"
     }
@@ -699,7 +733,7 @@ function Configure-RegistryPodDns {
     try {
         Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "apply", "-f", $checkPodPath)
         Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "-n", "kube-system", "wait", "--for=jsonpath={.status.phase}=Succeeded", "pod/$checkPod", "--timeout=120s")
-        $dnsOutput = @(& kubectl --context $runtimeContext -n kube-system logs $checkPod)
+        $dnsOutput = @(& kubectl --context $runtimeContext --request-timeout=30s -n kube-system logs $checkPod)
         if ($LASTEXITCODE -ne 0 -or -not ($dnsOutput | Where-Object { $_ -match "^$([Regex]::Escape($gateway))\s" })) {
             throw "Pod 内 $registryHost 未解析到宿主机网关 $gateway"
         }
@@ -715,7 +749,7 @@ function Write-ContainerKubeconfig {
         [Parameter(Mandatory = $true)][string]$Path
     )
 
-    $raw = & kubectl config view --raw --minify --context $Context -o json
+    $raw = & kubectl --request-timeout=30s config view --raw --minify --context $Context -o json
     if ($LASTEXITCODE -ne 0) {
         throw "读取 $Context kubeconfig 失败"
     }
@@ -781,11 +815,11 @@ function Install-Cilium {
 
 # Repair-StaleCiliumEndpoints 在节点地址变化后删除失效的派生端点,并等待当前 Agent 重新发布。
 function Repair-StaleCiliumEndpoints {
-    $podsRaw = (& kubectl --context $runtimeContext get pods --all-namespaces -o json) -join "`n"
+    $podsRaw = (& kubectl --context $runtimeContext --request-timeout=30s get pods --all-namespaces -o json) -join "`n"
     if ($LASTEXITCODE -ne 0) {
         throw "读取 Pod 列表失败,无法核对 CiliumEndpoint 节点归属"
     }
-    $endpointsRaw = (& kubectl --context $runtimeContext get ciliumendpoints --all-namespaces -o json) -join "`n"
+    $endpointsRaw = (& kubectl --context $runtimeContext --request-timeout=30s get ciliumendpoints --all-namespaces -o json) -join "`n"
     if ($LASTEXITCODE -ne 0) {
         throw "读取 CiliumEndpoint 列表失败"
     }
@@ -820,11 +854,11 @@ function Repair-StaleCiliumEndpoints {
     # keep the wait bounded while allowing the current agent to finish that reconciliation.
     $deadline = (Get-Date).AddSeconds(300)
     do {
-        $currentPodsRaw = (& kubectl --context $runtimeContext get pods --all-namespaces -o json) -join "`n"
+        $currentPodsRaw = (& kubectl --context $runtimeContext --request-timeout=30s get pods --all-namespaces -o json) -join "`n"
         if ($LASTEXITCODE -ne 0) {
             throw "等待 CiliumEndpoint 重建时读取 Pod 状态失败"
         }
-        $currentEndpointsRaw = (& kubectl --context $runtimeContext get ciliumendpoints --all-namespaces -o json) -join "`n"
+        $currentEndpointsRaw = (& kubectl --context $runtimeContext --request-timeout=30s get ciliumendpoints --all-namespaces -o json) -join "`n"
         if ($LASTEXITCODE -ne 0) {
             throw "等待 CiliumEndpoint 重建时读取端点状态失败"
         }
@@ -882,7 +916,7 @@ function Remove-DisallowedNodeImages {
 function Get-CiliumHealthTargets {
     param([string[]]$Nodes)
 
-    $ciliumNodesRaw = (& kubectl --context $runtimeContext get ciliumnodes -o json) -join "`n"
+    $ciliumNodesRaw = (& kubectl --context $runtimeContext --request-timeout=30s get ciliumnodes -o json) -join "`n"
     if ($LASTEXITCODE -ne 0) {
         throw "读取 CiliumNode 列表失败"
     }
@@ -969,19 +1003,19 @@ function Assert-CiliumState {
         throw "Cilium 集群不存在"
     }
 
-    $kindnet = @(& kubectl --context $runtimeContext -n kube-system get daemonset kindnet --ignore-not-found -o name)
+    $kindnet = @(& kubectl --context $runtimeContext --request-timeout=30s -n kube-system get daemonset kindnet --ignore-not-found -o name)
     if ($LASTEXITCODE -ne 0 -or $kindnet.Count -gt 0) {
         throw "运行集群仍存在 Kindnet"
     }
 
-    $agent = (& kubectl --context $runtimeContext -n kube-system get daemonset cilium -o json) | ConvertFrom-Json
-    $envoy = (& kubectl --context $runtimeContext -n kube-system get daemonset cilium-envoy -o json) | ConvertFrom-Json
-    $operator = (& kubectl --context $runtimeContext -n kube-system get deployment cilium-operator -o json) | ConvertFrom-Json
+    $agent = (& kubectl --context $runtimeContext --request-timeout=30s -n kube-system get daemonset cilium -o json) | ConvertFrom-Json
+    $envoy = (& kubectl --context $runtimeContext --request-timeout=30s -n kube-system get daemonset cilium-envoy -o json) | ConvertFrom-Json
+    $operator = (& kubectl --context $runtimeContext --request-timeout=30s -n kube-system get deployment cilium-operator -o json) | ConvertFrom-Json
     if ($agent.status.numberReady -ne $nodes.Count -or $envoy.status.numberReady -ne $nodes.Count -or $operator.status.availableReplicas -lt 1) {
         throw "Cilium 组件未覆盖全部节点: nodes=$($nodes.Count) agent=$($agent.status.numberReady) envoy=$($envoy.status.numberReady) operator=$($operator.status.availableReplicas)"
     }
 
-    $config = (& kubectl --context $runtimeContext -n kube-system get configmap cilium-config -o json) | ConvertFrom-Json
+    $config = (& kubectl --context $runtimeContext --request-timeout=30s -n kube-system get configmap cilium-config -o json) | ConvertFrom-Json
     if ($config.data.'enable-policy' -ne "always" -or $config.data.'cni-exclusive' -ne "true") {
         throw "Cilium 策略配置不符合基线: enable-policy=$($config.data.'enable-policy') cni-exclusive=$($config.data.'cni-exclusive')"
     }
@@ -1024,7 +1058,7 @@ function Invoke-NetworkPolicySmoke {
 
     try {
         foreach ($namespace in $namespaces) {
-            & kubectl --context $runtimeContext delete namespace $namespace --ignore-not-found=true --wait=true --timeout=120s | Out-Null
+            & kubectl --context $runtimeContext --request-timeout=30s delete namespace $namespace --ignore-not-found=true --wait=true --timeout=120s | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 throw "清理旧 NetworkPolicy 测试命名空间失败: $namespace"
             }
@@ -1254,24 +1288,24 @@ spec:
         foreach ($namespace in $namespaces) {
             Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "-n", $namespace, "wait", "--for=condition=Ready", "pod", "--all", "--timeout=300s")
         }
-        $serverIP = (& kubectl --context $runtimeContext -n cilium-smoke-server get service server -o jsonpath='{.spec.clusterIP}').Trim()
+        $serverIP = (& kubectl --context $runtimeContext --request-timeout=30s -n cilium-smoke-server get service server -o jsonpath='{.spec.clusterIP}').Trim()
         if ($LASTEXITCODE -ne 0 -or $serverIP -notmatch '^([0-9]{1,3}\.){3}[0-9]{1,3}$') {
             throw "读取 NetworkPolicy 测试 Service IP 失败"
         }
 
-        & kubectl --context $runtimeContext -n cilium-smoke-allowed exec client -- curl --connect-timeout 5 --max-time 5 -fsS "http://${serverIP}:8080/" | Out-Null
+        & kubectl --context $runtimeContext --request-timeout=30s -n cilium-smoke-allowed exec client -- curl --connect-timeout 5 --max-time 5 -fsS "http://${serverIP}:8080/" | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "显式 ingress/egress 放行未生效"
         }
         $previousErrorActionPreference = $ErrorActionPreference
         $ErrorActionPreference = "Continue"
-        $deniedIngressResult = @(& kubectl --context $runtimeContext -n cilium-smoke-denied exec client -- curl --connect-timeout 3 --max-time 3 -fsS "http://${serverIP}:8080/" 2>$null)
+        $deniedIngressResult = @(& kubectl --context $runtimeContext --request-timeout=30s -n cilium-smoke-denied exec client -- curl --connect-timeout 3 --max-time 3 -fsS "http://${serverIP}:8080/" 2>$null)
         $deniedIngressExitCode = $LASTEXITCODE
         if ($deniedIngressExitCode -eq 0) {
             $ErrorActionPreference = $previousErrorActionPreference
             throw "未授权命名空间绕过了 ingress deny-all"
         }
-        $deniedEgressResult = @(& kubectl --context $runtimeContext -n cilium-smoke-egress exec client -- curl --connect-timeout 3 --max-time 3 -fsS "http://${serverIP}:8080/" 2>$null)
+        $deniedEgressResult = @(& kubectl --context $runtimeContext --request-timeout=30s -n cilium-smoke-egress exec client -- curl --connect-timeout 3 --max-time 3 -fsS "http://${serverIP}:8080/" 2>$null)
         $deniedEgressExitCode = $LASTEXITCODE
         $ErrorActionPreference = $previousErrorActionPreference
         if ($deniedEgressExitCode -eq 0) {
@@ -1304,7 +1338,7 @@ spec:
         Write-Utf8NoBom -Path $egressAllowPath -Content $egressAllow
         Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "apply", "-f", $egressAllowPath)
         Start-Sleep -Seconds 3
-        & kubectl --context $runtimeContext -n cilium-smoke-egress exec client -- curl --connect-timeout 5 --max-time 5 -fsS "http://${serverIP}:8080/" | Out-Null
+        & kubectl --context $runtimeContext --request-timeout=30s -n cilium-smoke-egress exec client -- curl --connect-timeout 5 --max-time 5 -fsS "http://${serverIP}:8080/" | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "显式 egress 放行未生效"
         }
@@ -1313,7 +1347,7 @@ spec:
         $smokeError = $_
     } finally {
         foreach ($namespace in $namespaces) {
-            & kubectl --context $runtimeContext delete namespace $namespace --ignore-not-found=true --wait=true --timeout=180s | Out-Null
+            & kubectl --context $runtimeContext --request-timeout=30s delete namespace $namespace --ignore-not-found=true --wait=true --timeout=180s | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 $cleanupFailures += $namespace
             }
@@ -1360,7 +1394,7 @@ function Configure-ExternalEdge {
     }
 
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $DependencyContext, "apply", "-f", $edgeManifestPath)
-    $edgeSecretYaml = & kubectl --context $DependencyContext -n chaimir-edge create secret tls chaimir-edge-tls --cert=$registryCAPath --key=$registryKeyPath --dry-run=client -o yaml
+    $edgeSecretYaml = & kubectl --context $DependencyContext --request-timeout=30s -n chaimir-edge create secret tls chaimir-edge-tls --cert=$registryCAPath --key=$registryKeyPath --dry-run=client -o yaml
     if ($LASTEXITCODE -ne 0) {
         throw "生成外部入口 TLS Secret 失败"
     }
@@ -1427,6 +1461,12 @@ if ($Action -eq "Stop") {
     return
 }
 
+$projectConfig = Read-ChaimirEnvFile -Path $composeEnvPath -RequiredKeys @(
+    "SUPPLY_CHAIN_REGISTRY", "SUPPLY_CHAIN_REGISTRY_ENDPOINT", "SUPPLY_CHAIN_HARBOR_EXTERNAL_URL", "IMAGE_REGISTRY"
+)
+$registryHost = Get-ChaimirCanonicalRegistry -Config $projectConfig
+$digestItems = Read-ChaimirDigestLock -Path $digestLockPath -Required
+
 if ($Action -in @("Up", "Start")) {
     Ensure-CanonicalTls
 }
@@ -1438,7 +1478,7 @@ switch ($Action) {
         Sync-ContainerKubeconfigs
         Configure-RegistryOnNodes
         Approve-KubeletServingCertificates
-        Sync-CanonicalTlsSecret -Context $DependencyContext -Namespace "harbor" -Name "harbor-tls"
+        Sync-CanonicalTlsSecret -Context $DependencyContext -Namespace "harbor" -Name "harbor-tls" -CreateNamespace
         Sync-CanonicalTlsSecret -Context $runtimeContext -Namespace "chaimir-system" -Name "chaimir-tls" -CreateNamespace
         Assert-DependencyRegistry
         Install-Cilium
@@ -1455,7 +1495,7 @@ switch ($Action) {
         Approve-KubeletServingCertificates
         Wait-CiliumComponents -TimeoutSeconds 300
         Repair-StaleCiliumEndpoints
-        Sync-CanonicalTlsSecret -Context $DependencyContext -Namespace "harbor" -Name "harbor-tls"
+        Sync-CanonicalTlsSecret -Context $DependencyContext -Namespace "harbor" -Name "harbor-tls" -CreateNamespace
         Sync-CanonicalTlsSecret -Context $runtimeContext -Namespace "chaimir-system" -Name "chaimir-tls" -CreateNamespace
         Assert-DependencyRegistry
         Configure-RegistryPodDns
@@ -1471,5 +1511,11 @@ switch ($Action) {
         Sync-ContainerKubeconfigs
         Assert-CiliumState
         Configure-ExternalEdge
+    }
+    "HarborTls" {
+        # Harbor 首次安装前必须先同步 canonical 证书，避免 chart 引用不存在的 harbor-tls Secret。
+        Ensure-CanonicalTls
+        Sync-ContainerKubeconfigs
+        Sync-CanonicalTlsSecret -Context $DependencyContext -Namespace "harbor" -Name "harbor-tls" -CreateNamespace
     }
 }

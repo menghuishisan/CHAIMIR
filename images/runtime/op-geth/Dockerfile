@@ -1,6 +1,5 @@
-# OP Geth platform adapter: rebuild the pinned upstream commit with the
-# current platform toolchain, then initialize a supplied rollup genesis and
-# expose authenticated Engine API plus JSON-RPC with fixed defaults.
+# OP Geth 平台适配器:使用当前平台工具链重建固定的上游提交,初始化受控 rollup
+# genesis,并以固定默认值暴露带鉴权的 Engine API 和 JSON-RPC。
 ARG GO_BUILDER_IMAGE=invalid.invalid/base/go-builder:required
 
 FROM ${GO_BUILDER_IMAGE} AS builder
@@ -11,7 +10,7 @@ ARG OP_GETH_SOURCE_URL=https://codeload.github.com/ethereum-optimism/op-geth/tar
 ARG GO_MODULE_PROXY=
 
 USER root
-RUN apk add --no-cache tar
+RUN apk add --no-cache ca-certificates curl tar
 WORKDIR /src/op-geth
 ADD ${OP_GETH_SOURCE_URL} /tmp/op-geth-source.tar.gz
 RUN sha256sum /tmp/op-geth-source.tar.gz \
@@ -23,12 +22,12 @@ RUN sha256sum /tmp/op-geth-source.tar.gz \
 USER 1000:1000
 RUN if [ -n "${GO_MODULE_PROXY}" ]; then go env -w GOPROXY="${GO_MODULE_PROXY}"; fi \
     && go get \
-        go.opentelemetry.io/otel@v1.43.0 \
-        go.opentelemetry.io/otel/sdk@v1.43.0 \
+        go.opentelemetry.io/otel@v1.44.0 \
+        go.opentelemetry.io/otel/sdk@v1.44.0 \
         golang.org/x/crypto@v0.55.0 \
-        golang.org/x/net@v0.57.0 \
+        golang.org/x/net@v0.58.0 \
         golang.org/x/text@v0.41.0 \
-        google.golang.org/grpc@v1.82.1 \
+        google.golang.org/grpc@v1.83.2 \
     && go mod tidy \
     && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go run build/ci.go install -static ./cmd/geth
 
@@ -40,7 +39,7 @@ FROM alpine:3.23@sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc
 LABEL org.opencontainers.image.title="runtime/op-geth"
 LABEL org.opencontainers.image.description="Chaimir OP Geth source rebuild with runtime adapter"
 
-RUN apk add --no-cache ca-certificates curl \
+RUN apk add --no-cache ca-certificates 'curl=8.22.0-r0' 'openssl=3.5.8-r0' \
     && mkdir -p /runtime-state/op-geth \
     && chown -R 1000:1000 /runtime-state
 

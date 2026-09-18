@@ -5,7 +5,10 @@ LABEL org.opencontainers.image.title="middleware/redis"
 LABEL org.opencontainers.image.description="Chaimir Redis middleware thin wrapper"
 
 USER root
-RUN chown -R redis:redis /data
+RUN apk add --no-cache --upgrade \
+        openssl=3.5.8-r0 \
+        setpriv=2.41.6-r1 \
+    && chown -R redis:redis /data
 
 COPY redis-entrypoint.sh /usr/local/bin/chaimir-redis-entrypoint
 COPY redis-probe.sh /usr/local/bin/chaimir-redis-probe

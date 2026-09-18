@@ -19,9 +19,16 @@ description: 学生工作区文件、归档和受控终端能力。
 source:
   type: platform-built
 upstream:
-  image: alpine
+  image: alpine:3.23
   version: 3.23
   digest: sha256:fd791d74b68913cbb027c6546007b3f0d3bc45125f797758156952bc2d6daf40
+  runtime_packages:
+    - jq=1.8.2-r0
+    - curl=8.22.0-r0
+    - libcurl=8.22.0-r0
+    - libcrypto3=3.5.8-r0
+    - libexpat=2.8.4-r0
+    - libssl3=3.5.8-r0
 data_driven: false
 capabilities:
   provides:

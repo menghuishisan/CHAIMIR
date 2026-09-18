@@ -408,7 +408,7 @@ func toolResourceSpecFromManifest(manifest toolManifest, imageURL string, kind i
 	return spec, nil
 }
 
-// applyToolStudentMounts 把公开工具的学生安全域权限落实为容器挂载,不保留只登记不生效的权限。
+// applyToolStudentMounts 把公开工具的学生安全域权限落实为容器挂载,并保留经能力声明授权的系统只读挂载。
 func applyToolStudentMounts(spec map[string]any, manifest toolManifest) error {
 	if !manifest.StudentAccess.Enabled {
 		return nil
@@ -430,28 +430,54 @@ func applyToolStudentMounts(spec map[string]any, manifest toolManifest) error {
 			return fmt.Errorf("工具 %s 的组件 %s 与 mount_workspace 不一致", manifest.Name, component.Name)
 		}
 		seen := map[string]struct{}{}
+		mounts := make([]string, 0, len(component.MountDomains)+len(allowed))
 		for _, raw := range component.MountDomains {
 			name := strings.TrimSpace(raw)
 			if _, exists := seen[name]; exists {
 				continue
 			}
 			seen[name] = struct{}{}
-			found := false
-			for _, item := range allowed {
-				if item == name {
-					found = true
-					break
-				}
-			}
-			if !found {
+			if !containsString(allowed, name) && !manifestAllowsSystemMount(manifest, name) {
 				return fmt.Errorf("工具 %s 的组件 %s 请求未授权安全域 %s", manifest.Name, component.Name, name)
 			}
+			mounts = append(mounts, name)
 		}
-		component.MountDomains = append([]string(nil), allowed...)
+		for _, name := range allowed {
+			if _, exists := seen[name]; exists {
+				continue
+			}
+			seen[name] = struct{}{}
+			mounts = append(mounts, name)
+		}
+		component.MountDomains = mounts
 		component.WritableMountDomains = nil
 	}
 	spec["components"] = components
 	return nil
+}
+
+// manifestAllowsSystemMount 只按显式能力授予工具读取平台运行态的权限,不把学生挂载白名单扩大为系统域。
+func manifestAllowsSystemMount(manifest toolManifest, domain string) bool {
+	if strings.TrimSpace(domain) != sandbox.VolumeDomainRuntimeState {
+		return false
+	}
+	for _, required := range manifest.Capabilities.Requires {
+		switch strings.TrimSpace(required) {
+		case "fabric-crypto-identity", "runtime-state-reader":
+			return true
+		}
+	}
+	return false
+}
+
+// containsString 判断已规范化的安全域是否已存在,避免同一组件重复挂载。
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 // appendManifestSecretEnv 将显式 WorkloadSpec 的敏感环境变量绑定到声明的实际组件。
@@ -577,7 +603,7 @@ func normalizeExplicitToolResourceSpec(input map[string]any, imageURL string, ki
 	if err != nil {
 		return nil, fmt.Errorf("编码显式 WorkloadSpec 失败: %w", err)
 	}
-	var typed workload.ToolResourceSpec
+	var typed sandbox.ToolResourceSpec
 	if err := jsonx.DecodeStrictKnownFields(raw, &typed); err != nil {
 		return nil, fmt.Errorf("显式 WorkloadSpec 包含未知字段或类型错误: %w", err)
 	}

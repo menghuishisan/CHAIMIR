@@ -47,7 +47,14 @@ env_keys:
     - CHAIMIR_CHAIN_RPC_URL
     - CHAIMIR_RUNTIME_RPC_PORT
     - CHAIMIR_CHAIN_STATE_DIR
-  secret: []
+  secret:
+    - CHAIMIR_EVM_DEPLOYER_MNEMONIC
+secrets_required:
+  - component: runtime
+    env: CHAIMIR_EVM_DEPLOYER_MNEMONIC
+    secret_key: CHAIMIR_EVM_DEPLOYER_MNEMONIC
+    source: deploy/config/chaimir.env
+    runtime_value: secret-or-kms
 capabilities:
   provides:
     - chain-runtime

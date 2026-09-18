@@ -1,7 +1,71 @@
 # runtime/fabric
 
-镜像启动时在 `/runtime-state/fabric` 内用 `cryptogen`、`configtxgen` 生成单组织教学网络,运行态生成 TLS CA/证书和单节点 etcdraft 创世块,再启动 `orderer` 和 `peer`,创建并加入 `chaimir` 通道。运行期身份、TLS 材料、创世块、通道块和账本均属于当前沙箱的临时卷,不会写入镜像层或学生工作区。检测到旧的明文/solo 状态时会直接拒绝复用,不会迁移或降级。
+## 镜像职责
 
-链码安装、批准、提交、调用和查询只允许通过平台链能力适配器的固定 `peer` 子命令执行;Fabric Explorer 需要由组合连接显式注入 peer 端点,不使用隐式运行时地址。
+Hyperledger Fabric 工具运行时镜像。
 
-运行时内部客户端使用 `127.0.0.1` 并通过证书 SAN 和受控 hostname override 校验 TLS;监听仍绑定 `0.0.0.0`,由 M2 生成的 Service 代理对外提供受控访问。Fabric Explorer 只有在对应工具镜像通过供应链门禁,并由 WorkloadSpec 注入真实 peer/orderer 连接和只读 TLS 身份后才能启用,不得作为默认工具隐式注入。该镜像提供 cryptogen 生成的受控网络身份根,不提供独立 Fabric CA enrollment 服务;需要动态注册多组织身份的组合必须另行声明 CA 组件。
+## 能力边界
+
+- 支持 capability：chain-runtime, fabric-peer-orderer, fabric-crypto-identity, chaincode-dev
+- 明确不支持：manifest 未声明的能力、协议动作和跨镜像联动；入口和编排必须严格失败，不使用 generic fallback。
+- conflicts：无；cardinality：one；placement：sandbox。
+
+## 合法 runtime / provider
+
+- 生态或适配范围：fabric
+- 必需 provider 能力：无。
+- provider 只能通过 manifest 能力和显式 CompositionSpec link 选择；多个候选必须显式指定，不能按名称猜测。
+
+## bindings 与 links
+
+- 必需 bindings：无。
+- 必需 links：无；本镜像不声明跨组件 link。
+- binding 的 endpoint、协议、配置键和启动前置以 manifest 为准；缺失、重复、错误能力或错误 provider 均拒绝编排。
+
+## 端口与服务
+
+- peer：7051/TCP，暴露边界 proxy，用途：Fabric peer gRPC。
+- orderer：7050/TCP，暴露边界 none，用途：Fabric orderer gRPC。
+- 组件：无 resource_spec 组件。
+
+## command / args 语义
+
+- 镜像默认 ENTRYPOINT：["/usr/local/bin/chaimir-fabric-entrypoint"]；manifest 未覆盖组件 command/args，使用该入口语义。
+
+## 初始化材料与运行时注入
+
+- 镜像层不内置租户、链、协议或私有材料；声明的 init_assets：无。
+- genesis、rollup、checkpoint、Hyperlane、Chainlink、合约或 subgraph 材料必须由平台受控对象存储、初始化资产和 CompositionSpec 注入并校验来源及 SHA-256；缺失时严格失败。
+- 数据卷声明：无顶层 data_volumes 声明。
+
+## Secret / KMS
+
+- Secret 环境键：无。
+- 必需材料映射：无；该镜像不得自行生成或写入密钥。
+- Secret 只来自平台 Secret/KMS 运行时注入，不能写入 Dockerfile、manifest、README、镜像层或测试输出。
+
+## 持久化与隔离边界
+
+- 持久化目录：由组件 mount_domains 决定；未声明持久化数据时不得自行落盘。
+- 组件挂载与文件系统：无
+## 安全边界
+
+- 安全声明：{"run_as_non_root":true,"read_only_root_filesystem":true,"allow_privilege_escalation":false,"privileged":false,"host_network":false,"automount_service_account_token":false,"drop_capabilities":["ALL"],"network_policy":"deny-all"}
+- student_access：{"enabled":false,"shell":"none","allowed_mounts":[]}。
+- 网络只允许 manifest binding/link 所需目标，默认拒绝；禁止宿主机路径、hostNetwork、ServiceAccount token 和越权写入。
+
+## readiness / health
+
+- 未声明组件 readiness probe；容器运行不等于就绪或业务成功。
+- 镜像自检 fabric-peer-version：["peer","version"]。
+
+## 清理
+
+- 验收后按 CompositionSpec 所属租户/实例和项目 owner 标签删除容器、Pod、Service、NetworkPolicy、临时卷、Secret 投影和临时材料；保留平台长期资源。
+- 不使用 broad prune，不删除 kind-chaimir-cilium 节点、正式锁引用或其他项目资源。
+
+## 验收条件
+
+- 先按 digest lock 启动合法 CompositionSpec，核对 command/args、bindings、links、材料和 Secret 投影，再执行 manifest selftest。
+- selftest 只证明镜像布局和声明入口正确；协议、链、存储、索引、签名或跨镜像能力必须追加真实 provider 联动、正向业务、错误输入拒绝、重启/持久化（若声明）和清理证据。
+- 未执行或只完成探活的项目不得标记为业务通过。

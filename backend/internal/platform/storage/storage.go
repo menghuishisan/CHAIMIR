@@ -54,7 +54,7 @@ func New(ctx context.Context, cfg config.ObjectStorageConfig) (*Storage, error) 
 	}
 	client, err := minio.New(cfg.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
-		Secure: cfg.UseSSL,
+		Secure: cfg.Secure,
 		Region: cfg.Region,
 	})
 	if err != nil {
