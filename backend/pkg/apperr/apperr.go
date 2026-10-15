@@ -32,9 +32,22 @@ func (e *Error) LogString() string {
 		return ""
 	}
 	if e.cause != nil {
-		return fmt.Sprintf("[%s] %s: %v", e.code, e.message, e.cause)
+		return fmt.Sprintf("[%s] %s: %s", e.code, e.message, logCauseString(e.cause))
 	}
 	return e.Error()
+}
+
+// logCauseString 递归展开应用错误链,让后台日志保留到数据库或中间件根因。
+// 用户向 Error() 仍只返回稳定码和文案,避免内部原因穿透 API 响应。
+func logCauseString(err error) string {
+	if err == nil {
+		return ""
+	}
+	var appErr *Error
+	if errors.As(err, &appErr) {
+		return appErr.LogString()
+	}
+	return err.Error()
 }
 
 // UserCode 返回稳定错误码,供前端按码做跳转、重试或提示策略。

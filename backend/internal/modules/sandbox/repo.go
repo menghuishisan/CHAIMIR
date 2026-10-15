@@ -41,6 +41,7 @@ type TxStore interface {
 	CreateRuntimeImage(ctx context.Context, id, runtimeID int64, req RuntimeImageRequest) (RuntimeImage, error)
 	GetPublishedCompositionSnapshot(ctx context.Context, compositionDigest string) ([]byte, error)
 	UpsertPublishedCompositionSnapshot(ctx context.Context, compositionDigest string, snapshot []byte) error
+	DeletePublishedCompositionSnapshot(ctx context.Context, compositionDigest string) error
 	GetCompositionPrepullForUpdate(ctx context.Context, runtimeImageID int64, compositionDigest string) (CompositionPrepull, error)
 	StartCompositionPrepull(ctx context.Context, id, runtimeImageID int64, compositionDigest, attemptID string, imageClosure, detail []byte) (CompositionPrepull, error)
 	FinishCompositionPrepull(ctx context.Context, runtimeImageID int64, compositionDigest, attemptID string, status int16, daemonsetName string, desiredNodes, readyNodes int32, detail []byte) (CompositionPrepull, error)
@@ -328,6 +329,11 @@ func (s *txStore) UpsertPublishedCompositionSnapshot(ctx context.Context, compos
 		CompositionDigest: compositionDigest,
 		Snapshot:          snapshot,
 	})
+}
+
+// DeletePublishedCompositionSnapshot 删除被最终快照替代的已发布组合摘要。
+func (s *txStore) DeletePublishedCompositionSnapshot(ctx context.Context, compositionDigest string) error {
+	return s.q.DeletePublishedCompositionSnapshot(ctx, compositionDigest)
 }
 
 // GetCompositionPrepullForUpdate 锁定某个组合摘要的预拉取证明。

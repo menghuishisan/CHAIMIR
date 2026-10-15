@@ -313,7 +313,7 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
   const [disableTarget, setDisableTarget] = useState<SandboxRuntimeImage>()
   const [actionError, setActionError] = useState<string>()
 
-  /** prepull 触发预拉取:平台按节点逐台拉镜像,耗时较长,故完成后回报节点就绪数。 */
+  /** prepull 触发预拉取并轮询真实节点状态,避免长请求被入口层中止后误报失败。 */
   const prepull = useCallback(
     async (image: SandboxRuntimeImage) => {
       setBusyId(image.id)
@@ -324,21 +324,57 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
           setActionError('请先填写已发布组合摘要,再执行预拉取。')
           return
         }
-        const status = await api.sandbox.prepullRuntimeImage(runtimeId, image.id, digest)
-        setPrepullStates((current) => ({ ...current, [image.id]: status }))
-        toast.success(
-          status.prepull_status === ImagePrepullStatus.SUCCEEDED
-            ? `预拉取完成,${status.ready_nodes} 个节点已就绪`
-            : `预拉取已开始,当前 ${status.ready_nodes}/${status.desired_nodes} 个节点就绪`
-        )
-        onChanged()
+        const triggerPromise = api.sandbox.prepullRuntimeImage(runtimeId, image.id, digest)
+        let triggerError: unknown
+        const quickStatus = await Promise.race<SandboxPrepullStatus | undefined>([
+          triggerPromise,
+          wait(500).then(() => undefined),
+        ])
+        if (quickStatus) {
+          setPrepullStates((current) => ({ ...current, [image.id]: quickStatus }))
+        } else {
+          triggerPromise.catch((error) => {
+            triggerError = error
+          })
+        }
+
+        const deadline = Date.now() + appConfig.runtimeSelftestPollTimeoutMs
+        let lastStatus: SandboxPrepullStatus | undefined = quickStatus
+        while (Date.now() < deadline) {
+          try {
+            lastStatus = await api.sandbox.getRuntimeImagePrepull(runtimeId, image.id, digest)
+            setPrepullStates((current) => ({ ...current, [image.id]: lastStatus! }))
+          } catch (error) {
+            if (triggerError) throw triggerError
+            triggerError = error
+            await wait(appConfig.runtimeSelftestPollIntervalMs)
+            continue
+          }
+
+          if (lastStatus.prepull_status === ImagePrepullStatus.SUCCEEDED) {
+            toast.success(`预拉取完成,${lastStatus.ready_nodes} 个节点已就绪`)
+            return
+          }
+          if (lastStatus.prepull_status === ImagePrepullStatus.FAILED) {
+            if (triggerError) throw triggerError
+            throw new Error('预拉取没有完成,请读取进度后重试。')
+          }
+          await wait(appConfig.runtimeSelftestPollIntervalMs)
+        }
+
+        if (lastStatus?.prepull_status === ImagePrepullStatus.RUNNING) {
+          toast.success(`预拉取已开始,当前 ${lastStatus.ready_nodes}/${lastStatus.desired_nodes} 个节点就绪`)
+          return
+        }
+        if (triggerError) throw triggerError
+        throw new Error('预拉取仍在进行,请稍后刷新进度。')
       } catch (error) {
         setActionError(userFacingErrorMessage(error, '预拉取没有启动成功,请稍后重试。'))
       } finally {
         setBusyId(undefined)
       }
     },
-    [compositionDigest, onChanged, runtimeId]
+    [compositionDigest, runtimeId]
   )
 
   /** refreshPrepull 重新读取预拉取进度:拉取在后台进行,页面不轮询,由管理员按需刷新。 */
@@ -355,14 +391,13 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
         const status = await api.sandbox.getRuntimeImagePrepull(runtimeId, image.id, digest)
         setPrepullStates((current) => ({ ...current, [image.id]: status }))
         toast.success(`${status.ready_nodes}/${status.desired_nodes} 个节点已就绪`)
-        onChanged()
       } catch (error) {
         setActionError(userFacingErrorMessage(error, '没能读到预拉取进度,请稍后重试。'))
       } finally {
         setBusyId(undefined)
       }
     },
-    [compositionDigest, onChanged, runtimeId]
+    [compositionDigest, runtimeId]
   )
 
   const columns: TableColumn<SandboxRuntimeImage>[] = [

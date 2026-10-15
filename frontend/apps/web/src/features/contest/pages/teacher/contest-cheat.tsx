@@ -12,6 +12,8 @@ import { Search, ShieldAlert, Trophy } from 'lucide-react'
 import {
   CheatAction,
   CheatType,
+  ContestMode,
+  ContestStatus,
   PAGINATION_MAX_SIZE,
   type CheatRecord,
   type CheatSuspect,
@@ -52,10 +54,7 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../../hooks'
 import { formatDateTime, formatScore } from '../../../../utils/formatters'
-import {
-  cheatActionLabel,
-  cheatTypeLabel,
-} from '../../../../utils/labels/contest'
+import { cheatActionLabel, cheatTypeLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { CHEAT_ACTIONS, CHEAT_TYPES } from '../../options'
 import { readNumber, readString } from '../../jsonReaders'
@@ -75,17 +74,20 @@ const ACTION_HINTS: Record<CheatAction, string> = {
 
 export interface ContestCheatProps {
   contest: Contest
+  readOnly?: boolean
 }
 
 /**
  * ContestCheat 承载查重线索与违规处理。
  */
-export function ContestCheat({ contest }: ContestCheatProps) {
+export function ContestCheat({ contest, readOnly = false }: ContestCheatProps) {
   const [recordTarget, setRecordTarget] = useState<{ sourceRef?: string } | undefined>()
+  const isDraft = contest.status === ContestStatus.DRAFT
+  const actionsReadOnly = readOnly || isDraft
 
   const records = usePagedResource<CheatRecord>(
     (params) => api.contest.listCheatRecords(contest.id, params),
-    [contest.id],
+    [contest.id]
   )
 
   const columns: TableColumn<CheatRecord>[] = [
@@ -132,16 +134,39 @@ export function ContestCheat({ contest }: ContestCheatProps) {
   ]
 
   return (
-    <PageBody rail={<SuspectsCard contest={contest} onHandle={(sourceRef) => setRecordTarget({ sourceRef })} />}>
+    <PageBody
+      rail={
+        <SuspectsCard
+          contest={contest}
+          readOnly={actionsReadOnly}
+          onHandle={(sourceRef) => setRecordTarget({ sourceRef })}
+        />
+      }
+    >
       <PageSection
         title="违规处理记录"
-        description="扣分与取消资格会立即影响榜单。"
+        description={
+          isDraft
+            ? '赛事仍在编排中,当前没有参赛队伍或可审查的参赛数据。'
+            : '扣分与取消资格会立即影响榜单。'
+        }
         actions={
-          <Button variant="primary" leftIcon={ShieldAlert} onClick={() => setRecordTarget({})}>
-            登记违规
-          </Button>
+          readOnly ? (
+            <Badge tone="neutral">归档后只读</Badge>
+          ) : isDraft ? (
+            <Badge tone="neutral">报名开启后可处理</Badge>
+          ) : (
+            <Button variant="primary" leftIcon={ShieldAlert} onClick={() => setRecordTarget({})}>
+              登记违规
+            </Button>
+          )
         }
       >
+        {isDraft ? (
+          <Callout tone="info" title="赛事尚未开放报名">
+            草稿阶段没有参赛数据,查重和违规处理会在赛事开放报名后提供。
+          </Callout>
+        ) : null}
         {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):数据表与分页同处一块抬起片 */}
         <DataPanel
           label="违规处理记录"
@@ -159,7 +184,9 @@ export function ContestCheat({ contest }: ContestCheatProps) {
             emptyIcon={ShieldAlert}
             emptyTitle="还没有违规记录"
             emptyDescription="确认队伍违规后在这里登记处理。记录会留档并计入审计。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+            skeleton={
+              <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
+            }
           >
             {(page) => (
               <Table
@@ -172,7 +199,9 @@ export function ContestCheat({ contest }: ContestCheatProps) {
                   title: formatDateTime(item.created_at),
                   meta: `${cheatTypeLabel(item.type)} · ${readString(item.evidence, EVIDENCE_NOTE) || '未填写说明'}`,
                   badge: (
-                    <Badge tone={cheatActionTone(item.action)}>{cheatActionLabel(item.action)}</Badge>
+                    <Badge tone={cheatActionTone(item.action)}>
+                      {cheatActionLabel(item.action)}
+                    </Badge>
                   ),
                 })}
               />
@@ -181,7 +210,7 @@ export function ContestCheat({ contest }: ContestCheatProps) {
         </DataPanel>
       </PageSection>
 
-      {recordTarget ? (
+      {recordTarget && !actionsReadOnly ? (
         <CheatRecordModal
           contest={contest}
           sourceRef={recordTarget.sourceRef}
@@ -198,6 +227,7 @@ export function ContestCheat({ contest }: ContestCheatProps) {
 
 interface SuspectsCardProps {
   contest: Contest
+  readOnly: boolean
   onHandle: (sourceRef: string) => void
 }
 
@@ -205,7 +235,7 @@ interface SuspectsCardProps {
  * SuspectsCard 按赛题查询代码相似线索。
  * 查重以某一份提交为基准比对同题其他提交,故需要先给出基准提交的代码指纹。
  */
-function SuspectsCard({ contest, onHandle }: SuspectsCardProps) {
+function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
   const [problemId, setProblemId] = useState<string>('')
   const [codeHash, setCodeHash] = useState('')
   const [threshold, setThreshold] = useState('0.8')
@@ -216,24 +246,22 @@ function SuspectsCard({ contest, onHandle }: SuspectsCardProps) {
   const problems = useAsyncResource(
     () => api.contest.getProblems(contest.id),
     [contest.id],
-    () => false,
+    () => false
   )
 
   const problemOptions = useMemo(
     () =>
       (problems.data ?? []).map((problem: ContestProblem) => ({
         value: problem.id,
-        label:
-          typeof problem.face?.title === 'string'
-            ? `第 ${problem.seq} 题 · ${problem.face.title}`
-            : `第 ${problem.seq} 题`,
+        label: problem.title ? `第 ${problem.seq} 题 · ${problem.title}` : `第 ${problem.seq} 题`,
       })),
-    [problems.data],
+    [problems.data]
   )
 
   const search = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
+      if (readOnly) return
       if (problemId === '') {
         setSearchError('请选择要查重的赛题')
         return
@@ -258,14 +286,20 @@ function SuspectsCard({ contest, onHandle }: SuspectsCardProps) {
         setSearching(false)
       }
     },
-    [codeHash, contest.id, problemId, threshold],
+    [codeHash, contest.id, problemId, readOnly, threshold]
   )
 
   return (
     <Card>
       <CardHeader
         title="代码查重"
-        description="按赛题比对提交代码的相似度,超过阈值的会列出来供人工判断。"
+        description={
+          contest.status === ContestStatus.DRAFT
+            ? '赛事开放报名并产生参赛记录后,才可开始查重。'
+            : readOnly
+              ? '赛事已归档,查重和处理入口已关闭。'
+              : '按赛题比对提交代码的相似度,超过阈值的会列出来供人工判断。'
+        }
       />
       <CardBody className="flex flex-col gap-4">
         <ResourceState
@@ -283,6 +317,7 @@ function SuspectsCard({ contest, onHandle }: SuspectsCardProps) {
                   options={problemOptions}
                   value={problemId}
                   placeholder="选择赛题"
+                  disabled={readOnly}
                   onValueChange={setProblemId}
                 />
               </FormField>
@@ -297,6 +332,7 @@ function SuspectsCard({ contest, onHandle }: SuspectsCardProps) {
                   value={codeHash}
                   autoComplete="off"
                   placeholder="提交详情里的代码指纹"
+                  disabled={readOnly}
                   onChange={(event) => setCodeHash(event.target.value)}
                 />
               </FormField>
@@ -314,13 +350,21 @@ function SuspectsCard({ contest, onHandle }: SuspectsCardProps) {
                   max="0.99"
                   step="0.05"
                   value={threshold}
+                  disabled={readOnly}
                   onChange={(event) => setThreshold(event.target.value)}
                 />
               </FormField>
 
               {searchError ? <Callout tone="danger">{searchError}</Callout> : null}
 
-              <Button type="submit" variant="outline" leftIcon={Search} loading={searching} className="w-full">
+              <Button
+                type="submit"
+                variant="outline"
+                leftIcon={Search}
+                loading={searching}
+                disabled={readOnly}
+                className="w-full"
+              >
                 开始查重
               </Button>
             </form>
@@ -339,10 +383,7 @@ function SuspectsCard({ contest, onHandle }: SuspectsCardProps) {
             {[...suspects]
               .sort((a, b) => b.score - a.score)
               .map((suspect) => (
-                <div
-                  key={suspect.source_ref}
-                  className="flex flex-col gap-2 well p-3"
-                >
+                <div key={suspect.source_ref} className="flex flex-col gap-2 well p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Badge tone={suspect.score >= 0.95 ? 'danger' : 'warning'}>
                       相似度 {Math.round(suspect.score * 100)}%
@@ -353,9 +394,11 @@ function SuspectsCard({ contest, onHandle }: SuspectsCardProps) {
                       </span>
                     ) : null}
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => onHandle(suspect.source_ref)}>
-                    据此登记违规
-                  </Button>
+                  {!readOnly ? (
+                    <Button variant="ghost" size="sm" onClick={() => onHandle(suspect.source_ref)}>
+                      据此登记违规
+                    </Button>
+                  ) : null}
                 </div>
               ))}
           </div>
@@ -388,7 +431,7 @@ function CheatRecordModal({ contest, sourceRef, onClose, onSaved }: CheatRecordM
   const ladder = useAsyncResource(
     () => api.contest.getLadder(contest.id, { page: 1, size: PAGINATION_MAX_SIZE }),
     [contest.id],
-    () => false,
+    () => false
   )
 
   const teamOptions = useMemo(
@@ -396,9 +439,12 @@ function CheatRecordModal({ contest, sourceRef, onClose, onSaved }: CheatRecordM
       (ladder.data?.list ?? []).map((rank: LadderRank) => ({
         value: rank.team_id,
         // 榜单只回 team_id,按名次与得分标识队伍,不把内部编号当队名显示
-        label: `第 ${rank.rank} 名 · ${formatScore(rank.score)} 分 · 通过 ${rank.solved_count} 题`,
+        label:
+          contest.mode === ContestMode.SOLVE
+            ? `第 ${rank.rank} 名 · ${formatScore(rank.score)} 分 · 通过 ${rank.solved_count} 题`
+            : `第 ${rank.rank} 名 · 对抗积分 ${formatScore(rank.score)}`,
       })),
-    [ladder.data],
+    [contest.mode, ladder.data]
   )
 
   const actionValue = Number(action) as CheatAction
@@ -441,7 +487,7 @@ function CheatRecordModal({ contest, sourceRef, onClose, onSaved }: CheatRecordM
         setSubmitting(false)
       }
     },
-    [actionValue, contest.id, note, onSaved, penaltyScore, sourceRef, teamId, type],
+    [actionValue, contest.id, note, onSaved, penaltyScore, sourceRef, teamId, type]
   )
 
   return (

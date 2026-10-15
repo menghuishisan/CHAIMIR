@@ -388,6 +388,16 @@ func (q *Queries) DeleteCompositionPrepullByRuntimeImage(ctx context.Context, ru
 	return err
 }
 
+const deletePublishedCompositionSnapshot = `-- name: DeletePublishedCompositionSnapshot :exec
+DELETE FROM sandbox_composition
+WHERE composition_digest = $1 AND status = 1
+`
+
+func (q *Queries) DeletePublishedCompositionSnapshot(ctx context.Context, compositionDigest string) error {
+	_, err := q.db.Exec(ctx, deletePublishedCompositionSnapshot, compositionDigest)
+	return err
+}
+
 const disableRuntimeImage = `-- name: DisableRuntimeImage :one
 UPDATE runtime_image
 SET status = 2
@@ -482,33 +492,33 @@ func (q *Queries) EnsureTenantQuota(ctx context.Context, arg EnsureTenantQuotaPa
 
 const finishCompositionPrepull = `-- name: FinishCompositionPrepull :one
 UPDATE sandbox_composition_prepull
-SET status = $3::smallint, daemonset_name = $4, desired_nodes = $5, ready_nodes = $6, detail = $7,
-    completed_at = CASE WHEN $3::smallint = 2 OR $3::smallint = 3 THEN now() ELSE NULL END, updated_at = now()
-WHERE runtime_image_id = $1 AND composition_digest = $2 AND status = 4 AND attempt_id = $8::text
+SET status = $1::smallint, daemonset_name = $2::text, desired_nodes = $3::int, ready_nodes = $4::int, detail = $5,
+    completed_at = CASE WHEN $1::smallint = 2 OR $1::smallint = 3 THEN now() ELSE NULL END, updated_at = now()
+WHERE runtime_image_id = $6::bigint AND composition_digest = $7::text AND status = 4 AND attempt_id = $8::text
 RETURNING id, runtime_image_id, composition_digest, status, attempt_id, daemonset_name, image_closure,
           desired_nodes, ready_nodes, detail, started_at, completed_at, created_at, updated_at
 `
 
 type FinishCompositionPrepullParams struct {
-	RuntimeImageID    int64  `json:"runtime_image_id"`
-	CompositionDigest string `json:"composition_digest"`
 	Status            int16  `json:"status"`
 	DaemonsetName     string `json:"daemonset_name"`
 	DesiredNodes      int32  `json:"desired_nodes"`
 	ReadyNodes        int32  `json:"ready_nodes"`
 	Detail            []byte `json:"detail"`
+	RuntimeImageID    int64  `json:"runtime_image_id"`
+	CompositionDigest string `json:"composition_digest"`
 	AttemptID         string `json:"attempt_id"`
 }
 
 func (q *Queries) FinishCompositionPrepull(ctx context.Context, arg FinishCompositionPrepullParams) (SandboxCompositionPrepull, error) {
 	row := q.db.QueryRow(ctx, finishCompositionPrepull,
-		arg.RuntimeImageID,
-		arg.CompositionDigest,
 		arg.Status,
 		arg.DaemonsetName,
 		arg.DesiredNodes,
 		arg.ReadyNodes,
 		arg.Detail,
+		arg.RuntimeImageID,
+		arg.CompositionDigest,
 		arg.AttemptID,
 	)
 	var i SandboxCompositionPrepull

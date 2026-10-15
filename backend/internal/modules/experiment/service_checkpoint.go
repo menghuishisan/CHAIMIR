@@ -51,7 +51,7 @@ func (s *Service) JudgeCheckpoint(ctx context.Context, instanceID int64, checkpo
 	if s.judge == nil {
 		return CheckpointDTO{}, apperr.ErrExperimentJudgeUnavailable
 	}
-	codeKey, codeHash, err := s.resolveJudgeCodeSnapshot(ctx, inst, req)
+	codeKey, codeHash, err := s.resolveJudgeCodeSnapshot(ctx, inst, cp, req)
 	if err != nil {
 		return CheckpointDTO{}, err
 	}
@@ -198,13 +198,17 @@ func (s *Service) HandleJudgeFailed(ctx context.Context, event contracts.JudgeFa
 	return nil
 }
 
-// resolveJudgeCodeSnapshot 优先由 M2 保存当前沙箱工作区,客户端传入仅用于无沙箱检查点。
-func (s *Service) resolveJudgeCodeSnapshot(ctx context.Context, inst ExperimentInstance, req JudgeCheckpointRequest) (string, string, error) {
-	if len(inst.SandboxRefs) > 0 {
+// resolveJudgeCodeSnapshot 优先由 M2 保存检查点绑定环境的工作区,客户端引用仅用于无沙箱检查点。
+func (s *Service) resolveJudgeCodeSnapshot(ctx context.Context, inst ExperimentInstance, cp CheckpointComponent, req JudgeCheckpointRequest) (string, string, error) {
+	ref, hasSandbox := sandboxRefForCheckpoint(cp, inst)
+	if cp.EnvID != "" && !hasSandbox {
+		return "", "", apperr.ErrExperimentInstanceStateInvalid
+	}
+	if hasSandbox {
 		if s.sandbox == nil {
 			return "", "", apperr.ErrExperimentSandboxUnavailable
 		}
-		codeKey, codeHash, err := s.sandbox.SaveSandboxFiles(ctx, contracts.SandboxSaveRequest{TenantID: inst.TenantID, SandboxID: inst.SandboxRefs[0].SandboxID.Int64(), SourceRef: inst.SourceRef})
+		codeKey, codeHash, err := s.sandbox.SaveSandboxFiles(ctx, contracts.SandboxSaveRequest{TenantID: inst.TenantID, SandboxID: ref.SandboxID.Int64(), SourceRef: inst.SourceRef})
 		if err != nil {
 			return "", "", apperr.ErrExperimentSandboxUnavailable.WithCause(err)
 		}
@@ -232,17 +236,27 @@ func targetSandboxRef(cp CheckpointComponent, inst ExperimentInstance, mode stri
 	if mode != contracts.JudgeSandboxModeReuse {
 		return ""
 	}
-	if len(inst.SandboxRefs) == 0 {
+	ref, ok := sandboxRefForCheckpoint(cp, inst)
+	if !ok {
 		return ""
 	}
-	if cp.EnvID != "" {
-		for _, ref := range inst.SandboxRefs {
-			if ref.ComponentID == cp.EnvID {
-				return ids.Format(ref.SandboxID.Int64())
-			}
+	return ids.Format(ref.SandboxID.Int64())
+}
+
+// sandboxRefForCheckpoint 解析检查点声明的环境;显式绑定缺失时不回退到其他沙箱。
+func sandboxRefForCheckpoint(cp CheckpointComponent, inst ExperimentInstance) (SandboxRef, bool) {
+	if len(inst.SandboxRefs) == 0 {
+		return SandboxRef{}, false
+	}
+	if cp.EnvID == "" {
+		return inst.SandboxRefs[0], true
+	}
+	for _, ref := range inst.SandboxRefs {
+		if ref.ComponentID == cp.EnvID {
+			return ref, true
 		}
 	}
-	return ids.Format(inst.SandboxRefs[0].SandboxID.Int64())
+	return SandboxRef{}, false
 }
 
 // scaledCheckpointScore 将 M3 原始分按检查点配置分值归一。

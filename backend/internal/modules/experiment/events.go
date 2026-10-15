@@ -22,7 +22,7 @@ func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, e
 	if svc == nil {
 		return nil, apperr.ErrEventServiceMissing
 	}
-	subs := make([]eventbus.Subscription, 0, 4)
+	subs := make([]eventbus.Subscription, 0, 5)
 	if err := subscribeExperimentEvent(bus, &subs, contracts.SubjectJudgeCompleted, handleJudgeCompletedEvent(svc)); err != nil {
 		return nil, err
 	}
@@ -32,10 +32,30 @@ func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, e
 	if err := subscribeExperimentEvent(bus, &subs, contracts.SubjectSandboxRecycled, handleSandboxRecycledEvent(svc)); err != nil {
 		return nil, err
 	}
+	if err := subscribeExperimentEvent(bus, &subs, contracts.SubjectSandboxFailed, handleSandboxFailedEvent(svc)); err != nil {
+		return nil, err
+	}
 	if err := subscribeExperimentEvent(bus, &subs, contracts.SubjectTeachingCourseEnded, handleCourseEndedEvent(svc)); err != nil {
 		return nil, err
 	}
 	return subs, nil
+}
+
+// handleSandboxFailedEvent 解码 M2 阶段一启动失败事件。
+func handleSandboxFailedEvent(svc *Service) eventbus.Handler {
+	return func(ctx context.Context, data []byte) error {
+		var event contracts.SandboxFailedEvent
+		if err := eventbus.Decode(data, &event, apperr.ErrExperimentInstanceInvalid); err != nil {
+			return err
+		}
+		if !auth.ValidSourceRef(event.SourceRef) {
+			return apperr.ErrExperimentSourceRefInvalid
+		}
+		if !strings.HasPrefix(strings.TrimSpace(event.SourceRef), "experiment:") {
+			return nil
+		}
+		return svc.HandleSandboxFailed(ctx, event)
+	}
 }
 
 // subscribeExperimentEvent 注册单个主题并保留订阅句柄。

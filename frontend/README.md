@@ -70,6 +70,7 @@ pnpm build
 pnpm clean:artifacts
 ```
 
+- `pnpm type-check` 是独立的 TypeScript 静态门槛；`pnpm build` 只负责生成 Vite 生产产物。发布或镜像构建前必须先执行并通过 `pnpm type-check`、`pnpm lint`，再执行 `pnpm build`，避免在受限镜像构建层重复运行类型检查。
 - `clean:artifacts`: 清理 `.turbo` 和 `dist`，不删除依赖。
 - `clean:deps`: 清理根、app 和 package 下的 `node_modules`。
 - `clean`: 同时清理构建缓存和依赖。

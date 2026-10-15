@@ -19,6 +19,30 @@ import (
 	"chaimir/pkg/logging"
 )
 
+// GetStudentReport 读取当前学生在实验实例下的报告批改结果。
+// 访问边界沿用实例成员校验,输出使用不含对象引用的学生专用投影。
+func (s *Service) GetStudentReport(ctx context.Context, instanceID int64) (StudentReportDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return StudentReportDTO{}, err
+	}
+	var report ExperimentReport
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		inst, err := tx.GetInstance(ctx, id.TenantID, instanceID)
+		if err != nil {
+			return err
+		}
+		if err := ensureInstanceAccess(ctx, tx, id.AccountID, inst); err != nil {
+			return err
+		}
+		report, err = tx.GetReportByInstanceStudent(ctx, id.TenantID, instanceID, id.AccountID)
+		return err
+	}); err != nil {
+		return StudentReportDTO{}, err
+	}
+	return studentReportDTOFromModel(report), nil
+}
+
 // SubmitReport 校验并上传实验报告,对象引用只由服务端生成后写入报告记录。
 func (s *Service) SubmitReport(ctx context.Context, instanceID int64, req ReportUploadRequest) (ReportDTO, error) {
 	id, err := currentIdentity(ctx)

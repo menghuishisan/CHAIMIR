@@ -10,7 +10,8 @@ import { useCallback, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { ListOrdered, Play, Swords, Trophy, UserPlus, Users } from 'lucide-react'
 import {
-  ContestStatus,
+	ContestMode,
+	ContestStatus,
   TeamMode,
   type Contest,
   type ContestProblem,
@@ -195,7 +196,11 @@ function ContestDetailContent({ contest, record, onRefresh }: ContestDetailConte
           </TabsContent>
 
           <TabsContent value="ladder">
-            <ContestLadder contestId={contest.id} frozen={isContestLeaderboardFrozen(contest.status)} />
+            <ContestLadder
+              contestId={contest.id}
+              mode={contest.mode}
+              frozen={isContestLeaderboardFrozen(contest.status)}
+            />
           </TabsContent>
         </Tabs>
       </PageBody>
@@ -436,7 +441,7 @@ function ContestProblems({ contestId, canAnswer }: ContestProblemsProps) {
       header: '赛题',
       render: (problem) => (
         <span className="font-medium text-ink">
-          {typeof problem.face?.title === 'string' ? problem.face.title : `第 ${problem.seq} 题`}
+          {problem.title || `第 ${problem.seq} 题`}
         </span>
       ),
     },
@@ -507,6 +512,7 @@ function ContestProblems({ contestId, canAnswer }: ContestProblemsProps) {
 
 interface ContestLadderProps {
   contestId: string
+  mode: ContestMode
   frozen: boolean
 }
 
@@ -514,7 +520,7 @@ interface ContestLadderProps {
  * ContestLadder 展示天梯榜。
  * 封榜期明确说明榜单暂停更新,避免用户把冻结的名次当成最终结果。
  */
-function ContestLadder({ contestId, frozen }: ContestLadderProps) {
+function ContestLadder({ contestId, mode, frozen }: ContestLadderProps) {
   const ladder = usePagedResource<LadderRank>(
     (params) => api.contest.getLadder(contestId, params),
     [contestId],
@@ -535,21 +541,32 @@ function ContestLadder({ contestId, frozen }: ContestLadderProps) {
       mono: true,
       render: (rank) => formatScore(rank.score),
     },
-    { key: 'solved_count', header: '通过题数', align: 'right', mono: true },
-    {
-      key: 'last_solve_at',
-      header: '最近通过',
-      render: (rank) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {rank.last_solve_at ? formatDateTime(rank.last_solve_at) : '—'}
-        </span>
-      ),
-    },
+    ...(mode === ContestMode.SOLVE
+      ? [
+          { key: 'solved_count', header: '通过题数', align: 'right' as const, mono: true },
+          {
+            key: 'last_solve_at',
+            header: '最近通过',
+            render: (rank: LadderRank) => (
+              <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
+                {rank.last_solve_at ? formatDateTime(rank.last_solve_at) : '—'}
+              </span>
+            ),
+          },
+        ]
+      : []),
   ]
 
   return (
     // 同一父页下的子视图必须同构(§6.5.5 B):与赛题一样走 DataPanel 片段
-    <PageSection title="天梯榜" description="按得分与通过时间排名,封榜期暂停更新。">
+    <PageSection
+      title="天梯榜"
+      description={
+        mode === ContestMode.SOLVE
+          ? '按得分、通过题数与通过时间排名,封榜期暂停更新。'
+          : '按对抗赛积分排名,封榜期暂停更新。'
+      }
+    >
       <div className="flex flex-col gap-4">
         {frozen ? (
           <Callout tone="warning" title="封榜中">
@@ -571,7 +588,11 @@ function ContestLadder({ contestId, frozen }: ContestLadderProps) {
             resource={ladder}
             emptyIcon={ListOrdered}
             emptyTitle="榜单还是空的"
-            emptyDescription="有队伍通过赛题后榜单就会出现。"
+            emptyDescription={
+              mode === ContestMode.SOLVE
+                ? '有队伍通过赛题后榜单就会出现。'
+                : '有队伍完成对局后榜单就会出现。'
+            }
             skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
             {(page) => (
@@ -580,10 +601,13 @@ function ContestLadder({ contestId, frozen }: ContestLadderProps) {
                 data={page.list}
                 rowKey={(item) => item.team_id}
                 elevated={false}
-                // <md 换行卡(§6.4.1 规则 3):名次一行、得分与通过题数一行
+                // <md 换行卡(§6.4.1 规则 3):名次一行,赛制适用的成绩指标一行
                 mobileCard={(item) => ({
                   title: `第 ${item.rank} 名`,
-                  meta: `得分 ${formatScore(item.score)} · 通过 ${item.solved_count} 题`,
+                  meta:
+                    mode === ContestMode.SOLVE
+                      ? `得分 ${formatScore(item.score)} · 通过 ${item.solved_count} 题`
+                      : `对抗积分 ${formatScore(item.score)}`,
                 })}
                 empty={<Empty icon={ListOrdered} title="榜单还是空的" />}
               />

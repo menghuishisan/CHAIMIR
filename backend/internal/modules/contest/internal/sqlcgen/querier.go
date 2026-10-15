@@ -62,6 +62,7 @@ type Querier interface {
 	GetContestProblem(ctx context.Context, arg GetContestProblemParams) (ContestProblem, error)
 	GetLadderByTeam(ctx context.Context, arg GetLadderByTeamParams) (GetLadderByTeamRow, error)
 	GetLadderSnapshot(ctx context.Context, arg GetLadderSnapshotParams) (ContestLadderSnapshot, error)
+	GetLatestSolveSubmission(ctx context.Context, arg GetLatestSolveSubmissionParams) (SolveSubmission, error)
 	GetSolveSubmission(ctx context.Context, arg GetSolveSubmissionParams) (SolveSubmission, error)
 	GetSolveSubmissionByJudgeTask(ctx context.Context, arg GetSolveSubmissionByJudgeTaskParams) (SolveSubmission, error)
 	GetTeam(ctx context.Context, arg GetTeamParams) (Team, error)
@@ -82,6 +83,12 @@ type Querier interface {
 	ListContestAccessGrantsForSandbox(ctx context.Context, arg ListContestAccessGrantsForSandboxParams) ([]ContestAccessGrant, error)
 	ListContestProblems(ctx context.Context, arg ListContestProblemsParams) ([]ContestProblem, error)
 	ListContests(ctx context.Context, arg ListContestsParams) ([]Contest, error)
+	// 报名中、进行中和封榜中的赛事过了结束时间都必须进入结束态,避免学生入口长期显示报名中。
+	ListContestsDueToEnd(ctx context.Context, endAt pgtype.Timestamptz) ([]Contest, error)
+	// 封榜窗口由服务端按 freeze_minutes 计算,不接受前端自行推进状态。
+	ListContestsDueToFreeze(ctx context.Context, endAt pgtype.Timestamptz) ([]Contest, error)
+	// 后台生命周期扫描只推进仍处于报名中的赛事;已越过结束时间的赛事由结束扫描直接收口。
+	ListContestsDueToRun(ctx context.Context, startAt pgtype.Timestamptz) ([]Contest, error)
 	ListLadder(ctx context.Context, arg ListLadderParams) ([]ListLadderRow, error)
 	ListRunningBattleMatchesWithJudgeTask(ctx context.Context, limit int32) ([]BattleMatch, error)
 	ListStudentContestRecords(ctx context.Context, arg ListStudentContestRecordsParams) ([]ListStudentContestRecordsRow, error)

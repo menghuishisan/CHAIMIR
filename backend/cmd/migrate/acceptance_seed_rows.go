@@ -268,15 +268,23 @@ WHERE r.code=$1 AND ri.version=$2`, ref.Code, ref.ImageVersion).Scan(
 		}
 		runtime.InstanceCode = ref.InstanceCode
 		runtime.Code = ref.Code
-		runtime.AdapterSpec = append([]byte(nil), adapterSpec...)
-		if runtime.RuntimeID <= 0 || runtime.ImageID <= 0 || len(runtime.AdapterSpec) == 0 {
-			return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("验收运行时组合目录不完整: %s", ref.InstanceCode)
-		}
-		runtimes = append(runtimes, runtime)
 		var adapter sandbox.AdapterSpec
 		if err := json.Unmarshal(adapterSpec, &adapter); err != nil {
 			return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("解析验收运行时 %s 适配器失败: %w", ref.InstanceCode, err)
 		}
+		// 验收快照必须与正式组合编译使用同一份运行时实例拓扑规则。
+		// 目录中的 adapter_spec 保留声明式 Pod 名,发布到具体组合后才按 instance_code
+		// 物化;否则实际 Pod 为 source-chain-workspace 时,初始化仍会访问 workspace。
+		adapter = sandbox.MaterializeRuntimeTopology(ref.InstanceCode, adapter)
+		var marshalErr error
+		runtime.AdapterSpec, marshalErr = json.Marshal(adapter)
+		if marshalErr != nil {
+			return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("编码验收运行时 %s 适配器失败: %w", ref.InstanceCode, marshalErr)
+		}
+		if runtime.RuntimeID <= 0 || runtime.ImageID <= 0 || len(runtime.AdapterSpec) == 0 {
+			return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("验收运行时组合目录不完整: %s", ref.InstanceCode)
+		}
+		runtimes = append(runtimes, runtime)
 		appendClosure("runtime", ref.InstanceCode+"/"+runtime.Code, runtime.ImageURL, runtime.ImageVersion, adapter.RuntimeContainer)
 		for _, component := range adapter.InfraSidecars {
 			appendClosure("runtime", ref.InstanceCode+"/"+component.Name, component.ImageURL, "", component)
@@ -492,6 +500,7 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx, refs acceptanceMaterialRefs) 
 		"suite_ref":                   refs.JudgeSuiteRef,
 		"suite_archive_name":          "public-regression.tar",
 		"version_hash":                contestVersionHash,
+		"code_hash":                   teachingSubmissionHash,
 		"composition_snapshot":        judgeSnapshot,
 		"genesis_ref":                 evmGenesisRef,
 		"command":                     []string{"run-evm-tests"},
@@ -550,13 +559,12 @@ ON CONFLICT (tenant_id, task_id, version) DO UPDATE SET passed=EXCLUDED.passed, 
 			sanitizedRef = refs.ExperimentSanitizedBRef
 		}
 		input, err := jsonb(map[string]any{
-			"item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "checkpoint_id": checkpoint.checkpointID,
+			"item_code": "ctf-reentrancy-vault", "item_version": "1.0.0",
 			"trace_id": "trace-acceptance-experiment-" + checkpoint.checkpointID, "judger_code": "testcase-evm", "judger_type": 1,
-			"judger_version": judgerImageURL, "suite_ref": refs.JudgeSuiteRef, "code_storage_key": refs.InitCodeRef,
+			"judger_version": judgerImageURL, "suite_ref": refs.JudgeSuiteRef,
 			"sanitized_code_archive_name": "submission.tar", "sanitized_code_archive_ref": sanitizedRef,
 			"code_hash": experimentCodeHash, "composition_snapshot": judgeSnapshot, "exec_target": "sandbox/testcase-evm",
 			"timeout_sec": 60, "max_retries": 1, "max_score": checkpoint.maxScore,
-			"checkpoint": checkpoint.checkpointID,
 		})
 		if err != nil {
 			return fmt.Errorf("编码实验检查点判题输入快照失败: %w", err)
@@ -589,7 +597,7 @@ ON CONFLICT (tenant_id, task_id, version) DO UPDATE SET passed=EXCLUDED.passed, 
 	contestSolveInput, err := jsonb(map[string]any{
 		"item_code": "ctf-reentrancy-vault", "item_version": "1.0.0", "trace_id": "trace-acceptance-contest-solve",
 		"judger_code": "testcase-evm", "judger_type": 1, "judger_version": judgerImageURL,
-		"suite_ref": refs.JudgeSuiteRef, "submission_ref": refs.ContestSubmissionRef,
+		"suite_ref": refs.JudgeSuiteRef, "code_hash": contestSubmissionHash,
 		"sanitized_code_archive_name": "submission.tar", "sanitized_code_archive_ref": refs.ContestSanitizedRef,
 		"version_hash": contestVersionHash, "composition_snapshot": judgeSnapshot, "exec_target": "sandbox/testcase-evm",
 		"timeout_sec": 60, "max_retries": 1, "max_score": 100, "expectation": map[string]any{"public": true},
@@ -654,7 +662,7 @@ ON CONFLICT (tenant_id, source_ref, problem_ref) DO UPDATE SET judger_id=EXCLUDE
 		acceptanceIDs.BattleJudgeTask, acceptanceIDs.TenantID, acceptanceIDs.TeacherMain, acceptanceIDs.StudentA, battleSnapshot, contracts.JudgeTaskStatusDone); err != nil {
 		return err
 	}
-	battleDetails, err := jsonb([]contracts.JudgeResultDetail{{Case: "防御合约阻止重复提款", Passed: true, ExpectedLabel: "攻击交易应被拒绝", Actual: "defense_win", Hint: "攻击交易已回滚,守方获胜"}})
+	battleDetails, err := jsonb([]contracts.JudgeResultDetail{{Case: "攻击触发二次重入提款", Passed: true, ExpectedLabel: "攻击触发第二次提款,攻方获胜", Actual: "attack_win", Hint: "攻击交易完成并触发第二次提款,攻方获胜"}})
 	if err != nil {
 		return fmt.Errorf("编码对抗判题结果详情失败: %w", err)
 	}
@@ -1082,17 +1090,44 @@ func acceptanceVulnerabilityDraftBody(composition contracts.SandboxCompositionSp
 	}
 }
 
+// acceptanceVulnerabilityPrevalidateDetail 构造与真实预验证接口一致的双向断言结果。
+// 题面断言和执行结果是两个不同的数据契约,不能把题面配置直接当成验证结果返回。
+func acceptanceVulnerabilityPrevalidateDetail() map[string]any {
+	return map[string]any{
+		"positive": map[string]any{
+			"passed": true,
+			"assertions": []map[string]any{{
+				"case":           "攻击应触发两次重入回调",
+				"passed":         true,
+				"expected_label": "重入计数应为 2",
+				"actual":         "2",
+				"hint":           "",
+			}},
+		},
+		"negative": map[string]any{
+			"passed": true,
+			"assertions": []map[string]any{{
+				"case":           "攻击应触发两次重入回调",
+				"passed":         true,
+				"expected_label": "重入计数应为 2",
+				"actual":         "1",
+				"hint":           "",
+			}},
+		},
+	}
+}
+
 // acceptanceBattleJudgeExpectation 统一对抗赛公开正文和已完成判题快照的链上步骤与胜负断言。
 func acceptanceBattleJudgeExpectation() map[string]any {
 	return map[string]any{
 		"chain_steps": acceptanceBattleChainSteps(),
 		"assertions": []map[string]any{{
-			"label":          "守方合约应拒绝二次提款",
+			"label":          "攻击应触发二次重入提款",
 			"target":         "counter:last",
 			"field":          "value",
 			"op":             "eq",
-			"value":          1,
-			"expected_label": "攻击仅触发一次回调,守方仍可正常提款",
+			"value":          2,
+			"expected_label": "攻击触发第二次提款,攻方获胜",
 		}},
 	}
 }
@@ -1520,10 +1555,7 @@ ON CONFLICT (tenant_id, id) DO UPDATE SET type=EXCLUDED.type, name=EXCLUDED.name
 	if err != nil {
 		return fmt.Errorf("编码竞赛草稿正文失败: %w", err)
 	}
-	prevalidateDetail, err := jsonb(map[string]any{
-		"positive": map[string]any{"passed": true, "assertions": draft["assertions"]},
-		"negative": map[string]any{"passed": true, "assertions": draft["assertions"]},
-	})
+	prevalidateDetail, err := jsonb(acceptanceVulnerabilityPrevalidateDetail())
 	if err != nil {
 		return fmt.Errorf("编码漏洞题预验证详情失败: %w", err)
 	}
@@ -1696,13 +1728,13 @@ ON CONFLICT (scope, tenant_id, key) WHERE tenant_id IS NOT NULL DO UPDATE SET va
 		acceptanceIDs.SystemConfig, acceptanceIDs.TenantID, value, acceptanceIDs.SchoolAdmin); err != nil {
 		return err
 	}
-	condition, err := jsonb(map[string]any{"metric": "sandbox_pending_seconds", "op": ">", "value": 180})
+	condition, err := jsonb(map[string]any{"operator": "gt", "threshold": 180, "duration_seconds": 0})
 	if err != nil {
 		return fmt.Errorf("编码告警条件失败: %w", err)
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO alert_rule (id, scope, tenant_id, name, metric, condition, level, enabled)
-VALUES ($1,2,$2,'实验环境等待时间过长','sandbox_pending_seconds',$3,2,true)
+VALUES ($1,2,$2,'实验环境等待时间过长','sandbox.pending_seconds',$3,2,true)
 ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, metric=EXCLUDED.metric, condition=EXCLUDED.condition, level=EXCLUDED.level, enabled=EXCLUDED.enabled, updated_at=now()`,
 		acceptanceIDs.AlertRule, acceptanceIDs.TenantID, condition); err != nil {
 		return err

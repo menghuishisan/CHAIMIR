@@ -194,6 +194,27 @@ function compareStringGroup(group) {
   return problems.map((item) => `${group.constName}: ${item}`);
 }
 
+/** compareExactStringGroup 比较少量命名错误码,不把整段错误码空间复制到前端。 */
+function compareExactStringGroup(group) {
+  const source = goStringConstants(group.go)
+  const frontend = tsStringConst(group.ts, group.constName)
+  if (!frontend) return [`${group.constName}:前端 ${group.ts} 缺少该常量对象`]
+  const problems = []
+  for (const [backendName, frontendName] of Object.entries(group.members)) {
+    const backendValue = source.get(backendName)
+    if (backendValue === undefined) {
+      problems.push(`后端 ${group.go} 缺少 ${backendName}`)
+    } else if (!frontend.has(frontendName)) {
+      problems.push(`前端缺少 ${group.constName}.${frontendName}='${backendValue}'`)
+    } else if (frontend.get(frontendName) !== backendValue) {
+      problems.push(
+        `${group.constName}.${frontendName}:后端='${backendValue}',前端='${frontend.get(frontendName)}'`,
+      )
+    }
+  }
+  return problems.map((item) => `${group.constName}: ${item}`)
+}
+
 /** compareCaseStringGroup 比较 Go 数字状态转字符串的 switch 与 TypeScript 常量对象。 */
 function compareCaseStringGroup(group) {
   const backend = goCaseStringMap(group.go, group.prefix);
@@ -841,6 +862,27 @@ const stringGroups = [
   omit,
 }));
 
+const exactStringGroups = [
+  {
+    go: "backend/pkg/apperr/contest_codes.go",
+    ts: "frontend/packages/api-client/src/constants/contest.ts",
+    constName: "CONTEST_SUBMISSION_ERROR_CODES",
+    members: { CodeContestSubmissionNotFound: "NOT_FOUND" },
+  },
+  {
+    go: "backend/pkg/apperr/experiment_codes.go",
+    ts: "frontend/packages/api-client/src/constants/experiment.ts",
+    constName: "EXPERIMENT_REPORT_ERROR_CODES",
+    members: { CodeExperimentReportNotFound: "NOT_FOUND" },
+  },
+  {
+    go: "backend/pkg/apperr/experiment_codes.go",
+    ts: "frontend/packages/api-client/src/constants/experiment.ts",
+    constName: "EXPERIMENT_INSTANCE_ERROR_CODES",
+    members: { CodeExperimentInstanceAccessDenied: "ACCESS_DENIED" },
+  },
+];
+
 const caseStringGroups = [
   [
     "backend/internal/modules/judge/rules.go",
@@ -872,6 +914,7 @@ const problems = [
   ...groups.flatMap(compareGroup),
   ...compareAuditActorRole(),
   ...stringGroups.flatMap(compareStringGroup),
+  ...exactStringGroups.flatMap(compareExactStringGroup),
   ...caseStringGroups.flatMap(compareCaseStringGroup),
 ];
 
@@ -916,6 +959,7 @@ const pendingBackendNamedConsts = new Set([
 ]);
 const coveredStringConsts = new Set([
   ...stringGroups.map((group) => `${group.ts}:${group.constName}`),
+  ...exactStringGroups.map((group) => `${group.ts}:${group.constName}`),
   ...caseStringGroups.map((group) => `${group.ts}:${group.constName}`),
 ]);
 for (const fileName of readdirSync(

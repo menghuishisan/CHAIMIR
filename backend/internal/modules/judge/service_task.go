@@ -34,7 +34,7 @@ func (s *Service) ListTasks(ctx context.Context, tenantID, accountID int64, sour
 		var err error
 		items, total, err = tx.ListJudgeTasks(ctx, tenantID, strings.TrimSpace(sourceRef), pendingManual, accountID, state, limit, offset)
 		if err != nil {
-			return apperr.ErrJudgeTaskNotFound.WithCause(err)
+			return apperr.ErrInternal.WithCause(err)
 		}
 		return nil
 	}); err != nil {

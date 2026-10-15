@@ -4,7 +4,12 @@
 // axios 的 error 分支只剩「拿不到响应体」的传输层失败。
 
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios'
-import { API_BASE_PATH, API_ERROR_CODES, API_SUCCESS_CODE, API_TRANSPORT_ERROR_MESSAGES } from './constants'
+import {
+  API_BASE_PATH,
+  API_ERROR_CODES,
+  API_SUCCESS_CODE,
+  API_TRANSPORT_ERROR_MESSAGES,
+} from './constants'
 
 export interface ApiConfig {
   baseURL: string
@@ -132,7 +137,10 @@ export class ApiClient {
   }
 
   /** handleEnvelope 统一处理普通 JSON 请求与 Blob 失败响应中的平台信封。 */
-  private async handleEnvelope(apiResponse: ApiResponse, requestConfig: RetriableRequestConfig): Promise<unknown> {
+  private async handleEnvelope(
+    apiResponse: ApiResponse,
+    requestConfig: RetriableRequestConfig
+  ): Promise<unknown> {
     if (apiResponse.code === API_SUCCESS_CODE) {
       return apiResponse.data !== undefined ? apiResponse.data : apiResponse
     }
@@ -149,7 +157,7 @@ export class ApiClient {
       return this.client.request(requestConfig)
     }
 
-    if (apiResponse.code === API_ERROR_CODES.UNAUTHORIZED) {
+    if (requiresReauthentication(apiResponse.code)) {
       this.config.onUnauthorized?.()
     }
     throw transformApiError(apiResponse)
@@ -157,10 +165,12 @@ export class ApiClient {
 
   /** shouldRefresh 只对后端明确的登录失效错误触发一次令牌轮转。 */
   private shouldRefresh(response: ApiResponse, requestConfig: RetriableRequestConfig): boolean {
-    return response.code === API_ERROR_CODES.UNAUTHORIZED
-      && Boolean(this.config.hasRefreshSession?.())
-      && !requestConfig.chaimirRetried
-      && !requestConfig.url?.endsWith('/auth/refresh')
+    return (
+      response.code === API_ERROR_CODES.UNAUTHORIZED &&
+      Boolean(this.config.hasRefreshSession?.()) &&
+      !requestConfig.chaimirRetried &&
+      !requestConfig.url?.endsWith('/auth/refresh')
+    )
   }
 
   /** refreshAccessToken 单飞轮转 Refresh Token，并让并发失败请求等待同一结果。 */
@@ -188,10 +198,14 @@ export class ApiClient {
           timeout: this.config.timeout,
           withCredentials: true,
           headers: { 'Content-Type': 'application/json', 'X-Chaimir-Refresh': '1' },
-        },
+        }
       )
       const envelope = response.data
-      if (!isEnvelope(envelope) || envelope.code !== API_SUCCESS_CODE || !envelope.data?.access_token) {
+      if (
+        !isEnvelope(envelope) ||
+        envelope.code !== API_SUCCESS_CODE ||
+        !envelope.data?.access_token
+      ) {
         throw new Error('refresh response invalid')
       }
       this.config.onTokensRefreshed?.(envelope.data)
@@ -215,6 +229,15 @@ export class ApiClient {
    */
   async post<T = unknown>(url: string, data?: unknown): Promise<T> {
     return this.client.post<unknown, T>(url, data) as unknown as T
+  }
+
+  /**
+   * postLongRunning 等待服务端有界完成一个同步写操作,不使用普通页面请求的短超时。
+   * 仅用于接口契约明确会在本次响应中返回最终资源的长事务;真正的后台任务必须使用
+   * postBackground 并通过独立状态接口查询,不能用本方法代替任务状态机。
+   */
+  async postLongRunning<T = unknown>(url: string, data?: unknown): Promise<T> {
+    return this.client.post<unknown, T>(url, data, { timeout: 0 }) as unknown as T
   }
 
   /**
@@ -287,7 +310,11 @@ export class ApiClient {
    * 基于独立工具 origin 生成浏览器工具代理入口地址;鉴权 query 由上层短时票据接口显式传入。
    * 工具页必须与平台页面分 origin，避免被嵌入页面读取平台 DOM 或同源凭据。
    */
-  public browserURLAtOrigin(origin: string, path: string, query?: Record<string, string | undefined>): string {
+  public browserURLAtOrigin(
+    origin: string,
+    path: string,
+    query?: Record<string, string | undefined>
+  ): string {
     let parsedOrigin: URL
     try {
       parsedOrigin = new URL(origin.trim())
@@ -312,7 +339,11 @@ export class ApiClient {
   /**
    * upload 以默认 file 字段提交单文件上传。
    */
-  async upload<T = unknown>(url: string, file: File, onProgress?: (progress: number) => void): Promise<T> {
+  async upload<T = unknown>(
+    url: string,
+    file: File,
+    onProgress?: (progress: number) => void
+  ): Promise<T> {
     const formData = new FormData()
     formData.append('file', file)
 
@@ -384,7 +415,6 @@ export class ApiClient {
     })
     return { blob: response.blob, fileName: attachmentFileName(response.disposition) }
   }
-
 }
 
 /** encodePathSegment 将业务标识编码为单一路径段，避免标识中的斜杠或查询分隔符改变 API 路由。 */
@@ -424,6 +454,15 @@ function attachmentFileName(disposition: unknown): string {
  * 后端所有业务出口都写信封(见 internal/platform/response),拿到非信封的 200
  * 说明响应来自网关或代理而不是后端,不能当业务结果解读。
  */
+/** requiresReauthentication 统一识别需要结束本地受保护会话的服务端错误码。 */
+function requiresReauthentication(code: string): boolean {
+  return (
+    code === API_ERROR_CODES.UNAUTHORIZED ||
+    code === API_ERROR_CODES.IDENTITY_SESSION_INVALID ||
+    code === API_ERROR_CODES.IDENTITY_SESSION_CONTEXT_MISSING
+  )
+}
+
 function isEnvelope(data: unknown): data is ApiResponse {
   if (!data || typeof data !== 'object') return false
   const candidate = data as Record<string, unknown>
@@ -451,7 +490,7 @@ function transformTransportError(error: AxiosError): ApiError {
   return new ApiError(
     error.response
       ? API_TRANSPORT_ERROR_MESSAGES.MALFORMED_RESPONSE
-      : API_TRANSPORT_ERROR_MESSAGES.NETWORK,
+      : API_TRANSPORT_ERROR_MESSAGES.NETWORK
   )
 }
 

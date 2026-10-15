@@ -33,7 +33,7 @@ const PHASE_LABELS: Record<BlockPhase, string> = {
   failed: '未成块',
 }
 
-/** 已保存的代码引用:判分要拿这一刻的代码快照,不是让后端再去容器里抓。 */
+/** 页面最近一次保存返回的代码引用;有现场沙箱时后端会在判分动作内重新固化快照。 */
 export interface WorkspaceCodeRef {
   codeStorageKey: string
   codeHash: string
@@ -47,8 +47,10 @@ export interface BlockIncubatorProps {
   results: CheckpointResult[]
   /** 实例阶段状态 */
   stages: StageState[]
-  /** 最近一次「保存工作区」的产物;没有保存过时判分按钮会说明原因 */
+  /** 页面最近一次「保存工作区」的产物;现场沙箱可在判分动作内生成快照 */
   codeRef?: WorkspaceCodeRef
+  /** 只有实例处于 running/paused 时才允许触发检查点判分。 */
+  canJudge: boolean
   /** 判分完成后请调用方重新读取实例 */
   onJudged: () => void
   /** 激活一个已解锁阶段 */
@@ -64,6 +66,7 @@ export function BlockIncubator({
   results,
   stages,
   codeRef,
+  canJudge,
   onJudged,
   onActivateStage,
 }: BlockIncubatorProps) {
@@ -103,8 +106,7 @@ export function BlockIncubator({
 
   /**
    * judge 触发一个检查点判分。
-   * 代码引用来自最近一次保存工作区:判分对象必须是一个确定的快照,
-   * 否则重判时拿到的代码可能已经变了,分数就不可复现。
+   * 服务端在存在现场沙箱时于本次判分动作内固化快照;页面引用仅作为无现场沙箱时的输入。
    */
   const judge = useCallback(
     async (checkpointId: string) => {
@@ -216,7 +218,7 @@ export function BlockIncubator({
                     size="sm"
                     leftIcon={Play}
                     loading={block.phase === 'incubating'}
-                    disabled={judgingId !== undefined}
+                    disabled={!canJudge || judgingId !== undefined}
                     onClick={() => void judge(block.checkpoint.id)}
                   >
                     {block.phase === 'minted' ? '重新判分' : '开始判分'}
@@ -230,9 +232,12 @@ export function BlockIncubator({
 
       {!codeRef && blocks.length > 0 ? (
         <p className="text-xs text-on-dark-sub">
-          还没有保存过工作区。判分会按环境里当前的代码进行;先在代码面板点「保存工作区」,
-          判的就是你确认过的那一份。
+          当前页面还没有保存引用。开始判分时,平台会按实验环境里的当前工作区生成本次快照。
         </p>
+      ) : null}
+
+      {!canJudge && blocks.length > 0 ? (
+        <p className="text-xs text-on-dark-sub">实验状态或环境状态暂不支持判分，请刷新状态后重试。</p>
       ) : null}
 
       {panelError ? <p className="text-xs text-on-dark-danger">{panelError}</p> : null}

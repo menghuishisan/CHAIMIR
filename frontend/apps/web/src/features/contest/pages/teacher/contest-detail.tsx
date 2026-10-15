@@ -9,18 +9,8 @@
 
 import { useMemo, useState } from 'react'
 import { useParams } from 'react-router'
-import {
-  Archive,
-  Pencil,
-  ShieldAlert,
-  Swords,
-  Trophy,
-} from 'lucide-react'
-import {
-  ContestStatus,
-  type Contest,
-  type ResultSnapshot,
-} from '@chaimir/api-client'
+import { Archive, Pencil, ShieldAlert, Swords, Trophy } from 'lucide-react'
+import { ContestMode, ContestStatus, type Contest, type ResultSnapshot } from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
@@ -67,7 +57,7 @@ export default function TeacherContestDetailPage() {
   const contest = useAsyncResource(
     () => api.contest.getContest(contestId),
     [contestId],
-    () => false,
+    () => false
   )
 
   return (
@@ -97,6 +87,8 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
 
   const archived = contest.status === ContestStatus.ARCHIVED
   const isDraft = contest.status === ContestStatus.DRAFT
+  const contestEditable =
+    contest.status === ContestStatus.DRAFT || contest.status === ContestStatus.SIGNUP
 
   // 赛制、参赛形式、封榜时长与赛程都是赛事静态属性,统一进这张属性表,不占指标位(规范 §6.5)
   const scheduleItems = useMemo(
@@ -112,7 +104,7 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
       { term: '比赛开始', description: formatDateTime(contest.start_at), mono: true },
       { term: '比赛结束', description: formatDateTime(contest.end_at), mono: true },
     ],
-    [contest],
+    [contest]
   )
 
   return (
@@ -124,10 +116,7 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
       <PageHeader
         kicker={
           <Breadcrumb
-            items={[
-              { label: '实践' },
-              { label: '赛事组织', href: '/teacher/contests' },
-            ]}
+            items={[{ label: '实践' }, { label: '赛事组织', href: '/teacher/contests' }]}
           />
         }
       />
@@ -147,9 +136,13 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
         }
         subtitle={`${formatDateTime(contest.start_at)} — ${formatDateTime(contest.end_at)}`}
         actions={
-          <Button variant="outline" leftIcon={Pencil} onClick={() => setEditOpen(true)}>
-            编辑赛事
-          </Button>
+          contestEditable ? (
+            <Button variant="outline" leftIcon={Pencil} onClick={() => setEditOpen(true)}>
+              编辑赛事
+            </Button>
+          ) : (
+            <Badge tone="neutral">{archived ? '归档后只读' : '赛事开始后只读'}</Badge>
+          )
         }
         properties={[
           { label: '赛制', value: contestModeLabel(contest.mode) },
@@ -176,7 +169,11 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
         </Callout>
       ) : null}
 
-      <PageSection title="完整赛程" description="报名与比赛的四个时间点,以及赛制细节。" className="mt-6">
+      <PageSection
+        title="完整赛程"
+        description="报名与比赛的四个时间点,以及赛制细节。"
+        className="mt-6"
+      >
         <div className="rounded-lg bg-surface p-5 shadow-xs">
           <DescriptionList dense columns={2} items={scheduleItems} />
         </div>
@@ -196,16 +193,16 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
         </TabsList>
 
         <TabsContent value="problems">
-          <ContestProblems contest={contest} />
+          <ContestProblems contest={contest} readOnly={!isDraft} />
         </TabsContent>
 
         <TabsContent value="cheat">
-          <ContestCheat contest={contest} />
+          <ContestCheat contest={contest} readOnly={archived} />
         </TabsContent>
 
         <TabsContent value="snapshot">
           {archived ? (
-            <ContestSnapshot contestId={contest.id} />
+            <ContestSnapshot contest={contest} />
           ) : (
             <PageSection title="归档榜单">
               <Empty
@@ -241,11 +238,11 @@ interface SnapshotRow {
 }
 
 /** ContestSnapshot 展示归档后的最终榜单。 */
-function ContestSnapshot({ contestId }: { contestId: string }) {
+function ContestSnapshot({ contest }: { contest: Contest }) {
   const snapshot = useAsyncResource(
-    () => api.contest.getResultSnapshot(contestId),
-    [contestId],
-    (value: ResultSnapshot) => value.final_ranking.length === 0,
+    () => api.contest.getResultSnapshot(contest.id),
+    [contest.id],
+    (value: ResultSnapshot) => value.final_ranking.length === 0
   )
 
   const columns: TableColumn<SnapshotRow>[] = [
@@ -263,16 +260,20 @@ function ContestSnapshot({ contestId }: { contestId: string }) {
       mono: true,
       render: (row) => formatScore(row.score),
     },
-    { key: 'solvedCount', header: '通过题数', align: 'right', mono: true },
-    {
-      key: 'lastSolveAt',
-      header: '最近通过',
-      render: (row) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {row.lastSolveAt ? formatDateTime(row.lastSolveAt) : '—'}
-        </span>
-      ),
-    },
+    ...(contest.mode === ContestMode.SOLVE
+      ? [
+          { key: 'solvedCount', header: '通过题数', align: 'right' as const, mono: true },
+          {
+            key: 'lastSolveAt',
+            header: '最近通过',
+            render: (row: SnapshotRow) => (
+              <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
+                {row.lastSolveAt ? formatDateTime(row.lastSolveAt) : '—'}
+              </span>
+            ),
+          },
+        ]
+      : []),
   ]
 
   return (
@@ -300,7 +301,10 @@ function ContestSnapshot({ contestId }: { contestId: string }) {
                 // <md 换行卡(§6.4.1 规则 3):名次一行、得分与通过题数一行
                 mobileCard={(row) => ({
                   title: `第 ${row.rank} 名`,
-                  meta: `得分 ${formatScore(row.score)} · 通过 ${row.solvedCount} 题`,
+                  meta:
+                    contest.mode === ContestMode.SOLVE
+                      ? `得分 ${formatScore(row.score)} · 通过 ${row.solvedCount} 题`
+                      : `对抗积分 ${formatScore(row.score)}`,
                 })}
               />
             </DataPanel>

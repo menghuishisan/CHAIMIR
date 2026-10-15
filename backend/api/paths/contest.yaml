@@ -6,7 +6,7 @@
     operationId: contestListContests
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/StatusQuery" }]
+    parameters: [{ $ref: "#/components/parameters/StatusQuery" }, { $ref: "#/components/parameters/KeywordQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [contest]
@@ -51,6 +51,15 @@
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/problems/{problem_id}:
+  get:
+    tags: [contest]
+    summary: 读取参赛题面
+    operationId: contestGetStudentProblem
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ProblemIDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/contests/{id}/publish:
   post:
@@ -117,6 +126,17 @@
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/contests/{id}/problems/{problem_id}/env:
+  get:
+    tags: [contest]
+    summary: 恢复竞赛实操题环境
+    operationId: contestGetEnv
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { $ref: "#/components/parameters/IDPath" }
+      - { $ref: "#/components/parameters/ProblemIDPath" }
+      - { name: request_ref, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [contest]
     summary: 起实操题环境
@@ -134,7 +154,7 @@
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ProblemIDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody: { $ref: "#/components/requestBodies/ContestSolveRequestBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/contests/{id}/battle/entry:
   post:
@@ -144,7 +164,7 @@
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody: { $ref: "#/components/requestBodies/BattleEntryRequestBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/contests/{id}/battle/entries:
   get:
@@ -176,7 +196,7 @@
 /api/v1/contest/contests/{id}/ladder:
   get:
     tags: [contest]
-    summary: 竞赛天梯排名
+    summary: 竞赛天梯排名(解题赛显示解题统计,对抗赛显示 ELO)
     operationId: contestListLadder
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -245,6 +265,15 @@
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/contest/contests/{id}/problems/{problem_id}/submission:
+  get:
+    tags: [contest]
+    summary: 查看当前队伍最近一次解题提交
+    operationId: contestGetLatestSubmission
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/ProblemIDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/matches/{id}/replay:
   get:
@@ -320,7 +349,7 @@
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+    responses: { "200": { $ref: "#/components/responses/ContestSandboxFileSave" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/sandboxes/{id}/command-tools/{tool_code}/run:
   post:
     tags: [contest]
@@ -427,7 +456,7 @@
     operationId: contestListStudentContests
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
+    parameters: [{ $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }, { $ref: "#/components/parameters/KeywordQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/student/contests/{id}:
   get:
@@ -441,7 +470,7 @@
 /api/v1/contest/my/contest-records:
   get:
     tags: [contest]
-    summary: 我的竞赛战绩档案
+    summary: 我的竞赛战绩档案(包含本人队伍解题进度,对抗赛不含解题时间)
     operationId: contestMyRecords
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]

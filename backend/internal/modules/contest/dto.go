@@ -2,6 +2,8 @@
 package contest
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -56,6 +58,7 @@ type ProblemRequest struct {
 type ProblemDTO struct {
 	ID                ids.ID               `json:"id"`
 	ContestID         ids.ID               `json:"contest_id"`
+	Title             string               `json:"title,omitempty"`
 	ItemCode          string               `json:"item_code"`
 	ItemVersion       string               `json:"item_version"`
 	Score             int32                `json:"score"`
@@ -122,6 +125,11 @@ type ContestSandboxFileWriteResponse struct {
 	WorkspaceRevision int64 `json:"workspace_revision"`
 }
 
+// ContestSandboxFileSaveResponse 仅向学生返回修订号,不暴露内部对象存储引用或内容哈希。
+type ContestSandboxFileSaveResponse struct {
+	WorkspaceRevision int64 `json:"workspace_revision"`
+}
+
 // ContestSandboxToolRunRequest 是 M8 授权网关执行命令工具的请求。
 type ContestSandboxToolRunRequest struct {
 	Command     []string `json:"command"`
@@ -153,10 +161,22 @@ type ContestSandboxResponse struct {
 
 // SubmitRequest 是解题赛提交请求。
 type SubmitRequest struct {
-	ContentRef     map[string]any `json:"content_ref"`
-	CodeStorageKey string         `json:"code_storage_key"`
-	CodeHash       string         `json:"code_hash"`
-	SandboxRef     string         `json:"sandbox_ref"`
+	ContentRef map[string]any `json:"content_ref"`
+	SandboxRef string         `json:"sandbox_ref"`
+}
+
+// UnmarshalJSON 使解题提交请求严格遵循已发布的闭合字段契约。
+func (req *SubmitRequest) UnmarshalJSON(data []byte) error {
+	type wire SubmitRequest
+	if err := rejectUnknownContestRequestFields(data, "content_ref", "sandbox_ref"); err != nil {
+		return err
+	}
+	var decoded wire
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*req = SubmitRequest(decoded)
+	return nil
 }
 
 // SubmissionDTO 是解题赛提交输出。
@@ -178,10 +198,44 @@ type SubmissionDTO struct {
 
 // BattleEntryRequest 是提交参战物请求。
 type BattleEntryRequest struct {
-	ProblemID   ids.ID `json:"problem_id"`
-	Role        int16  `json:"role"`
-	ArtifactRef string `json:"artifact_ref"`
-	CodeHash    string `json:"code_hash"`
+	ProblemID ids.ID `json:"problem_id"`
+	SandboxID ids.ID `json:"sandbox_id"`
+	Role      int16  `json:"role"`
+}
+
+// UnmarshalJSON 拒绝对抗参战请求中未公开的对象引用或附加字段。
+func (req *BattleEntryRequest) UnmarshalJSON(data []byte) error {
+	type wire BattleEntryRequest
+	if err := rejectUnknownContestRequestFields(data, "problem_id", "sandbox_id", "role"); err != nil {
+		return err
+	}
+	var decoded wire
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*req = BattleEntryRequest(decoded)
+	return nil
+}
+
+// rejectUnknownContestRequestFields 校验这些具备对象归属安全边界的请求没有额外 JSON 字段。
+func rejectUnknownContestRequestFields(data []byte, allowed ...string) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	for name := range fields {
+		known := false
+		for _, field := range allowed {
+			if name == field {
+				known = true
+				break
+			}
+		}
+		if !known {
+			return fmt.Errorf("请求包含未声明字段 %q", name)
+		}
+	}
+	return nil
 }
 
 // BattleEntryDTO 是参战物输出。
@@ -281,12 +335,12 @@ type BattleReplayCheckpointDTO struct {
 
 // LadderDTO 是排行榜输出。
 type LadderDTO struct {
-	TeamID      ids.ID    `json:"team_id"`
-	Score       float64   `json:"score"`
-	SolvedCount int32     `json:"solved_count"`
-	LastSolveAt time.Time `json:"last_solve_at,omitempty"`
-	Rank        int32     `json:"rank"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	TeamID      ids.ID     `json:"team_id"`
+	Score       float64    `json:"score"`
+	SolvedCount int32      `json:"solved_count"`
+	LastSolveAt *time.Time `json:"last_solve_at,omitempty"`
+	Rank        int32      `json:"rank"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // LeaderboardPushDTO 是竞赛排行榜变化发送到 leaderboard topic 的精确实时负载。
@@ -306,12 +360,12 @@ type ResultSnapshotDTO struct {
 
 // LadderSnapshotEntryDTO 是最终榜单快照的公开固定结构。
 type LadderSnapshotEntryDTO struct {
-	TeamID      ids.ID    `json:"team_id"`
-	Score       float64   `json:"score"`
-	SolvedCount int32     `json:"solved_count"`
-	LastSolveAt time.Time `json:"last_solve_at,omitempty"`
-	Rank        int32     `json:"rank"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	TeamID      ids.ID     `json:"team_id"`
+	Score       float64    `json:"score"`
+	SolvedCount int32      `json:"solved_count"`
+	LastSolveAt *time.Time `json:"last_solve_at,omitempty"`
+	Rank        int32      `json:"rank"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // CheatRecordRequest 是违规判定请求。
@@ -399,10 +453,12 @@ type VulnProblemDTO struct {
 
 // ContestRecordDTO 是学生个人竞赛战绩输出。
 type ContestRecordDTO struct {
-	ContestID     ids.ID  `json:"contest_id"`
-	TeamID        ids.ID  `json:"team_id"`
-	Score         float64 `json:"score"`
-	Rank          int32   `json:"rank"`
-	ContestName   string  `json:"contest_name"`
-	ContestStatus int16   `json:"contest_status"`
+	ContestID     ids.ID     `json:"contest_id"`
+	TeamID        ids.ID     `json:"team_id"`
+	Score         float64    `json:"score"`
+	Rank          int32      `json:"rank"`
+	SolvedCount   int32      `json:"solved_count"`
+	LastSolveAt   *time.Time `json:"last_solve_at,omitempty"`
+	ContestName   string     `json:"contest_name"`
+	ContestStatus int16      `json:"contest_status"`
 }

@@ -5,91 +5,132 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
-	pkgcrypto "chaimir/pkg/crypto"
 )
 
-// CreateEnv 为竞赛题创建学生实操沙箱环境。
-func (s *Service) CreateEnv(ctx context.Context, contestID, problemID int64, req EnvRequest) (EnvDTO, error) {
+type contestEnvContext struct {
+	OrganizerTenantID int64
+	Contest           Contest
+	Problem           ContestProblem
+	Team              Team
+	SourceRef         string
+}
+
+// contestEnvSourceRefPrefix 返回竞赛题目和队伍环境来源引用的稳定前缀。
+func contestEnvSourceRefPrefix(year int, problemID, teamID int64) string {
+	return fmt.Sprintf("contest:%04d:solve-env:%s-%s-", year, ids.Format(problemID), ids.Format(teamID))
+}
+
+// resolveContestEnvContext 统一解析竞赛环境的队伍、题目和稳定来源引用。
+// 创建与刷新恢复必须使用同一来源规则,否则页面重开无法定位原有沙箱。
+func (s *Service) resolveContestEnvContext(ctx context.Context, contestID, problemID int64, req EnvRequest) (contestEnvContext, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return EnvDTO{}, err
+		return contestEnvContext{}, err
 	}
 	organizerTenantID, err := s.resolvePublishedContestTenant(ctx, contestID)
 	if err != nil {
-		return EnvDTO{}, err
+		return contestEnvContext{}, err
 	}
 	requestRef := strings.TrimSpace(req.RequestRef)
 	if requestRef == "" || len(requestRef) > 128 {
-		return EnvDTO{}, apperr.ErrContestSandboxUnavailable
+		return contestEnvContext{}, apperr.ErrContestSandboxUnavailable
 	}
-	var sourceRef string
-	var contest Contest
-	var problem ContestProblem
-	var team Team
+	out := contestEnvContext{OrganizerTenantID: organizerTenantID}
 	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
-		contest, err = tx.GetContest(ctx, organizerTenantID, contestID)
+		out.Contest, err = tx.GetContest(ctx, organizerTenantID, contestID)
 		if err != nil {
 			return err
 		}
-		if err := validateContestRunning(contest); err != nil {
+		if err := validateContestRunning(out.Contest); err != nil {
 			return err
 		}
-		problem, err = tx.GetContestProblem(ctx, organizerTenantID, problemID)
+		out.Problem, err = tx.GetContestProblem(ctx, organizerTenantID, problemID)
 		if err != nil {
 			return err
 		}
-		if problem.ContestID != contestID {
+		if out.Problem.ContestID != contestID {
 			return apperr.ErrContestProblemInvalid
 		}
-		team, err = s.currentAccountTeam(ctx, tx, organizerTenantID, id.TenantID, contestID, id.AccountID)
+		out.Team, err = s.currentAccountTeam(ctx, tx, organizerTenantID, id.TenantID, contestID, id.AccountID)
 		if err != nil {
 			return err
 		}
 		hash := sha256.Sum256([]byte(requestRef))
-		sourceRef = fmt.Sprintf("contest:%04d:solve-env:%s-%s-%x", contest.CreatedAt.Year(), ids.Format(problemID), ids.Format(team.ID), hash[:8])
+		out.SourceRef = fmt.Sprintf("%s%x", contestEnvSourceRefPrefix(out.Contest.CreatedAt.Year(), problemID, out.Team.ID), hash[:8])
 		return nil
 	}); err != nil {
-		return EnvDTO{}, err
+		return contestEnvContext{}, err
 	}
-	snapshot, err := s.compositionFromProblem(ctx, organizerTenantID, problem, contracts.SandboxAccessContestSolve)
+	return out, nil
+}
+
+// CreateEnv 为竞赛题创建学生实操沙箱环境。
+func (s *Service) CreateEnv(ctx context.Context, contestID, problemID int64, req EnvRequest) (EnvDTO, error) {
+	env, err := s.resolveContestEnvContext(ctx, contestID, problemID, req)
 	if err != nil {
 		return EnvDTO{}, err
 	}
-	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: organizerTenantID, CompositionSnapshot: snapshot, OwnerAccountID: contest.OrganizerID, SourceRef: sourceRef, ScopeRef: sourceRef, KeepAlive: false, SnapshotEnabled: false})
+	profile, err := sandboxProfileForContestMode(env.Contest.Mode)
+	if err != nil {
+		return EnvDTO{}, err
+	}
+	snapshot, err := s.compositionFromProblem(ctx, env.OrganizerTenantID, env.Problem, profile)
+	if err != nil {
+		return EnvDTO{}, err
+	}
+	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: env.OrganizerTenantID, CompositionSnapshot: snapshot, InitCodeRef: snapshot.Spec.InitCodeRef, InitScriptRef: snapshot.Spec.InitScriptRef, OwnerAccountID: env.Contest.OrganizerID, SourceRef: env.SourceRef, ScopeRef: env.SourceRef, KeepAlive: false, SnapshotEnabled: false})
 	if err != nil {
 		return EnvDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	capabilities := contestSandboxGrantCapabilities(info)
-	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
-		for _, member := range team.Members {
+	if err := s.store.TenantTx(ctx, env.OrganizerTenantID, func(ctx context.Context, tx TxStore) error {
+		for _, member := range env.Team.Members {
 			if _, err := tx.UpsertContestAccessGrant(ctx, ContestAccessGrant{
-				ID: s.ids.Generate(), TenantID: organizerTenantID, ContestID: contest.ID, TeamID: team.ID, SandboxID: info.SandboxID,
+				ID: s.ids.Generate(), TenantID: env.OrganizerTenantID, ContestID: env.Contest.ID, TeamID: env.Team.ID, SandboxID: info.SandboxID,
 				MemberTenantID: member.MemberTenantID, MemberAccountID: member.AccountID,
 				Capabilities: capabilities,
-				SourceRef:    info.SourceRef, ExpiresAt: contest.EndAt, Status: contestAccessGrantActive,
+				SourceRef:    info.SourceRef, ExpiresAt: env.Contest.EndAt, Status: contestAccessGrantActive,
 			}); err != nil {
 				return err
 			}
 		}
 		return nil
 	}); err != nil {
-		_ = s.sandbox.DestroySandbox(ctx, contracts.SandboxControlRequest{TenantID: organizerTenantID, SandboxID: info.SandboxID, SourceRef: info.SourceRef})
+		_ = s.sandbox.DestroySandbox(ctx, contracts.SandboxControlRequest{TenantID: env.OrganizerTenantID, SandboxID: info.SandboxID, SourceRef: info.SourceRef})
 		return EnvDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	return EnvDTO{SandboxID: ids.ID(info.SandboxID), SourceRef: info.SourceRef, Status: info.Status}, nil
 }
 
-// SubmitSolve 提交解题赛答案或代码引用并创建 M3 判题任务。
+// GetEnv 恢复当前队伍仍未销毁的竞赛实操环境,不创建新资源也不接受客户端运行时配置。
+func (s *Service) GetEnv(ctx context.Context, contestID, problemID int64, req EnvRequest) (EnvDTO, error) {
+	env, err := s.resolveContestEnvContext(ctx, contestID, problemID, req)
+	if err != nil {
+		return EnvDTO{}, err
+	}
+	info, err := s.sandbox.GetSandboxBySourceRef(ctx, env.OrganizerTenantID, env.SourceRef)
+	if err != nil {
+		if errors.Is(err, apperr.ErrSandboxNotFound) {
+			return EnvDTO{}, apperr.ErrNotFound.WithCause(err)
+		}
+		return EnvDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	return EnvDTO{SandboxID: ids.ID(info.SandboxID), SourceRef: info.SourceRef, Status: info.Status}, nil
+}
+
+// SubmitSolve 提交解题赛答案或当前授权沙箱,并创建 M3 判题任务。
 func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, req SubmitRequest) (SubmissionDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
@@ -99,11 +140,8 @@ func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, r
 	if err != nil {
 		return SubmissionDTO{}, err
 	}
-	req.CodeHash = strings.TrimSpace(req.CodeHash)
-	req.CodeStorageKey = strings.TrimSpace(req.CodeStorageKey)
 	req.SandboxRef = strings.TrimSpace(req.SandboxRef)
-	hasCode := req.CodeStorageKey != "" || req.CodeHash != ""
-	if req.ContentRef == nil || (hasCode && (req.CodeStorageKey == "" || !pkgcrypto.ValidSHA256Hex(req.CodeHash))) {
+	if req.ContentRef == nil {
 		return SubmissionDTO{}, apperr.ErrContestSubmissionInvalid
 	}
 	var contest Contest
@@ -119,6 +157,9 @@ func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, r
 		}
 		if err := validateContestRunning(contest); err != nil {
 			return err
+		}
+		if contest.Mode != ContestModeSolve {
+			return apperr.ErrContestSubmissionInvalid
 		}
 		problem, err = tx.GetContestProblem(ctx, organizerTenantID, problemID)
 		if err != nil {
@@ -149,27 +190,42 @@ func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, r
 	}); err != nil {
 		return SubmissionDTO{}, err
 	}
+	face, err := s.content.GetContentFace(ctx, organizerTenantID, contracts.ContentItemRef{ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion})
+	if err != nil {
+		return SubmissionDTO{}, apperr.ErrContestContentUnavailable.WithCause(err)
+	}
+	composition, hasComposition := face.Body["composition"]
+	if hasComposition {
+		if _, ok := composition.(map[string]any); !ok {
+			return SubmissionDTO{}, apperr.ErrContestSubmissionInvalid
+		}
+	}
+	submitKey := strings.TrimSpace(jsonx.StringFromAny(face.Body["submit_key"]))
+	codeTask := hasComposition && len(jsonx.ObjectFromAny(composition)) > 0
+	if err := validateContestSolveRequest(req, submitKey, codeTask); err != nil {
+		return SubmissionDTO{}, apperr.ErrContestSubmissionInvalid
+	}
 	sandboxSourceRef := ""
-	if req.SandboxRef != "" {
+	var savedCode contracts.SandboxWorkspaceSave
+	if codeTask {
 		sandboxID, ok := ids.Parse(req.SandboxRef)
 		if !ok {
 			return SubmissionDTO{}, apperr.ErrContestSubmissionInvalid
 		}
-		info, err := s.sandbox.GetSandbox(ctx, organizerTenantID, sandboxID)
-		if err != nil || info.TenantID != organizerTenantID || info.Status == contracts.SandboxStatusDestroyed || info.Status == contracts.SandboxStatusFailed || info.CompositionDigest != problem.CompositionDigest {
-			return SubmissionDTO{}, apperr.ErrContestSubmissionInvalid
+		req.SandboxRef = ids.Format(sandboxID)
+		savedCode, sandboxSourceRef, err = s.saveContestSubmissionWorkspace(ctx, contest, problem, team, sandboxID, id.TenantID, id.AccountID)
+		if err != nil {
+			return SubmissionDTO{}, err
 		}
-		prefix := fmt.Sprintf("contest:%04d:solve-env:%s-%s-", contest.CreatedAt.Year(), ids.Format(problemID), ids.Format(team.ID))
-		if !strings.HasPrefix(info.SourceRef, prefix) {
-			return SubmissionDTO{}, apperr.ErrContestSubmissionInvalid
-		}
-		sandboxSourceRef = info.SourceRef
 	}
-	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: organizerTenantID, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, CodeStorageKey: req.CodeStorageKey, CodeHash: req.CodeHash, SubmitterTenantID: id.TenantID, SubmitterID: id.AccountID, SourceRef: sourceRef, SourceOwnerID: contest.OrganizerID, SourceCourseID: 0, SourceScope: "contest", SandboxMode: sandboxModeForSolve(req), TargetSandboxRef: req.SandboxRef, SandboxSourceRef: sandboxSourceRef, ExtraInput: req.ContentRef, Priority: 8})
+	if err := s.validateSolveSubmissionContext(ctx, organizerTenantID, contest, problem, team, id.TenantID, id.AccountID); err != nil {
+		return SubmissionDTO{}, err
+	}
+	task, err := s.judge.SubmitJudgeTask(ctx, contracts.JudgeSubmitRequest{TenantID: organizerTenantID, ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion, CodeStorageKey: savedCode.CodeStorageKey, CodeHash: savedCode.CodeHash, SubmitterTenantID: id.TenantID, SubmitterID: id.AccountID, SourceRef: sourceRef, SourceOwnerID: contest.OrganizerID, SourceCourseID: 0, SourceScope: "contest", SandboxMode: sandboxModeForSolve(req), TargetSandboxRef: req.SandboxRef, SandboxSourceRef: sandboxSourceRef, ExtraInput: req.ContentRef, Priority: 8})
 	if err != nil {
 		return SubmissionDTO{}, apperr.ErrContestJudgeUnavailable.WithCause(err)
 	}
-	item := SolveSubmission{ID: submissionID, TenantID: organizerTenantID, ContestID: contest.ID, ProblemID: problem.ID, TeamID: team.ID, SubmitterTenantID: id.TenantID, SubmitterID: id.AccountID, ContentRef: req.ContentRef, SourceRef: sourceRef, JudgeTaskRef: ids.Format(task.TaskID), SandboxRef: req.SandboxRef}
+	item := SolveSubmission{ID: submissionID, TenantID: organizerTenantID, ContestID: contest.ID, ProblemID: problem.ID, TeamID: team.ID, SubmitterTenantID: id.TenantID, SubmitterID: id.AccountID, ContentRef: req.ContentRef, SourceRef: sourceRef, ScopeRef: sourceRef, JudgeTaskRef: ids.Format(task.TaskID), SandboxRef: req.SandboxRef}
 	if task.Status == contracts.JudgeTaskStatusDone {
 		item.Passed = task.Result.Passed
 		item.Score = scaledContestScore(problem.Score, task.Result.Score, task.Result.MaxScore)
@@ -208,6 +264,38 @@ func (s *Service) SubmitSolve(ctx context.Context, contestID, problemID int64, r
 	return submissionDTOFromModel(item), nil
 }
 
+// validateSolveSubmissionContext 在提交判题任务前重核赛态、题目版本和当前队伍。
+func (s *Service) validateSolveSubmissionContext(ctx context.Context, organizerTenantID int64, contest Contest, problem ContestProblem, team Team, memberTenantID, accountID int64) error {
+	return s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
+		currentContest, err := tx.GetContest(ctx, organizerTenantID, contest.ID)
+		if err != nil {
+			return err
+		}
+		if currentContest.Mode != ContestModeSolve {
+			return apperr.ErrContestSubmissionInvalid
+		}
+		if err := validateContestRunning(currentContest); err != nil {
+			return err
+		}
+		currentProblem, err := tx.GetContestProblem(ctx, organizerTenantID, problem.ID)
+		if err != nil {
+			return err
+		}
+		if currentProblem.ContestID != contest.ID || currentProblem.ItemCode != problem.ItemCode ||
+			currentProblem.ItemVersion != problem.ItemVersion || currentProblem.CompositionDigest != problem.CompositionDigest {
+			return apperr.ErrContestProblemInvalid
+		}
+		currentTeam, err := s.currentAccountTeam(ctx, tx, organizerTenantID, memberTenantID, contest.ID, accountID)
+		if err != nil {
+			return err
+		}
+		if currentTeam.ID != team.ID {
+			return apperr.ErrContestTeamAccessDenied
+		}
+		return nil
+	})
+}
+
 // GetSubmission 读取当前账号队伍可见的解题提交。
 func (s *Service) GetSubmission(ctx context.Context, submissionID int64) (SubmissionDTO, error) {
 	id, err := currentIdentity(ctx)
@@ -230,6 +318,42 @@ func (s *Service) GetSubmission(ctx context.Context, submissionID int64) (Submis
 			return err
 		}
 		return ensureTeamAccess(id.TenantID, id.AccountID, team)
+	}); err != nil {
+		return SubmissionDTO{}, err
+	}
+	return submissionDTOFromModel(item), nil
+}
+
+// GetLatestSubmission 读取当前学生队伍在指定题目下的最近一次提交。
+// 竞赛结束后仍允许参赛队成员查看自己的提交历史,用于刷新与关闭重开后的状态恢复。
+func (s *Service) GetLatestSubmission(ctx context.Context, contestID, problemID int64) (SubmissionDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return SubmissionDTO{}, err
+	}
+	organizerTenantID, err := s.resolvePublishedContestTenant(ctx, contestID)
+	if err != nil {
+		return SubmissionDTO{}, err
+	}
+	var item SolveSubmission
+	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
+		contest, err := tx.GetContest(ctx, organizerTenantID, contestID)
+		if err != nil {
+			return err
+		}
+		problem, err := tx.GetContestProblem(ctx, organizerTenantID, problemID)
+		if err != nil {
+			return err
+		}
+		if problem.ContestID != contest.ID {
+			return apperr.ErrContestProblemInvalid
+		}
+		team, err := s.currentAccountTeam(ctx, tx, organizerTenantID, id.TenantID, contestID, id.AccountID)
+		if err != nil {
+			return err
+		}
+		item, err = tx.GetLatestSolveSubmission(ctx, organizerTenantID, contestID, problemID, team.ID)
+		return err
 	}); err != nil {
 		return SubmissionDTO{}, err
 	}
@@ -332,7 +456,7 @@ func (s *Service) ListLadder(ctx context.Context, contestID int64, page, size in
 			if err != nil {
 				return err
 			}
-			all := ladderDTOsFromSnapshot(snapshot)
+			all := ladderDTOsFromSnapshot(snapshot, contest.Mode)
 			total = int64(len(all))
 			start := (page - 1) * size
 			if start >= len(all) {

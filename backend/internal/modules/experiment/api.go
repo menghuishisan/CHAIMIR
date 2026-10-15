@@ -70,7 +70,7 @@ func (a experimentAPI) listTeacherInstances(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if status != 0 && status != InstanceStatusCreating && status != InstanceStatusRunning && status != InstanceStatusPaused && status != InstanceStatusReleased {
+	if status != 0 && status != InstanceStatusCreating && status != InstanceStatusRunning && status != InstanceStatusPaused && status != InstanceStatusError && status != InstanceStatusReleased {
 		response.Fail(c, apperr.ErrExperimentInvalid)
 		return
 	}
@@ -99,6 +99,7 @@ func (a experimentAPI) registerStudentRoutes(g gin.IRouter) {
 	g.POST("/experiments/:id/instances", a.createInstance)
 	g.POST("/instances/:id/checkpoints/:cp/judge", a.judgeCheckpoint)
 	g.POST("/instances/:id/report", a.submitReport)
+	g.GET("/instances/:id/report", a.getStudentReport)
 }
 
 // listPublishedExperiments 仅向学生返回当前租户已发布实验。
@@ -111,7 +112,8 @@ func (a experimentAPI) listPublishedExperiments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, facets, err := a.svc.ListPublishedExperiments(c.Request.Context(), courseID, page, size)
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	out, total, p, s, facets, err := a.svc.ListPublishedExperiments(c.Request.Context(), courseID, keyword, page, size)
 	httpx.WritePageWithFacets(c, out, total, p, s, facets, err)
 }
 
@@ -159,7 +161,8 @@ func (a experimentAPI) listExperiments(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListExperiments(c.Request.Context(), courseID, status, page, size)
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	out, total, p, s, err := a.svc.ListExperiments(c.Request.Context(), courseID, status, keyword, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
 }
 
@@ -330,6 +333,16 @@ func (a experimentAPI) submitReport(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.SubmitReport(c.Request.Context(), id, ReportUploadRequest{FileName: file.Filename, ContentType: file.Header.Get("Content-Type"), Content: content})
+	httpx.Write(c, out, err)
+}
+
+// getStudentReport 返回当前学生本人报告的批改结果,不返回对象存储引用。
+func (a experimentAPI) getStudentReport(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetStudentReport(c.Request.Context(), id)
 	httpx.Write(c, out, err)
 }
 

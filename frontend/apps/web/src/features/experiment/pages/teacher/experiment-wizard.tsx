@@ -20,6 +20,7 @@ import {
   Breadcrumb,
   Button,
   Callout,
+  DescriptionList,
   Modal,
   ModalBody,
   ModalContent,
@@ -106,11 +107,7 @@ function NewExperimentBootstrap() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={
-          <Breadcrumb
-            items={[{ label: '实验编排', href: '/teacher/experiments' }]}
-          />
-        }
+        kicker={<Breadcrumb items={[{ label: '实验编排', href: '/teacher/experiments' }]} />}
         title="新建实验"
         description="创建草稿后按四步完成编排。每一步都会保存到服务器,中途离开也不会丢。"
         icon={LayoutTemplate}
@@ -231,9 +228,9 @@ function WizardContent({ experiment, courses }: WizardContentProps) {
   }, [draft, persistence, validateStep])
 
   const saveCurrent = useCallback(async () => {
-    if (!validateStep()) return
+    // 保存草稿用于持久化尚未完成的编辑态;当前步骤完整性只约束继续和发布校验。
     await persistence.saveStep(draft, persistence.stepIndex)
-  }, [draft, persistence, validateStep])
+  }, [draft, persistence])
 
   /** validateAndPublish 先保存当前草稿,再走后端发布前校验。 */
   const validateAndPublish = useCallback(async () => {
@@ -277,15 +274,18 @@ function WizardContent({ experiment, courses }: WizardContentProps) {
     []
   )
 
+  // 已发布实验的组件快照已经进入学生实例链路,教师只能查看不能再改写。
+  // 下架后重新进入草稿编辑链路,由服务端状态门槛与这里的页面门槛共同约束。
+  if (experiment.status === ExperimentStatus.PUBLISHED) {
+    return <PublishedExperimentView experiment={experiment} />
+  }
+
   return (
     <>
       <PageHeader
         kicker={
           <Breadcrumb
-            items={[
-              { label: '实践' },
-              { label: '实验编排', href: '/teacher/experiments' },
-            ]}
+            items={[{ label: '实践' }, { label: '实验编排', href: '/teacher/experiments' }]}
           />
         }
         title={draft.name || '未命名实验'}
@@ -410,7 +410,7 @@ function WizardContent({ experiment, courses }: WizardContentProps) {
             <Button
               variant="seal"
               leftIcon={Send}
-              disabled={!validateResult?.ok || experiment.status === ExperimentStatus.PUBLISHED}
+              disabled={!validateResult?.ok}
               loading={publishing}
               onClick={() => void publish()}
             >
@@ -419,6 +419,58 @@ function WizardContent({ experiment, courses }: WizardContentProps) {
           </ModalFooter>
         </ModalContent>
       </Modal>
+    </>
+  )
+}
+
+/** PublishedExperimentView 展示已发布实验的只读摘要,避免把向导伪装成可编辑页面。 */
+function PublishedExperimentView({ experiment }: { experiment: Experiment }) {
+  const components = experiment.components
+  const checkpointScore = components.checkpoints.reduce((sum, item) => sum + item.score, 0)
+
+  return (
+    <>
+      <PageHeader
+        kicker={
+          <Breadcrumb
+            items={[{ label: '实践' }, { label: '实验编排', href: '/teacher/experiments' }]}
+          />
+        }
+        title={experiment.name}
+        description="实验已经发布,当前页面只展示已冻结的配置摘要。"
+        icon={LayoutTemplate}
+        actions={
+          <StatusIndicator tone={experimentStatusTone(experiment.status)} label="已发布 · 只读" />
+        }
+      />
+      <PageSection>
+        <Callout tone="info" title="发布后配置已锁定">
+          学生实例使用发布时冻结的环境、题面和判分配置。需要调整时请先下架,完成修改后重新校验发布。
+        </Callout>
+      </PageSection>
+      <PageSection title="实验说明" description="学生进入实验时看到的说明。">
+        <div className="rounded-lg bg-surface p-5 shadow-xs">
+          <p className="whitespace-pre-wrap text-sm leading-7 text-ink">
+            {experiment.description || '未填写实验说明。'}
+          </p>
+        </div>
+      </PageSection>
+      <PageSection title="配置摘要" description="发布快照的结构摘要,不提供修改入口。">
+        <div className="rounded-lg bg-surface p-5 shadow-xs">
+          <DescriptionList
+            dense
+            columns={2}
+            items={[
+              { term: '代码环境', description: `${components.envs.length} 个` },
+              { term: '仿真场景', description: `${components.sims.length} 个` },
+              { term: '实验阶段', description: `${components.stages.length} 个` },
+              { term: '检查点', description: `${components.checkpoints.length} 个` },
+              { term: '检查点总分', description: `${checkpointScore} 分` },
+              { term: '实验报告', description: experiment.require_report ? '需要提交' : '不需要' },
+            ]}
+          />
+        </div>
+      </PageSection>
     </>
   )
 }

@@ -12,28 +12,30 @@ WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 -- name: ListExperiments :many
 SELECT id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at
 FROM experiment
-WHERE tenant_id = $1
+WHERE tenant_id = sqlc.arg(tenant_id)::bigint
   AND deleted_at IS NULL
-  AND ($2::bigint = 0 OR course_id = $2)
-  AND ($3::smallint = 0 OR status = $3)
+  AND (sqlc.arg(course_id)::bigint = 0 OR course_id = sqlc.arg(course_id)::bigint)
+  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(keyword)::text = '' OR strpos(lower(name || ' ' || description), lower(sqlc.arg(keyword)::text)) > 0)
 ORDER BY updated_at DESC, id DESC
-LIMIT $4 OFFSET $5;
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
 -- name: CountExperiments :one
 SELECT COUNT(*)::bigint
 FROM experiment
-WHERE tenant_id = $1
+WHERE tenant_id = sqlc.arg(tenant_id)::bigint
   AND deleted_at IS NULL
-  AND ($2::bigint = 0 OR course_id = $2)
-  AND ($3::smallint = 0 OR status = $3);
+  AND (sqlc.arg(course_id)::bigint = 0 OR course_id = sqlc.arg(course_id)::bigint)
+  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(keyword)::text = '' OR strpos(lower(name || ' ' || description), lower(sqlc.arg(keyword)::text)) > 0);
 
 -- name: CountPublishedExperimentsByShape :many
 SELECT collab_mode, require_report, COUNT(*)::bigint AS count
 FROM experiment
-WHERE tenant_id = $1
+WHERE tenant_id = sqlc.arg(tenant_id)::bigint
   AND deleted_at IS NULL
-  AND status = 3
-  AND ($2::bigint = 0 OR course_id = $2)
+  AND status = sqlc.arg(published_status)::smallint
+  AND (sqlc.arg(course_id)::bigint = 0 OR course_id = sqlc.arg(course_id)::bigint)
 GROUP BY collab_mode, require_report
 ORDER BY collab_mode, require_report;
 
@@ -160,9 +162,10 @@ WHERE tenant_id = $1 AND source_ref = $2;
 
 -- name: UpdateInstanceResources :one
 UPDATE experiment_instance
-SET sandbox_refs = $3,
-    sim_session_refs = $4,
-    status = $5,
+SET scope_ref = $3,
+    sandbox_refs = $4,
+    sim_session_refs = $5,
+    status = CASE WHEN status = 6 THEN 6 ELSE $6 END,
     last_active_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, experiment_id, owner_account_id, group_id, source_ref, scope_ref, sandbox_refs, sim_session_refs, status, COALESCE(score::float8, 0)::float8 AS score, started_at, finished_at, last_active_at;
@@ -235,7 +238,7 @@ JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
 WHERE i.tenant_id = sqlc.arg(tenant_id)::bigint
   AND (sqlc.arg(teacher_id)::bigint = 0 OR e.author_id = sqlc.arg(teacher_id)::bigint)
   AND (sqlc.arg(status)::smallint = 0 OR i.status = sqlc.arg(status)::smallint)
-  AND i.status IN (1, 2, 3, 7)
+  AND i.status IN (1, 2, 3, 6, 7)
 ORDER BY i.last_active_at DESC, i.id DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
@@ -246,7 +249,7 @@ JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
 WHERE i.tenant_id = sqlc.arg(tenant_id)::bigint
   AND (sqlc.arg(teacher_id)::bigint = 0 OR e.author_id = sqlc.arg(teacher_id)::bigint)
   AND (sqlc.arg(status)::smallint = 0 OR i.status = sqlc.arg(status)::smallint)
-  AND i.status IN (1, 2, 3, 7);
+  AND i.status IN (1, 2, 3, 6, 7);
 
 -- name: UpsertCheckpointResult :one
 INSERT INTO checkpoint_result (id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score, detail_ref, binding_output, judged_at)

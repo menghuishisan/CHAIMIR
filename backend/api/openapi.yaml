@@ -472,6 +472,8 @@ paths:
     $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}'
   /api/v1/contest/contests/{id}/problems:
     $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/problems'
+  /api/v1/contest/contests/{id}/problems/{problem_id}:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/problems/{problem_id}'
   /api/v1/contest/contests/{id}/publish:
     $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/publish'
   /api/v1/contest/contests/{id}/start:
@@ -490,6 +492,8 @@ paths:
     $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/problems/{problem_id}/env'
   /api/v1/contest/contests/{id}/problems/{problem_id}/submit:
     $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/problems/{problem_id}/submit'
+  /api/v1/contest/contests/{id}/problems/{problem_id}/submission:
+    $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/problems/{problem_id}/submission'
   /api/v1/contest/contests/{id}/battle/entry:
     $ref: './paths/contest.yaml#/api/v1/contest/contests/{id}/battle/entry'
   /api/v1/contest/contests/{id}/battle/entries:
@@ -808,6 +812,18 @@ components:
       required: false
       schema: { type: string }
   requestBodies:
+    ContestSolveRequestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ContestSolveRequest"
+    BattleEntryRequestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/BattleEntryRequest"
     ObjectBody:
       required: false
       content:
@@ -828,6 +844,17 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/StandardResponse"
+    ContestSandboxFileSave:
+      description: 保存竞赛工作区成功;只返回修订号,不暴露对象引用或哈希。
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/StandardResponse"
+              - type: object
+                properties:
+                  data:
+                    $ref: "#/components/schemas/ContestSandboxFileSaveResponse"
     Error:
       description: 统一错误响应。技术原因只进入日志,不进入响应体。
       content:
@@ -853,6 +880,40 @@ components:
       pattern: '^[1-9][0-9]*$'
       description: 公开 HTTP/WS 契约中的雪花 ID，使用十进制字符串避免浏览器数值精度损失。
       example: "910000000000000001"
+    ContestSolveRequest:
+      type: object
+      additionalProperties: false
+      required: [content_ref]
+      properties:
+        content_ref:
+          type: object
+          additionalProperties: true
+          description: 理论/答案题的答案字段;代码题提交空对象。
+        sandbox_ref:
+          $ref: "#/components/schemas/SnowflakeID"
+          description: 代码题当前获授权的竞赛实操沙箱;对象引用与哈希由服务端从该沙箱保存生成。
+    BattleEntryRequest:
+      type: object
+      additionalProperties: false
+      required: [problem_id, sandbox_id, role]
+      properties:
+        problem_id:
+          $ref: "#/components/schemas/SnowflakeID"
+        sandbox_id:
+          $ref: "#/components/schemas/SnowflakeID"
+          description: 当前参赛队伍已获授权的本题实操环境。
+        role:
+          type: integer
+          enum: [0, 1, 2]
+          description: 题目规则允许的参战角色;具体允许值由服务端按题目规则再次校验。
+    ContestSandboxFileSaveResponse:
+      type: object
+      additionalProperties: false
+      required: [workspace_revision]
+      properties:
+        workspace_revision:
+          type: integer
+          minimum: 0
     ObjectPayload:
       type: object
       additionalProperties: true

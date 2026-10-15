@@ -71,7 +71,7 @@ import {
 import { VULN_SOURCE_CONFIG_FIELDS } from '../../vulnerabilityContract'
 import { readString } from '../../jsonReaders'
 import { VulnProblemFormModal } from './vuln-problem-form'
-import { VulnPrevalidateModal } from './vuln-prevalidate'
+import { isVulnPrevalidateDetailConsistent, VulnPrevalidateModal } from './vuln-prevalidate'
 
 /** 状态筛选项:值为空串表示不过滤。 */
 const STATUS_FILTERS = [
@@ -203,8 +203,18 @@ export default function TeacherVulnWorkshopPage() {
       header: '预验证',
       render: (problem) => (
         <StatusIndicator
-          tone={vulnPrevalidateStatusTone(problem.prevalidate_status)}
-          label={vulnPrevalidateStatusLabel(problem.prevalidate_status)}
+          tone={vulnPrevalidateStatusTone(
+            problem.prevalidate_status === VulnPrevalidateStatus.PASSED &&
+            !isVulnPrevalidateDetailConsistent(problem)
+              ? VulnPrevalidateStatus.FAILED
+              : problem.prevalidate_status,
+          )}
+          label={vulnPrevalidateStatusLabel(
+            problem.prevalidate_status === VulnPrevalidateStatus.PASSED &&
+            !isVulnPrevalidateDetailConsistent(problem)
+              ? VulnPrevalidateStatus.FAILED
+              : problem.prevalidate_status,
+          )}
         />
       ),
     },
@@ -229,15 +239,18 @@ export default function TeacherVulnWorkshopPage() {
       align: 'right',
       render: (problem) => (
         <div className="flex items-center justify-end gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            leftIcon={FlaskConical}
-            onClick={() => setPrevalidateTarget(problem)}
-          >
-            预验证
-          </Button>
+          {problem.status === VulnProblemStatus.DRAFT ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              leftIcon={FlaskConical}
+              onClick={() => setPrevalidateTarget(problem)}
+            >
+              预验证
+            </Button>
+          ) : null}
           {problem.prevalidate_status === VulnPrevalidateStatus.PASSED &&
+          isVulnPrevalidateDetailConsistent(problem) &&
           problem.status === VulnProblemStatus.DRAFT ? (
             <Button
               variant="ghost"
@@ -420,15 +433,18 @@ export default function TeacherVulnWorkshopPage() {
                   ),
                   action: (
                     <div className="flex shrink-0 items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        leftIcon={FlaskConical}
-                        onClick={() => setPrevalidateTarget(item)}
-                      >
-                        预验证
-                      </Button>
+                      {item.status === VulnProblemStatus.DRAFT ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          leftIcon={FlaskConical}
+                          onClick={() => setPrevalidateTarget(item)}
+                        >
+                          预验证
+                        </Button>
+                      ) : null}
                       {item.prevalidate_status === VulnPrevalidateStatus.PASSED &&
+                      isVulnPrevalidateDetailConsistent(item) &&
                       item.status === VulnProblemStatus.DRAFT ? (
                         <IconButton
                           variant="ghost"
@@ -518,6 +534,7 @@ function VulnSourceCard({ source, onEdit, onSynced, onError }: VulnSourceCardPro
   }, [onError, onSynced, source.id])
 
   const endpoint = readString(source.config, VULN_SOURCE_CONFIG_FIELDS.endpoint)
+  const canSync = source.enabled && endpoint !== ''
 
   return (
     <Card>
@@ -551,7 +568,7 @@ function VulnSourceCard({ source, onEdit, onSynced, onError }: VulnSourceCardPro
             size="sm"
             leftIcon={RefreshCw}
             loading={syncing}
-            disabled={!source.enabled}
+            disabled={!canSync}
             onClick={() => void sync()}
           >
             同步案例
@@ -560,13 +577,19 @@ function VulnSourceCard({ source, onEdit, onSynced, onError }: VulnSourceCardPro
             修改配置
           </Button>
         </div>
-        {source.enabled ? null : (
+        {!source.enabled ? (
           <Empty
             icon={Database}
             title="来源已停用"
             description="启用后才能同步案例。"
           />
-        )}
+        ) : endpoint === '' ? (
+          <Empty
+            icon={Database}
+            title="来源配置不完整"
+            description="补充来源地址后才能同步案例。"
+          />
+        ) : null}
       </CardBody>
     </Card>
   )

@@ -24,6 +24,11 @@ export enum ContestStatus {
   ARCHIVED = 6,
 }
 
+/** 竞赛提交读取边界的错误码。 */
+export const CONTEST_SUBMISSION_ERROR_CODES = {
+  NOT_FOUND: '83001',
+} as const
+
 export enum TeamStatus {
   BUILDING = 1,
   LOCKED = 2,
@@ -102,8 +107,7 @@ export const VULN_CHAIN_OPERATION = {
   QUERY: 'query',
 } as const
 
-export type VulnChainOperation =
-  (typeof VULN_CHAIN_OPERATION)[keyof typeof VULN_CHAIN_OPERATION]
+export type VulnChainOperation = (typeof VULN_CHAIN_OPERATION)[keyof typeof VULN_CHAIN_OPERATION]
 
 /** CHAIN_ASSERT_OPERATION 是链上状态断言的公开操作协议。 */
 export const CHAIN_ASSERT_OPERATION = {

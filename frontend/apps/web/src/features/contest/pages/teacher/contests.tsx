@@ -14,6 +14,7 @@ import {
   FilterBar,
   FilterField,
   IconButton,
+  Input,
   Menu,
   MenuContent,
   MenuItem,
@@ -53,12 +54,16 @@ const STATUS_FILTERS = [
   { value: String(ContestStatus.SIGNUP), label: '报名中' },
   { value: String(ContestStatus.RUNNING), label: '进行中' },
   { value: String(ContestStatus.ENDED), label: '已结束' },
+  { value: String(ContestStatus.ARCHIVED), label: '已归档' },
 ] as const
 
 /** 可执行的状态流转动作。 */
 type LifecycleAction = 'publish' | 'start' | 'freeze' | 'end' | 'archive'
 
-const ACTION_COPY: Record<LifecycleAction, { title: string; description: string; confirm: string }> = {
+const ACTION_COPY: Record<
+  LifecycleAction,
+  { title: string; description: string; confirm: string }
+> = {
   publish: {
     title: '确认发布赛事',
     description: '发布后学生可以看到赛事并在报名窗口内报名。赛制与时间安排将不宜再改。',
@@ -92,6 +97,8 @@ const ACTION_COPY: Record<LifecycleAction, { title: string; description: string;
 export default function TeacherContestsPage() {
   const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [keyword, setKeyword] = useState('')
+  const [submittedKeyword, setSubmittedKeyword] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [confirm, setConfirm] = useState<{ action: LifecycleAction; contest: Contest }>()
   const [working, setWorking] = useState(false)
@@ -101,10 +108,15 @@ export default function TeacherContestsPage() {
     (params) =>
       api.contest.getContests({
         status: statusFilter ? (Number(statusFilter) as ContestStatus) : undefined,
+        keyword: submittedKeyword || undefined,
         ...params,
       }),
-    [statusFilter],
+    [statusFilter, submittedKeyword]
   )
+
+  const handleSearch = useCallback(() => {
+    setSubmittedKeyword(keyword.trim())
+  }, [keyword])
 
   /** runAction 执行状态流转。归档返回结果快照,其余返回赛事本体。 */
   const runAction = useCallback(async () => {
@@ -133,19 +145,19 @@ export default function TeacherContestsPage() {
   const totalCount = useResourceTotal((params) => api.contest.getContests(params), [])
   const signupCount = useResourceTotal(
     (params) => api.contest.getContests({ status: ContestStatus.SIGNUP, ...params }),
-    [],
+    []
   )
   const runningOnlyCount = useResourceTotal(
     (params) => api.contest.getContests({ status: ContestStatus.RUNNING, ...params }),
-    [],
+    []
   )
   const frozenCount = useResourceTotal(
     (params) => api.contest.getContests({ status: ContestStatus.FROZEN, ...params }),
-    [],
+    []
   )
   const draftCount = useResourceTotal(
     (params) => api.contest.getContests({ status: ContestStatus.DRAFT, ...params }),
-    [],
+    []
   )
   const runningCount =
     runningOnlyCount === undefined || frozenCount === undefined
@@ -183,7 +195,10 @@ export default function TeacherContestsPage() {
       key: 'status',
       header: '状态',
       render: (contest) => (
-        <StatusIndicator tone={contestStatusTone(contest.status)} label={contestStatusLabel(contest.status)} />
+        <StatusIndicator
+          tone={contestStatusTone(contest.status)}
+          label={contestStatusLabel(contest.status)}
+        />
       ),
     },
     {
@@ -192,7 +207,11 @@ export default function TeacherContestsPage() {
       align: 'right',
       render: (contest) => (
         <div className="flex items-center justify-end gap-1">
-          <Button variant="ghost" size="sm" onClick={() => navigate(`/teacher/contests/${contest.id}`)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate(`/teacher/contests/${contest.id}`)}
+          >
             管理赛事
           </Button>
           <ContestActionMenu
@@ -214,7 +233,11 @@ export default function TeacherContestsPage() {
         icon={Trophy}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" leftIcon={Bug} onClick={() => navigate('/teacher/vuln-workshop')}>
+            <Button
+              variant="outline"
+              leftIcon={Bug}
+              onClick={() => navigate('/teacher/vuln-workshop')}
+            >
               漏洞题工坊
             </Button>
             <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
@@ -247,7 +270,15 @@ export default function TeacherContestsPage() {
       <DataPanel
         label="赛事列表"
         filter={
-          <FilterBar label="赛事筛选">
+          <FilterBar label="赛事筛选" onSubmit={handleSearch} submitLabel="搜索">
+            <FilterField label="关键词" htmlFor="teacher-contest-keyword">
+              <Input
+                id="teacher-contest-keyword"
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="搜索赛事名称"
+              />
+            </FilterField>
             <FilterField label="赛事状态" group>
               <SegmentedControl
                 aria-label="按赛事状态筛选"
@@ -268,49 +299,53 @@ export default function TeacherContestsPage() {
           />
         }
       >
-          <ResourceState
-            resource={contests}
-            emptyIcon={Trophy}
-            emptyTitle={statusFilter ? '这个状态下没有赛事' : '还没有赛事'}
-            emptyDescription={
-              statusFilter ? '换个状态看看。' : '新建赛事后编排赛题,发布即可开放报名。'
-            }
-            emptyAction={
-              statusFilter ? undefined : (
-                <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
-                  新建赛事
-                </Button>
-              )
-            }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-          >
-            {(page) => (
-              <Table
-                columns={columns}
-                data={page.list}
-                rowKey={(item) => item.id}
-                elevated={false}
-                // <md 换行卡(§6.4.1 规则 3):赛事名一行、赛制与起止时间一行
-                mobileCard={(item) => ({
-                  title: item.name,
-                  meta: `${formatDateTime(item.start_at)} 开赛`,
-                  badge: (
-                    <StatusIndicator
-                      tone={contestStatusTone(item.status)}
-                      label={contestStatusLabel(item.status)}
-                    />
-                  ),
-                  action: (
-                    <ContestActionMenu
-                      contest={item}
-                      onManage={() => navigate(`/teacher/contests/${item.id}`)}
-                      onRequest={(action) => setConfirm({ action, contest: item })}
-                    />
-                  ),
-                })}
-              />
-            )}
-          </ResourceState>
+        <ResourceState
+          resource={contests}
+          emptyIcon={Trophy}
+          emptyTitle={submittedKeyword || statusFilter ? '没有匹配的赛事' : '还没有赛事'}
+          emptyDescription={
+            submittedKeyword || statusFilter
+              ? '换个关键词或状态看看。'
+              : '新建赛事后编排赛题,发布即可开放报名。'
+          }
+          emptyAction={
+            statusFilter ? undefined : (
+              <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
+                新建赛事
+              </Button>
+            )
+          }
+          skeleton={
+            <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
+          }
+        >
+          {(page) => (
+            <Table
+              columns={columns}
+              data={page.list}
+              rowKey={(item) => item.id}
+              elevated={false}
+              // <md 换行卡(§6.4.1 规则 3):赛事名一行、赛制与起止时间一行
+              mobileCard={(item) => ({
+                title: item.name,
+                meta: `${formatDateTime(item.start_at)} 开赛`,
+                badge: (
+                  <StatusIndicator
+                    tone={contestStatusTone(item.status)}
+                    label={contestStatusLabel(item.status)}
+                  />
+                ),
+                action: (
+                  <ContestActionMenu
+                    contest={item}
+                    onManage={() => navigate(`/teacher/contests/${item.id}`)}
+                    onRequest={(action) => setConfirm({ action, contest: item })}
+                  />
+                ),
+              })}
+            />
+          )}
+        </ResourceState>
       </DataPanel>
 
       {createOpen ? (
@@ -372,9 +407,13 @@ function ContestActionMenu({ contest, onManage, onRequest }: ContestActionMenuPr
   const canPublish = contest.status === ContestStatus.DRAFT
   const canStart = contest.status === ContestStatus.SIGNUP && now >= startAt && now < endAt
   const canFreeze =
-    contest.status === ContestStatus.RUNNING && contest.freeze_minutes > 0 && now >= freezeAt && now < endAt
+    contest.status === ContestStatus.RUNNING &&
+    contest.freeze_minutes > 0 &&
+    now >= freezeAt &&
+    now < endAt
   const canEnd =
-    (contest.status === ContestStatus.RUNNING || contest.status === ContestStatus.FROZEN) && now >= endAt
+    (contest.status === ContestStatus.RUNNING || contest.status === ContestStatus.FROZEN) &&
+    now >= endAt
   const canArchive = contest.status === ContestStatus.ENDED
 
   return (

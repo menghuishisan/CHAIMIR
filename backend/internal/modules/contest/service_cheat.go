@@ -24,7 +24,11 @@ func (s *Service) CreateCheatRecord(ctx context.Context, contestID int64, req Ch
 	}
 	item := CheatRecord{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, TeamID: req.TeamID.Int64(), Type: req.Type, Evidence: req.Evidence, Action: req.Action, OperatorID: id.AccountID}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		if _, err := s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID); err != nil {
+		contest, err := s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
+		if err != nil {
+			return err
+		}
+		if err := validateCheatReviewContestStatus(contest.Status); err != nil {
 			return err
 		}
 		team, err := tx.GetTeam(ctx, id.TenantID, req.TeamID.Int64())
@@ -91,7 +95,11 @@ func (s *Service) ListCheatSuspects(ctx context.Context, contestID, problemID in
 	excludeSourceRef = strings.TrimSpace(excludeSourceRef)
 	var problem ContestProblem
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		if _, err := s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID); err != nil {
+		contest, err := s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
+		if err != nil {
+			return err
+		}
+		if err := validateCheatReviewContestStatus(contest.Status); err != nil {
 			return err
 		}
 		problem, err = tx.GetContestProblem(ctx, id.TenantID, problemID)

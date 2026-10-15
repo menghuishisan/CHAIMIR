@@ -254,11 +254,15 @@ func validateStageConfig(cfg ComponentConfigRequest, envIDs, simIDs, checkpointI
 			}
 			stagedSims[id] = true
 		}
+		stageSimIDs := make(map[string]bool, len(stage.Components.Sims))
+		for _, simID := range stage.Components.Sims {
+			stageSimIDs[strings.TrimSpace(simID)] = true
+		}
 		if err := validateUnlockCondition(stage.UnlockCondition, checkpointIDs); err != nil {
 			return err
 		}
 		for _, binding := range stage.ParamBindings {
-			if err := validateParamBinding(binding, simIDs, checkpointIDs); err != nil {
+			if err := validateParamBinding(binding, stageSimIDs, checkpointIDs); err != nil {
 				return err
 			}
 		}
@@ -382,7 +386,7 @@ func validateInstanceTransition(current, next int16) error {
 			return nil
 		}
 	case InstanceStatusRunning:
-		if current == InstanceStatusPaused || current == InstanceStatusReleased || current == InstanceStatusCreating {
+		if current == InstanceStatusPaused || current == InstanceStatusReleased || current == InstanceStatusCreating || current == InstanceStatusError {
 			return nil
 		}
 	case InstanceStatusFinished:
@@ -450,6 +454,13 @@ func validateManualScore(score float64) error {
 // sourceRefForInstance 按全局 source_ref 规范生成实验实例来源引用。
 func sourceRefForInstance(id int64, now time.Time) string {
 	return fmt.Sprintf("experiment:%04d:instance:%s", now.Year(), ids.Format(id))
+}
+
+// scopeRefForInstanceGeneration 为实验实例的每次资源运行生成独立作用域。
+// source_ref 在整个实例生命周期内稳定,scope_ref 则随暂停后重建递增,避免 M2/M4
+// 资源表的唯一作用域约束阻断恢复,也让每次回收只触及本次实际创建的资源。
+func scopeRefForInstanceGeneration(sourceRef string, generationID int64) string {
+	return strings.TrimSpace(sourceRef) + ":scope:" + ids.Format(generationID)
 }
 
 // validExperimentSourceRef 校验事件来源确属 M7 实例。

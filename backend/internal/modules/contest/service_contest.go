@@ -3,6 +3,7 @@ package contest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -17,17 +19,18 @@ import (
 )
 
 // ListContests 查询当前租户竞赛列表。
-func (s *Service) ListContests(ctx context.Context, status int16, page, size int) ([]ContestDTO, int64, int, int, error) {
+func (s *Service) ListContests(ctx context.Context, status int16, keyword string, page, size int) ([]ContestDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
 	page, size = pagex.Normalize(page, size)
+	keyword = strings.TrimSpace(keyword)
 	var items []Contest
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, total, err = tx.ListContests(ctx, id.TenantID, status, page, size)
+		items, total, err = tx.ListContests(ctx, id.TenantID, status, keyword, page, size)
 		return err
 	}); err != nil {
 		return nil, 0, 0, 0, err
@@ -60,17 +63,18 @@ func (s *Service) GetContestForTeacher(ctx context.Context, contestID int64) (Co
 
 // ListStudentContests 查询学生可发现的报名中、进行中和已结束竞赛。
 // status 传 0 表示不按状态过滤;传具体状态时仍受「非草稿」可见区间约束。
-func (s *Service) ListStudentContests(ctx context.Context, status int16, page, size int) ([]ContestDTO, int64, int, int, error) {
+func (s *Service) ListStudentContests(ctx context.Context, status int16, keyword string, page, size int) ([]ContestDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
 	page, size = pagex.Normalize(page, size)
+	keyword = strings.TrimSpace(keyword)
 	var items []Contest
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, total, err = tx.ListStudentContests(ctx, id.TenantID, status, page, size)
+		items, total, err = tx.ListStudentContests(ctx, id.TenantID, status, keyword, page, size)
 		return err
 	}); err != nil {
 		return nil, 0, 0, 0, err
@@ -206,11 +210,14 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 	if err != nil {
 		return ProblemDTO{}, apperr.ErrContestContentUnavailable.WithCause(err)
 	}
+	if !contestContentTypeAllowed(contest.Mode, full.Type) {
+		return ProblemDTO{}, apperr.ErrContestProblemInvalid
+	}
 	var compositionSnapshot *contracts.SandboxCompositionSnapshot
 	if _, declared := full.Body["composition"]; declared {
-		profile := contracts.SandboxAccessContestSolve
-		if contest.Mode == ContestModeBattle {
-			profile = contracts.SandboxAccessContestBattle
+		profile, profileErr := sandboxProfileForContestMode(contest.Mode)
+		if profileErr != nil {
+			return ProblemDTO{}, profileErr
 		}
 		compiled, err := s.compileCompositionFromContent(ctx, id.TenantID, req.ItemCode, req.ItemVersion, profile)
 		if err != nil {
@@ -248,7 +255,7 @@ func (s *Service) ListProblems(ctx context.Context, contestID int64) ([]ProblemD
 	if err != nil {
 		return nil, err
 	}
-	organizerTenantID, err := s.resolvePublishedContestTenant(ctx, contestID)
+	organizerTenantID, err := s.resolveContestTenantForProblemRead(ctx, id, contestID)
 	if err != nil {
 		return nil, err
 	}
@@ -273,8 +280,95 @@ func (s *Service) ListProblems(ctx context.Context, contestID int64) ([]ProblemD
 		if err != nil {
 			return nil, apperr.ErrContestContentUnavailable.WithCause(err)
 		}
-		dto.Face = face.Body
+		dto.Title = strings.TrimSpace(jsonx.StringFromAny(face.Body["title"]))
 		out = append(out, dto)
+	}
+	return out, nil
+}
+
+// GetProblemForStudent 读取已报名队伍成员可见的完整安全题面。
+// 题目列表只返回摘要;完整题面必须经过队伍成员校验,并再次剥离执行期字段。
+func (s *Service) GetProblemForStudent(ctx context.Context, contestID, problemID int64) (ProblemDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return ProblemDTO{}, err
+	}
+	organizerTenantID, err := s.resolvePublishedContestTenant(ctx, contestID)
+	if err != nil {
+		return ProblemDTO{}, err
+	}
+	var item ContestProblem
+	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
+		if _, err := s.currentAccountTeam(ctx, tx, organizerTenantID, id.TenantID, contestID, id.AccountID); err != nil {
+			if errors.Is(err, apperr.ErrContestTeamNotFound) {
+				return apperr.ErrContestNotFound
+			}
+			return err
+		}
+		var err error
+		item, err = tx.GetContestProblem(ctx, organizerTenantID, problemID)
+		if err != nil {
+			return err
+		}
+		if item.ContestID != contestID {
+			return apperr.ErrContestProblemInvalid
+		}
+		return nil
+	}); err != nil {
+		return ProblemDTO{}, err
+	}
+	face, err := s.content.GetContentFace(ctx, organizerTenantID, contracts.ContentItemRef{ItemCode: item.ItemCode, ItemVersion: item.ItemVersion})
+	if err != nil {
+		return ProblemDTO{}, apperr.ErrContestContentUnavailable.WithCause(err)
+	}
+	safeFace, err := contestStudentFace(face.Body)
+	if err != nil {
+		return ProblemDTO{}, apperr.ErrContestContentUnavailable.WithCause(err)
+	}
+	out := problemDTOFromModel(item)
+	out.Title = strings.TrimSpace(jsonx.StringFromAny(safeFace["title"]))
+	out.Face = safeFace
+	return out, nil
+}
+
+// contestStudentFace 只投影学生答题所需的题面与组合摘要,不透传执行期配置。
+func contestStudentFace(face map[string]any) (map[string]any, error) {
+	out, err := jsonx.CloneObjectStrict(face)
+	if err != nil {
+		return nil, err
+	}
+	delete(out, "init_code_ref")
+	delete(out, "init_script_ref")
+	delete(out, "sim_package_ref")
+	delete(out, "judge_config")
+	if raw, ok := out["composition"]; ok {
+		composition, ok := raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("题面组合声明格式不正确")
+		}
+		safeComposition := map[string]any{}
+		if workspace := strings.TrimSpace(jsonx.StringFromAny(composition["workspace_runtime_instance"])); workspace != "" {
+			safeComposition["workspace_runtime_instance"] = workspace
+		}
+		runtimes, ok := composition["runtimes"].([]any)
+		if !ok || len(runtimes) == 0 {
+			return nil, fmt.Errorf("题面组合声明缺少运行时")
+		}
+		safeRuntimes := make([]any, 0, len(runtimes))
+		for _, rawRuntime := range runtimes {
+			runtime, ok := rawRuntime.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("题面运行时声明格式不正确")
+			}
+			instanceCode := strings.TrimSpace(jsonx.StringFromAny(runtime["instance_code"]))
+			runtimeCode := strings.TrimSpace(jsonx.StringFromAny(runtime["runtime_code"]))
+			if instanceCode == "" || runtimeCode == "" {
+				return nil, fmt.Errorf("题面运行时声明不完整")
+			}
+			safeRuntimes = append(safeRuntimes, map[string]any{"instance_code": instanceCode, "runtime_code": runtimeCode})
+		}
+		safeComposition["runtimes"] = safeRuntimes
+		out["composition"] = safeComposition
 	}
 	return out, nil
 }
@@ -336,7 +430,7 @@ func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSn
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.archive", auditTargetContest, contestID, map[string]any{"snapshot_id": snapshot.ID}); err != nil {
 		return ResultSnapshotDTO{}, err
 	}
-	return resultSnapshotDTOFromModel(snapshot), nil
+	return resultSnapshotDTOFromModel(snapshot, contest.Mode), nil
 }
 
 // RunAutoArchiveOnce 执行一次竞赛自动收尾扫描,供统一 background runner 调用。
@@ -361,6 +455,115 @@ func (s *Service) RunAutoArchiveOnce(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+type contestLifecycleTransition struct {
+	item          Contest
+	nextStatus    int16
+	revokedGrants []ContestAccessGrant
+	snapshotID    int64
+}
+
+// AdvanceContestStatusesOnce 按赛事时间窗口推进报名、进行中、封榜和结束状态。
+// 所有状态变更都在 contest 特权事务中完成,结束后的连接回收和审计在事务提交后执行。
+func (s *Service) AdvanceContestStatusesOnce(ctx context.Context, now time.Time) error {
+	if now.IsZero() {
+		now = timex.Now()
+	}
+	transitions := make([]contestLifecycleTransition, 0)
+	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+		dueToEnd, err := tx.ListContestsDueToEnd(ctx, now)
+		if err != nil {
+			return err
+		}
+		for _, contest := range dueToEnd {
+			grants, err := s.revokeContestSandboxGrants(ctx, tx, contest.TenantID, contest.ID)
+			if err != nil {
+				return err
+			}
+			updated, err := tx.SetContestStatus(ctx, contest.TenantID, contest.ID, ContestStatusEnded)
+			if err != nil {
+				return err
+			}
+			transitions = append(transitions, contestLifecycleTransition{item: updated, nextStatus: ContestStatusEnded, revokedGrants: grants})
+		}
+
+		dueToRun, err := tx.ListContestsDueToRun(ctx, now)
+		if err != nil {
+			return err
+		}
+		for _, contest := range dueToRun {
+			if err := tx.LockContestTeams(ctx, contest.TenantID, contest.ID); err != nil {
+				return err
+			}
+			updated, err := tx.SetContestStatus(ctx, contest.TenantID, contest.ID, ContestStatusRunning)
+			if err != nil {
+				return err
+			}
+			transitions = append(transitions, contestLifecycleTransition{item: updated, nextStatus: ContestStatusRunning})
+		}
+
+		dueToFreeze, err := tx.ListContestsDueToFreeze(ctx, now)
+		if err != nil {
+			return err
+		}
+		for _, contest := range dueToFreeze {
+			ranks, err := s.listAllContestLadder(ctx, tx, contest.TenantID, contest.ID)
+			if err != nil {
+				return err
+			}
+			snapshot, err := s.saveLadderSnapshot(ctx, tx, contest.TenantID, contest.ID, ContestStatusFrozen, ranks)
+			if err != nil {
+				return err
+			}
+			updated, err := tx.SetContestStatus(ctx, contest.TenantID, contest.ID, ContestStatusFrozen)
+			if err != nil {
+				return err
+			}
+			transitions = append(transitions, contestLifecycleTransition{item: updated, nextStatus: ContestStatusFrozen, snapshotID: snapshot.ID})
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	for _, transition := range transitions {
+		if transition.nextStatus == ContestStatusEnded {
+			if err := s.closeRevokedContestSandboxSessions(transition.revokedGrants); err != nil {
+				return apperr.ErrContestSandboxUnavailable.WithCause(err)
+			}
+		}
+		detail := map[string]any{"status": transition.nextStatus}
+		if transition.snapshotID > 0 {
+			detail["snapshot_id"] = transition.snapshotID
+		}
+		if err := s.writeAudit(ctx, transition.item.TenantID, 0, audit.ActorRoleSystem, "contest.lifecycle", auditTargetContest, transition.item.ID, detail); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// listAllContestLadder 按分页完整读取排行榜,保证封榜快照不因固定页大小截断。
+func (s *Service) listAllContestLadder(ctx context.Context, tx TxStore, tenantID, contestID int64) ([]LadderRank, error) {
+	pageSize := s.cfg.MatchmakerBatchSize
+	if pageSize <= 0 {
+		return nil, apperr.ErrContestStateInvalid
+	}
+	ranks := make([]LadderRank, 0)
+	for page := 1; ; page++ {
+		batch, total, err := tx.ListLadder(ctx, tenantID, contestID, page, pageSize)
+		if err != nil {
+			return nil, err
+		}
+		ranks = append(ranks, batch...)
+		if int64(len(ranks)) >= total {
+			return ranks, nil
+		}
+		if len(batch) == 0 {
+			return nil, apperr.ErrContestStateInvalid
+		}
+	}
 }
 
 // archiveContestSystem 执行归档,复用人工与自动归档的快照、回收和租约屏障。
@@ -460,14 +663,20 @@ func (s *Service) GetSnapshot(ctx context.Context, contestID int64) (ResultSnaps
 		return ResultSnapshotDTO{}, err
 	}
 	var snapshot LadderSnapshot
+	var mode int16
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
+		contest, err := tx.GetContest(ctx, id.TenantID, contestID)
+		if err != nil {
+			return err
+		}
+		mode = contest.Mode
 		snapshot, err = tx.GetLadderSnapshot(ctx, id.TenantID, contestID, ContestStatusArchived)
 		return err
 	}); err != nil {
 		return ResultSnapshotDTO{}, err
 	}
-	return resultSnapshotDTOFromModel(snapshot), nil
+	return resultSnapshotDTOFromModel(snapshot, mode), nil
 }
 
 // transitionContest 封装竞赛状态流转、内容引用登记和审计。
@@ -561,7 +770,7 @@ func (s *Service) saveLadderSnapshot(ctx context.Context, tx TxStore, tenantID, 
 	}
 	ranking := make([]LadderSnapshotEntry, 0, len(ranks))
 	for _, rank := range ranks {
-		ranking = append(ranking, LadderSnapshotEntry{TeamID: rank.TeamID, Score: rank.Score, SolvedCount: rank.SolvedCount, LastSolveAt: rank.LastSolveAt, Rank: rank.Rank, UpdatedAt: rank.UpdatedAt})
+		ranking = append(ranking, LadderSnapshotEntry{TeamID: rank.TeamID, Score: rank.Score, SolvedCount: rank.SolvedCount, LastSolveAt: optionalTime(rank.LastSolveAt), Rank: rank.Rank, UpdatedAt: rank.UpdatedAt})
 	}
 	return tx.UpsertLadderSnapshot(ctx, LadderSnapshot{ID: s.ids.Generate(), TenantID: tenantID, ContestID: contestID, SnapshotStatus: snapshotStatus, Ranking: ranking})
 }

@@ -69,6 +69,9 @@ func RegisterJudgeModule(ctx context.Context, deps JudgeModuleDeps) (*judge.Serv
 	if err := judge.RegisterRoutes(deps.Router, svc, deps.Auth, deps.Roles); err != nil {
 		return nil, err
 	}
+	if err := judge.RegisterEventSubscriptions(deps.EventBus, svc); err != nil {
+		return nil, err
+	}
 	task, err := judgeWorkerTask(deps.Config, svc)
 	if err != nil {
 		return nil, err

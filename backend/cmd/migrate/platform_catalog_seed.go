@@ -44,12 +44,13 @@ type platformRuntimeManifest struct {
 		} `json:"workload"`
 		InitAssets []sandbox.InitAssetSpec `json:"init_assets"`
 		Native     struct {
-			Helper        string              `json:"helper"`
-			Profile       string              `json:"profile"`
-			ExecTarget    string              `json:"exec_target"`
-			ResetStrategy string              `json:"reset_strategy"`
-			Actions       map[string][]string `json:"actions"`
-			Methods       map[string]string   `json:"methods"`
+			Helper         string              `json:"helper"`
+			Profile        string              `json:"profile"`
+			ExecTarget     string              `json:"exec_target"`
+			ResetStrategy  string              `json:"reset_strategy"`
+			MountWorkspace bool                `json:"mount_workspace"`
+			Actions        map[string][]string `json:"actions"`
+			Methods        map[string]string   `json:"methods"`
 		} `json:"native"`
 	} `json:"runtime"`
 	SupplyChain        map[string]any              `json:"supply_chain"`
@@ -602,6 +603,7 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 				if compileErr != nil {
 					return fmt.Errorf("编译判题器 %s 组合快照失败: %w", m.Name, compileErr)
 				}
+				baseDigest := snapshot.Digest
 				snapshot.PrivateSidecars = platformPrivateSidecars(execution.ExecutionSidecars)
 				if err := contracts.AppendPrivateSidecarImageClosure(&snapshot); err != nil {
 					return fmt.Errorf("补齐判题器 %s 私有 sidecar 镜像闭包失败: %w", m.Name, err)
@@ -611,6 +613,9 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 					return fmt.Errorf("计算判题器 %s 私有 sidecar 组合摘要失败: %w", m.Name, digestErr)
 				}
 				snapshot.Digest = digest
+				if replaceErr := sandbox.ReplacePlatformSandboxCompositionSnapshot(ctx, store, []string{baseDigest}, snapshot); replaceErr != nil {
+					return fmt.Errorf("登记判题器 %s 最终组合快照失败: %w", m.Name, replaceErr)
+				}
 				execution.CompositionSnapshot = snapshot
 				resource = execution
 			} else {
@@ -636,7 +641,10 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 		if genesisRef == "" {
 			return fmt.Errorf("onchain-assert 缺少 testcase-evm manifest 的 genesis_ref")
 		}
-		onchainResource = judge.JudgerResourceSpec{CompositionSnapshot: snapshot, GenesisRef: genesisRef, TimeoutSec: 60, MaxRetries: 1}
+		onchainResource = judge.JudgerResourceSpec{Composition: onchainComposition, CompositionSnapshot: snapshot, GenesisRef: genesisRef, TimeoutSec: 60, MaxRetries: 1}
+	}
+	if onchainResource.Composition.ID == "" {
+		onchainResource.Composition = onchainComposition
 	}
 	items = append(items, catalogJudger{id: platformJudgerID("onchain-assert"), code: "onchain-assert", name: "链上状态断言判题器", typ: 2, executorRef: "m3-backend-strategy", runtimeNeeded: true, defaultTimeout: 60, resource: onchainResource})
 	return database.WithPrivilegedTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -728,7 +736,9 @@ func platformJudgerResourceSpec(manifest platformJudgerManifest, imageURL string
 		EphemeralMounts:        []workload.EphemeralMountSpec{{Name: "judge-workdir", MountPath: "/judge"}, {Name: "judge-tmp", MountPath: "/tmp"}},
 		PrepullCommand:         []string{"sleep", "1"},
 	}
-	return contracts.SandboxCompositionSpec{ID: "judge:" + manifest.Name, Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: runtimeCode, ImageVersion: platformRuntimeImageVersion(runtimeCode)}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}, judge.JudgerResourceSpec{
+	composition := contracts.SandboxCompositionSpec{ID: "judge:" + manifest.Name, Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: runtimeCode, ImageVersion: platformRuntimeImageVersion(runtimeCode)}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}
+	return composition, judge.JudgerResourceSpec{
+		Composition:       composition,
 		GenesisRef:        genesisRef,
 		Command:           append([]string(nil), manifest.Judger.Command...),
 		ExecTarget:        execTarget,

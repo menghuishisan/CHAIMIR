@@ -451,6 +451,7 @@ func (s *Service) buildInputSnapshot(j Judger, spec contracts.ContentJudgeSpec, 
 func (s *Service) compileJudgerResourceSpec(ctx context.Context, req JudgerRequest, execution JudgerExecutionSpec) (JudgerResourceSpec, error) {
 	spec := JudgerResourceSpec{
 		GenesisRef:        strings.TrimSpace(execution.GenesisRef),
+		Composition:       req.Composition,
 		InitScriptRef:     strings.TrimSpace(execution.InitScriptRef),
 		Command:           append([]string(nil), execution.Command...),
 		ExecTarget:        strings.TrimSpace(execution.ExecTarget),
@@ -465,6 +466,7 @@ func (s *Service) compileJudgerResourceSpec(ctx context.Context, req JudgerReque
 		if err != nil {
 			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
 		}
+		baseDigest := snapshot.Digest
 		snapshot.PrivateSidecars = privateSidecarsForSandbox(execution.ExecutionSidecars)
 		if err := contracts.AppendPrivateSidecarImageClosure(&snapshot); err != nil {
 			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
@@ -474,6 +476,9 @@ func (s *Service) compileJudgerResourceSpec(ctx context.Context, req JudgerReque
 			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(digestErr)
 		}
 		snapshot.Digest = digest
+		if err := s.sandbox.ReplacePlatformSandboxCompositionSnapshot(ctx, []string{baseDigest}, snapshot); err != nil {
+			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
+		}
 		spec.CompositionSnapshot = snapshot
 	}
 	if err := validateJudgerResourceSpecForUse(Judger{Type: req.Type, RuntimeRequired: req.RuntimeRequired, ResourceSpec: spec}); err != nil {

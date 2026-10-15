@@ -611,9 +611,9 @@ contract VaultDefense {
     function withdraw() external {
         uint256 amount = balances[msg.sender];
         require(amount > 0, "no balance");
-        balances[msg.sender] = 0;
         (bool sent,) = payable(msg.sender).call{value: amount}("");
         require(sent, "transfer failed");
+        balances[msg.sender] = 0;
     }
 }
 `})
@@ -1025,7 +1025,7 @@ func acceptanceBattleReplayActions() []contracts.JudgeReplayAction {
 			Seq: 5, Op: "tx",
 			Payload: map[string]any{"target_ref": "defense", "method": "withdraw"},
 			Output: map[string]any{
-				"receipt": acceptanceBattleReplayReceipt("0x1", "0x527718439c478573ec6337dccdaa7efeb6478526251652883815146aa06a646d", "0xe39b6c23569c7e2d9ddb351fdf5e13527ce7c334e7336afeb2ec21eb114f7a9f", "0x5", "0x703b", from, defenseAddress, ""),
+				"receipt": acceptanceBattleReplayReceipt("0x0", "0x527718439c478573ec6337dccdaa7efeb6478526251652883815146aa06a646d", "0xe39b6c7e2d9ddb351fdf5e13527ce7c334e7336afeb2ec21eb114f7a9f", "0x5", "0x703b", from, defenseAddress, ""),
 			},
 		},
 	}
@@ -1052,11 +1052,11 @@ func acceptanceBattleReplayArchive(artifactAHash, artifactBHash string) map[stri
 			"score":     1,
 			"max_score": 1,
 			"details": []map[string]any{{
-				"case":           "防御合约阻止重复提款",
+				"case":           "攻击触发二次重入提款",
 				"passed":         true,
-				"expected_label": "攻击仅触发一次回调,守方仍可正常提款",
-				"actual":         "defense_win",
-				"hint":           "攻击交易已完成但未发生第二次提款,守方获胜",
+				"expected_label": "攻击触发第二次提款,攻方获胜",
+				"actual":         "attack_win",
+				"hint":           "攻击交易完成并触发第二次提款,攻方获胜",
 			}},
 		},
 		"finished_at": timex.RFC3339OrEmpty(timex.Now()),

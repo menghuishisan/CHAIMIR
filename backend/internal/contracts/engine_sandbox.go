@@ -311,6 +311,15 @@ type SandboxExecResult struct {
 	Stderr []byte `json:"stderr"`
 }
 
+// SandboxPlatformSelftestRequest 描述平台级临时沙箱自检请求。
+// 该契约只允许平台服务使用已编译的不可变组合快照执行受控命令,不创建租户归属、账号归属或可恢复业务沙箱。
+type SandboxPlatformSelftestRequest struct {
+	CompositionSnapshot SandboxCompositionSnapshot `json:"composition_snapshot"`
+	ExecTarget          string                     `json:"exec_target"`
+	Commands            [][]string                 `json:"commands"`
+	TimeoutSec          int32                      `json:"timeout_sec"`
+}
+
 // SandboxRecycleRequest 是按来源级联回收沙箱的内部请求。
 type SandboxRecycleRequest struct {
 	TenantID  int64  `json:"tenant_id"`
@@ -395,12 +404,18 @@ type SandboxService interface {
 	CompileSandboxComposition(ctx context.Context, tenantID int64, spec SandboxCompositionSpec) (SandboxCompositionSnapshot, error)
 	// CompilePlatformSandboxComposition 供平台治理面编译不属于任一租户的不可变组合快照。
 	CompilePlatformSandboxComposition(ctx context.Context, spec SandboxCompositionSpec) (SandboxCompositionSnapshot, error)
+	// ReplacePlatformSandboxCompositionSnapshot 用最终私有组合快照替换编译过程产生的基础快照。
+	ReplacePlatformSandboxCompositionSnapshot(ctx context.Context, previousDigests []string, snapshot SandboxCompositionSnapshot) error
+	// PrepullPlatformComposition 按最终组合快照的全部 runtime 镜像闭包执行真实预拉取。
+	PrepullPlatformComposition(ctx context.Context, compositionDigest string) error
 	// ValidateSandboxTemplate 校验业务模块保存/发布的沙箱模板能解析到可调度运行时、镜像和工具,但不创建资源。
 	ValidateSandboxTemplate(ctx context.Context, req SandboxCreateRequest) error
 	// CreateSandbox 创建沙箱并返回控制面摘要,实际启动过程异步推进。
 	CreateSandbox(ctx context.Context, req SandboxCreateRequest) (SandboxInfo, error)
 	// GetSandbox 查询单个沙箱当前状态与工具接入信息。
 	GetSandbox(ctx context.Context, tenantID, sandboxID int64) (SandboxInfo, error)
+	// GetSandboxBySourceRef 按业务稳定来源引用读取仍未销毁的沙箱,供竞赛/实验页面恢复服务端状态。
+	GetSandboxBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (SandboxInfo, error)
 	// 下列 Principal 方法只允许 M8 等业务网关在已核验业务授权后调用；普通 M2 用户路由不得转发它们。
 	GetSandboxForPrincipal(ctx context.Context, access SandboxPrincipalRequest) (SandboxInfo, error)
 	ReadSandboxFileForPrincipal(ctx context.Context, access SandboxPrincipalRequest, relativePath string) (SandboxWorkspaceFileRead, error)
@@ -438,6 +453,8 @@ type SandboxService interface {
 	SaveSandboxFiles(ctx context.Context, req SandboxSaveRequest) (string, string, error)
 	// ExecSandboxCommand 在沙箱内执行受限命令,供判题 worker 运行套件。
 	ExecSandboxCommand(ctx context.Context, req SandboxExecRequest) (SandboxExecResult, error)
+	// RunPlatformSelftest 在临时平台沙箱中执行已声明的真实镜像自检命令,完成后必须回收全部资源。
+	RunPlatformSelftest(ctx context.Context, req SandboxPlatformSelftestRequest) error
 	// ChainDeploy 调用统一链部署能力。
 	ChainDeploy(ctx context.Context, req SandboxChainDeployRequest) (map[string]any, error)
 	// ChainSendTx 调用统一链交易能力。

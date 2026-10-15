@@ -83,6 +83,7 @@ runtime:
     profile: evm-contract
     exec_target: sandbox/runtime
     reset_strategy: recreate_runtime
+    mount_workspace: true
     actions:
       deploy: [/usr/local/bin/chaimir-foundry-adapter, deploy]
       tx: [/usr/local/bin/chaimir-foundry-adapter, tx]
@@ -131,7 +132,6 @@ selftest:
 capability_selftest:
   deploy_payload:
     bytecode: "0x6005600c60003960056000f3600060005500"
-    from: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
   query_target: chainId
 supply_chain:
   sbom: true

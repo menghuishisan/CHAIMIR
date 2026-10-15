@@ -12,6 +12,19 @@ import (
 	"chaimir/pkg/apperr"
 )
 
+// sandboxProfileForContestMode 把竞赛模式映射为唯一的沙箱访问契约。
+// 题目编排、学生实操环境和对抗判题必须使用同一 profile,避免锁定快照与运行阶段错配。
+func sandboxProfileForContestMode(mode int16) (contracts.SandboxAccessProfile, error) {
+	switch mode {
+	case ContestModeSolve:
+		return contracts.SandboxAccessContestSolve, nil
+	case ContestModeBattle:
+		return contracts.SandboxAccessContestBattle, nil
+	default:
+		return "", apperr.ErrContestProblemInvalid
+	}
+}
+
 // compileCompositionFromContent 在教师编排题目时读取 M5 正文并编译唯一不可变快照。
 func (s *Service) compileCompositionFromContent(ctx context.Context, tenantID int64, itemCode, itemVersion string, profile contracts.SandboxAccessProfile) (contracts.SandboxCompositionSnapshot, error) {
 	face, err := s.content.GetContentFull(ctx, tenantID, contracts.ContentItemRef{ItemCode: itemCode, ItemVersion: itemVersion})

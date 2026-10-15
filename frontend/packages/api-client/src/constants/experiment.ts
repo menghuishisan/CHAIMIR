@@ -38,6 +38,16 @@ export enum ExperimentReportStatus {
   GRADED = 2,
 }
 
+/** 实验学生报告读取边界的错误码。 */
+export const EXPERIMENT_REPORT_ERROR_CODES = {
+  NOT_FOUND: '74004',
+} as const
+
+/** 实验实例访问边界的错误码。 */
+export const EXPERIMENT_INSTANCE_ERROR_CODES = {
+  ACCESS_DENIED: '72004',
+} as const
+
 /**
  * 实验阶段状态与后端 experiment service_stage.go 输出保持一致。
  */

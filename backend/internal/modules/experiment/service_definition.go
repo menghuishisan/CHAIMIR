@@ -4,6 +4,7 @@ package experiment
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
@@ -12,17 +13,18 @@ import (
 )
 
 // ListExperiments 查询当前租户实验定义列表。
-func (s *Service) ListExperiments(ctx context.Context, courseID int64, status int16, page, size int) ([]ExperimentDTO, int64, int, int, error) {
+func (s *Service) ListExperiments(ctx context.Context, courseID int64, status int16, keyword string, page, size int) ([]ExperimentDTO, int64, int, int, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return nil, 0, 0, 0, err
 	}
 	page, size = pagex.Normalize(page, size)
+	keyword = strings.TrimSpace(keyword)
 	items := []Experiment{}
 	var total int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, total, err = tx.ListExperiments(ctx, id.TenantID, courseID, status, page, size)
+		items, total, err = tx.ListExperiments(ctx, id.TenantID, courseID, status, keyword, page, size)
 		return err
 	}); err != nil {
 		return nil, 0, 0, 0, err
@@ -57,18 +59,19 @@ func (s *Service) GetExperimentForTeacher(ctx context.Context, experimentID int6
 }
 
 // ListPublishedExperiments 查询学生可发现的已发布实验，并返回最小安全投影。
-func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, page, size int) ([]StudentExperimentDTO, int64, int, int, map[string]map[string]int64, error) {
+func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, keyword string, page, size int) ([]StudentExperimentDTO, int64, int, int, map[string]map[string]int64, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return nil, 0, 0, 0, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
+	keyword = strings.TrimSpace(keyword)
 	items := []Experiment{}
 	var total int64
 	groupByExperiment := map[int64]int64{}
 	var facets map[string]map[string]int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		items, total, err = tx.ListExperiments(ctx, id.TenantID, courseID, ExperimentStatusPublished, page, size)
+		items, total, err = tx.ListExperiments(ctx, id.TenantID, courseID, ExperimentStatusPublished, keyword, page, size)
 		if err != nil {
 			return err
 		}
@@ -86,8 +89,16 @@ func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, 
 		return nil, 0, 0, 0, nil, err
 	}
 	out := make([]StudentExperimentDTO, 0, len(items))
+	faces, err := s.studentCheckpointFaces(ctx, id.TenantID, items)
+	if err != nil {
+		return nil, 0, 0, 0, nil, err
+	}
 	for _, item := range items {
-		out = append(out, studentExperimentDTOFromModel(item, groupByExperiment[item.ID]))
+		dto := studentExperimentDTOFromModel(item, groupByExperiment[item.ID])
+		if err := attachStudentCheckpointFaces(&dto, item, faces); err != nil {
+			return nil, 0, 0, 0, nil, apperr.ErrExperimentInvalid.WithCause(err)
+		}
+		out = append(out, dto)
 	}
 	return out, total, page, size, facets, nil
 }
@@ -119,7 +130,46 @@ func (s *Service) GetPublishedExperimentForStudent(ctx context.Context, experime
 	}); err != nil {
 		return StudentExperimentDTO{}, err
 	}
-	return studentExperimentDTOFromModel(item, groupID), nil
+	faces, err := s.studentCheckpointFaces(ctx, id.TenantID, []Experiment{item})
+	if err != nil {
+		return StudentExperimentDTO{}, err
+	}
+	dto := studentExperimentDTOFromModel(item, groupID)
+	if err := attachStudentCheckpointFaces(&dto, item, faces); err != nil {
+		return StudentExperimentDTO{}, apperr.ErrExperimentInvalid.WithCause(err)
+	}
+	return dto, nil
+}
+
+// studentCheckpointFaces 批量读取学生可见题面,并按稳定题目版本引用去重。
+func (s *Service) studentCheckpointFaces(ctx context.Context, tenantID int64, items []Experiment) (map[string]contracts.ContentItemSnapshot, error) {
+	refs := make([]contracts.ContentItemRef, 0)
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		for _, checkpoint := range item.Components.Checkpoints {
+			key := checkpoint.ItemCode + "\x00" + checkpoint.ItemVersion
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			refs = append(refs, contracts.ContentItemRef{ItemCode: checkpoint.ItemCode, ItemVersion: checkpoint.ItemVersion})
+		}
+	}
+	out := make(map[string]contracts.ContentItemSnapshot, len(refs))
+	for start := 0; start < len(refs); start += 100 {
+		end := start + 100
+		if end > len(refs) {
+			end = len(refs)
+		}
+		batch, err := s.content.BatchGetContentFace(ctx, tenantID, refs[start:end])
+		if err != nil {
+			return nil, apperr.ErrExperimentInvalid.WithCause(err)
+		}
+		for _, face := range batch {
+			out[face.ItemCode+"\x00"+face.ItemVersion] = face
+		}
+	}
+	return out, nil
 }
 
 // CreateExperiment 创建服务端持久化的实验编排向导草稿。
@@ -172,6 +222,9 @@ func (s *Service) UpdateExperiment(ctx context.Context, experimentID int64, req 
 		}
 		if err := s.ensureTeacherCanManage(ctx, id.AccountID, current); err != nil {
 			return err
+		}
+		if current.Status != ExperimentStatusDraft && current.Status != ExperimentStatusUnpublished {
+			return apperr.ErrExperimentStateInvalid
 		}
 		current.CourseID = req.CourseID.Int64()
 		current.TemplateRef = req.TemplateRef

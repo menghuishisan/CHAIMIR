@@ -19,6 +19,7 @@ type Querier interface {
 	CreateSandboxRecycleOutbox(ctx context.Context, arg CreateSandboxRecycleOutboxParams) (SandboxRecycleOutbox, error)
 	CreateSandboxTool(ctx context.Context, arg CreateSandboxToolParams) (SandboxTool, error)
 	DeleteCompositionPrepullByRuntimeImage(ctx context.Context, runtimeImageID int64) error
+	DeletePublishedCompositionSnapshot(ctx context.Context, compositionDigest string) error
 	DisableRuntimeImage(ctx context.Context, arg DisableRuntimeImageParams) (RuntimeImage, error)
 	EnsureTenantQuota(ctx context.Context, arg EnsureTenantQuotaParams) (EnsureTenantQuotaRow, error)
 	FinishCompositionPrepull(ctx context.Context, arg FinishCompositionPrepullParams) (SandboxCompositionPrepull, error)

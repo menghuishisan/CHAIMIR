@@ -13,6 +13,10 @@ const (
 	SubjectJudgeFailed = "judge.failed"
 	// SubjectSandboxRecycled 表示沙箱回收完成事件,由 M2 发布供来源模块订阅。
 	SubjectSandboxRecycled = "sandbox.recycled"
+	// SubjectSandboxFailed 表示沙箱阶段一启动失败事件,由 M2 发布供来源模块完成实例对账。
+	SubjectSandboxFailed = "sandbox.failed"
+	// SubjectSandboxRuntimeSelftestCompleted 表示平台运行时自检状态已落库,由 M3 刷新依赖判题器目录。
+	SubjectSandboxRuntimeSelftestCompleted = "sandbox.runtime.selftest.completed"
 	// SubjectExperimentScored 表示实验得分落定事件,由 M7 发布供上层流程消费。
 	SubjectExperimentScored = "experiment.scored"
 	// SubjectTeachingCourseEnded 表示课程已结束或归档,由 M6 发布供 M7 级联回收课内实验实例。
@@ -29,6 +33,13 @@ const (
 	SubjectNotifySendRequested = "notify.send.requested"
 	// SubjectNotifyPushRequested 表示异步实时推送请求,由业务模块发布并由 M10 消费。
 	SubjectNotifyPushRequested = "notify.push.requested"
+)
+
+const (
+	// SandboxRuntimeStatusAvailable 是运行时通过平台自检后可供组合编译使用的事件状态值。
+	SandboxRuntimeStatusAvailable int16 = 1
+	// SandboxRuntimeSelftestPassed 是运行时平台自检通过的事件状态值。
+	SandboxRuntimeSelftestPassed int16 = 2
 )
 
 // JudgeCompletedEvent 是判题完成事件载荷。
@@ -61,6 +72,30 @@ type SandboxRecycledEvent struct {
 	SourceRef  string    `json:"source_ref"`
 	Reason     string    `json:"reason"`
 	RecycledAt time.Time `json:"recycled_at"`
+}
+
+// SandboxFailedEvent 是沙箱阶段一启动失败事件载荷。
+//
+// 来源模块据此把仍处于创建或运行态的业务实例推进到错误态并补偿回收;
+// 失败原因只进入 M2 结构化日志和 sandbox_event,不跨模块传播内部细节。
+type SandboxFailedEvent struct {
+	TenantID  int64     `json:"tenant_id"`
+	TraceID   string    `json:"trace_id"`
+	SandboxID int64     `json:"sandbox_id"`
+	SourceRef string    `json:"source_ref"`
+	ScopeRef  string    `json:"scope_ref"`
+	FailedAt  time.Time `json:"failed_at"`
+}
+
+// SandboxRuntimeSelftestCompletedEvent 是运行时自检完成后的平台目录刷新事件。
+type SandboxRuntimeSelftestCompletedEvent struct {
+	TenantID       int64     `json:"tenant_id"`
+	TraceID        string    `json:"trace_id"`
+	RuntimeID      int64     `json:"runtime_id"`
+	RuntimeCode    string    `json:"runtime_code"`
+	SelftestStatus int16     `json:"selftest_status"`
+	RuntimeStatus  int16     `json:"runtime_status"`
+	FinishedAt     time.Time `json:"finished_at"`
 }
 
 // ExperimentScoredEvent 是实验实例得分落定后的事件载荷。

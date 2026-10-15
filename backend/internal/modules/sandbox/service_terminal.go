@@ -67,7 +67,8 @@ func (s *Service) TerminalTargetForOwner(ctx context.Context, tenantID, accountI
 	if !runtimeContainerAllowed(runtime, targetContainer) {
 		return TerminalTarget{}, apperr.ErrSandboxOwnershipInvalid
 	}
-	return TerminalTarget{TenantID: sb.TenantID, SandboxID: sb.ID, Namespace: sb.Namespace, Container: targetContainer, Command: runtime.AdapterSpec.WorkspaceOps.Terminal}, nil
+	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.Terminal, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir, "")
+	return TerminalTarget{TenantID: sb.TenantID, SandboxID: sb.ID, Namespace: sb.Namespace, Container: targetContainer, Command: command}, nil
 }
 
 // AttachTerminal 把已鉴权输入输出流代理到 Kubernetes exec PTY。

@@ -134,53 +134,89 @@ function readFrontendSecurityHeaders(): Record<string, string> {
   return headers
 }
 
-/** monacoManualChunk 按 Monaco 稳定源码边界拆分仅在 IDE 打开时加载的编辑器核心。 */
-function monacoManualChunk(moduleId: string): string | undefined {
-  const normalized = moduleId.replace(/\\/g, '/')
-  const marker = '/monaco-editor/esm/vs/'
-  const markerIndex = normalized.indexOf(marker)
-  if (markerIndex < 0) return undefined
-  const relative = normalized.slice(markerIndex + marker.length)
-  const segments = relative.split('/')
+const monacoAmdAssets = [
+  'loader.js',
+  'editor/editor.main.js',
+  'editor/editor.main.css',
+  'base/worker/workerMain.js',
+  'base/browser/ui/codicons/codicon/codicon.ttf',
+  'language/css/cssMode.js',
+  'language/css/cssWorker.js',
+  'language/html/htmlMode.js',
+  'language/html/htmlWorker.js',
+  'language/json/jsonMode.js',
+  'language/json/jsonWorker.js',
+  'language/typescript/tsMode.js',
+  'language/typescript/tsWorker.js',
+  'basic-languages/go/go.js',
+  'basic-languages/css/css.js',
+  'basic-languages/html/html.js',
+  'basic-languages/markdown/markdown.js',
+  'basic-languages/python/python.js',
+  'basic-languages/shell/shell.js',
+  'basic-languages/solidity/solidity.js',
+  'basic-languages/typescript/typescript.js',
+  'basic-languages/yaml/yaml.js',
+] as const
 
-  if (segments[0] === 'base' && segments[1]) return `monaco-base-${segments[1]}`
-  if (segments[0] === 'platform') return 'monaco-platform'
-  if (segments[0] === 'editor' && segments[1] === 'common' && segments[2]) {
-    if (segments[2] === 'model' || segments[2] === 'services') return 'monaco-editor-common-model-services'
-    return `monaco-editor-common-${segments[2]}`
+/** monacoAmdAssetsPlugin 输出 Monaco 官方预构建 AMD 文件,避免 Rollup 解析近千个 ESM 模块。 */
+function monacoAmdAssetsPlugin(): Plugin {
+  const packageRoot = path.resolve(__dirname, '../../packages/ide/node_modules/monaco-editor/min/vs')
+  return {
+    name: 'chaimir-monaco-amd-assets',
+    generateBundle() {
+      for (const relativePath of monacoAmdAssets) {
+        const assetPath = path.resolve(packageRoot, relativePath)
+        const relative = path.relative(packageRoot, assetPath)
+        if (relative.startsWith('..') || path.isAbsolute(relative) || !fs.existsSync(assetPath)) {
+          throw new Error(`Monaco 资源缺失: ${relativePath}`)
+        }
+        this.emitFile({
+          type: 'asset',
+          fileName: `assets/monaco/vs/${relativePath}`,
+          source: fs.readFileSync(assetPath),
+        })
+      }
+    },
   }
-  if (segments[0] === 'editor' && segments[1] === 'browser' && segments[2]) {
-    const browserCore = ['controller', 'coreCommands.js', 'editorExtensions.js', 'services', 'view', 'view.js', 'viewParts', 'widget']
-    if (browserCore.includes(segments[2])) return 'monaco-editor-browser-core'
-    return `monaco-editor-browser-${segments[2]}`
-  }
-  if (segments[0] === 'editor' && segments[1] === 'contrib' && segments[2]) {
-    const hoverFeatures = ['colorPicker', 'hover', 'inlayHints']
-    const suggestFeatures = ['inlineCompletions', 'snippet', 'suggest']
-    if (hoverFeatures.includes(segments[2])) return 'monaco-editor-contrib-hover'
-    if (suggestFeatures.includes(segments[2])) return 'monaco-editor-contrib-suggest'
-    return `monaco-editor-contrib-${segments[2]}`
-  }
-  if (segments[0] === 'editor' && segments[1] === 'standalone') return 'monaco-editor-standalone'
-  if (segments[0] === 'editor') return 'monaco-editor-api'
-  return undefined
+}
+
+/**
+ * tailwindAppStylesPlugins 只让 Tailwind 处理应用的唯一 CSS 入口。
+ * Tailwind v4 会为每个 CSS 模块建立扫描器;Monaco 与终端带入的大量依赖 CSS
+ * 没有 Tailwind 指令,在 Alpine 构建基座中反复扫描源码会把冷构建放大到不可接受。
+ * 应用入口已经通过 @import 引入设计系统,因此收窄 transform 不会改变最终 CSS。
+ */
+function tailwindAppStylesPlugins(): Plugin[] {
+  const appStylesPattern = /[\\/]apps[\\/]web[\\/]src[\\/]styles[\\/]app\.css(?:\?.*)?$/
+  return tailwindcss({ optimize: false }).map((plugin) => {
+    const transform = plugin.transform
+    if (!transform || typeof transform !== 'object' || typeof transform.handler !== 'function') return plugin
+    return {
+      ...plugin,
+      transform: {
+        ...transform,
+        filter: { id: { include: [appStylesPattern] } },
+      },
+    }
+  })
 }
 
 export default defineConfig({
   envDir: path.resolve(__dirname, '../..'),
-  plugins: [fontAssetsPlugin(), react(), tailwindcss()],
+  // Tailwind 插件的 Lightning CSS 优化与 Vite 生产 CSS 处理重复;
+  // 关闭前者,保留 Vite 单一 CSS 产物链,避免 Alpine 构建基座重复执行原生优化。
+  plugins: [fontAssetsPlugin(), monacoAmdAssetsPlugin(), react(), ...tailwindAppStylesPlugins()],
   preview: {
     headers: readFrontendSecurityHeaders(),
   },
   // 路径别名不设:tsconfig 未声明对应 paths,只在 Vite 侧配别名会让 tsc 与打包解析结果不一致;
   // 全站统一用相对路径导入,单一解析规则。
   build: {
-    // Monaco 仅在 IDE 打开后加载并已拆到约 500 KiB;保留少量版本波动空间。
+    // Monaco 由同源 AMD 静态资源按需加载,主应用不再把编辑器模块图纳入 Rollup。
     chunkSizeWarningLimit: 550,
-    rollupOptions: {
-      output: {
-        manualChunks: monacoManualChunk,
-      },
-    },
+    // Docker 构建阶段会统一生成 gzip 静态资源;Vite 再逐文件计算压缩体积只增加构建耗时,
+    // 不改变产物内容或运行期压缩策略。
+    reportCompressedSize: false,
   },
 })

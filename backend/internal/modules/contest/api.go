@@ -93,11 +93,14 @@ func (a contestAPI) getContest(c *gin.Context) {
 func (a contestAPI) registerStudentRoutes(g gin.IRouter) {
 	g.GET("/student/contests", a.listStudentContests)
 	g.GET("/student/contests/:id", a.getStudentContest)
+	g.GET("/contests/:id/problems/:problem_id", a.getStudentProblem)
 	g.POST("/contests/:id/signup", a.signup)
 	g.POST("/contests/:id/join-team", a.joinTeam)
 	g.POST("/teams/:id/lock", a.lockTeam)
+	g.GET("/contests/:id/problems/:problem_id/env", a.getEnv)
 	g.POST("/contests/:id/problems/:problem_id/env", a.createEnv)
 	g.POST("/contests/:id/problems/:problem_id/submit", a.submitSolve)
+	g.GET("/contests/:id/problems/:problem_id/submission", a.getLatestSubmission)
 	g.GET("/submissions/:id", a.getSubmission)
 	g.POST("/contests/:id/battle/entry", a.submitBattleEntry)
 	g.GET("/contests/:id/battle/entries", a.listBattleEntries)
@@ -105,6 +108,26 @@ func (a contestAPI) registerStudentRoutes(g gin.IRouter) {
 	g.GET("/matches/:id/replay", a.getBattleReplay)
 	g.POST("/matches/:id/replay/download-grant", a.issueBattleReplayDownloadGrant)
 	g.GET("/my/contest-records", a.myRecords)
+}
+
+// getStudentProblem 返回已报名队伍成员可见的完整安全题面。
+func (a contestAPI) getStudentProblem(c *gin.Context) {
+	contestID, problemID, ok := contestProblemPath(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetProblemForStudent(c.Request.Context(), contestID, problemID)
+	httpx.Write(c, out, err)
+}
+
+// getLatestSubmission 返回当前参赛队伍在题目下最近一次解题提交。
+func (a contestAPI) getLatestSubmission(c *gin.Context) {
+	contestID, problemID, ok := contestProblemPath(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetLatestSubmission(c.Request.Context(), contestID, problemID)
+	httpx.Write(c, out, err)
 }
 
 // registerContestSandboxRoutes 注册 M8 作为跨校授权网关的普通 HTTP 工作区和链操作入口。
@@ -147,7 +170,8 @@ func (a contestAPI) listStudentContests(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListStudentContests(c.Request.Context(), status, page, size)
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	out, total, p, s, err := a.svc.ListStudentContests(c.Request.Context(), status, keyword, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
 }
 
@@ -203,7 +227,8 @@ func (a contestAPI) listContests(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListContests(c.Request.Context(), status, page, size)
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	out, total, p, s, err := a.svc.ListContests(c.Request.Context(), status, keyword, page, size)
 	httpx.WritePage(c, out, total, p, s, err)
 }
 
@@ -342,6 +367,16 @@ func (a contestAPI) lockTeam(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.LockTeam(c.Request.Context(), id)
+	httpx.Write(c, out, err)
+}
+
+// getEnv 读取当前队伍仍未销毁的竞赛实操环境,供页面刷新后恢复服务端状态。
+func (a contestAPI) getEnv(c *gin.Context) {
+	contestID, problemID, ok := contestProblemPath(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetEnv(c.Request.Context(), contestID, problemID, EnvRequest{RequestRef: c.Query("request_ref")})
 	httpx.Write(c, out, err)
 }
 

@@ -327,7 +327,63 @@ function CheckpointList({ experiment }: { experiment: StudentExperiment }) {
             mono: true,
           }))}
         />
+        {checkpoints.map((checkpoint, index) => (
+          <Card key={checkpoint.id}>
+            <CardHeader
+              title={checkpoint.title || `检查点 ${index + 1}`}
+              description={`${checkpoint.score} 分`}
+            />
+            <CardBody>
+              <PublicCheckpointFace face={checkpoint.face} />
+            </CardBody>
+          </Card>
+        ))}
       </CardBody>
     </Card>
   )
+}
+
+/** PublicCheckpointFace 展示学生可见的题面说明与公开验收约束。 */
+function PublicCheckpointFace({ face }: { face?: Record<string, unknown> }) {
+  const fields = [
+    ['scenario', '场景'],
+    ['statement', '题目说明'],
+    ['objective', '目标'],
+    ['input', '输入'],
+    ['input_contract', '输入要求'],
+    ['output', '输出'],
+    ['output_contract', '输出要求'],
+    ['constraints', '限制'],
+    ['limits', '限制'],
+    ['acceptance', '验收条件'],
+    ['acceptance_criteria', '验收条件'],
+    ['samples', '样例'],
+    ['examples', '样例'],
+    ['attachments', '公开材料'],
+  ] as const
+  const visible = fields
+    .map(([key, label]) => ({ key, label, value: formatFaceValue(face?.[key]) }))
+    .filter((item) => item.value !== '')
+
+  if (visible.length === 0) {
+    return <p className="text-sm text-ink-sub">老师暂未补充公开题面说明。</p>
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      {visible.map((item) => (
+        <section key={item.key} className="flex flex-col gap-1">
+          <h4 className="text-sm font-medium text-ink">{item.label}</h4>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink-sub">{item.value}</p>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+/** formatFaceValue 将公开题面值转为稳定可读文本,不把内部字段名暴露给学生。 */
+function formatFaceValue(value: unknown): string {
+  if (typeof value === 'string') return value.trim()
+  if (value === undefined || value === null) return ''
+  return JSON.stringify(value, null, 2) ?? ''
 }

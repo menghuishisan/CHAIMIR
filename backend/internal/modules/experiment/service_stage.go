@@ -91,7 +91,7 @@ func (s *Service) ActivateStage(ctx context.Context, instanceID int64, stageNo i
 		}
 		latest.SandboxRefs = append(latest.SandboxRefs, sandboxes...)
 		latest.SimSessionRefs = append(latest.SimSessionRefs, simRefs...)
-		inst, err = tx.UpdateInstanceResources(ctx, id.TenantID, latest.ID, latest.SandboxRefs, latest.SimSessionRefs, InstanceStatusRunning)
+		inst, err = tx.UpdateInstanceResources(ctx, id.TenantID, latest.ID, latest.ScopeRef, latest.SandboxRefs, latest.SimSessionRefs, InstanceStatusRunning)
 		return err
 	}); err != nil {
 		if cleanupErr := s.destroyCreatedStageResources(ctx, inst, sandboxes, simRefs); cleanupErr != nil {

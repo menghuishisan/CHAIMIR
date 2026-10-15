@@ -203,6 +203,9 @@ func decodeSandboxRefs(raw []byte) ([]SandboxRef, error) {
 	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return nil, apperr.ErrExperimentInstanceInvalid.WithCause(err)
 	}
+	if out == nil {
+		return []SandboxRef{}, nil
+	}
 	return out, nil
 }
 
@@ -214,6 +217,9 @@ func decodeSimRefs(raw []byte) ([]SimSessionRef, error) {
 	}
 	if err := jsonx.DecodeStrictKnownFields(raw, &out); err != nil {
 		return nil, apperr.ErrExperimentInstanceInvalid.WithCause(err)
+	}
+	if out == nil {
+		return []SimSessionRef{}, nil
 	}
 	return out, nil
 }

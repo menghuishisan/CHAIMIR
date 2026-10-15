@@ -6,8 +6,7 @@
 // 兼容性也不在前端算:目录不下发「哪个运行时允许哪些工具」,保存时由服务端编译器判定并回报。
 //
 // 仿真场景从 M4 已发布仿真包里选,版本按包的版本清单选。
-// 组件标识(id)由教师给一个便于识别的短名,后续阶段与检查点引用它 ——
-// 这是编排内部的引用键,故要求可读而不是自动生成的编号。
+// 组件标识是教师显式维护的稳定引用键,后续阶段与检查点按它关联;输入格式与 M7 服务端校验一致。
 
 import { useCallback, useMemo, useState } from 'react'
 import { Link2, Network, Plus, Server, Trash2 } from 'lucide-react'
@@ -53,6 +52,8 @@ import {
 } from '../../../sandbox/composition'
 import { simCategoryLabel } from '../../../../utils/labels/sim'
 import type { ExperimentDraft } from './wizard-state'
+
+const COMPONENT_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 
 export interface WizardComponentsStepProps {
   draft: ExperimentDraft
@@ -305,11 +306,15 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
   const submit = useCallback(() => {
     const trimmedId = id.trim()
     if (trimmedId === '') {
-      setFormError('请给这个环境起一个名称,后面的阶段与检查点会引用它')
+      setFormError('请填写环境标识,后面的阶段与检查点会引用它')
+      return
+    }
+    if (!COMPONENT_ID_PATTERN.test(trimmedId)) {
+      setFormError('环境标识需为 1 至 64 位小写英文字母、数字或连字符,且首尾为字母或数字,例如 attack-node')
       return
     }
     if (!editing && usedIds.includes(trimmedId)) {
-      setFormError('这个名称已被其他环境使用,请换一个')
+      setFormError('这个环境标识已被使用,请换一个')
       return
     }
     const declarationError = compositionDeclarationError(declaration)
@@ -377,10 +382,10 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
           <FormField
-            label="环境名称"
+            label="环境标识"
             htmlFor="env-id"
             required
-            helper="用便于识别的短名,例如 main 或 attack;阶段与检查点会按此名称引用环境"
+            helper="用于阶段与检查点之间引用,学生不会看到。使用小写英文字母、数字和连字符,例如 main 或 attack-node"
           >
             <Input
               id="env-id"
@@ -539,11 +544,15 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
   const submit = useCallback(() => {
     const trimmedId = id.trim()
     if (trimmedId === '') {
-      setFormError('请给这个场景起一个名称')
+      setFormError('请填写仿真场景标识')
+      return
+    }
+    if (!COMPONENT_ID_PATTERN.test(trimmedId)) {
+      setFormError('仿真场景标识需为 1 至 64 位小写英文字母、数字或连字符,且首尾为字母或数字,例如 mining-stage')
       return
     }
     if (!editing && usedIds.includes(trimmedId)) {
-      setFormError('这个名称已被其他场景使用,请换一个')
+      setFormError('这个仿真场景标识已被使用,请换一个')
       return
     }
     if (packageCode === '' || version === '') {
@@ -573,10 +582,10 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
           <FormField
-            label="场景名称"
+            label="仿真场景标识"
             htmlFor="sim-id"
             required
-            helper="用便于识别的短名;阶段与检查点会按此名称引用场景"
+            helper="用于阶段与检查点之间引用,学生不会看到。使用小写英文字母、数字和连字符,例如 mining-stage"
           >
             <Input
               id="sim-id"

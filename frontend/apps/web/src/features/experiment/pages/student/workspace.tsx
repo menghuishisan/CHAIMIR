@@ -25,9 +25,18 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import {
+  API_ERROR_CODES,
+  ApiError,
+  EXPERIMENT_INSTANCE_ERROR_CODES,
   EXPERIMENT_STAGE_STATUS,
   ExperimentInstanceStatus,
+  EXPERIMENT_REPORT_ERROR_CODES,
+  ExperimentReportStatus,
+  SandboxPhase,
+  SandboxStatus,
   type ExperimentInstance,
+  type SandboxInstance,
+  type StudentReportDTO,
   type SandboxRef,
   type SimSessionRef,
   type StudentExperiment,
@@ -54,8 +63,9 @@ import { SandboxIdeWorkspace } from '../../../sandbox/components/SandboxIdeWorks
 import { useTicketedWebSocket } from '../../../../hooks'
 import { useImmersive } from '../../../../layouts/immersive/context'
 import { experimentInstanceStatusLabel } from '../../../../utils/labels/experiment'
+import { experimentReportStatusLabel } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { formatFileSize } from '../../../../utils/formatters'
+import { formatDateTime, formatFileSize } from '../../../../utils/formatters'
 import { BlockIncubator, type WorkspaceCodeRef } from './block-incubator'
 
 /** 查询参数名:实例编号随进入时写进地址,刷新与深链据此回到同一现场。 */
@@ -71,6 +81,7 @@ export default function StudentExperimentWorkspacePage() {
 
   const [experiment, setExperiment] = useState<StudentExperiment>()
   const [instance, setInstance] = useState<ExperimentInstance>()
+  const [instanceRefreshKey, setInstanceRefreshKey] = useState(0)
   const [fatalError, setFatalError] = useState<string>()
 
   const instanceId = searchParams.get(INSTANCE_PARAM) ?? ''
@@ -116,7 +127,22 @@ export default function StudentExperimentWorkspacePage() {
     if (!instanceId) return
     try {
       setInstance(await api.experiment.getInstance(instanceId))
+      setInstanceRefreshKey((current) => current + 1)
     } catch (error) {
+      if (error instanceof ApiError && error.code === API_ERROR_CODES.UNAUTHORIZED) {
+        setInstance(undefined)
+        setFatalError(userFacingErrorMessage(error, '登录状态已失效,请重新登录后再进入实验。'))
+        return
+      }
+      if (
+        error instanceof ApiError &&
+        (error.code === EXPERIMENT_INSTANCE_ERROR_CODES.ACCESS_DENIED ||
+          error.code === API_ERROR_CODES.RESOURCE_NOT_FOUND)
+      ) {
+        setInstance(undefined)
+        setFatalError(userFacingErrorMessage(error, '当前账号无法继续访问这个实验,请返回实验列表。'))
+        return
+      }
       // 重读失败不该把已经打开的工作台清空:提示后保留现场,由用户决定是否重试
       toast.error(userFacingErrorMessage(error, '实验状态刷新失败,稍后可以再试一次。'))
     }
@@ -161,6 +187,7 @@ export default function StudentExperimentWorkspacePage() {
       title={title}
       experiment={experiment}
       instance={instance}
+      instanceRefreshKey={instanceRefreshKey}
       onExit={exit}
       onReload={reloadInstance}
     />
@@ -171,6 +198,7 @@ interface ExperimentWorkbenchProps {
   title: string
   experiment: StudentExperiment
   instance: ExperimentInstance
+  instanceRefreshKey: number
   onExit: () => void
   onReload: () => void
 }
@@ -182,6 +210,7 @@ function ExperimentWorkbench({
   title,
   experiment,
   instance,
+  instanceRefreshKey,
   onExit,
   onReload,
 }: ExperimentWorkbenchProps) {
@@ -189,6 +218,10 @@ function ExperimentWorkbench({
   const [codeRef, setCodeRef] = useState<WorkspaceCodeRef>()
   const [activeSandboxId, setActiveSandboxId] = useState<string>()
   const [reportOpen, setReportOpen] = useState(false)
+  const [report, setReport] = useState<StudentReportDTO>()
+  const [sandboxStates, setSandboxStates] = useState<
+    Record<string, { instance?: SandboxInstance; error?: string }>
+  >({})
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
@@ -197,6 +230,24 @@ function ExperimentWorkbench({
   const stages = useMemo(() => instance.stages ?? [], [instance.stages])
   const results = useMemo(() => instance.checkpoints ?? [], [instance.checkpoints])
   const checkpoints = experiment.components.checkpoints
+
+  /** refreshReport 只读取当前学生的安全报告投影,缺少报告不是工作台错误。 */
+  const refreshReport = useCallback(async () => {
+    if (!experiment.require_report) return
+    try {
+      setReport(await api.experiment.getStudentReport(instance.instance_id))
+    } catch (error) {
+      if (error instanceof ApiError && error.code === EXPERIMENT_REPORT_ERROR_CODES.NOT_FOUND) {
+        setReport(undefined)
+        return
+      }
+      setActionError(userFacingErrorMessage(error, '报告批改结果暂时读不到,稍后可以刷新。'))
+    }
+  }, [experiment.require_report, instance.instance_id])
+
+  useEffect(() => {
+    void refreshReport()
+  }, [refreshReport])
 
   // 当前阶段:后端把活跃阶段标成 active;没有分阶段的实验就只有一组资源
   const activeStage = useMemo(
@@ -219,6 +270,77 @@ function ExperimentWorkbench({
     [activeSandboxId, sandboxes]
   )
 
+  /** refreshSandboxStates 读取实例全部 M2 沙箱的实时状态,供生命周期操作门禁使用。 */
+  const refreshSandboxStates = useCallback(async (refs: SandboxRef[]) => {
+    let pending = false
+    await Promise.all(
+      refs.map(async (ref) => {
+        try {
+          const liveInstance = await api.sandbox.getInstance(ref.sandbox_id)
+          setSandboxStates((current) => ({
+            ...current,
+            [ref.sandbox_id]: { instance: liveInstance },
+          }))
+          const phaseReady =
+            liveInstance.phase === SandboxPhase.READY ||
+            liveInstance.phase === SandboxPhase.FULLY_READY
+          const terminal =
+            liveInstance.status === SandboxStatus.FAILED ||
+            liveInstance.status === SandboxStatus.DESTROYED
+          pending ||= !phaseReady && !terminal
+        } catch (error) {
+          pending = true
+          setSandboxStates((current) => ({
+            ...current,
+            [ref.sandbox_id]: {
+              error: userFacingErrorMessage(error, '实验环境状态暂时读不到。'),
+            },
+          }))
+        }
+      })
+    )
+    return pending
+  }, [])
+
+  useEffect(() => {
+    if (
+      (instance.status !== ExperimentInstanceStatus.RUNNING &&
+        instance.status !== ExperimentInstanceStatus.PAUSED) ||
+      instance.sandboxes.length === 0
+    ) {
+      return
+    }
+    let disposed = false
+    let timer: number | undefined
+    const refreshUntilSettled = async () => {
+      const pending = await refreshSandboxStates(instance.sandboxes)
+      if (!disposed && pending) {
+        timer = window.setTimeout(() => void refreshUntilSettled(), 3000)
+      }
+    }
+    void refreshUntilSettled()
+    return () => {
+      disposed = true
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [instance.sandboxes, instance.status, refreshSandboxStates])
+
+  // 页面重开后先通过正式保存接口重新固化当前工作区,再把返回的引用交给判分。
+  // 不把对象存储 key 加到沙箱详情响应,避免把内部存储字段变成新的读取面。
+  const restoreCodeRef = useCallback(async () => {
+    if (!currentSandbox) return
+    try {
+      const saved = await api.sandbox.saveFiles(currentSandbox.sandbox_id)
+      setCodeRef({ codeStorageKey: saved.code_storage_key, codeHash: saved.code_hash })
+    } catch (error) {
+      setActionError(userFacingErrorMessage(error, '已保存的工作区引用没能恢复,请稍后重试。'))
+    }
+  }, [currentSandbox])
+
+  useEffect(() => {
+    setCodeRef(undefined)
+  }, [currentSandbox?.sandbox_id])
+
   /** openSimulation 打开实例已经授权的仿真会话,退出后回到当前实验实例。 */
   const openSimulation = useCallback(
     (sim: SimSessionRef) => {
@@ -228,9 +350,11 @@ function ExperimentWorkbench({
         return_experiment: experiment.id,
         return_instance: instance.instance_id,
       })
-      navigate(`/student/simulations/${encodeURIComponent(sim.package_code)}/workspace?${query.toString()}`)
+      navigate(
+        `/student/simulations/${encodeURIComponent(sim.package_code)}/workspace?${query.toString()}`
+      )
     },
-    [experiment.id, instance.instance_id, navigate],
+    [experiment.id, instance.instance_id, navigate]
   )
 
   // 进度订阅:topic 由实例给出,连的是 M10 统一业务 WS;推送只当刷新信号
@@ -316,10 +440,30 @@ function ExperimentWorkbench({
 
   const paused = instance.status === ExperimentInstanceStatus.PAUSED
   const released = instance.status === ExperimentInstanceStatus.RELEASED
-  const resumable = paused || released
+  const failed = instance.status === ExperimentInstanceStatus.ERROR
+  const resumable = paused || released || failed
   const finished =
     instance.status === ExperimentInstanceStatus.FINISHED ||
     instance.status === ExperimentInstanceStatus.RECYCLED
+  const recycled = instance.status === ExperimentInstanceStatus.RECYCLED
+  const environmentPreparing = instance.sandboxes.some((sandbox) =>
+    !isSandboxReadyForOperation(sandboxStates[sandbox.sandbox_id]?.instance)
+  )
+  const environmentFailed = instance.sandboxes.some((sandbox) =>
+    sandboxStates[sandbox.sandbox_id]?.instance?.status === SandboxStatus.FAILED ||
+    sandboxStates[sandbox.sandbox_id]?.error !== undefined
+  )
+  const canPause =
+    instance.status === ExperimentInstanceStatus.RUNNING &&
+    instance.sandboxes.every((sandbox) =>
+      isSandboxReadyForOperation(sandboxStates[sandbox.sandbox_id]?.instance)
+    )
+  const canJudge =
+    (instance.status === ExperimentInstanceStatus.RUNNING ||
+      instance.status === ExperimentInstanceStatus.PAUSED) &&
+    sandboxes.every((sandbox) =>
+      isSandboxReadyForOperation(sandboxStates[sandbox.sandbox_id]?.instance)
+    )
 
   const mintedCount = results.filter((result) => result.passed).length
 
@@ -350,7 +494,7 @@ function ExperimentWorkbench({
                   variant="seal"
                   size="sm"
                   leftIcon={Send}
-                  disabled={busy}
+                  disabled={busy || failed}
                   onClick={() => setReportOpen(true)}
                 >
                   提交报告
@@ -361,7 +505,7 @@ function ExperimentWorkbench({
                   size="sm"
                   leftIcon={SquareCheckBig}
                   loading={busy}
-                  disabled={finished}
+                  disabled={finished || failed}
                   onClick={() => void control('finish')}
                 >
                   完成实验
@@ -386,10 +530,16 @@ function ExperimentWorkbench({
         stage={
           released ? (
             <ReleasedEnvironmentStage />
+          ) : recycled ? (
+            <RecycledEnvironmentStage />
+          ) : failed ? (
+            <FailedEnvironmentStage />
           ) : currentSandbox ? (
             <SandboxIdeWorkspace
               key={currentSandbox.sandbox_id}
               sandboxId={currentSandbox.sandbox_id}
+              refreshKey={instanceRefreshKey}
+              onReady={restoreCodeRef}
               onSaved={(result) =>
                 setCodeRef({ codeStorageKey: result.code_storage_key, codeHash: result.code_hash })
               }
@@ -399,22 +549,29 @@ function ExperimentWorkbench({
           )
         }
         right={
-          <BlockIncubator
-            instanceId={instance.instance_id}
-            checkpoints={checkpoints}
-            results={results}
-            stages={stages}
-            codeRef={codeRef}
-            onJudged={onReload}
-            onActivateStage={(stage) => void activateStage(stage)}
-          />
+          <div className="flex h-full min-h-0 flex-col overflow-y-auto">
+            <BlockIncubator
+              instanceId={instance.instance_id}
+              checkpoints={checkpoints}
+              results={results}
+              stages={stages}
+              codeRef={codeRef}
+              canJudge={canJudge}
+              onJudged={onReload}
+              onActivateStage={(stage) => void activateStage(stage)}
+            />
+            {experiment.require_report ? <StudentReportPanel report={report} /> : null}
+          </div>
         }
         rightLabel="进度与判分"
         footer={
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-2">
             <div className="flex min-w-0 flex-col">
               <span className="flex flex-wrap items-center gap-2 text-xs text-on-dark-sub">
-                <Badge onDark tone={paused ? 'warning' : finished ? 'neutral' : 'jade'}>
+                <Badge
+                  onDark
+                  tone={failed ? 'danger' : paused ? 'warning' : finished ? 'neutral' : 'jade'}
+                >
                   {experimentInstanceStatusLabel(instance.status)}
                 </Badge>
                 <span className="font-mono tabular-nums">当前得分 {instance.score}</span>
@@ -441,7 +598,7 @@ function ExperimentWorkbench({
                   loading={busy}
                   onClick={() => void control('resume')}
                 >
-                  {released ? '重建实验环境' : '恢复实验'}
+                  {released || failed ? '重建实验环境' : '恢复实验'}
                 </Button>
               ) : (
                 <Button
@@ -449,12 +606,21 @@ function ExperimentWorkbench({
                   size="sm"
                   leftIcon={Pause}
                   loading={busy}
-                  disabled={finished}
+                  disabled={!canPause}
                   onClick={() => void control('pause')}
                 >
                   暂停实验
                 </Button>
               )}
+              {!resumable && !finished && !canPause ? (
+                <span className="max-w-xs text-right text-xs text-on-dark-sub">
+                  {environmentFailed
+                    ? '环境状态异常或暂时无法读取,请刷新状态后重试。'
+                    : environmentPreparing
+                      ? '环境准备完成后才能暂停。'
+                      : '当前实验状态不能暂停。'}
+                </span>
+              ) : null}
             </div>
           </div>
         }
@@ -466,11 +632,61 @@ function ExperimentWorkbench({
           onClose={() => setReportOpen(false)}
           onSubmitted={() => {
             setReportOpen(false)
+            void refreshReport()
             onReload()
           }}
         />
       ) : null}
     </>
+  )
+}
+
+/** isSandboxReadyForOperation 检查 M2 实时状态是否允许操作当前工作区。 */
+function isSandboxReadyForOperation(sandbox?: SandboxInstance): boolean {
+  if (!sandbox) return false
+  const phaseReady =
+    sandbox.phase === SandboxPhase.READY || sandbox.phase === SandboxPhase.FULLY_READY
+  const statusAllowsPause =
+    sandbox.status === SandboxStatus.READY ||
+    sandbox.status === SandboxStatus.RUNNING ||
+    sandbox.status === SandboxStatus.IDLE ||
+    sandbox.status === SandboxStatus.PAUSED
+  return phaseReady && statusAllowsPause
+}
+
+/** StudentReportPanel 展示学生本人报告的提交与批改结果,不暴露存储引用。 */
+function StudentReportPanel({ report }: { report?: StudentReportDTO }) {
+  return (
+    <section className="flex flex-col gap-2 border-t border-dark-line p-4">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-medium text-on-dark">实验报告</h2>
+        {report ? (
+          <Badge
+            onDark
+            tone={report.status === ExperimentReportStatus.GRADED ? 'success' : 'warning'}
+          >
+            {experimentReportStatusLabel(report.status)}
+          </Badge>
+        ) : null}
+      </div>
+      {report ? (
+        <div className="flex flex-col gap-1 rounded-md border border-dark-line bg-dark-surface p-3 text-xs text-on-dark-sub">
+          <span>提交时间：{formatDateTime(report.submitted_at)}</span>
+          {report.status === ExperimentReportStatus.GRADED ? (
+            <span className="font-mono tabular-nums text-on-dark">
+              报告得分：{report.manual_score}
+            </span>
+          ) : (
+            <span>报告已提交,等待老师批改。</span>
+          )}
+          {report.comment ? (
+            <p className="whitespace-pre-wrap leading-relaxed">老师评语：{report.comment}</p>
+          ) : null}
+        </div>
+      ) : (
+        <p className="text-xs text-on-dark-sub">提交报告后,批改结果会显示在这里。</p>
+      )}
+    </section>
   )
 }
 
@@ -607,6 +823,31 @@ function ReleasedEnvironmentStage() {
   )
 }
 
+/** RecycledEnvironmentStage 说明实例关联的沙箱已回收,避免继续展示旧工作面。 */
+function RecycledEnvironmentStage() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+      <p className="text-base text-on-dark">实验环境已回收</p>
+      <p className="max-w-md text-sm text-on-dark-sub">
+        已保存的代码、检查点和报告不会丢失。返回实验详情后重新进入,系统会准备新的环境。
+      </p>
+    </div>
+  )
+}
+
+/** FailedEnvironmentStage 说明实例环境准备失败,避免把失败实例当成可操作工作面。 */
+function FailedEnvironmentStage() {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center">
+      <TriangleAlert aria-hidden="true" className="size-6 text-on-dark-danger" />
+      <p className="text-base text-on-dark">实验环境没能准备好</p>
+      <p className="max-w-md text-sm text-on-dark-sub">
+        本次环境没有启动成功,已有的实验进度仍然保留。点击下方“重建实验环境”后可以继续实验。
+      </p>
+    </div>
+  )
+}
+
 interface ReportModalProps {
   instanceId: string
   onClose: () => void
@@ -649,7 +890,7 @@ function ReportModal({ instanceId, onClose, onSubmitted }: ReportModalProps) {
         <ModalHeader>
           <ModalTitle>提交实验报告</ModalTitle>
           <ModalDescription>
-            选择 PDF、Markdown 或纯文本报告。提交后由老师批改,批改结果在实验详情里看。
+            选择 PDF、Markdown 或纯文本报告。提交后由老师批改,结果会显示在实验工作台。
           </ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-3">

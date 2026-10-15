@@ -59,6 +59,7 @@ func (s *Service) SubmitJudgeTask(ctx context.Context, req contracts.JudgeSubmit
 	if err != nil {
 		return contracts.JudgeTaskInfo{}, err
 	}
+	snapshot.CodeHash = codeHash
 	ownership := sourceOwnershipFromRequest(req)
 	if err := validateSourceOwnership(ownership); err != nil {
 		return contracts.JudgeTaskInfo{}, err

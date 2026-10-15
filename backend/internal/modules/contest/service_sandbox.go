@@ -3,6 +3,7 @@ package contest
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
+	pkgcrypto "chaimir/pkg/crypto"
 )
 
 const (
@@ -82,6 +84,81 @@ func (s *Service) resolveContestSandboxAccess(ctx context.Context, sandboxID int
 	}, nil
 }
 
+// contestSandboxGrantScopeMatches 确认授权精确绑定组织租户、竞赛、题目、队伍、成员和环境。
+func contestSandboxGrantScopeMatches(grant ContestAccessGrant, contest Contest, problem ContestProblem, team Team, sandboxID, memberTenantID, accountID int64) bool {
+	if contest.ID <= 0 || contest.TenantID != grant.TenantID || problem.ID <= 0 || problem.TenantID != contest.TenantID ||
+		problem.ContestID != contest.ID || team.ID <= 0 || team.TenantID != contest.TenantID || team.ContestID != contest.ID ||
+		grant.TenantID != contest.TenantID || grant.ContestID != contest.ID || grant.TeamID != team.ID ||
+		grant.SandboxID != sandboxID || grant.MemberTenantID != memberTenantID || grant.MemberAccountID != accountID {
+		return false
+	}
+	prefix := contestEnvSourceRefPrefix(contest.CreatedAt.Year(), problem.ID, team.ID)
+	if !strings.HasPrefix(grant.SourceRef, prefix) {
+		return false
+	}
+	digest := strings.TrimPrefix(grant.SourceRef, prefix)
+	if len(digest) != 16 {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
+	return err == nil
+}
+
+// saveContestSubmissionWorkspace 从当前成员获授权的题目环境保存判题快照,不接受浏览器提供的对象引用。
+func (s *Service) saveContestSubmissionWorkspace(ctx context.Context, contest Contest, problem ContestProblem, team Team, sandboxID, memberTenantID, accountID int64) (contracts.SandboxWorkspaceSave, string, error) {
+	if sandboxID <= 0 || problem.CompositionDigest == "" {
+		return contracts.SandboxWorkspaceSave{}, "", apperr.ErrContestSubmissionInvalid
+	}
+	access, err := s.resolveContestSandboxAccess(ctx, sandboxID, contestSandboxCapabilityWorkspaceWrite)
+	if err != nil {
+		return contracts.SandboxWorkspaceSave{}, "", err
+	}
+	if !contestSandboxGrantScopeMatches(access.grant, contest, problem, team, sandboxID, memberTenantID, accountID) {
+		return contracts.SandboxWorkspaceSave{}, "", apperr.ErrContestTeamAccessDenied
+	}
+	info, err := s.sandbox.GetSandboxForPrincipal(ctx, access.access)
+	if err != nil {
+		return contracts.SandboxWorkspaceSave{}, "", err
+	}
+	if info.TenantID != contest.TenantID || info.SandboxID != sandboxID || info.SourceRef != access.grant.SourceRef ||
+		info.CompositionDigest != problem.CompositionDigest || !contestSubmissionSandboxReady(info) {
+		return contracts.SandboxWorkspaceSave{}, "", apperr.ErrContestSandboxUnavailable
+	}
+
+	saved, err := s.sandbox.SaveSandboxFilesForPrincipal(ctx, access.access)
+	if err != nil {
+		return contracts.SandboxWorkspaceSave{}, "", err
+	}
+	if strings.TrimSpace(saved.CodeStorageKey) == "" || len(saved.CodeStorageKey) > 255 || !pkgcrypto.ValidSHA256Hex(saved.CodeHash) {
+		return contracts.SandboxWorkspaceSave{}, "", apperr.ErrContestSandboxUnavailable
+	}
+
+	latest, err := s.resolveContestSandboxAccess(ctx, sandboxID, contestSandboxCapabilityWorkspaceWrite)
+	if err != nil {
+		return contracts.SandboxWorkspaceSave{}, "", err
+	}
+	if latest.grant.ID != access.grant.ID || latest.grant.GrantVersion != access.grant.GrantVersion ||
+		!contestSandboxGrantScopeMatches(latest.grant, contest, problem, team, sandboxID, memberTenantID, accountID) {
+		return contracts.SandboxWorkspaceSave{}, "", apperr.ErrContestTeamAccessDenied
+	}
+	latestInfo, err := s.sandbox.GetSandboxForPrincipal(ctx, latest.access)
+	if err != nil {
+		return contracts.SandboxWorkspaceSave{}, "", err
+	}
+	if latestInfo.TenantID != contest.TenantID || latestInfo.SandboxID != sandboxID || latestInfo.SourceRef != latest.grant.SourceRef ||
+		latestInfo.CompositionDigest != problem.CompositionDigest || !contestSubmissionSandboxReady(latestInfo) ||
+		latestInfo.WorkspaceRevision != saved.WorkspaceRevision {
+		return contracts.SandboxWorkspaceSave{}, "", apperr.ErrContestSandboxUnavailable
+	}
+	return saved, latestInfo.SourceRef, nil
+}
+
+// contestSubmissionSandboxReady 接受已可编辑或因空闲进入待回收状态的环境,拒绝准备中和终止环境。
+func contestSubmissionSandboxReady(info contracts.SandboxInfo) bool {
+	statusReady := info.Status == contracts.SandboxStatusReady || info.Status == contracts.SandboxStatusRunning || info.Status == contracts.SandboxStatusIdle
+	return statusReady && info.Phase >= contracts.SandboxPhaseReady
+}
+
 // grantAllows 判断已签发能力集合是否覆盖本次访问动作。
 func grantAllows(grant ContestAccessGrant, required string) bool {
 	for _, capability := range grant.Capabilities {
@@ -134,12 +211,16 @@ func (s *Service) WriteContestSandboxFile(ctx context.Context, sandboxID int64, 
 }
 
 // SaveContestSandboxFiles 立即持久化当前竞赛成员可访问的工作区。
-func (s *Service) SaveContestSandboxFiles(ctx context.Context, sandboxID int64) (contracts.SandboxWorkspaceSave, error) {
+func (s *Service) SaveContestSandboxFiles(ctx context.Context, sandboxID int64) (ContestSandboxFileSaveResponse, error) {
 	resolved, err := s.resolveContestSandboxAccess(ctx, sandboxID, contestSandboxCapabilityWorkspaceWrite)
 	if err != nil {
-		return contracts.SandboxWorkspaceSave{}, err
+		return ContestSandboxFileSaveResponse{}, err
 	}
-	return s.sandbox.SaveSandboxFilesForPrincipal(ctx, resolved.access)
+	saved, err := s.sandbox.SaveSandboxFilesForPrincipal(ctx, resolved.access)
+	if err != nil {
+		return ContestSandboxFileSaveResponse{}, err
+	}
+	return ContestSandboxFileSaveResponse{WorkspaceRevision: saved.WorkspaceRevision}, nil
 }
 
 // RunContestSandboxCommandTool 执行当前竞赛成员已授权的工具白名单命令。

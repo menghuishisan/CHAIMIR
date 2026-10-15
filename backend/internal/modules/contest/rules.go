@@ -11,7 +11,6 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
-	pkgcrypto "chaimir/pkg/crypto"
 )
 
 var (
@@ -94,6 +93,18 @@ func validateProblemRequest(req ProblemRequest, mode int16) (ProblemRequest, err
 	return req, nil
 }
 
+// contestContentTypeAllowed enforces the M5 content types supported by each contest mode.
+func contestContentTypeAllowed(mode, contentType int16) bool {
+	switch mode {
+	case ContestModeSolve:
+		return contentType == contentTypeContestProblem || contentType == contentTypeTheoryQuestion
+	case ContestModeBattle:
+		return contentType == contentTypeContestProblem
+	default:
+		return false
+	}
+}
+
 // validateBattleConfig 校验并规范化对抗题执行所需的沙箱运行时配置。
 func validateBattleConfig(cfg *BattleRuntimeConfig) (*BattleRuntimeConfig, error) {
 	if cfg == nil {
@@ -135,6 +146,14 @@ func validateContestTransition(current, next int16) error {
 		}
 	}
 	return apperr.ErrContestStateInvalid
+}
+
+// validateCheatReviewContestStatus 校验赛事是否已有参赛阶段数据且尚未归档。
+func validateCheatReviewContestStatus(status int16) error {
+	if status == ContestStatusDraft || status == ContestStatusArchived {
+		return apperr.ErrContestStateInvalid
+	}
+	return nil
 }
 
 // validateContestTransitionWindow 在状态图基础上叠加竞赛时间窗口约束。
@@ -220,17 +239,49 @@ func validateTeamName(name string) (string, error) {
 	return name, nil
 }
 
-// validateBattleEntryRequest 校验参战物角色和对象引用。
+// validateBattleEntryRequest 校验参战题目、授权沙箱和角色。
 func validateBattleEntryRequest(req BattleEntryRequest) (BattleEntryRequest, error) {
-	req.ArtifactRef = strings.TrimSpace(req.ArtifactRef)
-	req.CodeHash = strings.TrimSpace(req.CodeHash)
-	if req.ProblemID <= 0 || req.ArtifactRef == "" || len(req.ArtifactRef) > 255 || !pkgcrypto.ValidSHA256Hex(req.CodeHash) {
+	if req.ProblemID <= 0 || req.SandboxID <= 0 {
 		return BattleEntryRequest{}, apperr.ErrContestBattleEntryInvalid
 	}
 	if req.Role != BattleRoleStrategy && req.Role != BattleRoleDefense && req.Role != BattleRoleAttack {
 		return BattleEntryRequest{}, apperr.ErrContestBattleEntryInvalid
 	}
 	return req, nil
+}
+
+// validateContestSolveRequest 校验代码题与答案题的互斥请求契约。
+func validateContestSolveRequest(req SubmitRequest, submitKey string, codeTask bool) error {
+	if req.ContentRef == nil {
+		return apperr.ErrContestSubmissionInvalid
+	}
+	if codeTask {
+		if strings.TrimSpace(req.SandboxRef) == "" || len(req.ContentRef) != 0 {
+			return apperr.ErrContestSubmissionInvalid
+		}
+		return nil
+	}
+	if submitKey == "" || strings.TrimSpace(req.SandboxRef) != "" || len(req.ContentRef) != 1 ||
+		strings.TrimSpace(jsonx.StringValue(req.ContentRef[submitKey])) == "" {
+		return apperr.ErrContestSubmissionInvalid
+	}
+	return nil
+}
+
+// validateBattleEntryRole 校验参战角色必须属于题目声明的对局规则。
+// 角色边界由题目规则唯一决定,不能让客户端选择一个撮合器永远无法配对的角色。
+func validateBattleEntryRole(rule, role int16) error {
+	switch rule {
+	case BattleRuleAttackDefense:
+		if role == BattleRoleAttack || role == BattleRoleDefense {
+			return nil
+		}
+	case BattleRuleGame:
+		if role == BattleRoleStrategy {
+			return nil
+		}
+	}
+	return apperr.ErrContestBattleEntryInvalid
 }
 
 // validateCheatRequest 校验防作弊处理输入。

@@ -13,6 +13,7 @@ export const ALERT_LEVELS = [
 /** ALERT_METRICS 是告警规则允许选择的指标键。 */
 export const ALERT_METRICS = [
   'sandbox.active_count',
+  'sandbox.pending_seconds',
   'sandbox.failed_rate',
   'judge.queue_length',
   'judge.failed_rate',

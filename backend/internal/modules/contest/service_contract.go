@@ -68,7 +68,7 @@ func (s *Service) ListMyContestRecords(ctx context.Context) ([]ContestRecordDTO,
 	}
 	out := make([]ContestRecordDTO, 0, len(records))
 	for _, item := range records {
-		out = append(out, ContestRecordDTO{ContestID: ids.ID(item.ContestID), TeamID: ids.ID(item.TeamID), Score: item.Score, Rank: item.Rank, ContestName: item.ContestName, ContestStatus: item.ContestStatus})
+		out = append(out, ContestRecordDTO{ContestID: ids.ID(item.ContestID), TeamID: ids.ID(item.TeamID), Score: item.Score, Rank: item.Rank, SolvedCount: item.SolvedCount, LastSolveAt: item.LastSolveAt, ContestName: item.ContestName, ContestStatus: item.ContestStatus})
 	}
 	return out, nil
 }

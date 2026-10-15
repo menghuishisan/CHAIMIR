@@ -107,6 +107,7 @@ type JudgeInputSnapshot struct {
 	SuiteRef                 string                               `json:"suite_ref,omitempty"`
 	SuiteArchiveName         string                               `json:"suite_archive_name,omitempty"`
 	VersionHash              string                               `json:"version_hash"`
+	CodeHash                 string                               `json:"code_hash,omitempty"`
 	CompositionSnapshot      contracts.SandboxCompositionSnapshot `json:"composition_snapshot"`
 	SandboxSourceRef         string                               `json:"sandbox_source_ref,omitempty"`
 	GenesisRef               string                               `json:"genesis_ref,omitempty"`

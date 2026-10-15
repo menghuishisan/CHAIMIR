@@ -14,7 +14,10 @@ import {
   Button,
   Callout,
   DataPanel,
+  FilterBar,
+  FilterField,
   IconButton,
+  Input,
   MetricStrip,
   Menu,
   MenuContent,
@@ -43,11 +46,21 @@ export default function StudentExperimentsPage() {
   const navigate = useNavigate()
   const [enteringId, setEnteringId] = useState<string>()
   const [actionError, setActionError] = useState<string>()
+  const [keyword, setKeyword] = useState('')
+  const [submittedKeyword, setSubmittedKeyword] = useState('')
 
   const experiments = usePagedResource<StudentExperiment>(
-    (params) => api.experiment.getPublishedExperiments(params),
-    [],
+    (params) =>
+      api.experiment.getPublishedExperiments({
+        ...params,
+        keyword: submittedKeyword || undefined,
+      }),
+    [submittedKeyword],
   )
+
+  const handleSearch = useCallback(() => {
+    setSubmittedKeyword(keyword.trim())
+  }, [keyword])
 
   // 协作形态与报告要求取后端 facets:全量分组计数,不用当前页切片去数(§6.5.4)
   const groupCount = facetCount(
@@ -178,9 +191,21 @@ export default function StudentExperimentsPage() {
         </Callout>
       ) : null}
 
-      {/* 数据表与分页同处一块抬起片(§6.5.2)。学生投影接口没有筛选参数,故不排筛选井 */}
+      {/* 数据表与分页同处一块抬起片(§6.5.2)。关键词由学生投影接口按名称或说明筛选。 */}
       <DataPanel
         label="实验列表"
+        filter={
+          <FilterBar label="实验筛选" onSubmit={handleSearch} submitLabel="搜索">
+            <FilterField label="关键词" htmlFor="student-experiment-keyword">
+              <Input
+                id="student-experiment-keyword"
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="搜索实验名称或说明"
+              />
+            </FilterField>
+          </FilterBar>
+        }
         footer={
           <Pagination
             page={experiments.page}
@@ -193,8 +218,12 @@ export default function StudentExperimentsPage() {
         <ResourceState
           resource={experiments}
           emptyIcon={FlaskConical}
-          emptyTitle="暂无可做的实验"
-          emptyDescription="老师发布实验后会显示在这里,你可以直接进入实验环境动手做。"
+          emptyTitle={submittedKeyword ? '没有匹配的实验' : '暂无可做的实验'}
+          emptyDescription={
+            submittedKeyword
+              ? '换个关键词试试。'
+              : '老师发布实验后会显示在这里,你可以直接进入实验环境动手做。'
+          }
           skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
         >
           {(page) => (

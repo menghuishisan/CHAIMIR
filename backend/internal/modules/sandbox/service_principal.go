@@ -172,7 +172,8 @@ func (s *Service) TerminalTargetForPrincipal(ctx context.Context, access contrac
 	if targetContainer == "" || !runtimeContainerAllowed(runtime, targetContainer) {
 		return contracts.SandboxTerminalTarget{}, apperr.ErrSandboxOwnershipInvalid
 	}
-	return contracts.SandboxTerminalTarget{TenantID: sb.TenantID, SandboxID: sb.ID, Namespace: sb.Namespace, Container: targetContainer, Command: append([]string(nil), runtime.AdapterSpec.WorkspaceOps.Terminal...)}, nil
+	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.Terminal, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir, "")
+	return contracts.SandboxTerminalTarget{TenantID: sb.TenantID, SandboxID: sb.ID, Namespace: sb.Namespace, Container: targetContainer, Command: command}, nil
 }
 
 // AttachSandboxTerminal 二次根据受控访问主体重算目标，避免调用方伪造命名空间或容器。

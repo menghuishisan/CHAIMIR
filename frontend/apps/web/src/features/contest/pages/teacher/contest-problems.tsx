@@ -12,6 +12,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { Plus, Swords, Target } from 'lucide-react'
 import {
   ContestMode,
+  ContentType,
   ContentStatus,
   PAGINATION_MAX_SIZE,
   type BattleRule,
@@ -54,13 +55,14 @@ import { battleEntryRoles, battleRuntimeConfig } from '../../rules'
 
 export interface ContestProblemsProps {
   contest: Contest
+  readOnly?: boolean
 }
 
 /**
  * ContestProblems 管理赛题清单。
  * 后端按 (赛事, 题目, 版本) 唯一约束做 upsert,故"编辑"与"新增"是同一个提交动作。
  */
-export function ContestProblems({ contest }: ContestProblemsProps) {
+export function ContestProblems({ contest, readOnly = false }: ContestProblemsProps) {
   const [modal, setModal] = useState<{ problem?: ContestProblem } | undefined>()
 
   const problems = useAsyncResource(
@@ -80,7 +82,7 @@ export function ContestProblems({ contest }: ContestProblemsProps) {
       render: (problem) => (
         <div className="min-w-0">
           <div className="truncate font-medium text-ink">
-            {typeof problem.face?.title === 'string' ? problem.face.title : `第 ${problem.seq} 题`}
+            {problem.title || `第 ${problem.seq} 题`}
           </div>
           <div className="truncate font-mono text-xs text-ink-sub">
             {problem.item_code} · {problem.item_version}
@@ -116,11 +118,14 @@ export function ContestProblems({ contest }: ContestProblemsProps) {
       key: 'actions',
       header: '操作',
       align: 'right',
-      render: (problem) => (
-        <Button variant="ghost" size="sm" onClick={() => setModal({ problem })}>
-          编辑
-        </Button>
-      ),
+      render: (problem) =>
+        readOnly ? (
+          <Badge tone="neutral">只读</Badge>
+        ) : (
+          <Button variant="ghost" size="sm" onClick={() => setModal({ problem })}>
+            编辑
+          </Button>
+        ),
     },
   ]
 
@@ -135,9 +140,11 @@ export function ContestProblems({ contest }: ContestProblemsProps) {
       actions={
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="neutral">合计 {totalScore} 分</Badge>
-          <Button variant="primary" leftIcon={Plus} onClick={() => setModal({})}>
-            添加赛题
-          </Button>
+          {!readOnly ? (
+            <Button variant="primary" leftIcon={Plus} onClick={() => setModal({})}>
+              添加赛题
+            </Button>
+          ) : null}
         </div>
       }
     >
@@ -150,11 +157,15 @@ export function ContestProblems({ contest }: ContestProblemsProps) {
           emptyTitle="还没有赛题"
           emptyDescription="发布赛事前至少需要一道赛题,否则学生报名后无题可做。"
           emptyAction={
-            <Button variant="primary" leftIcon={Plus} onClick={() => setModal({})}>
-              添加赛题
-            </Button>
+            readOnly ? undefined : (
+              <Button variant="primary" leftIcon={Plus} onClick={() => setModal({})}>
+                添加赛题
+              </Button>
+            )
           }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+          skeleton={
+            <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
+          }
         >
           {(list) => (
             <Table
@@ -162,18 +173,17 @@ export function ContestProblems({ contest }: ContestProblemsProps) {
               data={list}
               rowKey={(item) => item.id}
               elevated={false}
-              onRowClick={(item) => setModal({ problem: item })}
+              onRowClick={readOnly ? undefined : (item) => setModal({ problem: item })}
               // <md 换行卡(§6.4.1 规则 3):题名一行、题源与分值一行,题目类型在右
               mobileCard={(item) => ({
-                title:
-                  typeof item.face?.title === 'string' ? item.face.title : `第 ${item.seq} 题`,
+                title: item.title || `第 ${item.seq} 题`,
                 meta: `第 ${item.seq} 题 · ${item.score} 分 · ${item.item_code}`,
                 badge: item.battle_rule ? (
                   <Badge tone="cinnabar">{battleRuleLabel(item.battle_rule)}</Badge>
                 ) : (
                   <Badge tone="neutral">解题</Badge>
                 ),
-                action: (
+                action: readOnly ? undefined : (
                   <Button variant="ghost" size="sm" onClick={() => setModal({ problem: item })}>
                     编辑
                   </Button>
@@ -184,7 +194,7 @@ export function ContestProblems({ contest }: ContestProblemsProps) {
         </ResourceState>
       </DataPanel>
 
-      {modal ? (
+      {modal && !readOnly ? (
         <ProblemFormModal
           contest={contest}
           problem={modal.problem}
@@ -244,14 +254,17 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
   )
 
   const itemOptions = useMemo(
-    () => toContentItemVersionOptions(items.data?.list ?? []),
-    [items.data]
+    () =>
+      toContentItemVersionOptions(
+        items.data?.list ?? [],
+        isBattle
+          ? [ContentType.CONTEST_PROBLEM]
+          : [ContentType.CONTEST_PROBLEM, ContentType.THEORY_QUESTION]
+      ),
+    [isBattle, items.data]
   )
 
-  const entryRoles = useMemo(
-    () => battleEntryRoles(Number(battleRule) as BattleRule),
-    [battleRule]
-  )
+  const entryRoles = useMemo(() => battleEntryRoles(Number(battleRule) as BattleRule), [battleRule])
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {

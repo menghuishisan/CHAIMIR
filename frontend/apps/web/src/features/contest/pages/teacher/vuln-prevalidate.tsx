@@ -13,6 +13,7 @@ import { useCallback, useState } from 'react'
 import { CircleCheck, CircleX, FlaskConical } from 'lucide-react'
 import {
   SANDBOX_ACCESS_PROFILE,
+  VulnProblemStatus,
   VulnPrevalidateStatus,
   type VulnProblem,
 } from '@chaimir/api-client'
@@ -36,7 +37,10 @@ import { CompositionDeclarationFields } from '../../../sandbox/components/Compos
 import {
   compositionDeclarationError,
   compositionSpecFromDeclaration,
+  declarationFromSpec,
+  derivedInfraFromSpec,
   emptyCompositionDeclaration,
+  readScenarioNeutralSpec,
 } from '../../../sandbox/composition'
 import {
   vulnLevelLabel,
@@ -52,7 +56,6 @@ const DETAIL_POSITIVE = 'positive'
 const DETAIL_NEGATIVE = 'negative'
 
 /** 单段验证结果里的键。 */
-const CASE_PASSED = 'passed'
 const CASE_ASSERTIONS = 'assertions'
 
 /** 单条断言结果里的键(后端 checkVulnAssertions 写入)。 */
@@ -68,11 +71,28 @@ export interface VulnPrevalidateModalProps {
   onDone: () => void
 }
 
+/** isVulnPrevalidateDetailConsistent 校验状态是否与正反向断言明细一致。 */
+export function isVulnPrevalidateDetailConsistent(problem: VulnProblem): boolean {
+  if (problem.prevalidate_status !== VulnPrevalidateStatus.PASSED) return false
+  const positive = readSection(problem.prevalidate_detail, DETAIL_POSITIVE)
+  const negative = readSection(problem.prevalidate_detail, DETAIL_NEGATIVE)
+  return positive?.passed === true && negative?.passed === true
+}
+
 /**
  * VulnPrevalidateModal 触发预验证并呈现双向验证结果。
  */
 export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalidateModalProps) {
-  const [declaration, setDeclaration] = useState(emptyCompositionDeclaration)
+  // 预验证必须复用题目草稿里已经锁定的环境声明,否则打开弹窗时会把真实运行时清空,
+  // 让教师在没有任何可选项的表单上重新拼一遍,也会丢失编译器生成的连接与基础设施。
+  const savedComposition = readScenarioNeutralSpec(problem.draft_body, 'composition')
+  const savedInitCodeRef = readString(problem.draft_body, 'init_code_ref')
+  const savedInitScriptRef = readString(problem.draft_body, 'init_script_ref')
+  const [declaration, setDeclaration] = useState(() =>
+    savedComposition === undefined
+      ? emptyCompositionDeclaration()
+      : declarationFromSpec(savedComposition)
+  )
   const [result, setResult] = useState<VulnProblem>(problem)
   const [formError, setFormError] = useState<string>()
   const [running, setRunning] = useState(false)
@@ -92,7 +112,13 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
           id: `vuln-${problem.id}`,
           declaration,
           accessProfile: SANDBOX_ACCESS_PROFILE.VULNERABILITY_PREVALIDATE,
+          derivedInfra: derivedInfraFromSpec(savedComposition),
+          links: savedComposition?.links ?? [],
+          initCodeRef: savedInitCodeRef,
+          initScriptRef: savedInitScriptRef,
         }),
+        init_code_ref: savedInitCodeRef || undefined,
+        init_script_ref: savedInitScriptRef || undefined,
       })
       setResult(updated)
       if (updated.prevalidate_status === VulnPrevalidateStatus.PASSED) {
@@ -104,11 +130,17 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
     } finally {
       setRunning(false)
     }
-  }, [declaration, onDone, problem.id])
+  }, [declaration, onDone, problem.id, savedInitCodeRef, savedInitScriptRef, savedComposition])
 
   const positive = readSection(result.prevalidate_detail, DETAIL_POSITIVE)
   const negative = readSection(result.prevalidate_detail, DETAIL_NEGATIVE)
   const detailError = readString(result.prevalidate_detail, 'error')
+  const detailConsistent = isVulnPrevalidateDetailConsistent(result)
+  const canRun = result.status === VulnProblemStatus.DRAFT
+  const displayStatus =
+    result.prevalidate_status === VulnPrevalidateStatus.PASSED && !detailConsistent
+      ? VulnPrevalidateStatus.FAILED
+      : result.prevalidate_status
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -129,7 +161,7 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
               { term: '复现方式', description: vulnRuntimeModeLabel(result.runtime_mode) },
               {
                 term: '当前状态',
-                description: vulnPrevalidateStatusLabel(result.prevalidate_status),
+                description: vulnPrevalidateStatusLabel(displayStatus),
               },
             ]}
           />
@@ -151,9 +183,15 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
           ) : (
             <div className="flex flex-col gap-4">
               <StatusIndicator
-                tone={vulnPrevalidateStatusTone(result.prevalidate_status)}
-                label={vulnPrevalidateStatusLabel(result.prevalidate_status)}
+                tone={vulnPrevalidateStatusTone(displayStatus)}
+                label={vulnPrevalidateStatusLabel(displayStatus)}
               />
+
+              {result.prevalidate_status === VulnPrevalidateStatus.PASSED && !detailConsistent ? (
+                <Callout tone="warning" title="验证记录需要重新确认">
+                  当前状态与正反向断言结果不一致,请重新验证后再固化题目。
+                </Callout>
+              ) : null}
 
               {detailError ? (
                 <Callout tone="danger" title="验证过程没有跑完">
@@ -180,14 +218,16 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
           <Button variant="outline" onClick={onClose}>
             关闭
           </Button>
-          <Button
-            variant="primary"
-            leftIcon={FlaskConical}
-            loading={running}
-            onClick={() => void run()}
-          >
-            {Object.keys(result.prevalidate_detail).length === 0 ? '开始验证' : '重新验证'}
-          </Button>
+          {canRun ? (
+            <Button
+              variant="primary"
+              leftIcon={FlaskConical}
+              loading={running}
+              onClick={() => void run()}
+            >
+              {Object.keys(result.prevalidate_detail).length === 0 ? '开始验证' : '重新验证'}
+            </Button>
+          ) : null}
         </ModalFooter>
       </ModalContent>
     </Modal>
@@ -299,10 +339,8 @@ function readSection(
   if (typeof raw !== 'object' || raw === null) return undefined
   const section = raw as Record<string, unknown>
   if (Object.keys(section).length === 0) return undefined
-  return {
-    passed: section[CASE_PASSED] === true,
-    assertions: readAssertions(section[CASE_ASSERTIONS]),
-  }
+  const assertions = readAssertions(section[CASE_ASSERTIONS])
+  return { passed: assertions.length > 0 && assertions.every((item) => item.passed), assertions }
 }
 
 /** readAssertions 把断言结果数组转成有类型的行;非数组回空数组。 */

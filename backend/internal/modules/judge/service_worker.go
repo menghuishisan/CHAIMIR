@@ -2,12 +2,11 @@
 package judge
 
 import (
-	"archive/tar"
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
 	"reflect"
@@ -632,87 +631,64 @@ func (s *Service) markOutboxFailed(ctx context.Context, item JudgeEventOutbox, c
 	})
 }
 
-// executeJudgerSelftest 用判题器声明的自检样例验证配置可执行性。
+// executeJudgerSelftest 在判题器声明的真实私有 sidecar 中执行 manifest 自检命令。
 func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
 	if err := validateJudgerResourceSpecForUse(j); err != nil {
 		return err
 	}
-	if len(j.ResourceSpec.Selftest) == 0 {
-		return apperr.ErrJudgerConfigInvalid
-	}
-	selftestArchive, err := selftestSubmissionArchive()
+	commands, err := parseJudgerSelftestCommands(j.ResourceSpec.Selftest)
 	if err != nil {
 		return apperr.ErrJudgerConfigInvalid.WithCause(err)
 	}
-	expectation, _ := j.ResourceSpec.Selftest["expectation"].(map[string]any)
-	extra, _ := j.ResourceSpec.Selftest["extra_input"].(map[string]any)
-	snapshot, err := s.snapshotExpectationForJudger(j.Type, expectation, extra)
-	if err != nil {
-		return err
+	if len(commands) == 0 {
+		// 后端策略判题器没有独立容器自检命令,其依赖的运行时已由 M2 单独完成接入即测。
+		if len(j.ResourceSpec.ExecutionSidecars) > 0 {
+			return apperr.ErrJudgerConfigInvalid
+		}
+		return nil
 	}
-	executionExpectation := snapshot
-	if j.Type == JudgerTypeOnchainAssert || j.Type == JudgerTypeSimCheckpoint {
-		executionExpectation = cloneExpectationMap(expectation)
-	}
-	task := JudgeTask{
-		ID:          s.ids.Generate(),
-		TenantID:    int64FromAny(j.ResourceSpec.Selftest["tenant_id"]),
-		SubmitterID: int64FromAny(j.ResourceSpec.Selftest["submitter_id"]),
-		SourceRef:   strings.TrimSpace(jsonx.StringFromAny(j.ResourceSpec.Selftest["source_ref"])),
-		InputSnapshot: JudgeInputSnapshot{
-			JudgerType:               j.Type,
-			CompositionSnapshot:      j.ResourceSpec.CompositionSnapshot,
-			GenesisRef:               j.ResourceSpec.GenesisRef,
-			InitScriptRef:            j.ResourceSpec.InitScriptRef,
-			Command:                  append([]string(nil), j.ResourceSpec.Command...),
-			ExecTarget:               strings.TrimSpace(j.ResourceSpec.ExecTarget),
-			ExecutionSidecars:        append([]workload.ComponentSpec(nil), j.ResourceSpec.ExecutionSidecars...),
-			TimeoutSec:               timeoutForSnapshot(j),
-			MaxScore:                 int32FromAny(j.ResourceSpec.Selftest["max_score"]),
-			Expectation:              executionExpectation,
-			ExtraInput:               extra,
-			SanitizedCodeArchiveName: "selftest-submission.tar",
-		},
-		SandboxMode: JudgeSandboxModeFresh,
-		MaxRetries:  0,
-	}
-	if task.TenantID <= 0 || task.SubmitterID <= 0 || strings.TrimSpace(task.SourceRef) == "" {
-		return apperr.ErrJudgerConfigInvalid
-	}
-	if task.InputSnapshot.MaxScore <= 0 {
-		task.InputSnapshot.MaxScore = 100
-	}
-	sanitized, err := s.storeSanitizedCodeArchive(ctx, task.TenantID, task.ID, selftestArchive)
-	if err != nil {
-		return err
-	}
-	task.InputSnapshot.SanitizedCodeArchiveRef = sanitized
-	result, err := s.executeTask(ctx, task)
-	if err != nil {
-		return err
-	}
-	if !result.Passed {
-		return apperr.ErrJudgerSelftestFailed
+	if err := s.sandbox.RunPlatformSelftest(ctx, contracts.SandboxPlatformSelftestRequest{
+		CompositionSnapshot: j.ResourceSpec.CompositionSnapshot,
+		ExecTarget:          strings.TrimSpace(j.ResourceSpec.ExecTarget),
+		Commands:            commands,
+		TimeoutSec:          timeoutForSnapshot(j),
+	}); err != nil {
+		logging.ErrorContext(ctx, "judge platform selftest failed", apperr.AsAppError(err).LogString(), slog.String("judger_code", j.Code))
+		return apperr.ErrJudgerSelftestFailed.WithCause(err)
 	}
 	return nil
 }
 
-// selftestSubmissionArchive 生成最小安全提交包,供判题器自检走完整 fresh 注入链路。
-func selftestSubmissionArchive() ([]byte, error) {
-	const name = "main.txt"
-	const body = "judge selftest submission\n"
-	var buf bytes.Buffer
-	tw := tar.NewWriter(&buf)
-	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
+type judgerSelftestDefinition struct {
+	Commands []judgerSelftestCommand `json:"commands"`
+}
+
+type judgerSelftestCommand struct {
+	Name    string   `json:"name"`
+	Command []string `json:"command"`
+}
+
+// parseJudgerSelftestCommands 严格解析 manifest 自检命令,允许可信平台 manifest 使用 shell 组合命令。
+func parseJudgerSelftestCommands(raw map[string]any) ([][]string, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
 		return nil, err
 	}
-	if _, err := tw.Write([]byte(body)); err != nil {
+	var definition judgerSelftestDefinition
+	if err := jsonx.DecodeStrictKnownFields(encoded, &definition); err != nil {
 		return nil, err
 	}
-	if err := tw.Close(); err != nil {
-		return nil, err
+	commands := make([][]string, 0, len(definition.Commands))
+	for _, item := range definition.Commands {
+		if strings.TrimSpace(item.Name) == "" || !workload.ValidCommand(item.Command) {
+			return nil, fmt.Errorf("判题器自检命令声明无效")
+		}
+		commands = append(commands, append([]string(nil), item.Command...))
 	}
-	return buf.Bytes(), nil
+	return commands, nil
 }
 
 // decodeCommandResult 解析判题器 stdout JSON 并限制可见详情大小。

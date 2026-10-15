@@ -30,6 +30,43 @@ func (s *Service) CompilePlatformSandboxComposition(ctx context.Context, spec co
 	return CompilePlatformSandboxComposition(ctx, s.store, spec)
 }
 
+// ReplacePlatformSandboxCompositionSnapshot 将 sidecar 等平台私有闭包加入后的最终快照登记为唯一事实。
+func (s *Service) ReplacePlatformSandboxCompositionSnapshot(ctx context.Context, previousDigests []string, snapshot contracts.SandboxCompositionSnapshot) error {
+	return ReplacePlatformSandboxCompositionSnapshot(ctx, s.store, previousDigests, snapshot)
+}
+
+// ReplacePlatformSandboxCompositionSnapshot 删除编译中间摘要并原子登记最终组合快照。
+func ReplacePlatformSandboxCompositionSnapshot(ctx context.Context, store Store, previousDigests []string, snapshot contracts.SandboxCompositionSnapshot) error {
+	if store == nil {
+		return apperr.ErrSandboxCreateRequestInvalid
+	}
+	digest, err := contracts.CanonicalSnapshotDigest(snapshot)
+	if err != nil || strings.TrimSpace(snapshot.Digest) == "" || digest != snapshot.Digest {
+		return apperr.ErrSandboxCreateRequestInvalid
+	}
+	raw, err := json.Marshal(snapshot)
+	if err != nil {
+		return apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
+	}
+	return store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		seen := map[string]struct{}{snapshot.Digest: {}}
+		for _, previous := range previousDigests {
+			previous = strings.TrimSpace(previous)
+			if previous == "" {
+				continue
+			}
+			if _, exists := seen[previous]; exists {
+				continue
+			}
+			if err := tx.DeletePublishedCompositionSnapshot(ctx, previous); err != nil {
+				return err
+			}
+			seen[previous] = struct{}{}
+		}
+		return tx.UpsertPublishedCompositionSnapshot(ctx, snapshot.Digest, raw)
+	})
+}
+
 // CompilePlatformSandboxComposition 让部署装配层复用 M2 唯一编译器冻结平台目录快照。
 // 它只读取平台运行时、镜像和工具目录，不创建沙箱或绕开自检门禁。
 func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec contracts.SandboxCompositionSpec) (contracts.SandboxCompositionSnapshot, error) {
@@ -1580,8 +1617,11 @@ func setComponentEnv(componentCode, componentName, name, value string, runtimes 
 	return fmt.Errorf("组件 %s 的源容器 %s 不存在", componentCode, componentName)
 }
 
-// materializeRuntimeTopology 为每个运行时实例生成唯一 Pod 角色,保证多链组合中的同名拓扑不会碰撞。
-func materializeRuntimeTopology(instance string, adapter AdapterSpec) AdapterSpec {
+// MaterializeRuntimeTopology 为每个运行时实例生成唯一 Pod 角色,保证多链组合中的同名拓扑不会碰撞。
+//
+// 组合编译和验收种子都必须调用这一份规则;不能让迁移种子复制一套拓扑前缀逻辑,
+// 否则目录自检通过而已发布组合快照仍会使用未实例化的 workspace/sandbox 目标。
+func MaterializeRuntimeTopology(instance string, adapter AdapterSpec) AdapterSpec {
 	instance = strings.TrimSpace(instance)
 	if instance == "" {
 		return adapter
@@ -1598,7 +1638,8 @@ func materializeRuntimeTopology(instance string, adapter AdapterSpec) AdapterSpe
 			if original == "" {
 				original = fmt.Sprintf("pod-%d", index+1)
 			}
-			prefixed := instance + "-" + original
+			// 编译快照会在创建阶段再次经过这里;使用幂等命名规则避免把实例前缀重复拼接。
+			prefixed := runtimePodName(instance, original)
 			adapter.Pods[index].Name = prefixed
 			podNames[original] = prefixed
 		}
@@ -1624,6 +1665,11 @@ func materializeRuntimeTopology(instance string, adapter AdapterSpec) AdapterSpe
 	adapter.CapabilityCommands.Query.ExecTarget = rewriteRuntimeExecTarget(adapter.CapabilityCommands.Query.ExecTarget, podNames)
 	adapter.CapabilityCommands.Reset.ExecTarget = rewriteRuntimeExecTarget(adapter.CapabilityCommands.Reset.ExecTarget, podNames)
 	return adapter
+}
+
+// materializeRuntimeTopology 保留包内调用的短名称,所有实际规则仍由统一实现维护。
+func materializeRuntimeTopology(instance string, adapter AdapterSpec) AdapterSpec {
+	return MaterializeRuntimeTopology(instance, adapter)
 }
 
 // rewriteRuntimeExecTarget prefixes the Pod portion of a declared pod/container target.

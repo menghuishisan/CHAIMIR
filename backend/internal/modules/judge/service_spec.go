@@ -31,7 +31,10 @@ type JudgerExecutionSpec struct {
 type JudgerResourceSpec struct {
 	// DisabledReason records why a runtime-backed judger has no frozen composition yet.
 	// It keeps the directory fail-closed without serializing an empty snapshot as if it were usable.
-	DisabledReason      string                               `json:"disabled_reason,omitempty"`
+	DisabledReason string `json:"disabled_reason,omitempty"`
+	// Composition 保存判题器的原始平台组合声明,供运行时自检完成后重新编译唯一快照。
+	// 它不是可执行事实;真正执行仍只能使用 CompositionSnapshot。
+	Composition         contracts.SandboxCompositionSpec     `json:"composition,omitempty"`
 	CompositionSnapshot contracts.SandboxCompositionSnapshot `json:"composition_snapshot,omitempty"`
 	GenesisRef          string                               `json:"genesis_ref,omitempty"`
 	InitScriptRef       string                               `json:"init_script_ref,omitempty"`

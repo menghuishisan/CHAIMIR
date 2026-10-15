@@ -32,7 +32,7 @@ Foundry/Anvil EVM 运行时镜像。
 - 默认 command/args 由镜像入口启动 Anvil；CompositionSpec 显式传入的 args 会原样追加到 Anvil 参数。需要改变链标识、区块时间等运行时契约时，必须在合法组合中明确声明，不能由入口猜测或回退。
 
 - 镜像默认 ENTRYPOINT：["/usr/local/bin/chaimir-foundry-entrypoint"]；manifest 未覆盖组件 command/args，使用该入口语义。
-- runtime 原生动作：helper=/usr/local/bin/chaimir-foundry-adapter；profile=evm-contract；actions={"deploy":["/usr/local/bin/chaimir-foundry-adapter","deploy"],"tx":["/usr/local/bin/chaimir-foundry-adapter","tx"],"query":["/usr/local/bin/chaimir-foundry-adapter","query"]}。query 只支持 manifest 约定的 latest、blockNumber、chainId、balance:<address>、code:<address>、counter:last；未声明目标严格失败。deploy 的 `contract_ref`、tx 的 `target_ref` 和 deploy 的 `constructor_args:[{"type":"address","target_ref":"..."}]` 用于同一沙箱内的显式步骤绑定；构造参数只允许从已部署的地址引用，不能使用动态文本替换。deploy 只有显式 `compile:true` 时才在 runtime 内按 `project_dir`、`artifact` 离线编译，未显式开启时必须读取已经存在的 artifact。tx payload 的 `expect_revert` 必须是布尔值；只有显式为 `true` 时才允许 unlocked 账户通过受控 JSON-RPC 发送并返回真实链上回滚回执，同时必须提供正整数 `gas_limit`；未声明或为 `false` 的交易仍按默认 gas 预估执行。
+- runtime 原生动作：helper=/usr/local/bin/chaimir-foundry-adapter；profile=evm-contract；actions={"deploy":["/usr/local/bin/chaimir-foundry-adapter","deploy"],"tx":["/usr/local/bin/chaimir-foundry-adapter","tx"],"query":["/usr/local/bin/chaimir-foundry-adapter","query"]}。query 只支持 manifest 约定的 latest、blockNumber、chainId、balance:<address>、code:<address>、counter:last；未声明目标严格失败。deploy 的 `contract_ref`、tx 的 `target_ref` 和 deploy 的 `constructor_args:[{"type":"address","target_ref":"..."}]` 用于同一沙箱内的显式步骤绑定；构造参数只允许从已部署的地址引用，不能使用动态文本替换。deploy 只有显式 `compile:true` 时才在 runtime 内按 `project_dir`、`artifact` 离线编译，未显式开启时必须读取已经存在的 artifact；能力自检载荷不固化 `from`，由运行时依据正式注入的 `CHAIMIR_EVM_DEPLOYER_MNEMONIC` 派生首个解锁账户。tx payload 的 `expect_revert` 必须是布尔值；只有显式为 `true` 时才允许 unlocked 账户通过受控 JSON-RPC 发送并返回真实链上回滚回执，同时必须提供正整数 `gas_limit`；未声明或为 `false` 的交易仍按默认 gas 预估执行。
 
 ## 初始化材料与运行时注入
 
@@ -50,7 +50,7 @@ Foundry/Anvil EVM 运行时镜像。
 ## 持久化与隔离边界
 
 - 持久化目录：由组件 mount_domains 决定；未声明持久化数据时不得自行落盘。
-- 组件挂载与文件系统：无
+- 组件挂载与文件系统：runtime 主容器显式挂载 workspace（用于按题面要求在 runtime 内离线编译并生成构建产物）、runtime-state 和 public-assets；学生入口仍由独立的 tool/workspace sidecar 挂载 workspace，runtime 主容器不提供学生 shell。
 ## 安全边界
 
 - 安全声明：{"run_as_non_root":true,"read_only_root_filesystem":true,"allow_privilege_escalation":false,"privileged":false,"host_network":false,"automount_service_account_token":false,"drop_capabilities":["ALL"],"network_policy":"deny-all"}

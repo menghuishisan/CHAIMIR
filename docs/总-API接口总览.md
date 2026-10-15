@@ -69,6 +69,8 @@
 
 补充:生产代码不得用同一错误码动态替换多种用户文案;新增场景应在对应段落补稳定错误码。`11503–11508` 只用于服务端装配依赖缺失,详细技术原因只进入日志。
 
+身份会话错误补充:`12015` 表示 Refresh 或服务端会话无效,`12017` 表示已鉴权请求缺少服务端会话上下文；二者都要求客户端清除本地 access token 并重新登录。仅通用 `11001` 在存在 Refresh Cookie 时触发一次令牌轮转。
+
 ### 6. 跨模块调用约定
 - 业务实时数据经 M10 `POST /notify/push` 或模块授权后的进度 WS 入口推送;topic 必须带租户前缀 `tenant:{tenant_id}:...`;引擎内部字节流(终端/仿真 stream)走各模块自有 WS。
 - 资源回收:M7/M8 调 M2 `/sandboxes/recycle`、M4 `/sessions/recycle`(按 `scope_ref`);稳定业务归属仍使用 `source_ref`。
@@ -120,7 +122,7 @@
 - `/runtimes`、`/tools`:运行时/工具管理 + 接入即测 `[平台管理员]`;镜像预拉取提供触发与状态查询,完成以全目标节点真实拉取成功为准。
 - `/catalog`:能力编排目录 `[教师/学校管理员/平台管理员]` —— 返回可选择的运行时、工具和基础设施能力摘要及参数 schema,不返回原始 WorkloadSpec、镜像 digest 地址、命令白名单或自检详情。业务模块提交声明式 `CompositionSpec` 由 M2 唯一编译;依赖自动展开结果只在编译预览和发布快照中出现。
 - `/sandboxes`:创建/查询/销毁/回收 `[内部]`;创建请求只接受已编译组合快照 digest、`source_ref`、`scope_ref`、访问主体和生命周期参数;拒绝运行时/工具/镜像/命令/端口等旁路字段。`WS /sandboxes/{id}/progress`、`/terminal`。
-- `/sandboxes/{id}/files`、`/tools/{code}/*`、`/command-tools/{code}/run`:文件、Web 工具代理和受控命令工具 `[用户]`;Web 工具代理支持浏览器一次性 `token` 入口并换成路径受限 Cookie。
+- `/sandboxes/{id}/files`、`/tools/{code}/*`、`/command-tools/{code}/run`:文件、Web 工具代理和受控命令工具 `[用户]`;竞赛授权网关的保存接口只返回工作区修订号,不暴露内部代码对象引用或哈希。Web 工具代理支持浏览器一次性 `token` 入口并换成路径受限 Cookie。
 - `GET /sandboxes/{id}` 响应中的 `capabilities` 由运行时命令清单与服务端注册表计算,是前端文件、终端、命令工具和链操作入口的权威能力声明。
 - `/sandboxes/{id}/chain/deploy|tx|query`:链上部署、交易和查询`[用户/内部]`;用户路径按沙箱 owner 校验,内部服务路径按签名 `source_ref` 校验。
 - `/sandboxes/{id}/chain/reset`:链恢复创世就绪态`[内部]`。
@@ -159,20 +161,20 @@
 
 ### M7 实验 `/api/v1/experiment`
 - `/experiments/*`:配置/校验/发布。
-- `/student/experiments`、`/student/experiments/{id}`:学生可发现的已发布实验列表与单条读取,统一走学生投影(剔除环境初始化与判题内部配置)。
-- `/experiments/{id}/instances`、`/instances/{id}`:实例创建(编排 M2/M4)/工作台/控制;`GET /instances` 为教师/学校管理员的租户内活跃实例监控列表,普通教师仅见本人实验;`/instances/{id}/stages/{stage}/activate` 是阶段资源创建唯一写入口;`/instances/{id}/progress` 返回 M10 订阅元信息。**无手动回收接口**:引擎资源释放走 `finish` 内部回收、后台超时回收、以及订阅 `teaching.course.ended` 的课程结束级联三条自动路径。
+- `/student/experiments`、`/student/experiments/{id}`:学生可发现的已发布实验列表与单条读取,支持 `keyword` 按名称或说明检索;统一走学生投影(剔除环境初始化与判题内部配置),检查点附带过滤后的公开题面正文。
+- `/experiments/{id}/instances`、`/instances/{id}`:实例创建(编排 M2/M4)/工作台/控制;`GET /instances` 为教师/学校管理员的租户内实例监控列表,普通教师仅见本人实验,支持 creating/running/paused/error/released 状态筛选;`/instances/{id}/stages/{stage}/activate` 是阶段资源创建唯一写入口;`/instances/{id}/progress` 返回 M10 订阅元信息。**无手动回收接口**:引擎资源释放走 `finish` 内部回收、后台超时回收、以及订阅 `teaching.course.ended` 的课程结束级联三条自动路径。
 - `/instances/{id}/checkpoints/{cp}/judge`:检查点判分(调 M3)。
-- `/instances/{id}/report`:学生以 `multipart/form-data` 的 `file` 字段上传并提交报告,服务端统一校验后生成对象引用;`/reports/{id}/access`:教师换取一次性报告下载授权;`/reports/{id}/grade`:教师批改报告。
+- `/instances/{id}/report`:学生以 `multipart/form-data` 的 `file` 字段上传并提交报告,服务端统一校验后生成对象引用;同路径 `GET` 只返回本人报告的安全批改结果;`/reports/{id}/access`:教师换取一次性报告下载授权;`/reports/{id}/grade`:教师批改报告。
 - `/groups/*`:多人协作。`GET /experiments/{id}/groups` 是教师编组视角(全部分组 + 成员角色,不含实例),`GET /groups/{id}` 是按组读单组并附带共享实例。
 - `/internal/instances/{id}/score`、`/internal/stats` `[内部]`(供上层聚合/M9;M7 不直接依赖同层 M6)。
 
 ### M8 竞赛 `/api/v1/contest`
-- `/contests/*`:赛事管理/题目编排/发布开始结束。
-- `/student/contests`、`/student/contests/{id}`:学生可发现的非草稿赛事列表与单条读取(门槛与列表一致)。
+- `/contests/*`:赛事管理/题目编排/发布开始结束;列表支持 `keyword` 按名称检索。
+- `/student/contests`、`/student/contests/{id}`:学生可发现的非草稿赛事列表与单条读取(门槛与列表一致),支持状态和名称检索。
 - `/signup`、`/contests/{id}/join-team`、`/teams/*`:报名组队。加入队伍只按邀请码(队伍编号对学生是内部标识,不进请求)。
-- `/problems/{pid}/env`、`/submit`:解题赛(环境从 M5 锁定题目版本的 `composition` 派生并以 `contest-solve` 调 M2、判题调 M3);学生请求不得携带运行时、镜像、工具、初始化或网络配置。
-- `/battle/entry`、`/battle/matches`、`/battle/replay-window`、`/matches/{id}/replay`、`/ladder`:对抗赛/回放/天梯。`GET /contests/{id}/battle/entries?page=&size=` 与 `GET /contests/{id}/battle/matches` 都返回分页信封;matches 师生同路由按身份分视角:赛事组织者与学校管理员见本赛事全部对局(实时监控),其余账号见本队对局;学生回放使用 `GET /contests/{id}/battle/replay-window?page=&size=`，由服务端提供已完成总量、处理中数量、窗口前检查点和窗口内有序事件，不能用通用列表页切片重算全场状态;回放取件仍限参赛队伍成员。
-- `/my/contest-records`、`/result-snapshot`:个人战绩。
+- `/problems` 摘要、`/problems/{pid}` 安全题面、`/problems/{pid}/env`、`/submit`、`/submission`:解题赛;摘要不返回完整题面,安全题面和环境/提交均要求当前参赛队伍成员。`GET /problems/{pid}/env` 按服务端稳定 `request_ref` 恢复当前队伍仍未销毁的环境,不存在时返回通用资源不存在;`POST` 只负责创建或幂等取得环境。`GET /problems/{pid}/submission` 只返回当前队伍最近一次提交,用于刷新和关闭重开后的状态恢复。代码题提交只带当前 `sandbox_ref`，M8 核验成员 grant 和题目/队伍/竞赛归属后经 M2 保存工作区；`code_storage_key`、`code_hash` 由服务端生成，客户端不提供。答案题只传 `content_ref`。环境从 M5 锁定题目版本的 `composition` 派生并以 `contest-solve` 调 M2、判题调 M3;学生请求不得携带运行时、镜像、工具、初始化或网络配置。
+- `/battle/entry`、`/battle/matches`、`/battle/replay-window`、`/matches/{id}/replay`、`/ladder`:对抗赛/回放/天梯。`POST /battle/entry` 请求为 `{problem_id,sandbox_id,role}`;M8 校验当前成员授权的竞赛、队伍及题目沙箱后,调用 M2 保存工作区并以返回的引用与哈希创建参战版本,客户端不得指定 `artifact_ref` 或 `code_hash`。`GET /contests/{id}/battle/entries?page=&size=` 与 `GET /contests/{id}/battle/matches` 都返回分页信封;matches 师生同路由按身份分视角:赛事组织者与学校管理员见本赛事全部对局(实时监控),其余账号见本队对局;学生回放使用 `GET /contests/{id}/battle/replay-window?page=&size=`，由服务端提供已完成总量、处理中数量、窗口前检查点和窗口内有序事件，不能用通用列表页切片重算全场状态;回放取件仍限参赛队伍成员。
+- `/my/contest-records`、`/result-snapshot`:个人战绩;榜单统计按赛制解释,对抗赛只展示 ELO,不展示解题数/末次解题时间。
 - `/cheat-*`:防作弊。
 - `/vuln-sources/*`、`/vuln-problems/*`:租户漏洞源与漏洞题转化 `[出题教师/学校管理员]`(finalize 调 M5 system-import)。
 - `/platform/vuln-sources`:全局漏洞源目录(`tenant_id=0`)`[平台管理员]`,只查看与新增/更新,不代租户同步、不生成租户草稿。
@@ -182,7 +184,8 @@
 - `/platform/dashboard`、`/platform/statistics`:平台看板与统计聚合 `[平台管理员]`。租户列表与入驻申请审核不在 M9,统一走 M1 `/platform/tenants`、`/platform/applications`。
 - `/school/dashboard`、`/school/statistics`:学校看板。
 - `/audit`、`/audit/export`:统一审计查询中心(查 M1 audit_log)。
-- `/configs/*`、`/alert-rules`、`/alert-events/*`:配置/告警。
+- `/configs/*`、`/alert-rules`、`/alert-events/*`:配置/告警;告警规则 `condition` 固定为
+  `operator`、`threshold`、`duration_seconds` 三字段,指标必须来自 M9 登记清单。
 - `/platform/monitoring/panels`:外接监控嵌入入口。
 - `/platform/backups`:备份记录。
 

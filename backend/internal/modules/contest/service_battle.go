@@ -36,49 +36,67 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 	if err != nil {
 		return BattleEntryDTO{}, err
 	}
+	contest, problem, team, err := s.loadBattleEntryContext(ctx, organizerTenantID, contestID, req, id.TenantID, id.AccountID)
+	if err != nil {
+		return BattleEntryDTO{}, err
+	}
+	saved, _, err := s.saveContestSubmissionWorkspace(ctx, contest, problem, team, req.SandboxID.Int64(), id.TenantID, id.AccountID)
+	if err != nil {
+		return BattleEntryDTO{}, err
+	}
+	artifactRef := saved.CodeStorageKey
 	var entry BattleEntry
 	var opponents []BattleEntry
-	var problem ContestProblem
 	problemID := req.ProblemID.Int64()
 	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
-		contest, err := tx.GetContest(ctx, organizerTenantID, contestID)
+		currentContest, err := tx.GetContest(ctx, organizerTenantID, contestID)
 		if err != nil {
 			return err
 		}
-		if contest.Mode != ContestModeBattle {
+		if currentContest.Mode != ContestModeBattle {
 			return apperr.ErrContestBattleEntryInvalid
 		}
-		if err := validateContestRunning(contest); err != nil {
+		if err := validateContestRunning(currentContest); err != nil {
 			return err
 		}
-		problem, err = tx.GetContestProblem(ctx, organizerTenantID, problemID)
+		currentProblem, err := tx.GetContestProblem(ctx, organizerTenantID, problemID)
 		if err != nil {
 			return err
 		}
-		if problem.ContestID != contestID {
+		if currentProblem.ContestID != contestID {
 			return apperr.ErrContestProblemInvalid
 		}
-		team, err := s.currentAccountTeam(ctx, tx, organizerTenantID, id.TenantID, contestID, id.AccountID)
+		if currentProblem.ItemCode != problem.ItemCode || currentProblem.ItemVersion != problem.ItemVersion ||
+			currentProblem.CompositionDigest != problem.CompositionDigest {
+			return apperr.ErrContestProblemInvalid
+		}
+		if err := validateBattleEntryRole(currentProblem.BattleRule, req.Role); err != nil {
+			return err
+		}
+		currentTeam, err := s.currentAccountTeam(ctx, tx, organizerTenantID, id.TenantID, contestID, id.AccountID)
 		if err != nil {
 			return err
 		}
-		version, err := tx.NextBattleVersion(ctx, organizerTenantID, contestID, problemID, team.ID, req.Role)
+		if currentTeam.ID != team.ID {
+			return apperr.ErrContestTeamAccessDenied
+		}
+		version, err := tx.NextBattleVersion(ctx, organizerTenantID, contestID, problemID, currentTeam.ID, req.Role)
 		if err != nil {
 			return err
 		}
-		if err := tx.DeactivateBattleEntries(ctx, organizerTenantID, contestID, problemID, team.ID, req.Role); err != nil {
+		if err := tx.DeactivateBattleEntries(ctx, organizerTenantID, contestID, problemID, currentTeam.ID, req.Role); err != nil {
 			return err
 		}
-		entry, err = tx.CreateBattleEntry(ctx, BattleEntry{ID: s.ids.Generate(), TenantID: organizerTenantID, ContestID: contestID, ProblemID: problemID, TeamID: team.ID, Role: req.Role, ArtifactRef: req.ArtifactRef, ArtifactHash: req.CodeHash, VersionNo: version})
+		entry, err = tx.CreateBattleEntry(ctx, BattleEntry{ID: s.ids.Generate(), TenantID: organizerTenantID, ContestID: contestID, ProblemID: problemID, TeamID: currentTeam.ID, Role: req.Role, ArtifactRef: artifactRef, ArtifactHash: saved.CodeHash, VersionNo: version})
 		if err != nil {
 			return err
 		}
-		opponents, err = tx.ListActiveBattleOpponents(ctx, organizerTenantID, contestID, problemID, entry.ID, team.ID, contest.MatchMode, s.cfg.MatchmakerBatchSize, s.cfg.BattleELOInitialScore)
+		opponents, err = tx.ListActiveBattleOpponents(ctx, organizerTenantID, contestID, problemID, entry.ID, currentTeam.ID, currentContest.MatchMode, s.cfg.MatchmakerBatchSize, s.cfg.BattleELOInitialScore)
 		if err != nil {
 			return err
 		}
 		for _, opponent := range opponents {
-			if !battleRolesCompatible(problem.BattleRule, entry.Role, opponent.Role) {
+			if !battleRolesCompatible(currentProblem.BattleRule, entry.Role, opponent.Role) {
 				continue
 			}
 			matchID := s.ids.Generate()
@@ -94,6 +112,39 @@ func (s *Service) SubmitBattleEntry(ctx context.Context, contestID int64, req Ba
 		return BattleEntryDTO{}, err
 	}
 	return battleEntryDTOFromModel(entry), nil
+}
+
+// loadBattleEntryContext 读取并校验当前竞赛、题目和队伍,不写入对局状态。
+func (s *Service) loadBattleEntryContext(ctx context.Context, organizerTenantID, contestID int64, req BattleEntryRequest, memberTenantID, accountID int64) (Contest, ContestProblem, Team, error) {
+	var contest Contest
+	var problem ContestProblem
+	var team Team
+	err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		contest, err = tx.GetContest(ctx, organizerTenantID, contestID)
+		if err != nil {
+			return err
+		}
+		if contest.Mode != ContestModeBattle {
+			return apperr.ErrContestBattleEntryInvalid
+		}
+		if err := validateContestRunning(contest); err != nil {
+			return err
+		}
+		problem, err = tx.GetContestProblem(ctx, organizerTenantID, req.ProblemID.Int64())
+		if err != nil {
+			return err
+		}
+		if problem.ContestID != contestID {
+			return apperr.ErrContestProblemInvalid
+		}
+		if err := validateBattleEntryRole(problem.BattleRule, req.Role); err != nil {
+			return err
+		}
+		team, err = s.currentAccountTeam(ctx, tx, organizerTenantID, memberTenantID, contestID, accountID)
+		return err
+	})
+	return contest, problem, team, err
 }
 
 // ListBattleEntries 查询当前账号队伍的参战物列表。
@@ -514,7 +565,7 @@ func (s *Service) executeBattleMatchWithLease(ctx context.Context, match BattleM
 		}
 		return err
 	}
-	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: match.TenantID, CompositionSnapshot: snapshot, OwnerAccountID: ownerID, SourceRef: match.SourceRef, ScopeRef: match.ScopeRef, KeepAlive: false, SnapshotEnabled: false})
+	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: match.TenantID, CompositionSnapshot: snapshot, InitCodeRef: snapshot.Spec.InitCodeRef, InitScriptRef: snapshot.Spec.InitScriptRef, OwnerAccountID: ownerID, SourceRef: match.SourceRef, ScopeRef: match.ScopeRef, KeepAlive: false, SnapshotEnabled: false})
 	if err != nil {
 		if marked, failErr := s.markBattleFailed(ctx, match); failErr != nil {
 			return apperr.ErrContestBattleMatchFailed.WithCause(fmt.Errorf("创建对局沙箱失败: %w; 标记对局失败也失败: %v", err, failErr))
@@ -755,7 +806,8 @@ func (s *Service) applyBattleRankDelta(ctx context.Context, tx TxStore, tenantID
 	}
 	rank.ID = s.ids.Generate()
 	rank.Score += delta
-	rank.LastSolveAt = timex.Now()
+	rank.SolvedCount = 0
+	rank.LastSolveAt = time.Time{}
 	_, err = tx.UpsertLadder(ctx, rank)
 	return err
 }

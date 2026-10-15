@@ -36,7 +36,7 @@ var maintenancePolicies = []MaintenancePolicy{
 	}},
 	{Module: "contest", Role: "chaimir_maintenance_contest", Tables: []string{
 		"contest", "contest_problem", "team", "team_member", "solve_submission", "battle_entry", "battle_match",
-		"ladder_rank", "contest_ladder_snapshot", "cheat_record", "vuln_source", "vuln_problem",
+		"contest_access_grant", "ladder_rank", "contest_ladder_snapshot", "cheat_record", "vuln_source", "vuln_problem",
 	}},
 	{Module: "notify", Role: "chaimir_maintenance_notify", Tables: []string{
 		"notification", "notification_template", "notification_preference", "system_announcement", "announcement_read",

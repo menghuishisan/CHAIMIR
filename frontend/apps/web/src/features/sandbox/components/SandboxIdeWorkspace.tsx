@@ -41,7 +41,12 @@ import {
   type SandboxInstance,
   type SandboxToolAccess,
 } from '@chaimir/api-client'
-import { mountMonacoEditor, mountTerminal, type MountedEditor, type MountedTerminal } from '@chaimir/ide'
+import {
+  mountMonacoEditor,
+  mountTerminal,
+  type MountedEditor,
+  type MountedTerminal,
+} from '@chaimir/ide'
 import {
   Button,
   ChainProgress,
@@ -96,8 +101,12 @@ const LANGUAGE_BY_EXTENSION: Record<string, string> = {
 export interface SandboxIdeWorkspaceProps {
   /** 沙箱编号:由实验实例或竞赛环境响应给出 */
   sandboxId: string
+  /** 上层业务页面重读实例摘要后递增,用于让工作台同步重读沙箱详情。 */
+  refreshKey?: number
   /** 保存工作区成功后回调:调用方据此提交或触发判分 */
   onSaved?: (result: SandboxFileSaveResponse) => void
+  /** 环境首次就绪后回调,用于业务页面同步可操作状态或恢复权威工作区状态。 */
+  onReady?: () => Promise<void>
   /** 工作区能力入口。竞赛页面注入 M8 授权网关,实验页面使用 M2 租户内入口。 */
   workspaceApi?: SandboxWorkspaceApi
 }
@@ -112,8 +121,11 @@ export interface SandboxWorkspaceApi {
   getProgressWsUrl(instanceId: string): string
   readFile(instanceId: string, path: string): Promise<SandboxFileReadResponse>
   listFiles(instanceId: string, path?: string): Promise<SandboxFileListResponse>
-  writeFile(instanceId: string, data: SandboxFileWriteRequest): Promise<{ workspace_revision: number }>
-  saveFiles(instanceId: string): Promise<SandboxFileSaveResponse>
+  writeFile(
+    instanceId: string,
+    data: SandboxFileWriteRequest
+  ): Promise<{ workspace_revision: number }>
+  saveFiles(instanceId: string): Promise<SandboxWorkspaceSaveResult>
   runCommandTool(
     instanceId: string,
     toolCode: string,
@@ -121,7 +133,11 @@ export interface SandboxWorkspaceApi {
   ): Promise<SandboxCommandToolRunResponse>
   chainDeploy(instanceId: string, data: SandboxChainRequest): Promise<SandboxChainResponse>
   chainSendTx(instanceId: string, data: SandboxChainRequest): Promise<SandboxChainResponse>
-  chainQuery(instanceId: string, runtimeInstance: string, target: string): Promise<SandboxChainResponse>
+  chainQuery(
+    instanceId: string,
+    runtimeInstance: string,
+    target: string
+  ): Promise<SandboxChainResponse>
   getToolProxyUrl(
     instanceId: string,
     toolCode: string,
@@ -129,6 +145,10 @@ export interface SandboxWorkspaceApi {
     toolOrigin: string
   ): Promise<string>
 }
+
+/** SandboxWorkspaceSaveResult 允许受控网关只返回修订号,不向页面暴露对象存储引用。 */
+export type SandboxWorkspaceSaveResult = Pick<SandboxFileSaveResponse, 'workspace_revision'> &
+  Partial<Pick<SandboxFileSaveResponse, 'code_storage_key' | 'code_hash'>>
 
 /** 工作台只依赖公开运行时字段,租户编号由具体网关决定是否返回。 */
 export type SandboxWorkspaceInstance = Omit<SandboxInstance, 'tenant_id'> & {
@@ -141,11 +161,18 @@ export type SandboxWorkspaceInstance = Omit<SandboxInstance, 'tenant_id'> & {
  * 上游模块(M7 实例、M8 环境)的响应里工具字段命名与 M2 不同(`code` 对 `tool_code`),
  * 更重要的是「出现什么」的权威在 M2,让调用方传等于给了绕过这层判定的口子。
  */
-export function SandboxIdeWorkspace({ sandboxId, onSaved, workspaceApi }: SandboxIdeWorkspaceProps) {
+export function SandboxIdeWorkspace({
+  sandboxId,
+  refreshKey = 0,
+  onSaved,
+  onReady,
+  workspaceApi,
+}: SandboxIdeWorkspaceProps) {
   const workspace = workspaceApi ?? api.sandbox
   const [instance, setInstance] = useState<SandboxWorkspaceInstance>()
   const [loadError, setLoadError] = useState<string>()
   const [progress, setProgress] = useState<SandboxProgress>()
+  const readyNotifiedRef = useRef(false)
 
   /** loadInstance 读取沙箱详情:能力声明与工具入口都以它为准。 */
   const loadInstance = useCallback(async () => {
@@ -159,14 +186,47 @@ export function SandboxIdeWorkspace({ sandboxId, onSaved, workspaceApi }: Sandbo
 
   useEffect(() => {
     void loadInstance()
-  }, [loadInstance])
+  }, [loadInstance, refreshKey])
+
+  useEffect(() => {
+    readyNotifiedRef.current = false
+  }, [sandboxId])
+
+  useEffect(() => {
+    if (
+      readyNotifiedRef.current ||
+      !onReady ||
+      !instance ||
+      (instance.phase !== SandboxPhase.READY && instance.phase !== SandboxPhase.FULLY_READY) ||
+      instance.status === SandboxStatus.FAILED ||
+      instance.status === SandboxStatus.DESTROYED
+    ) {
+      return
+    }
+    readyNotifiedRef.current = true
+    void onReady()
+  }, [instance, onReady])
 
   // 环境还没就绪时订阅准备进度:第一次拉容器要十几秒,期间界面必须说清在做什么。
-  // 就绪后断开 —— 后续状态变化(暂停/回收)由业务侧的动作驱动重读,不需要一直挂着连接。
-  const notReady = instance !== undefined && instance.phase !== SandboxPhase.FULLY_READY
+  // 已回收的沙箱是终态,不能把旧 phase 当成“正在释放”继续展示,也不应再建立进度连接。
+  const terminal =
+    instance?.status === SandboxStatus.DESTROYED || instance?.status === SandboxStatus.FAILED
+  // 当前实例阶段是服务端权威状态;进度 WebSocket 只补充同一阶段的说明,不能提前开放工作面。
+  const notReady =
+    instance !== undefined &&
+    !terminal &&
+    instance.phase !== SandboxPhase.READY &&
+    instance.phase !== SandboxPhase.FULLY_READY
+  // 进度消息只补充服务端当前 phase/status 的说明,旧消息不能覆盖失败或终态文案。
+  const matchingProgress =
+    instance !== undefined &&
+    progress?.phase === instance.phase &&
+    progress.status === instance.status
+      ? progress
+      : undefined
   const progressUrl = useMemo(
     () => (notReady ? workspace.getProgressWsUrl(sandboxId) : undefined),
-    [notReady, sandboxId, workspace],
+    [notReady, sandboxId, workspace]
   )
 
   const progressSocket = useTicketedWebSocket({
@@ -180,6 +240,25 @@ export function SandboxIdeWorkspace({ sandboxId, onSaved, workspaceApi }: Sandbo
     },
   })
 
+  // HTTP 沙箱详情是状态权威,WebSocket 只负责实时提示。准备阶段即使进度连接丢失或
+  // 某条推送未到达,也要周期性重读详情,让页面最终进入真实的就绪或失败状态,不把用户
+  // 永久留在旧的准备进度上。进入就绪/失败后 effect 自动清理定时器。
+  useEffect(() => {
+    if (!notReady) return
+    let disposed = false
+    let timer: number | undefined
+    const poll = async () => {
+      await loadInstance()
+      if (disposed) return
+      timer = window.setTimeout(() => void poll(), 3000)
+    }
+    timer = window.setTimeout(() => void poll(), 3000)
+    return () => {
+      disposed = true
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [loadInstance, notReady])
+
   const toolAccess = instance?.tool_access ?? []
 
   if (loadError) {
@@ -187,7 +266,12 @@ export function SandboxIdeWorkspace({ sandboxId, onSaved, workspaceApi }: Sandbo
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <TriangleAlert aria-hidden="true" className="size-6 text-on-dark-danger" />
         <p className="text-sm text-on-dark-sub">{loadError}</p>
-        <Button variant="on-dark" size="sm" leftIcon={RefreshCw} onClick={() => void loadInstance()}>
+        <Button
+          variant="on-dark"
+          size="sm"
+          leftIcon={RefreshCw}
+          onClick={() => void loadInstance()}
+        >
           重新读取
         </Button>
       </div>
@@ -209,14 +293,39 @@ export function SandboxIdeWorkspace({ sandboxId, onSaved, workspaceApi }: Sandbo
         <TriangleAlert aria-hidden="true" className="size-6 text-on-dark-danger" />
         <p className="text-base text-on-dark">实验环境没能准备好</p>
         <p className="max-w-md text-sm text-on-dark-sub">
-          {progress?.message ?? '环境准备失败。退出后重新进入即可重新准备一次。'}
+          {matchingProgress?.message ?? '环境准备失败。返回当前页面重新打开环境即可重试。'}
         </p>
-        {progress?.trace_id ? (
+        {matchingProgress?.trace_id ? (
           <p className="font-mono text-xs text-on-dark-faint">
-            如需帮助,请提供编号 {progress.trace_id}
+            如需帮助,请提供编号 {matchingProgress.trace_id}
           </p>
         ) : null}
-        <Button variant="on-dark" size="sm" leftIcon={RefreshCw} onClick={() => void loadInstance()}>
+        <Button
+          variant="on-dark"
+          size="sm"
+          leftIcon={RefreshCw}
+          onClick={() => void loadInstance()}
+        >
+          重新读取状态
+        </Button>
+      </div>
+    )
+  }
+
+  // 回收完成后的沙箱不能再操作。业务页面会提供重新进入入口,这里明确告诉用户返回详情页。
+  if (instance.status === SandboxStatus.DESTROYED) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <p className="text-base text-on-dark">实验环境已回收</p>
+        <p className="max-w-md text-sm text-on-dark-sub">
+          已保存的代码和实验进度仍然保留。返回实验详情后重新进入,系统会按最新状态准备环境。
+        </p>
+        <Button
+          variant="on-dark"
+          size="sm"
+          leftIcon={RefreshCw}
+          onClick={() => void loadInstance()}
+        >
           重新读取状态
         </Button>
       </div>
@@ -225,10 +334,12 @@ export function SandboxIdeWorkspace({ sandboxId, onSaved, workspaceApi }: Sandbo
 
   // 还在准备:按阶段给出链式进度,不让人对着空白等
   if (notReady) {
-    const phase = progress ? progress.phase : instance.phase
+    const phase = instance.phase
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-        <p className="text-base text-on-dark">{progress?.message ?? sandboxPhaseLabel(phase)}</p>
+        <p className="text-base text-on-dark">
+          {matchingProgress?.message ?? sandboxPhaseLabel(phase)}
+        </p>
         <ChainProgress
           onDark
           size="md"
@@ -242,7 +353,12 @@ export function SandboxIdeWorkspace({ sandboxId, onSaved, workspaceApi }: Sandbo
         {progressSocket.status === 'error' || progressSocket.status === 'closed' ? (
           <div className="flex items-center gap-2">
             <span className="text-xs text-on-dark-sub">进度连接断了,可以手动刷新状态。</span>
-            <Button variant="on-dark" size="sm" leftIcon={RefreshCw} onClick={() => void loadInstance()}>
+            <Button
+              variant="on-dark"
+              size="sm"
+              leftIcon={RefreshCw}
+              onClick={() => void loadInstance()}
+            >
               刷新状态
             </Button>
           </div>
@@ -333,7 +449,12 @@ export function SandboxIdeWorkspace({ sandboxId, onSaved, workspaceApi }: Sandbo
 
       {capabilities.chain_operations.length > 0 ? (
         <TabsContent value="chain" className="min-h-0 flex-1">
-          <ChainPanel sandboxId={sandboxId} workspaceApi={workspace} operations={capabilities.chain_operations} runtimeInstances={instance.runtime_instances} />
+          <ChainPanel
+            sandboxId={sandboxId}
+            workspaceApi={workspace}
+            operations={capabilities.chain_operations}
+            runtimeInstances={instance.runtime_instances}
+          />
         </TabsContent>
       ) : null}
 
@@ -370,7 +491,12 @@ interface FilesPanelProps {
  * 目录逐层展开而不是一次拉全树:后端 listFiles 是按路径列一层,递归拉整棵树在
  * 大工程上会打出几十个请求,而学生真正会点开的往往只有一两层。
  */
-function FilesPanel({ sandboxId, workspaceApi, workspaceRevision: initialWorkspaceRevision, onSaved }: FilesPanelProps) {
+function FilesPanel({
+  sandboxId,
+  workspaceApi,
+  workspaceRevision: initialWorkspaceRevision,
+  onSaved,
+}: FilesPanelProps) {
   const [path, setPath] = useState('.')
   const [entries, setEntries] = useState<SandboxFileEntry[]>([])
   const [openPath, setOpenPath] = useState<string>()
@@ -404,7 +530,7 @@ function FilesPanel({ sandboxId, workspaceApi, workspaceRevision: initialWorkspa
         setPanelError(userFacingErrorMessage(error, '这个目录暂时打不开,请稍后重试。'))
       }
     },
-    [sandboxId, workspaceApi],
+    [sandboxId, workspaceApi]
   )
 
   useEffect(() => {
@@ -425,7 +551,7 @@ function FilesPanel({ sandboxId, workspaceApi, workspaceRevision: initialWorkspa
         setPanelError(userFacingErrorMessage(error, '这个文件暂时读不出来,请稍后重试。'))
       }
     },
-    [sandboxId, workspaceApi],
+    [sandboxId, workspaceApi]
   )
 
   // 编辑器与「当前打开的文件」同生共死:换文件即重新装配,拿到的 language 才是对的
@@ -501,8 +627,18 @@ function FilesPanel({ sandboxId, workspaceApi, workspaceRevision: initialWorkspa
       }
       const result = await workspaceApi.saveFiles(sandboxId)
       setWorkspaceRevision(result.workspace_revision)
+      if (onSaved && (!result.code_storage_key || !result.code_hash)) {
+        setPanelError('工作区已保存,但没有生成判分所需的快照。请稍后重试。')
+        return
+      }
       toast.success('工作区已保存')
-      onSaved?.(result)
+      if (onSaved && result.code_storage_key && result.code_hash) {
+        onSaved({
+          workspace_revision: result.workspace_revision,
+          code_storage_key: result.code_storage_key,
+          code_hash: result.code_hash,
+        })
+      }
     } catch (error) {
       setPanelError(userFacingErrorMessage(error, '保存没有成功,请稍后重试。'))
     } finally {
@@ -616,7 +752,13 @@ function FilesPanel({ sandboxId, workspaceApi, workspaceRevision: initialWorkspa
  * 终端是双向流:xterm 的输入直接送 WS,服务端输出写回 xterm ——
  * 中间不做行缓冲或命令解析,那会让 vim 这类交互程序不可用。
  */
-function TerminalPanel({ sandboxId, workspaceApi }: { sandboxId: string; workspaceApi: SandboxWorkspaceApi }) {
+function TerminalPanel({
+  sandboxId,
+  workspaceApi,
+}: {
+  sandboxId: string
+  workspaceApi: SandboxWorkspaceApi
+}) {
   const host = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<MountedTerminal | undefined>(undefined)
   const [ready, setReady] = useState(false)
@@ -746,8 +888,14 @@ function ChainPanel({ sandboxId, workspaceApi, operations, runtimeInstances }: C
 
       const response =
         operation === 'deploy'
-          ? await workspaceApi.chainDeploy(sandboxId, { runtime_instance: runtimeInstance, payload })
-          : await workspaceApi.chainSendTx(sandboxId, { runtime_instance: runtimeInstance, payload })
+          ? await workspaceApi.chainDeploy(sandboxId, {
+              runtime_instance: runtimeInstance,
+              payload,
+            })
+          : await workspaceApi.chainSendTx(sandboxId, {
+              runtime_instance: runtimeInstance,
+              payload,
+            })
       setResult(JSON.stringify(response, null, 2))
     } catch (error) {
       setPanelError(userFacingErrorMessage(error, '这次链操作没有成功,请检查参数后重试。'))
@@ -811,7 +959,13 @@ function ChainPanel({ sandboxId, workspaceApi, operations, runtimeInstances }: C
       )}
 
       <div>
-        <Button variant="primary" size="sm" leftIcon={Play} loading={busy} onClick={() => void run()}>
+        <Button
+          variant="primary"
+          size="sm"
+          leftIcon={Play}
+          loading={busy}
+          onClick={() => void run()}
+        >
           执行
         </Button>
       </div>
@@ -864,15 +1018,11 @@ function CommandPanel({ sandboxId, workspaceApi, tools }: CommandPanelProps) {
       const stdout = decodeUtf8Base64(response.stdout_base64)
       const stderr = decodeUtf8Base64(response.stderr_base64)
       setOutput(
-        [
-          stdout,
-          stderr ? `\n${stderr}` : '',
-          `\n[结束状态 ${response.exit_code}]`,
-        ].join(''),
+        [stdout, stderr ? `\n${stderr}` : '', `\n[结束状态 ${response.exit_code}]`].join('')
       )
     } catch (error) {
       setPanelError(
-        userFacingErrorMessage(error, '这条命令没能执行。它可能不在这个工具允许的范围内。'),
+        userFacingErrorMessage(error, '这条命令没能执行。它可能不在这个工具允许的范围内。')
       )
     } finally {
       setBusy(false)
@@ -911,7 +1061,13 @@ function CommandPanel({ sandboxId, workspaceApi, tools }: CommandPanelProps) {
       </label>
 
       <div>
-        <Button variant="primary" size="sm" leftIcon={Play} loading={busy} onClick={() => void run()}>
+        <Button
+          variant="primary"
+          size="sm"
+          leftIcon={Play}
+          loading={busy}
+          onClick={() => void run()}
+        >
           执行
         </Button>
       </div>
@@ -964,10 +1120,18 @@ function WebToolPanel({
   }, [sandboxId, toolCode, workspaceApi])
 
   if (loadError) {
-    return <div className="grid h-full place-items-center px-4 text-sm text-on-dark-danger">{loadError}</div>
+    return (
+      <div className="grid h-full place-items-center px-4 text-sm text-on-dark-danger">
+        {loadError}
+      </div>
+    )
   }
   if (!src) {
-    return <div className="grid h-full place-items-center px-4 text-sm text-on-dark-sub">工具正在准备...</div>
+    return (
+      <div className="grid h-full place-items-center px-4 text-sm text-on-dark-sub">
+        工具正在准备...
+      </div>
+    )
   }
   return (
     <iframe

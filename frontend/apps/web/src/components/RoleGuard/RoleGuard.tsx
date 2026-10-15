@@ -2,14 +2,19 @@
 // 未登录 → 登录页(携带回跳路径);角色不匹配 → 403(保留 URL,不再误踢登录页,根治审查 S6);
 // 校验通过 → 经 SessionContext 下发账号供壳层与页面复用。
 
-import React from 'react'
+import React, { useEffect } from 'react'
 import { Navigate, Outlet } from 'react-router'
 import { LoaderCircle, ShieldAlert } from 'lucide-react'
 import type { UserRole } from '@chaimir/api-client'
 import { Button } from '@chaimir/ui'
 import { api } from '../../app/api'
 import { useAsyncResource } from '../../hooks'
-import { isPasswordChangeRequired } from '../../utils/authSession'
+import {
+  clearLoginTokensLocally,
+  isPasswordChangeRequired,
+  subscribeToAuthSessionChanges,
+} from '../../utils/authSession'
+import { loginPathForPath } from '../../utils/roleRouting'
 import { AppStatusScreen } from '../AppStatusScreen'
 import { ForbiddenPage } from '../StatusPages'
 import { SessionContext } from './session'
@@ -22,6 +27,15 @@ interface RoleGuardProps {
  * RoleGuard 只执行本地改密拦截，认证状态统一由 /me 与 HttpOnly refresh cookie 恢复。
  */
 export const RoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles }) => {
+  useEffect(
+    () =>
+      subscribeToAuthSessionChanges(() => {
+        clearLoginTokensLocally()
+        window.location.replace(loginPathForPath(window.location.pathname))
+      }),
+    []
+  )
+
   // 服务端要求改密的账号先完成改密,再进入任何受保护页面
   if (isPasswordChangeRequired()) {
     return <Navigate to="/auth/change-pwd" replace />

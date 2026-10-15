@@ -66,12 +66,6 @@ type Orchestrator interface {
 	SnapshotSupported(ctx context.Context) (bool, error)
 }
 
-// sandboxResourceReadiness 是编排器可选的只读就绪探针,用于服务重启后恢复已存在的资源。
-// 旧的编排器实现没有该探针时仍走完整的幂等创建流程。
-type sandboxResourceReadiness interface {
-	SandboxResourcesReady(context.Context, CreateSandboxPlan) (bool, error)
-}
-
 // sandboxExecFailure 保留统一的输出超限错误,其余底层执行失败映射到调用场景已有错误码。
 func sandboxExecFailure(fallback *apperr.Error, err error, stderr []byte) error {
 	if errors.Is(err, limitio.ErrLimitExceeded) {
@@ -349,7 +343,9 @@ func (s *Service) resolveSandboxCreateDependencies(ctx context.Context, tx TxSto
 		if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &frozenAdapter); err != nil {
 			return resolvedSandboxCreateDependencies{}, apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
 		}
-		runtime.AdapterSpec = frozenAdapter
+		// 冻结快照保存的是组合编译后的声明;执行前统一按实例编码物化 Pod
+		// 及所有 exec target,确保重启恢复和历史快照都指向真实运行时拓扑。
+		runtime.AdapterSpec = materializeRuntimeTopology(frozen.InstanceCode, frozenAdapter)
 		runtime.CapabilityImpl = frozen.CapabilityImpl
 		image, err := tx.GetRuntimeImageByID(ctx, frozen.RuntimeID, frozen.ImageID)
 		if err != nil {
@@ -489,6 +485,28 @@ func (s *Service) cleanupCreatedSandboxAfterAuditFailure(ctx context.Context, sb
 // GetSandbox 查询单个沙箱当前状态与工具接入信息。
 func (s *Service) getSandboxContract(ctx context.Context, tenantID, sandboxID int64) (contracts.SandboxInfo, error) {
 	return s.info(ctx, tenantID, sandboxID)
+}
+
+// GetSandboxBySourceRef 按稳定来源引用读取仍未销毁的沙箱,用于业务页面刷新后的状态恢复。
+func (s *Service) GetSandboxBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (contracts.SandboxInfo, error) {
+	if tenantID <= 0 || strings.TrimSpace(sourceRef) == "" {
+		return contracts.SandboxInfo{}, apperr.ErrSandboxNotFound
+	}
+	var items []Sandbox
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		items, err = tx.ListSandboxesBySourceRef(ctx, tenantID, strings.TrimSpace(sourceRef))
+		return err
+	}); err != nil {
+		return contracts.SandboxInfo{}, apperr.ErrSandboxNotFound.WithCause(err)
+	}
+	if len(items) == 0 {
+		return contracts.SandboxInfo{}, apperr.ErrSandboxNotFound
+	}
+	if len(items) != 1 {
+		return contracts.SandboxInfo{}, apperr.ErrSandboxCreateFailed
+	}
+	return s.info(ctx, tenantID, items[0].ID)
 }
 
 // GetSandboxForOwner 查询用户自己的沙箱,防止同租户内横向访问。
@@ -754,6 +772,7 @@ func (s *Service) planForExistingSandbox(ctx context.Context, sb Sandbox) (Creat
 			if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &runtime.AdapterSpec); err != nil {
 				return apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
 			}
+			runtime.AdapterSpec = materializeRuntimeTopology(frozen.InstanceCode, runtime.AdapterSpec)
 			runtime.CapabilityImpl = frozen.CapabilityImpl
 			image, err := tx.GetRuntimeImageByID(ctx, frozen.RuntimeID, frozen.ImageID)
 			if err != nil {
@@ -1089,6 +1108,7 @@ func (s *Service) workspaceRuntimeForSandbox(ctx context.Context, sb Sandbox) (R
 	if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &runtime.AdapterSpec); err != nil {
 		return Runtime{}, RuntimeImage{}, err
 	}
+	runtime.AdapterSpec = materializeRuntimeTopology(frozen.InstanceCode, runtime.AdapterSpec)
 	runtime.AdapterLevel = frozen.AdapterLevel
 	runtime.CapabilityImpl = frozen.CapabilityImpl
 	return runtime, image, nil
@@ -1162,34 +1182,12 @@ func (s *Service) startSandbox(ctx context.Context, plan CreateSandboxPlan) {
 	needsInitialization := sandboxNeedsInitialization(plan)
 	bootstrapPlan := plan
 	bootstrapPlan.RuntimeOnlyBootstrap = needsInitialization
-	resourcesReady := false
-	if checker, ok := s.orchestrator.(sandboxResourceReadiness); ok {
-		ready, err := checker.SandboxResourcesReady(ctx, plan)
-		if err != nil {
-			slog.WarnContext(ctx, "sandbox resource readiness probe failed; falling back to idempotent create", slog.String("error", logging.SanitizeError(err.Error())), slog.Int64("tenant_id", plan.Sandbox.TenantID), slog.Int64("sandbox_id", plan.Sandbox.ID))
-		} else {
-			resourcesReady = ready
-		}
-	}
-	if !resourcesReady {
-		if err := s.orchestrator.CreateSandboxResources(ctx, bootstrapPlan); err != nil {
-			// 服务重启可能留下已经就绪的 K8s 资源,但原进程内协程已经消失;
-			// 标记沙箱失败前必须再次探测资源状态。
-			if checker, ok := s.orchestrator.(sandboxResourceReadiness); ok {
-				ready, readinessErr := checker.SandboxResourcesReady(ctx, plan)
-				if readinessErr == nil && ready {
-					resourcesReady = true
-				} else {
-					s.cleanupAfterStartFailure(ctx, plan.Sandbox)
-					s.markStartFailed(ctx, plan.Sandbox, err)
-					return
-				}
-			} else {
-				s.cleanupAfterStartFailure(ctx, plan.Sandbox)
-				s.markStartFailed(ctx, plan.Sandbox, err)
-				return
-			}
-		}
+	// 资源创建本身是按已发布组合做的幂等核对,既适用于新沙箱也适用于服务重启恢复。
+	// 不能在命名空间和专属 RBAC 尚未由创建流程建立前读取 Pod,否则首次启动会被错误判为权限故障。
+	if err := s.orchestrator.CreateSandboxResources(ctx, bootstrapPlan); err != nil {
+		s.cleanupAfterStartFailure(ctx, plan.Sandbox)
+		s.markStartFailed(ctx, plan.Sandbox, err)
+		return
 	}
 	advanced, err := s.advanceStartupState(ctx, plan.Sandbox.TenantID, plan.Sandbox.ID, SandboxPhaseReady, SandboxStatusReady, map[string]any{"phase": SandboxPhaseReady, "status": SandboxStatusReady}, SandboxStatusCreating)
 	if err != nil {
@@ -1411,6 +1409,18 @@ func (s *Service) markStartFailed(ctx context.Context, sb Sandbox, cause error) 
 	}
 	if shouldBroadcast {
 		s.broadcastProgress(ctx, sb.TenantID, sb.ID, broadcastPhase, SandboxStatusFailed, response.TraceFromContext(ctx))
+	}
+	if shouldBroadcast {
+		if err := s.bus.Publish(ctx, contracts.SubjectSandboxFailed, contracts.SandboxFailedEvent{
+			TenantID:  sb.TenantID,
+			TraceID:   response.TraceFromContext(ctx),
+			SandboxID: sb.ID,
+			SourceRef: sb.SourceRef,
+			ScopeRef:  sb.ScopeRef,
+			FailedAt:  timex.Now(),
+		}); err != nil {
+			logging.ErrorContext(ctx, "sandbox failure event publish failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID), slog.String("source_ref", sb.SourceRef), slog.String("scope_ref", sb.ScopeRef))
+		}
 	}
 	logging.ErrorContext(ctx, "sandbox start failed", apperr.AsAppError(cause).LogString(), slog.Int64("tenant_id", sb.TenantID), slog.Int64("sandbox_id", sb.ID))
 }

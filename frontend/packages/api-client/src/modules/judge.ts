@@ -54,7 +54,8 @@ export class JudgeApi {
    * 触发判题器自测。
    */
   async runJudgerSelftest(judgerId: string): Promise<Judger> {
-    return this.client.post(`/judge/judgers/${encodePathSegment(judgerId)}/selftest`)
+    // 判题器自检会真实创建组合沙箱、执行声明命令并回收资源,等待服务端返回最终状态。
+    return this.client.postLongRunning(`/judge/judgers/${encodePathSegment(judgerId)}/selftest`)
   }
 
   /**

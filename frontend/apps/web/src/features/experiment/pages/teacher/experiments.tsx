@@ -28,6 +28,7 @@ import {
   FilterBar,
   FilterField,
   IconButton,
+  Input,
   MetricStrip,
   Menu,
   MenuContent,
@@ -74,6 +75,8 @@ const STATUS_FILTERS = [
 export default function TeacherExperimentsPage() {
   const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [keyword, setKeyword] = useState('')
+  const [submittedKeyword, setSubmittedKeyword] = useState('')
   const [validateResult, setValidateResult] = useState<{
     experiment: Experiment
     result: ValidationResult
@@ -86,10 +89,15 @@ export default function TeacherExperimentsPage() {
     (params) =>
       api.experiment.getExperiments({
         status: statusFilter ? (Number(statusFilter) as ExperimentStatus) : undefined,
+        keyword: submittedKeyword || undefined,
         ...params,
       }),
-    [statusFilter]
+    [statusFilter, submittedKeyword]
   )
+
+  const handleSearch = useCallback(() => {
+    setSubmittedKeyword(keyword.trim())
+  }, [keyword])
 
   /** validateExperiment 发布前校验:把问题列清楚,而不是让发布直接失败。 */
   const validateExperiment = useCallback(async (experiment: Experiment) => {
@@ -281,7 +289,15 @@ export default function TeacherExperimentsPage() {
       <DataPanel
         label="实验列表"
         filter={
-          <FilterBar label="实验筛选">
+          <FilterBar label="实验筛选" onSubmit={handleSearch} submitLabel="搜索">
+            <FilterField label="关键词" htmlFor="teacher-experiment-keyword">
+              <Input
+                id="teacher-experiment-keyword"
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="搜索实验名称或说明"
+              />
+            </FilterField>
             <FilterField label="实验状态" group>
               <SegmentedControl
                 aria-label="按实验状态筛选"
@@ -305,10 +321,10 @@ export default function TeacherExperimentsPage() {
           <ResourceState
             resource={experiments}
             emptyIcon={LayoutTemplate}
-            emptyTitle={statusFilter ? '这个状态下没有实验' : '还没有实验'}
+            emptyTitle={submittedKeyword || statusFilter ? '没有匹配的实验' : '还没有实验'}
             emptyDescription={
-              statusFilter
-                ? '换个状态看看。'
+              submittedKeyword || statusFilter
+                ? '换个关键词或状态看看。'
                 : '新建实验后配置环境与检查点,校验通过即可发布给学生。'
             }
             emptyAction={

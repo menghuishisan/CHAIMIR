@@ -326,7 +326,9 @@ function JudgeMonitorSection({
           emptyIcon={RefreshCw}
           emptyTitle="暂无判题任务"
           emptyDescription="学生提交编程题或竞赛答题后会产生判题任务。"
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+          skeleton={
+            <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
+          }
         >
           {(page) =>
             page.list.length === 0 ? (
@@ -659,8 +661,8 @@ function ExperimentMonitorSection() {
         </DataPanel>
 
         <Callout tone="info" title="关于实验环境状态">
-          单个学生的环境细节在实验工作台内可见。如果学生反馈环境准备失败,
-          让他退出后重新进入即可重新准备。
+          单个学生的环境细节在实验工作台内可见。如果环境准备失败,学生可以在工作台点击“重建实验环境”。
+          列表刷新后会显示服务端对账后的状态。
         </Callout>
       </div>
     </PageSection>
@@ -777,7 +779,9 @@ function BattleMonitorSection({ contests }: { contests: Contest[] }) {
           emptyIcon={Swords}
           emptyTitle="还没有对局"
           emptyDescription="学生提交参战物后系统会安排对局。解题赛没有对局记录。"
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+          skeleton={
+            <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
+          }
         >
           {(page) => (
             <Table

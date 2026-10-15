@@ -8,14 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/judge/internal/sqlcgen"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
-
-	"chaimir/internal/platform/ids"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -413,21 +412,34 @@ func (s *txStore) CreateOutbox(ctx context.Context, id int64, tenantID, taskID i
 	if err != nil {
 		return JudgeEventOutbox{}, err
 	}
-	var meta struct {
-		TenantID ids.ID `json:"tenant_id"`
-		TraceID  string `json:"trace_id"`
-	}
-	if err := jsonx.DecodeStrictKnownFields(raw, &meta); err != nil {
-		return JudgeEventOutbox{}, apperr.ErrJudgeEventPublishFailed.WithCause(err)
-	}
-	if meta.TenantID.Int64() != tenantID || strings.TrimSpace(meta.TraceID) == "" {
-		return JudgeEventOutbox{}, apperr.ErrJudgeEventPublishFailed.WithCause(fmt.Errorf("判题终态事件缺少真实 tenant_id 或 trace_id"))
+	if err := validateJudgeOutboxPayload(payload, tenantID); err != nil {
+		return JudgeEventOutbox{}, err
 	}
 	row, err := s.q.CreateJudgeOutbox(ctx, sqlcgen.CreateJudgeOutboxParams{ID: id, TenantID: tenantID, TaskID: taskID, Subject: subject, Payload: raw})
 	if err != nil {
 		return JudgeEventOutbox{}, err
 	}
 	return outboxFromRow(row), nil
+}
+
+// validateJudgeOutboxPayload 校验跨模块事件的定位字段,与 contracts 中的 JSON 数字 ID 契约保持一致。
+func validateJudgeOutboxPayload(payload any, tenantID int64) error {
+	var eventTenantID int64
+	var traceID string
+	switch event := payload.(type) {
+	case contracts.JudgeCompletedEvent:
+		eventTenantID = event.TenantID
+		traceID = event.TraceID
+	case contracts.JudgeFailedEvent:
+		eventTenantID = event.TenantID
+		traceID = event.TraceID
+	default:
+		return apperr.ErrJudgeEventPublishFailed.WithCause(fmt.Errorf("判题终态事件类型不受支持: %T", payload))
+	}
+	if eventTenantID != tenantID || strings.TrimSpace(traceID) == "" {
+		return apperr.ErrJudgeEventPublishFailed.WithCause(fmt.Errorf("判题终态事件缺少真实 tenant_id 或 trace_id"))
+	}
+	return nil
 }
 
 // ClaimPendingOutbox 原子领取待发布事件并写入租约。

@@ -13,6 +13,10 @@ $statePath = Join-Path $stateRoot "watcher.state.json"
 $logPath = Join-Path $stateRoot "watcher.log"
 $taskName = "Chaimir.DockerRuntimeWatcher"
 $clusterContext = "kind-chaimir-cilium"
+$dependencyContext = "docker-desktop"
+$edgeNamespace = "chaimir-edge"
+$edgeEndpointSlice = "chaimir-cilium-ingress"
+$controlPlaneContainer = "chaimir-cilium-control-plane"
 $scriptPath = $PSCommandPath
 New-Item -ItemType Directory -Force -Path $stateRoot | Out-Null
 
@@ -81,8 +85,33 @@ function Test-DockerReady {
     return (-not $result.TimedOut -and $result.ExitCode -eq 0 -and $result.Stdout.Trim() -match '^\S+$')
 }
 
+# Test-ExternalEdgeReady 检查外部 Nginx 的 EndpointSlice 是否仍指向当前控制平面地址。
+# Docker 重启后 Kind 节点 IP 可能变化;节点和 Cilium Pod 即使已 Ready,旧地址仍会让入口返回 502。
+function Test-ExternalEdgeReady {
+    $nodeResult = Invoke-ProcessWithTimeout -FilePath "docker.exe" -Arguments @(
+        "inspect", $controlPlaneContainer, "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"
+    ) -TimeoutSeconds 30
+    if ($nodeResult.TimedOut -or $nodeResult.ExitCode -ne 0) {
+        return $false
+    }
+    $nodeIP = $nodeResult.Stdout.Trim()
+    if ($nodeIP -notmatch '^([0-9]{1,3}\.){3}[0-9]{1,3}$') {
+        return $false
+    }
+
+    $endpointResult = Invoke-ProcessWithTimeout -FilePath "kubectl.exe" -Arguments @(
+        "--context", $dependencyContext, "-n", $edgeNamespace, "get", "endpointslice", $edgeEndpointSlice,
+        "-o", "jsonpath={.endpoints[0].addresses[0]} {.endpoints[0].conditions.ready} {.ports[0].port}"
+    ) -TimeoutSeconds 30
+    if ($endpointResult.TimedOut -or $endpointResult.ExitCode -ne 0) {
+        return $false
+    }
+    $parts = @($endpointResult.Stdout.Trim() -split '\s+')
+    return ($parts.Count -eq 3 -and $parts[0] -eq $nodeIP -and $parts[1] -eq 'true' -and $parts[2] -eq '30443')
+}
+
 # Test-CiliumReady 检查项目 Kind API 与全部节点是否真实 Ready。
-# 不能只依据 Docker API 或上一次状态文件，否则 Docker 重启后节点未恢复时会漏掉修复。
+# 不能只依据 Docker API、节点状态或上一次状态文件,还必须确认外部 HTTPS 入口已同步。
 function Test-CiliumReady {
     $result = Invoke-ProcessWithTimeout -FilePath "kubectl.exe" -Arguments @(
         "--context", $clusterContext, "get", "nodes", "--no-headers"
@@ -133,7 +162,7 @@ function Test-CiliumReady {
             return $false
         }
     }
-    return $true
+    return (Test-ExternalEdgeReady)
 }
 
 function Read-WatcherState {

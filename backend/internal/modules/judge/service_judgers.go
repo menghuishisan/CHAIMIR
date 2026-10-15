@@ -40,11 +40,15 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 	if len(assertions) == 0 {
 		return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid
 	}
+	runtimeInstance, err := judgeRuntimeInstance(task)
+	if err != nil {
+		return JudgeExecutionResult{}, err
+	}
 	details := make([]JudgeResultDetail, 0, len(assertions))
 	actions := make([]contracts.JudgeReplayAction, 0, len(steps))
 	passed := true
 	for seq, raw := range steps {
-		action, err := s.runChainStep(ctx, task, sandboxID, jsonx.ObjectFromAny(raw))
+		action, err := s.runChainStep(ctx, task, sandboxID, runtimeInstance, jsonx.ObjectFromAny(raw))
 		if err != nil {
 			return JudgeExecutionResult{}, err
 		}
@@ -63,7 +67,7 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
 		}
-		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), Target: parsedAssertion.Target})
+		actual, err := s.sandbox.ChainQuery(ctx, contracts.SandboxChainQueryRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), RuntimeInstance: runtimeInstance, Target: parsedAssertion.Target})
 		if err != nil {
 			return JudgeExecutionResult{}, apperr.ErrJudgeWorkerFailed.WithCause(err)
 		}
@@ -89,25 +93,35 @@ func (s *Service) judgeOnchainAssertions(ctx context.Context, task JudgeTask, sa
 	return JudgeExecutionResult{Passed: passed, Score: score, MaxScore: task.InputSnapshot.MaxScore, Details: details, Replay: contracts.JudgeReplayTrace{Actions: actions}}, nil
 }
 
+// judgeRuntimeInstance 返回冻结组合明确指定的工作区 runtime 实例。
+// 判题调用链能力必须使用这份不可变快照,不能按 runtime 列表顺序推断或回退到别名。
+func judgeRuntimeInstance(task JudgeTask) (string, error) {
+	instance := strings.TrimSpace(task.InputSnapshot.CompositionSnapshot.Spec.WorkspaceRuntimeInstance)
+	if instance == "" {
+		return "", apperr.ErrJudgerConfigInvalid
+	}
+	return instance, nil
+}
+
 // runChainStep 执行 deploy/tx/reset/query 预处理步骤。
-func (s *Service) runChainStep(ctx context.Context, task JudgeTask, sandboxID int64, step map[string]any) (*contracts.JudgeReplayAction, error) {
+func (s *Service) runChainStep(ctx context.Context, task JudgeTask, sandboxID int64, runtimeInstance string, step map[string]any) (*contracts.JudgeReplayAction, error) {
 	op := strings.TrimSpace(jsonx.StringFromAny(step["op"]))
 	payload := sanitizeReplayMap(jsonx.ObjectFromAny(step["payload"]))
 	switch op {
 	case "deploy":
-		output, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), Payload: jsonx.ObjectFromAny(step["payload"])})
+		output, err := s.sandbox.ChainDeploy(ctx, contracts.SandboxChainDeployRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), RuntimeInstance: runtimeInstance, Payload: jsonx.ObjectFromAny(step["payload"])})
 		if err != nil {
 			return nil, err
 		}
 		return &contracts.JudgeReplayAction{Op: op, Payload: payload, Output: sanitizeReplayMap(output)}, nil
 	case "tx":
-		output, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), Payload: jsonx.ObjectFromAny(step["payload"])})
+		output, err := s.sandbox.ChainSendTx(ctx, contracts.SandboxChainTxRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), RuntimeInstance: runtimeInstance, Payload: jsonx.ObjectFromAny(step["payload"])})
 		if err != nil {
 			return nil, err
 		}
 		return &contracts.JudgeReplayAction{Op: op, Payload: payload, Output: sanitizeReplayMap(output)}, nil
 	case "reset":
-		if err := s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task)}); err != nil {
+		if err := s.sandbox.ChainReset(ctx, contracts.SandboxChainResetRequest{TenantID: task.TenantID, SandboxID: sandboxID, SourceRef: sandboxSourceRef(task), RuntimeInstance: runtimeInstance}); err != nil {
 			return nil, err
 		}
 		return &contracts.JudgeReplayAction{Op: op}, nil

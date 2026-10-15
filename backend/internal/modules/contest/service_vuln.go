@@ -258,6 +258,9 @@ func (s *Service) SetVulnPrevalidate(ctx context.Context, problemID int64, req P
 	}); err != nil {
 		return VulnProblemDTO{}, err
 	}
+	if current.Status != VulnProblemStatusDraft {
+		return VulnProblemDTO{}, apperr.ErrContestVulnPrevalidateFailed
+	}
 	lockedSpec := req.Composition
 	lockedSpec.ID = fmt.Sprintf("contest:%04d:vuln:%s", timex.Now().Year(), ids.Format(problemID))
 	snapshot, err := s.sandbox.CompileSandboxComposition(ctx, id.TenantID, lockedSpec)

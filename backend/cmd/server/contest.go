@@ -104,6 +104,11 @@ func RegisterContestModule(ctx context.Context, deps ContestModuleDeps) (*contes
 		return nil, err
 	}
 	go background.Run(ctx, archiveTask)
+	lifecycleTask, err := contestLifecycleTask(deps.Config, svc)
+	if err != nil {
+		return nil, err
+	}
+	go background.Run(ctx, lifecycleTask)
 	return svc, nil
 }
 
@@ -127,4 +132,22 @@ func contestAutoArchiveTask(cfg config.ContestConfig, svc *contest.Service) (bac
 		return background.Task{}, fmt.Errorf("CONTEST_AUTO_ARCHIVE_POLL_INTERVAL_SECONDS 必须大于 0")
 	}
 	return background.Task{Name: "contest.auto_archive", Interval: time.Duration(cfg.AutoArchivePollIntervalSeconds) * time.Second, Run: svc.RunAutoArchiveOnce}, nil
+}
+
+// contestLifecycleTask 把报名、开赛、封榜和结束状态推进接入统一后台任务运行器。
+// 复用自动归档轮询间隔,避免再引入一套仅服务于同一赛事时钟的配置。
+func contestLifecycleTask(cfg config.ContestConfig, svc *contest.Service) (background.Task, error) {
+	if svc == nil {
+		return background.Task{}, fmt.Errorf("contest lifecycle task 缺少 service")
+	}
+	if cfg.AutoArchivePollIntervalSeconds <= 0 {
+		return background.Task{}, fmt.Errorf("CONTEST_AUTO_ARCHIVE_POLL_INTERVAL_SECONDS 必须大于 0")
+	}
+	return background.Task{
+		Name:     "contest.lifecycle",
+		Interval: time.Duration(cfg.AutoArchivePollIntervalSeconds) * time.Second,
+		Run: func(ctx context.Context) error {
+			return svc.AdvanceContestStatusesOnce(ctx, time.Now())
+		},
+	}, nil
 }

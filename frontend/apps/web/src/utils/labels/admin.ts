@@ -231,6 +231,7 @@ export function configKeyDescription(key: string): string | undefined {
  */
 const ALERT_METRIC_LABELS: Record<string, string> = {
   'sandbox.active_count': '活跃实验环境数',
+  'sandbox.pending_seconds': '实验环境等待时间',
   'sandbox.failed_rate': '实验环境创建失败率',
   'judge.queue_length': '待评分任务数量',
   'judge.failed_rate': '自动评分失败率',

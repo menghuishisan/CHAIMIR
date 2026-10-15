@@ -3,7 +3,7 @@
 // 「我是否已报名」由 GET /contest/my/contest-records 判定 —— 它是学生侧唯一能取到本人
 // team_id 的接口(对齐清单 §3.1),没有独立的「我的报名」接口。
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Swords } from 'lucide-react'
 import { ContestStatus, type Contest, type ContestRecord } from '@chaimir/api-client'
@@ -14,6 +14,7 @@ import {
   DataPanel,
   FilterBar,
   FilterField,
+  Input,
   MetricStrip,
   PageHeader,
   PageScaffold,
@@ -48,15 +49,22 @@ const STATUS_FILTERS = [
 export default function StudentContestsPage() {
   const navigate = useNavigate()
   const [statusFilter, setStatusFilter] = useState<string>('')
+  const [keyword, setKeyword] = useState('')
+  const [submittedKeyword, setSubmittedKeyword] = useState('')
 
   const contests = usePagedResource<Contest>(
     (params) =>
       api.contest.getStudentContests({
         status: statusFilter ? (Number(statusFilter) as ContestStatus) : undefined,
+        keyword: submittedKeyword || undefined,
         ...params,
       }),
-    [statusFilter],
+    [statusFilter, submittedKeyword],
   )
+
+  const handleSearch = useCallback(() => {
+    setSubmittedKeyword(keyword.trim())
+  }, [keyword])
   // 战绩同时承担「已报名判定」:有记录说明已在某支队伍里
   const records = useAsyncResource(() => api.contest.getMyContestRecords(), [], () => false)
 
@@ -148,7 +156,15 @@ export default function StudentContestsPage() {
       <DataPanel
         label="赛事列表"
         filter={
-          <FilterBar label="赛事筛选">
+          <FilterBar label="赛事筛选" onSubmit={handleSearch} submitLabel="搜索">
+            <FilterField label="关键词" htmlFor="student-contest-keyword">
+              <Input
+                id="student-contest-keyword"
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder="搜索赛事名称"
+              />
+            </FilterField>
             <FilterField label="赛事状态" group>
               <SegmentedControl
                 aria-label="按赛事状态筛选"
@@ -172,10 +188,10 @@ export default function StudentContestsPage() {
         <ResourceState
           resource={contests}
           emptyIcon={Swords}
-          emptyTitle={statusFilter ? '这个状态下没有赛事' : '暂无可参与的赛事'}
+          emptyTitle={submittedKeyword || statusFilter ? '没有匹配的赛事' : '暂无可参与的赛事'}
           emptyDescription={
-            statusFilter
-              ? '换个状态看看,或查看全部赛事。'
+            submittedKeyword || statusFilter
+              ? '换个关键词或状态看看。'
               : '老师发布赛事后会显示在这里,报名窗口开放时即可报名。'
           }
           skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}

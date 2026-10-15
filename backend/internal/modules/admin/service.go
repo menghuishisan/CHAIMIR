@@ -902,12 +902,15 @@ func (s *Service) requireTenantAdmin(ctx context.Context) (tenant.Identity, erro
 	return id, nil
 }
 
-// validateAlertRule 校验告警规则范围、指标和等级。
+// validateAlertRule 校验告警规则范围、指标、条件和等级。
 func validateAlertRule(req AlertRuleRequest) error {
 	if err := validateScopeTenant(req.Scope, req.TenantID.Int64()); err != nil {
 		return apperr.ErrAdminAlertInvalid
 	}
-	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Metric) == "" || req.Level < AlertLevelNotice || req.Level > AlertLevelCritical {
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Metric) != req.Metric || req.Level < AlertLevelNotice || req.Level > AlertLevelCritical {
+		return apperr.ErrAdminAlertInvalid
+	}
+	if err := validateAlertCondition(req.Metric, req.Condition); err != nil {
 		return apperr.ErrAdminAlertInvalid
 	}
 	return nil

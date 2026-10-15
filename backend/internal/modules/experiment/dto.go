@@ -113,9 +113,12 @@ type StudentSimComponent struct {
 
 // StudentCheckpointComponent 描述检查点标识和分值，不泄露判题实现。
 type StudentCheckpointComponent struct {
-	ID    string  `json:"id"`
-	Score float64 `json:"score"`
-	Mode  string  `json:"mode,omitempty"`
+	ID    string         `json:"id"`
+	Score float64        `json:"score"`
+	Mode  string         `json:"mode,omitempty"`
+	Title string         `json:"title,omitempty"`
+	Type  int16          `json:"type,omitempty"`
+	Face  map[string]any `json:"face,omitempty"`
 }
 
 // StudentStageConfig 描述学生可见的阶段流程，不暴露参数注入规则。
@@ -225,6 +228,16 @@ type ReportDTO struct {
 	StudentName string    `json:"student_name"`
 	StudentNo   string    `json:"student_no,omitempty"`
 	ContentRef  string    `json:"content_ref"`
+	ManualScore float64   `json:"manual_score"`
+	Comment     string    `json:"comment,omitempty"`
+	Status      int16     `json:"status"`
+	SubmittedAt time.Time `json:"submitted_at"`
+}
+
+// StudentReportDTO 是学生读取本人报告批改结果的安全投影,不包含对象存储引用。
+type StudentReportDTO struct {
+	ID          ids.ID    `json:"id"`
+	InstanceID  ids.ID    `json:"instance_id"`
 	ManualScore float64   `json:"manual_score"`
 	Comment     string    `json:"comment,omitempty"`
 	Status      int16     `json:"status"`

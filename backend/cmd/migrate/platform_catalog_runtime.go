@@ -113,7 +113,7 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 			"secret_env":                secretEnv,
 			"resources":                 map[string]any{"requests": map[string]string{"cpu": manifest.Resources.CPURequest, "memory": manifest.Resources.MemoryRequest}, "limits": map[string]string{"cpu": manifest.Resources.CPULimit, "memory": manifest.Resources.MemoryLimit}},
 			"read_only_root_filesystem": manifest.Security.ReadOnlyRootFilesystem,
-			"labels":                    map[string]string{"chaimir.io/student-access": "false"}, "mount_workspace": false,
+			"labels":                    map[string]string{"chaimir.io/student-access": "false"}, "mount_workspace": manifest.Runtime.Native.MountWorkspace,
 			"mount_domains": []string{"runtime-state", "public-assets"}, "writable_mount_domains": []string{"runtime-state", "public-assets"},
 			"prepull_command": selftest,
 		},

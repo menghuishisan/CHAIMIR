@@ -97,7 +97,7 @@ func submissionFromRow(row sqlcgen.SolveSubmission) (SolveSubmission, error) {
 	if err != nil {
 		return SolveSubmission{}, err
 	}
-	return SolveSubmission{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ProblemID: row.ProblemID, TeamID: row.TeamID, SubmitterTenantID: row.SubmitterTenantID, SubmitterID: row.SubmitterID, ContentRef: content, SourceRef: row.SourceRef, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, SandboxRef: pgtypex.TextValue(row.SandboxRef), SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
+	return SolveSubmission{ID: row.ID, TenantID: row.TenantID, ContestID: row.ContestID, ProblemID: row.ProblemID, TeamID: row.TeamID, SubmitterTenantID: row.SubmitterTenantID, SubmitterID: row.SubmitterID, ContentRef: content, SourceRef: row.SourceRef, ScopeRef: row.ScopeRef, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), Passed: row.Passed, Score: row.Score, SandboxRef: pgtypex.TextValue(row.SandboxRef), SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
 }
 
 // battleEntryFromRow 转换参战物行。
@@ -149,12 +149,12 @@ func ladderSnapshotFromRow(row sqlcgen.ContestLadderSnapshot) (LadderSnapshot, e
 
 // ladderSnapshotEntryJSON 是 JSONB 中保存的快照结构,雪花 ID 使用字符串。
 type ladderSnapshotEntryJSON struct {
-	TeamID      string    `json:"team_id"`
-	Score       float64   `json:"score"`
-	SolvedCount int32     `json:"solved_count"`
-	LastSolveAt time.Time `json:"last_solve_at,omitempty"`
-	Rank        int32     `json:"rank"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	TeamID      string     `json:"team_id"`
+	Score       float64    `json:"score"`
+	SolvedCount int32      `json:"solved_count"`
+	LastSolveAt *time.Time `json:"last_solve_at,omitempty"`
+	Rank        int32      `json:"rank"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // battleScoreDeltaJSON 是 score_delta 的唯一数据库 JSONB 结构,雪花 ID 固定使用字符串。
@@ -346,7 +346,7 @@ func vulnProblemFromRow(row any) (VulnProblem, error) {
 
 // recordFromRow 转换个人竞赛记录行。
 func recordFromRow(row sqlcgen.ListStudentContestRecordsRow) StudentContestRecord {
-	return StudentContestRecord{ContestID: row.ContestID, TeamID: row.TeamID, Score: row.Score, Rank: row.Rank, ContestName: row.ContestName, ContestStatus: row.ContestStatus}
+	return StudentContestRecord{ContestID: row.ContestID, TeamID: row.TeamID, Score: row.Score, Rank: row.Rank, SolvedCount: row.SolvedCount, LastSolveAt: timex.PtrFromTimestamptz(row.LastSolveAt), ContestName: row.ContestName, ContestStatus: row.ContestStatus}
 }
 
 // decodeMap 解析 JSONB 对象,空值按空对象处理。

@@ -155,6 +155,8 @@ const (
 const (
 	// contentTypeContestProblem 是 M5 竞赛题内容类型的稳定取值。
 	contentTypeContestProblem int16 = 2
+	// contentTypeTheoryQuestion 是 M5 理论题内容类型的稳定取值。
+	contentTypeTheoryQuestion int16 = 3
 	// contentAuthorExternal 是 M5 外部来源导入作者类型的稳定取值。
 	contentAuthorExternal int16 = 3
 	// contentVisibilityTenant 是 M5 本租户教师可见的稳定取值。

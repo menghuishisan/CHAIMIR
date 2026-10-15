@@ -203,6 +203,17 @@ interface StageFormModalProps {
   onSave: (stage: StageConfig) => void
 }
 
+type ParamBindingDraft = ParamBinding & { constantValueText: string }
+
+/** paramBindingDraft 从持久化 JSON 值生成编辑文本,确保数字和字符串不会混淆。 */
+function paramBindingDraft(binding: ParamBinding): ParamBindingDraft {
+  return {
+    ...binding,
+    constantValueText:
+      binding.constant_value === undefined ? '' : (JSON.stringify(binding.constant_value) ?? ''),
+  }
+}
+
 /**
  * StageFormModal 配置单个阶段:启用组件、进入条件与参数传递。
  */
@@ -219,7 +230,9 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
     stage?.unlock_condition?.checkpoint_id ?? '',
   )
   const [minScore, setMinScore] = useState(String(stage?.unlock_condition?.min_score ?? ''))
-  const [bindings, setBindings] = useState<ParamBinding[]>(stage?.param_bindings ?? [])
+  const [bindings, setBindings] = useState<ParamBindingDraft[]>(() =>
+    (stage?.param_bindings ?? []).map(paramBindingDraft),
+  )
   const [formError, setFormError] = useState<string>()
 
   const submit = useCallback(() => {
@@ -234,6 +247,32 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
     if (unlockType === 'checkpoint' && unlockCheckpoint === '') {
       setFormError('请选择作为进入条件的检查点')
       return
+    }
+
+    const normalizedBindings: ParamBinding[] = []
+    for (let index = 0; index < bindings.length; index += 1) {
+      const { constantValueText, ...binding } = bindings[index]
+      if (!simIds.includes(binding.target_component)) {
+        setFormError(`第 ${index + 1} 条参数传递的目标必须是本阶段已启用的仿真场景`)
+        return
+      }
+      if (binding.source_type === 'constant') {
+        if (constantValueText.trim() === '') {
+          setFormError(`第 ${index + 1} 条参数传递请填写固定值`)
+          return
+        }
+        try {
+          normalizedBindings.push({
+            ...binding,
+            constant_value: JSON.parse(constantValueText) as unknown,
+          })
+        } catch {
+          setFormError(`第 ${index + 1} 条固定值不是有效的 JSON,请按示例补全`)
+          return
+        }
+      } else {
+        normalizedBindings.push(binding)
+      }
     }
     setFormError(undefined)
 
@@ -254,7 +293,7 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
       description: description.trim() === '' ? undefined : description.trim(),
       components: { envs: envIds, sims: simIds },
       unlock_condition: unlock,
-      param_bindings: bindings.length > 0 ? bindings : undefined,
+      param_bindings: normalizedBindings.length > 0 ? normalizedBindings : undefined,
     })
   }, [
     bindings,
@@ -387,7 +426,12 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
             </div>
           ) : null}
 
-          <ParamBindingsEditor draft={draft} bindings={bindings} onChange={setBindings} />
+          <ParamBindingsEditor
+            draft={draft}
+            bindings={bindings}
+            simIds={simIds}
+            onChange={setBindings}
+          />
 
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
         </ModalBody>
@@ -406,8 +450,9 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
 
 interface ParamBindingsEditorProps {
   draft: ExperimentDraft
-  bindings: ParamBinding[]
-  onChange: (bindings: ParamBinding[]) => void
+  bindings: ParamBindingDraft[]
+  simIds: string[]
+  onChange: (bindings: ParamBindingDraft[]) => void
 }
 
 /**
@@ -415,14 +460,16 @@ interface ParamBindingsEditorProps {
  * 把上一阶段检查点的判分输出接到本阶段某个组件的参数上,或直接给一个固定值 ——
  * 这让「用第一阶段部署的合约地址跑第二阶段的攻击」这类编排成为可能。
  */
-function ParamBindingsEditor({ draft, bindings, onChange }: ParamBindingsEditorProps) {
-  const componentOptions = [
-    ...draft.components.envs.map((env, index) => ({ value: env.id, label: `代码环境 ${index + 1}` })),
-    ...draft.components.sims.map((sim, index) => ({ value: sim.id, label: `仿真场景 ${index + 1}` })),
-  ]
+function ParamBindingsEditor({ draft, bindings, simIds, onChange }: ParamBindingsEditorProps) {
+  const componentOptions = draft.components.sims
+    .filter((sim) => simIds.includes(sim.id))
+    .map((sim) => ({
+      value: sim.id,
+      label: `仿真场景 ${draft.components.sims.findIndex((item) => item.id === sim.id) + 1}`,
+    }))
 
   const update = useCallback(
-    (index: number, patch: Partial<ParamBinding>) => {
+    (index: number, patch: Partial<ParamBindingDraft>) => {
       onChange(bindings.map((item, i) => (i === index ? { ...item, ...patch } : item)))
     },
     [bindings, onChange],
@@ -452,6 +499,7 @@ function ParamBindingsEditor({ draft, bindings, onChange }: ParamBindingsEditorP
                 source_type: 'checkpoint',
                 source_ref: draft.components.checkpoints[0]?.id ?? '',
                 source_path: '',
+                constantValueText: '',
               },
             ])
           }
@@ -463,7 +511,7 @@ function ParamBindingsEditor({ draft, bindings, onChange }: ParamBindingsEditorP
       {bindings.map((binding, index) => (
         <div key={index} className="flex flex-col gap-3 well p-3">
           <div className="grid gap-3 sm:grid-cols-2">
-            <FormField label="传给哪个组件" htmlFor={`binding-target-${index}`} required>
+            <FormField label="传给哪个仿真场景" htmlFor={`binding-target-${index}`} required>
               <Select
                 id={`binding-target-${index}`}
                 size="sm"
@@ -471,6 +519,9 @@ function ParamBindingsEditor({ draft, bindings, onChange }: ParamBindingsEditorP
                 value={binding.target_component}
                 onValueChange={(value) => update(index, { target_component: value })}
               />
+              {componentOptions.length === 0 ? (
+                <p className="mt-1 text-xs text-ink-sub">请先在本阶段启用仿真场景,参数才能传入该场景。</p>
+              ) : null}
             </FormField>
             <FormField
               label="配置项名称"
@@ -533,15 +584,15 @@ function ParamBindingsEditor({ draft, bindings, onChange }: ParamBindingsEditorP
             </div>
           ) : (
             <FormField
-              label="固定值"
+              label="固定值（JSON）"
               htmlFor={`binding-constant-${index}`}
               required
-              helper="直接传给组件的值"
+              helper={'按 JSON 值填写并保留类型: 120 是数字,"120" 是文本,true 是布尔值'}
             >
               <Input
                 id={`binding-constant-${index}`}
-                value={typeof binding.constant_value === 'string' ? binding.constant_value : ''}
-                onChange={(event) => update(index, { constant_value: event.target.value })}
+                value={binding.constantValueText}
+                onChange={(event) => update(index, { constantValueText: event.target.value })}
               />
             </FormField>
           )}

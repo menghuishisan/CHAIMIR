@@ -27,7 +27,6 @@ import type {
   SandboxCommandToolRunResponse,
   SandboxFileListResponse,
   SandboxFileReadResponse,
-  SandboxFileSaveResponse,
   SandboxFileWriteRequest,
   SandboxChainRequest,
   SandboxChainResponse,
@@ -53,7 +52,7 @@ export type ContestSandboxFileReadResponse = SandboxFileReadResponse
 export type ContestSandboxFileListResponse = SandboxFileListResponse
 export type ContestSandboxFileWriteRequest = SandboxFileWriteRequest
 export type ContestSandboxFileWriteResponse = { workspace_revision: number }
-export type ContestSandboxFileSaveResponse = SandboxFileSaveResponse
+export type ContestSandboxFileSaveResponse = { workspace_revision: number }
 export type ContestSandboxCommandToolRunRequest = SandboxCommandToolRunRequest
 export type ContestSandboxCommandToolRunResponse = SandboxCommandToolRunResponse
 export type ContestSandboxChainRequest = SandboxChainRequest
@@ -93,6 +92,7 @@ export interface ContestRequest {
 export interface ContestProblem {
   id: SnowflakeID
   contest_id: SnowflakeID
+  title?: string
   item_code: string
   item_version: string
   score: number
@@ -176,8 +176,6 @@ export interface ContestSubmission {
 
 export interface ContestSubmitRequest {
   content_ref: Record<string, unknown>
-  code_storage_key?: string
-  code_hash?: string
   sandbox_ref?: string
 }
 
@@ -198,9 +196,8 @@ export interface EnvSummary {
 
 export interface BattleEntryRequest {
   problem_id: SnowflakeID
+  sandbox_id: SnowflakeID
   role: BattleRole
-  artifact_ref: string
-  code_hash: string
 }
 
 export interface BattleEntry {
@@ -401,6 +398,8 @@ export interface ContestRecord {
   team_id: SnowflakeID
   score: number
   rank: number
+  solved_count: number
+  last_solve_at?: string
   contest_name: string
   contest_status: ContestStatus
 }

@@ -120,25 +120,6 @@ func (o *K8sOrchestrator) CreateSandboxResources(ctx context.Context, plan Creat
 	return nil
 }
 
-// SandboxResourcesReady 只读检查已存在沙箱的运行时 Pod 是否全部 Ready。
-// 恢复流程先用该探针识别服务重启前已完成的编排,避免重复等待或重建资源。
-func (o *K8sOrchestrator) SandboxResourcesReady(ctx context.Context, plan CreateSandboxPlan) (bool, error) {
-	cs := o.client.Clientset()
-	for _, podName := range runtimePodNames(plan) {
-		pod, err := cs.CoreV1().Pods(plan.Sandbox.Namespace).Get(ctx, podName, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		if err != nil {
-			return false, fmt.Errorf("查询既有沙箱 Pod 状态失败: %w", err)
-		}
-		if !sandboxPodReady(pod) {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
 // ResetSandboxRuntime 重建承载链节点的计算 Pod,保留工作区 Pod、PVC、命名空间和工具记录。
 // 运行时账本位于 Pod 临时卷,因此 Pod 重建后由镜像入口按固定创世配置重新初始化。
 func (o *K8sOrchestrator) ResetSandboxRuntime(ctx context.Context, plan CreateSandboxPlan) error {
@@ -1185,6 +1166,8 @@ func verifyManagedLabels(existing, desired metav1.Object) error {
 
 // sameSandboxPodSpec 比较沙箱 Pod 的安全、镜像、挂载、网络和调度语义,忽略 API Server 自动填充字段。
 func sameSandboxPodSpec(current, desired corev1.PodSpec) bool {
+	current = normalizeSandboxPodSpecForComparison(current)
+	desired = normalizeSandboxPodSpecForComparison(desired)
 	return current.ServiceAccountName == desired.ServiceAccountName &&
 		apiequality.Semantic.DeepEqual(current.AutomountServiceAccountToken, desired.AutomountServiceAccountToken) &&
 		apiequality.Semantic.DeepEqual(current.EnableServiceLinks, desired.EnableServiceLinks) &&
@@ -1197,6 +1180,62 @@ func sameSandboxPodSpec(current, desired corev1.PodSpec) bool {
 		apiequality.Semantic.DeepEqual(current.NodeSelector, desired.NodeSelector) &&
 		apiequality.Semantic.DeepEqual(current.Tolerations, desired.Tolerations) &&
 		apiequality.Semantic.DeepEqual(current.Affinity, desired.Affinity)
+}
+
+// normalizeSandboxPodSpecForComparison 去除 Kubernetes 在持久化 Pod 时补齐的等价默认值,
+// 保留镜像、安全上下文、资源、挂载和探针等真正属于组合契约的字段。
+func normalizeSandboxPodSpecForComparison(spec corev1.PodSpec) corev1.PodSpec {
+	for index := range spec.InitContainers {
+		normalizeSandboxContainerForComparison(&spec.InitContainers[index])
+	}
+	for index := range spec.Containers {
+		normalizeSandboxContainerForComparison(&spec.Containers[index])
+	}
+	spec.Tolerations = normalizeSandboxTolerationsForComparison(spec.Tolerations)
+	return spec
+}
+
+// normalizeSandboxTolerationsForComparison 去除 Kubernetes 自动补齐的默认节点不可用容忍,
+// 保留平台显式声明的其他调度约束,避免二阶段幂等核对把同一 Pod 误判为规格漂移。
+func normalizeSandboxTolerationsForComparison(items []corev1.Toleration) []corev1.Toleration {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]corev1.Toleration, 0, len(items))
+	for _, item := range items {
+		if isKubernetesDefaultSandboxToleration(item) {
+			continue
+		}
+		out = append(out, item)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// isKubernetesDefaultSandboxToleration 识别 API Server 为未配置 Pod 自动加入的两条默认容忍。
+func isKubernetesDefaultSandboxToleration(item corev1.Toleration) bool {
+	if item.Operator != corev1.TolerationOpExists || item.Effect != corev1.TaintEffectNoExecute || item.Value != "" || item.TolerationSeconds == nil || *item.TolerationSeconds != 300 {
+		return false
+	}
+	return item.Key == "node.kubernetes.io/not-ready" || item.Key == "node.kubernetes.io/unreachable"
+}
+
+// normalizeSandboxContainerForComparison 忽略 API Server 为容器补齐的终止消息字段,
+// 以及等价于未设置的递归只读挂载默认值,避免同一组合的二次幂等核对误报规格漂移。
+func normalizeSandboxContainerForComparison(container *corev1.Container) {
+	container.TerminationMessagePath = ""
+	container.TerminationMessagePolicy = ""
+	for index := range container.VolumeMounts {
+		mount := &container.VolumeMounts[index]
+		if mount.RecursiveReadOnly != nil && *mount.RecursiveReadOnly == corev1.RecursiveReadOnlyDisabled {
+			mount.RecursiveReadOnly = nil
+		}
+		if mount.MountPropagation != nil && *mount.MountPropagation == corev1.MountPropagationNone {
+			mount.MountPropagation = nil
+		}
+	}
 }
 
 // sameSandboxPVCSpec 比较 PVC 的平台控制字段,允许 Kubernetes 为未指定 StorageClass 选择集群默认类。
@@ -1642,7 +1681,7 @@ func networkPolicyRuleName(prefix string, rule workload.NetworkRuleSpec, directi
 func networkPolicyPortIdentity(ports []workload.NetworkPortRef) string {
 	items := make([]string, 0, len(ports))
 	for _, port := range ports {
-		items = append(items, strings.TrimSpace(port.Name)+"="+strconv.FormatInt(int64(port.Port), 10))
+		items = append(items, strings.TrimSpace(port.Name)+"="+strconv.Itoa(int(port.Port)))
 	}
 	return strings.Join(items, ",")
 }

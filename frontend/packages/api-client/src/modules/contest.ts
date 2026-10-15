@@ -63,6 +63,7 @@ export class ContestApi {
    */
   async getContests(params?: {
     status?: ContestStatus
+    keyword?: string
     page?: number
     size?: number
   }): Promise<PaginatedResponse<Contest>> {
@@ -85,6 +86,7 @@ export class ContestApi {
    */
   async getStudentContests(params?: {
     status?: ContestStatus
+    keyword?: string
     page?: number
     size?: number
   }): Promise<PaginatedResponse<Contest>> {
@@ -162,11 +164,23 @@ export class ContestApi {
     return this.client.get(`/contest/contests/${encodePathSegment(contestId)}/problems`)
   }
 
+  /** 读取已报名队伍成员可见的完整安全题面。 */
+  async getProblem(contestId: string, problemId: string): Promise<ContestProblem> {
+    return this.client.get(
+      `/contest/contests/${encodePathSegment(contestId)}/problems/${encodePathSegment(problemId)}`
+    )
+  }
+
   /**
    * 添加或更新竞赛题目。
+   * 题目引用时服务端会同步编译并冻结组合快照,其耗时由服务端 HTTP 写超时约束;
+   * 不能使用普通页面请求的 30 秒客户端超时截断合法编译。
    */
   async addProblem(contestId: string, data: ContestProblemRequest): Promise<ContestProblem> {
-    return this.client.post(`/contest/contests/${encodePathSegment(contestId)}/problems`, data)
+    return this.client.postLongRunning(
+      `/contest/contests/${encodePathSegment(contestId)}/problems`,
+      data
+    )
   }
 
   /**
@@ -196,6 +210,14 @@ export class ContestApi {
    */
   async lockTeam(teamId: string): Promise<ContestTeam> {
     return this.client.post(`/contest/teams/${encodePathSegment(teamId)}/lock`)
+  }
+
+  /** 读取当前队伍仍未销毁的竞赛实操环境,供页面刷新后恢复服务端状态。 */
+  async getEnv(contestId: string, problemId: string, requestRef: string): Promise<EnvSummary> {
+    return this.client.get(
+      `/contest/contests/${encodePathSegment(contestId)}/problems/${encodePathSegment(problemId)}/env`,
+      { request_ref: requestRef }
+    )
   }
 
   /**
@@ -286,7 +308,10 @@ export class ContestApi {
     runtimeInstance: string,
     target: string
   ): Promise<ContestSandboxChainResponse> {
-    return this.client.get(`/contest/sandboxes/${encodePathSegment(sandboxId)}/chain/query`, { runtime_instance: runtimeInstance, target })
+    return this.client.get(`/contest/sandboxes/${encodePathSegment(sandboxId)}/chain/query`, {
+      runtime_instance: runtimeInstance,
+      target,
+    })
   }
 
   /** 获取竞赛授权沙箱网页工具代理地址。 */
@@ -306,7 +331,7 @@ export class ContestApi {
   }
 
   /**
-   * 提交解题赛答案或代码引用。
+   * 提交解题赛答案或当前授权实操环境。
    */
   async submitSolve(
     contestId: string,
@@ -324,6 +349,13 @@ export class ContestApi {
    */
   async getSubmission(submissionId: string): Promise<ContestSubmission> {
     return this.client.get(`/contest/submissions/${encodePathSegment(submissionId)}`)
+  }
+
+  /** 读取当前参赛队伍在题目下最近一次解题提交。 */
+  async getLatestSubmission(contestId: string, problemId: string): Promise<ContestSubmission> {
+    return this.client.get(
+      `/contest/contests/${encodePathSegment(contestId)}/problems/${encodePathSegment(problemId)}/submission`
+    )
   }
 
   /**

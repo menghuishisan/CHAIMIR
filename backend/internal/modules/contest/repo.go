@@ -34,10 +34,13 @@ type TxStore interface {
 	FindPublishedContestTenant(context.Context, int64) (int64, error)
 	FindTeamTenant(context.Context, int64) (int64, error)
 	FindBattleMatchTenant(context.Context, int64) (int64, error)
-	ListContests(context.Context, int64, int16, int, int) ([]Contest, int64, error)
-	ListStudentContests(context.Context, int64, int16, int, int) ([]Contest, int64, error)
+	ListContests(context.Context, int64, int16, string, int, int) ([]Contest, int64, error)
+	ListStudentContests(context.Context, int64, int16, string, int, int) ([]Contest, int64, error)
 	UpdateContest(context.Context, Contest) (Contest, error)
 	SetContestStatus(context.Context, int64, int64, int16) (Contest, error)
+	ListContestsDueToRun(context.Context, time.Time) ([]Contest, error)
+	ListContestsDueToFreeze(context.Context, time.Time) ([]Contest, error)
+	ListContestsDueToEnd(context.Context, time.Time) ([]Contest, error)
 	UpsertContestProblem(context.Context, ContestProblem) (ContestProblem, error)
 	GetContestProblem(context.Context, int64, int64) (ContestProblem, error)
 	ListContestProblems(context.Context, int64, int64) ([]ContestProblem, error)
@@ -59,6 +62,7 @@ type TxStore interface {
 	ListContestAccessGrantsForContest(context.Context, int64, int64) ([]ContestAccessGrant, error)
 	CreateSolveSubmission(context.Context, SolveSubmission) (SolveSubmission, error)
 	GetSolveSubmission(context.Context, int64, int64) (SolveSubmission, error)
+	GetLatestSolveSubmission(context.Context, int64, int64, int64, int64) (SolveSubmission, error)
 	FindSolveSubmissionTenant(context.Context, int64) (int64, error)
 	GetSolveSubmissionByJudgeTask(context.Context, int64, string) (SolveSubmission, error)
 	UpdateSolveSubmissionResult(context.Context, int64, int64, bool, int32) (SolveSubmission, error)
@@ -212,13 +216,13 @@ func (tx *txStore) FindBattleMatchTenant(ctx context.Context, matchID int64) (in
 }
 
 // ListContests 查询竞赛列表。
-func (tx *txStore) ListContests(ctx context.Context, tenantID int64, status int16, page, size int) ([]Contest, int64, error) {
+func (tx *txStore) ListContests(ctx context.Context, tenantID int64, status int16, keyword string, page, size int) ([]Contest, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := tx.q.ListContests(ctx, sqlcgen.ListContestsParams{TenantID: tenantID, Column2: status, Limit: limit, Offset: offset})
+	rows, err := tx.q.ListContests(ctx, sqlcgen.ListContestsParams{TenantID: tenantID, Status: status, Keyword: keyword, PageLimit: limit, PageOffset: offset})
 	if err != nil {
 		return nil, 0, apperr.ErrContestInvalid.WithCause(err)
 	}
-	total, err := tx.q.CountContests(ctx, sqlcgen.CountContestsParams{TenantID: tenantID, Column2: status})
+	total, err := tx.q.CountContests(ctx, sqlcgen.CountContestsParams{TenantID: tenantID, Status: status, Keyword: keyword})
 	if err != nil {
 		return nil, 0, apperr.ErrContestInvalid.WithCause(err)
 	}
@@ -235,9 +239,9 @@ func (tx *txStore) ListContests(ctx context.Context, tenantID int64, status int1
 
 // ListStudentContests 查询学生可发现的非草稿竞赛分页。
 // status 传 0 表示不按状态过滤;总数按同一条件计,与列表同口径。
-func (tx *txStore) ListStudentContests(ctx context.Context, tenantID int64, status int16, page, size int) ([]Contest, int64, error) {
+func (tx *txStore) ListStudentContests(ctx context.Context, tenantID int64, status int16, keyword string, page, size int) ([]Contest, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := tx.q.ListStudentContests(ctx, sqlcgen.ListStudentContestsParams{TenantID: tenantID, Status: status, PageLimit: limit, PageOffset: offset})
+	rows, err := tx.q.ListStudentContests(ctx, sqlcgen.ListStudentContestsParams{TenantID: tenantID, Status: status, Keyword: keyword, PageLimit: limit, PageOffset: offset})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -249,7 +253,7 @@ func (tx *txStore) ListStudentContests(ctx context.Context, tenantID int64, stat
 		}
 		items = append(items, item)
 	}
-	total, err := tx.q.CountStudentContests(ctx, sqlcgen.CountStudentContestsParams{TenantID: tenantID, Status: status})
+	total, err := tx.q.CountStudentContests(ctx, sqlcgen.CountStudentContestsParams{TenantID: tenantID, Status: status, Keyword: keyword})
 	return items, total, err
 }
 
@@ -273,6 +277,46 @@ func (tx *txStore) SetContestStatus(ctx context.Context, tenantID, id int64, sta
 		return Contest{}, apperr.ErrContestStateInvalid.WithCause(err)
 	}
 	return contestFromRow(row)
+}
+
+// ListContestsDueToRun 查询已经到开始时间且仍在结束时间前的报名中赛事。
+func (tx *txStore) ListContestsDueToRun(ctx context.Context, now time.Time) ([]Contest, error) {
+	rows, err := tx.q.ListContestsDueToRun(ctx, timex.Timestamptz(now))
+	if err != nil {
+		return nil, err
+	}
+	return contestsFromRows(rows)
+}
+
+// ListContestsDueToFreeze 查询进入封榜窗口但尚未封榜的赛事。
+func (tx *txStore) ListContestsDueToFreeze(ctx context.Context, now time.Time) ([]Contest, error) {
+	rows, err := tx.q.ListContestsDueToFreeze(ctx, timex.Timestamptz(now))
+	if err != nil {
+		return nil, err
+	}
+	return contestsFromRows(rows)
+}
+
+// ListContestsDueToEnd 查询已经到结束时间且尚未结束的赛事。
+func (tx *txStore) ListContestsDueToEnd(ctx context.Context, now time.Time) ([]Contest, error) {
+	rows, err := tx.q.ListContestsDueToEnd(ctx, timex.Timestamptz(now))
+	if err != nil {
+		return nil, err
+	}
+	return contestsFromRows(rows)
+}
+
+// contestsFromRows 把生命周期扫描的 sqlc 行统一转换为领域模型。
+func contestsFromRows(rows []sqlcgen.Contest) ([]Contest, error) {
+	items := make([]Contest, 0, len(rows))
+	for _, row := range rows {
+		item, err := contestFromRow(row)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
 }
 
 // UpsertContestProblem 新增或更新赛题配置。
@@ -494,7 +538,7 @@ func (tx *txStore) CreateSolveSubmission(ctx context.Context, item SolveSubmissi
 	if err != nil {
 		return SolveSubmission{}, err
 	}
-	row, err := tx.q.CreateSolveSubmission(ctx, sqlcgen.CreateSolveSubmissionParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ProblemID: item.ProblemID, TeamID: item.TeamID, SubmitterTenantID: item.SubmitterTenantID, SubmitterID: item.SubmitterID, ContentRef: content, SourceRef: item.SourceRef, JudgeTaskRef: pgtypex.Text(item.JudgeTaskRef), SandboxRef: pgtypex.Text(item.SandboxRef)})
+	row, err := tx.q.CreateSolveSubmission(ctx, sqlcgen.CreateSolveSubmissionParams{ID: item.ID, TenantID: item.TenantID, ContestID: item.ContestID, ProblemID: item.ProblemID, TeamID: item.TeamID, SubmitterTenantID: item.SubmitterTenantID, SubmitterID: item.SubmitterID, ContentRef: content, SourceRef: item.SourceRef, ScopeRef: item.ScopeRef, JudgeTaskRef: pgtypex.Text(item.JudgeTaskRef), SandboxRef: pgtypex.Text(item.SandboxRef)})
 	if err != nil {
 		return SolveSubmission{}, apperr.ErrContestSubmissionInvalid.WithCause(err)
 	}
@@ -504,6 +548,15 @@ func (tx *txStore) CreateSolveSubmission(ctx context.Context, item SolveSubmissi
 // GetSolveSubmission 读取解题提交。
 func (tx *txStore) GetSolveSubmission(ctx context.Context, tenantID, id int64) (SolveSubmission, error) {
 	row, err := tx.q.GetSolveSubmission(ctx, sqlcgen.GetSolveSubmissionParams{TenantID: tenantID, ID: id})
+	if err != nil {
+		return SolveSubmission{}, apperr.ErrContestSubmissionNotFound.WithCause(err)
+	}
+	return submissionFromRow(row)
+}
+
+// GetLatestSolveSubmission 读取当前队伍在指定竞赛题目下最近一次解题提交。
+func (tx *txStore) GetLatestSolveSubmission(ctx context.Context, tenantID, contestID, problemID, teamID int64) (SolveSubmission, error) {
+	row, err := tx.q.GetLatestSolveSubmission(ctx, sqlcgen.GetLatestSolveSubmissionParams{TenantID: tenantID, ContestID: contestID, ProblemID: problemID, TeamID: teamID})
 	if err != nil {
 		return SolveSubmission{}, apperr.ErrContestSubmissionNotFound.WithCause(err)
 	}

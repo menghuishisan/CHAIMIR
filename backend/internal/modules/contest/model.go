@@ -100,6 +100,7 @@ type SolveSubmission struct {
 	SubmitterID       int64
 	ContentRef        map[string]any
 	SourceRef         string
+	ScopeRef          string
 	JudgeTaskRef      string
 	Passed            bool
 	Score             int32
@@ -193,12 +194,12 @@ type LadderSnapshot struct {
 
 // LadderSnapshotEntry 是排行榜快照中固定字段的内部结构。
 type LadderSnapshotEntry struct {
-	TeamID      int64     `json:"team_id"`
-	Score       float64   `json:"score"`
-	SolvedCount int32     `json:"solved_count"`
-	LastSolveAt time.Time `json:"last_solve_at,omitempty"`
-	Rank        int32     `json:"rank"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	TeamID      int64      `json:"team_id"`
+	Score       float64    `json:"score"`
+	SolvedCount int32      `json:"solved_count"`
+	LastSolveAt *time.Time `json:"last_solve_at,omitempty"`
+	Rank        int32      `json:"rank"`
+	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
 // CheatRecord 是教师或管理员确认后的违规处理记录。
@@ -264,6 +265,8 @@ type StudentContestRecord struct {
 	TeamID        int64
 	Score         float64
 	Rank          int32
+	SolvedCount   int32
+	LastSolveAt   *time.Time
 	ContestName   string
 	ContestStatus int16
 }

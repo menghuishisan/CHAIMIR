@@ -2,6 +2,8 @@
 package contest
 
 import (
+	"time"
+
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/secretmap"
@@ -74,25 +76,42 @@ func battleScoreDeltaAuditDetail(item *BattleScoreDelta) map[string]any {
 
 // ladderDTOFromModel 转换排行投影为 HTTP 输出。
 func ladderDTOFromModel(item LadderRank) LadderDTO {
-	return LadderDTO{TeamID: ids.ID(item.TeamID), Score: item.Score, SolvedCount: item.SolvedCount, LastSolveAt: item.LastSolveAt, Rank: item.Rank, UpdatedAt: item.UpdatedAt}
+	return LadderDTO{TeamID: ids.ID(item.TeamID), Score: item.Score, SolvedCount: item.SolvedCount, LastSolveAt: optionalTime(item.LastSolveAt), Rank: item.Rank, UpdatedAt: item.UpdatedAt}
 }
 
 // resultSnapshotDTOFromModel 把归档状态的排行榜快照转换为最终结果输出。
-func resultSnapshotDTOFromModel(item LadderSnapshot) ResultSnapshotDTO {
+func resultSnapshotDTOFromModel(item LadderSnapshot, mode int16) ResultSnapshotDTO {
 	ranking := make([]LadderSnapshotEntryDTO, 0, len(item.Ranking))
 	for _, entry := range item.Ranking {
-		ranking = append(ranking, LadderSnapshotEntryDTO{TeamID: ids.ID(entry.TeamID), Score: entry.Score, SolvedCount: entry.SolvedCount, LastSolveAt: entry.LastSolveAt, Rank: entry.Rank, UpdatedAt: entry.UpdatedAt})
+		solvedCount, lastSolveAt := entry.SolvedCount, entry.LastSolveAt
+		if mode == ContestModeBattle {
+			solvedCount, lastSolveAt = 0, nil
+		}
+		ranking = append(ranking, LadderSnapshotEntryDTO{TeamID: ids.ID(entry.TeamID), Score: entry.Score, SolvedCount: solvedCount, LastSolveAt: lastSolveAt, Rank: entry.Rank, UpdatedAt: entry.UpdatedAt})
 	}
 	return ResultSnapshotDTO{ID: ids.ID(item.ID), TenantID: ids.ID(item.TenantID), ContestID: ids.ID(item.ContestID), FinalRanking: ranking, GeneratedAt: item.GeneratedAt}
 }
 
 // ladderDTOsFromSnapshot 把内部榜单快照转换为列表接口使用的公开排行 DTO。
-func ladderDTOsFromSnapshot(snapshot LadderSnapshot) []LadderDTO {
+func ladderDTOsFromSnapshot(snapshot LadderSnapshot, mode int16) []LadderDTO {
 	out := make([]LadderDTO, 0, len(snapshot.Ranking))
 	for _, entry := range snapshot.Ranking {
-		out = append(out, LadderDTO{TeamID: ids.ID(entry.TeamID), Score: entry.Score, SolvedCount: entry.SolvedCount, LastSolveAt: entry.LastSolveAt, Rank: entry.Rank, UpdatedAt: entry.UpdatedAt})
+		solvedCount, lastSolveAt := entry.SolvedCount, entry.LastSolveAt
+		if mode == ContestModeBattle {
+			solvedCount, lastSolveAt = 0, nil
+		}
+		out = append(out, LadderDTO{TeamID: ids.ID(entry.TeamID), Score: entry.Score, SolvedCount: solvedCount, LastSolveAt: lastSolveAt, Rank: entry.Rank, UpdatedAt: entry.UpdatedAt})
 	}
 	return out
+}
+
+// optionalTime 把领域零时间转换为空值,避免把“无解题时间”输出成公元 1 年。
+func optionalTime(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	utc := value.UTC()
+	return &utc
 }
 
 // cheatDTOFromModel 转换违规记录为 HTTP 输出。

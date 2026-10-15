@@ -2,8 +2,11 @@
 package experiment
 
 import (
+	"fmt"
+
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 )
 
 // experimentDTOFromModel 转换实验定义为 HTTP 输出。
@@ -73,6 +76,41 @@ func studentExperimentDTOFromModel(item Experiment, myGroupID int64) StudentExpe
 		components.Stages = append(components.Stages, StudentStageConfig{Stage: stage.Stage, Title: stage.Title, Description: stage.Description, Components: cloneStageComponents(stage.Components), UnlockCondition: stage.UnlockCondition})
 	}
 	return StudentExperimentDTO{ID: ids.ID(item.ID), CourseID: ids.ID(item.CourseID), Name: item.Name, Description: item.Description, Components: components, CollabMode: item.CollabMode, GroupConfig: item.GroupConfig, MyGroupID: ids.ID(myGroupID), RequireReport: item.RequireReport, Status: item.Status, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}
+}
+
+// attachStudentCheckpointFaces 将已发布检查点题面的公开投影附加到学生实验视图。
+// 题面只来自 GetContentFace,并移除执行期组合、初始化引用和额外输入。
+func attachStudentCheckpointFaces(dto *StudentExperimentDTO, item Experiment, faces map[string]contracts.ContentItemSnapshot) error {
+	for index, checkpoint := range item.Components.Checkpoints {
+		key := checkpoint.ItemCode + "\x00" + checkpoint.ItemVersion
+		face, ok := faces[key]
+		if index >= len(dto.Components.Checkpoints) {
+			return fmt.Errorf("学生检查点投影数量不一致")
+		}
+		if !ok {
+			return fmt.Errorf("检查点题面不存在: %s@%s", checkpoint.ItemCode, checkpoint.ItemVersion)
+		}
+		safe, err := studentCheckpointFace(face.Body)
+		if err != nil {
+			return err
+		}
+		dto.Components.Checkpoints[index].Title = face.Title
+		dto.Components.Checkpoints[index].Type = face.Type
+		dto.Components.Checkpoints[index].Face = safe
+	}
+	return nil
+}
+
+// studentCheckpointFace 保留题面说明、输入输出、限制、验收条件和公开材料,不暴露执行配置。
+func studentCheckpointFace(body map[string]any) (map[string]any, error) {
+	out, err := jsonx.CloneObjectStrict(body)
+	if err != nil {
+		return nil, err
+	}
+	for _, key := range []string{"composition", "init_code_ref", "init_script_ref", "sim_package_ref", "judge_config", "judger_code", "extra_input"} {
+		delete(out, key)
+	}
+	return out, nil
 }
 
 // cloneRuntimeRefs 复制运行时引用并保持空集合的 JSON 数组形状。
@@ -156,6 +194,11 @@ func reportDTOFromModel(item ExperimentReport, profiles map[int64]contracts.Acco
 		profile = contracts.AccountInfo{Name: "已离校学生"}
 	}
 	return ReportDTO{ID: ids.ID(item.ID), InstanceID: ids.ID(item.InstanceID), StudentID: ids.ID(item.StudentID), StudentName: profile.Name, StudentNo: profile.No, ContentRef: item.ContentRef, ManualScore: item.ManualScore, Comment: item.Comment, Status: item.Status, SubmittedAt: item.SubmittedAt}
+}
+
+// studentReportDTOFromModel 转换学生本人可见的报告结果,不把 content_ref 下发到浏览器。
+func studentReportDTOFromModel(item ExperimentReport) StudentReportDTO {
+	return StudentReportDTO{ID: ids.ID(item.ID), InstanceID: ids.ID(item.InstanceID), ManualScore: item.ManualScore, Comment: item.Comment, Status: item.Status, SubmittedAt: item.SubmittedAt}
 }
 
 // sandboxRefFromContract 提取 M2 沙箱摘要中工作台需要的稳定字段。

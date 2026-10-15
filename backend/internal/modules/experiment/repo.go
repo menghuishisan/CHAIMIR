@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"chaimir/internal/modules/experiment/internal/sqlcgen"
@@ -31,7 +32,7 @@ type Store interface {
 type TxStore interface {
 	CreateExperiment(context.Context, Experiment) (Experiment, error)
 	GetExperiment(context.Context, int64, int64) (Experiment, error)
-	ListExperiments(context.Context, int64, int64, int16, int, int) ([]Experiment, int64, error)
+	ListExperiments(context.Context, int64, int64, int16, string, int, int) ([]Experiment, int64, error)
 	CountPublishedExperimentsByShape(context.Context, int64, int64) (map[string]map[string]int64, error)
 	UpdateExperiment(context.Context, Experiment) (Experiment, error)
 	SetExperimentStatus(context.Context, int64, int64, int16) (Experiment, error)
@@ -51,7 +52,7 @@ type TxStore interface {
 	GetInstance(context.Context, int64, int64) (ExperimentInstance, error)
 	GetInstanceForUpdate(context.Context, int64, int64) (ExperimentInstance, error)
 	GetInstanceBySourceRef(context.Context, int64, string) (ExperimentInstance, error)
-	UpdateInstanceResources(context.Context, int64, int64, []SandboxRef, []SimSessionRef, int16) (ExperimentInstance, error)
+	UpdateInstanceResources(context.Context, int64, int64, string, []SandboxRef, []SimSessionRef, int16) (ExperimentInstance, error)
 	SetInstanceStatus(context.Context, int64, int64, int16) (ExperimentInstance, error)
 	FinishInstance(context.Context, int64, int64, float64) (ExperimentInstance, error)
 	UpdateInstanceScoreIfChanged(context.Context, int64, int64, float64) (ExperimentInstance, bool, error)
@@ -131,13 +132,13 @@ func (tx *txStore) GetExperiment(ctx context.Context, tenantID, id int64) (Exper
 }
 
 // ListExperiments 查询实验定义分页。
-func (tx *txStore) ListExperiments(ctx context.Context, tenantID, courseID int64, status int16, page, size int) ([]Experiment, int64, error) {
+func (tx *txStore) ListExperiments(ctx context.Context, tenantID, courseID int64, status int16, keyword string, page, size int) ([]Experiment, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := tx.q.ListExperiments(ctx, sqlcgen.ListExperimentsParams{TenantID: tenantID, Column2: courseID, Column3: status, Limit: limit, Offset: offset})
+	rows, err := tx.q.ListExperiments(ctx, sqlcgen.ListExperimentsParams{TenantID: tenantID, CourseID: courseID, Status: status, Keyword: keyword, PageLimit: limit, PageOffset: offset})
 	if err != nil {
 		return nil, 0, apperr.ErrExperimentInvalid.WithCause(err)
 	}
-	total, err := tx.q.CountExperiments(ctx, sqlcgen.CountExperimentsParams{TenantID: tenantID, Column2: courseID, Column3: status})
+	total, err := tx.q.CountExperiments(ctx, sqlcgen.CountExperimentsParams{TenantID: tenantID, CourseID: courseID, Status: status, Keyword: keyword})
 	if err != nil {
 		return nil, 0, apperr.ErrExperimentInvalid.WithCause(err)
 	}
@@ -154,7 +155,7 @@ func (tx *txStore) ListExperiments(ctx context.Context, tenantID, courseID int64
 
 // CountPublishedExperimentsByShape 统计学生可见已发布实验的协作与报告形态。
 func (tx *txStore) CountPublishedExperimentsByShape(ctx context.Context, tenantID, courseID int64) (map[string]map[string]int64, error) {
-	rows, err := tx.q.CountPublishedExperimentsByShape(ctx, sqlcgen.CountPublishedExperimentsByShapeParams{TenantID: tenantID, Column2: courseID})
+	rows, err := tx.q.CountPublishedExperimentsByShape(ctx, sqlcgen.CountPublishedExperimentsByShapeParams{TenantID: tenantID, PublishedStatus: ExperimentStatusPublished, CourseID: courseID})
 	if err != nil {
 		return nil, apperr.ErrExperimentInvalid.WithCause(err)
 	}
@@ -360,7 +361,10 @@ func (tx *txStore) GetInstanceBySourceRef(ctx context.Context, tenantID int64, s
 }
 
 // UpdateInstanceResources 保存实例已创建的 M2/M4 引用。
-func (tx *txStore) UpdateInstanceResources(ctx context.Context, tenantID, id int64, sandboxes []SandboxRef, sims []SimSessionRef, status int16) (ExperimentInstance, error) {
+func (tx *txStore) UpdateInstanceResources(ctx context.Context, tenantID, id int64, scopeRef string, sandboxes []SandboxRef, sims []SimSessionRef, status int16) (ExperimentInstance, error) {
+	if strings.TrimSpace(scopeRef) == "" {
+		return ExperimentInstance{}, apperr.ErrExperimentInstanceInvalid
+	}
 	sandboxRaw, err := jsonx.AnyBytes(sandboxes, apperr.ErrExperimentInstanceInvalid)
 	if err != nil {
 		return ExperimentInstance{}, err
@@ -369,7 +373,7 @@ func (tx *txStore) UpdateInstanceResources(ctx context.Context, tenantID, id int
 	if err != nil {
 		return ExperimentInstance{}, err
 	}
-	row, err := tx.q.UpdateInstanceResources(ctx, sqlcgen.UpdateInstanceResourcesParams{TenantID: tenantID, ID: id, SandboxRefs: sandboxRaw, SimSessionRefs: simRaw, Status: status})
+	row, err := tx.q.UpdateInstanceResources(ctx, sqlcgen.UpdateInstanceResourcesParams{TenantID: tenantID, ID: id, ScopeRef: scopeRef, SandboxRefs: sandboxRaw, SimSessionRefs: simRaw, Status: status})
 	if err != nil {
 		return ExperimentInstance{}, apperr.ErrExperimentInstanceStateInvalid.WithCause(err)
 	}

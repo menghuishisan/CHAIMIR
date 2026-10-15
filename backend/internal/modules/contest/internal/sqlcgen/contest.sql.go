@@ -437,16 +437,19 @@ func (q *Queries) CountCheatRecords(ctx context.Context, arg CountCheatRecordsPa
 const countContests = `-- name: CountContests :one
 SELECT COUNT(*)::bigint
 FROM contest
-WHERE tenant_id = $1 AND deleted_at IS NULL AND ($2::smallint = 0 OR status = $2)
+WHERE tenant_id = $1::bigint AND deleted_at IS NULL
+  AND ($2::smallint = 0 OR status = $2::smallint)
+  AND ($3::text = '' OR strpos(lower(name), lower($3::text)) > 0)
 `
 
 type CountContestsParams struct {
-	TenantID int64 `json:"tenant_id"`
-	Column2  int16 `json:"column_2"`
+	TenantID int64  `json:"tenant_id"`
+	Status   int16  `json:"status"`
+	Keyword  string `json:"keyword"`
 }
 
 func (q *Queries) CountContests(ctx context.Context, arg CountContestsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countContests, arg.TenantID, arg.Column2)
+	row := q.db.QueryRow(ctx, countContests, arg.TenantID, arg.Status, arg.Keyword)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -499,17 +502,19 @@ func (q *Queries) CountProblemSolvedTeams(ctx context.Context, arg CountProblemS
 const countStudentContests = `-- name: CountStudentContests :one
 SELECT COUNT(*)::bigint
 FROM contest
-WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6
+WHERE tenant_id = $1::bigint AND deleted_at IS NULL AND status BETWEEN 2 AND 6
   AND ($2::smallint = 0 OR status = $2::smallint)
+  AND ($3::text = '' OR strpos(lower(name), lower($3::text)) > 0)
 `
 
 type CountStudentContestsParams struct {
-	TenantID int64 `json:"tenant_id"`
-	Status   int16 `json:"status"`
+	TenantID int64  `json:"tenant_id"`
+	Status   int16  `json:"status"`
+	Keyword  string `json:"keyword"`
 }
 
 func (q *Queries) CountStudentContests(ctx context.Context, arg CountStudentContestsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countStudentContests, arg.TenantID, arg.Status)
+	row := q.db.QueryRow(ctx, countStudentContests, arg.TenantID, arg.Status, arg.Keyword)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -592,7 +597,7 @@ func (q *Queries) CreateBattleEntry(ctx context.Context, arg CreateBattleEntryPa
 
 const createBattleMatch = `-- name: CreateBattleMatch :one
 INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until)
-SELECT $1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL, '{}'::jsonb, NULL, 1, now(), NULL, '', NULL
+SELECT $1, $2, $3, $4, $5, $6, $7, $7, NULL, NULL, NULL, '{}'::jsonb, NULL, 1, now(), NULL, '', NULL
 WHERE EXISTS (
     SELECT 1 FROM contest c
     WHERE c.tenant_id = $2 AND c.id = $3 AND c.status IN (3, 4) AND c.end_at > now()
@@ -1671,6 +1676,49 @@ func (q *Queries) GetLadderSnapshot(ctx context.Context, arg GetLadderSnapshotPa
 	return i, err
 }
 
+const getLatestSolveSubmission = `-- name: GetLatestSolveSubmission :one
+SELECT id, tenant_id, contest_id, problem_id, team_id, submitter_tenant_id, submitter_id, content_ref, source_ref, scope_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at
+FROM solve_submission
+WHERE tenant_id = $1 AND contest_id = $2 AND problem_id = $3 AND team_id = $4
+ORDER BY submitted_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestSolveSubmissionParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	ContestID int64 `json:"contest_id"`
+	ProblemID int64 `json:"problem_id"`
+	TeamID    int64 `json:"team_id"`
+}
+
+func (q *Queries) GetLatestSolveSubmission(ctx context.Context, arg GetLatestSolveSubmissionParams) (SolveSubmission, error) {
+	row := q.db.QueryRow(ctx, getLatestSolveSubmission,
+		arg.TenantID,
+		arg.ContestID,
+		arg.ProblemID,
+		arg.TeamID,
+	)
+	var i SolveSubmission
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ContestID,
+		&i.ProblemID,
+		&i.TeamID,
+		&i.SubmitterTenantID,
+		&i.SubmitterID,
+		&i.ContentRef,
+		&i.SourceRef,
+		&i.ScopeRef,
+		&i.JudgeTaskRef,
+		&i.Passed,
+		&i.Score,
+		&i.SandboxRef,
+		&i.SubmittedAt,
+	)
+	return i, err
+}
+
 const getSolveSubmission = `-- name: GetSolveSubmission :one
 SELECT id, tenant_id, contest_id, problem_id, team_id, submitter_tenant_id, submitter_id, content_ref, source_ref, scope_ref, judge_task_ref, passed, score, sandbox_ref, submitted_at
 FROM solve_submission
@@ -2456,24 +2504,28 @@ func (q *Queries) ListContestProblems(ctx context.Context, arg ListContestProble
 const listContests = `-- name: ListContests :many
 SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 FROM contest
-WHERE tenant_id = $1 AND deleted_at IS NULL AND ($2::smallint = 0 OR status = $2)
+WHERE tenant_id = $1::bigint AND deleted_at IS NULL
+  AND ($2::smallint = 0 OR status = $2::smallint)
+  AND ($3::text = '' OR strpos(lower(name), lower($3::text)) > 0)
 ORDER BY updated_at DESC, id DESC
-LIMIT $3 OFFSET $4
+LIMIT $5::int OFFSET $4::int
 `
 
 type ListContestsParams struct {
-	TenantID int64 `json:"tenant_id"`
-	Column2  int16 `json:"column_2"`
-	Limit    int32 `json:"limit"`
-	Offset   int32 `json:"offset"`
+	TenantID   int64  `json:"tenant_id"`
+	Status     int16  `json:"status"`
+	Keyword    string `json:"keyword"`
+	PageOffset int32  `json:"page_offset"`
+	PageLimit  int32  `json:"page_limit"`
 }
 
 func (q *Queries) ListContests(ctx context.Context, arg ListContestsParams) ([]Contest, error) {
 	rows, err := q.db.Query(ctx, listContests,
 		arg.TenantID,
-		arg.Column2,
-		arg.Limit,
-		arg.Offset,
+		arg.Status,
+		arg.Keyword,
+		arg.PageOffset,
+		arg.PageLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -2513,18 +2565,181 @@ func (q *Queries) ListContests(ctx context.Context, arg ListContestsParams) ([]C
 	return items, nil
 }
 
+const listContestsDueToEnd = `-- name: ListContestsDueToEnd :many
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
+FROM contest
+WHERE deleted_at IS NULL AND status IN (2, 3, 4) AND end_at <= $1
+ORDER BY end_at ASC, id ASC
+`
+
+// 报名中、进行中和封榜中的赛事过了结束时间都必须进入结束态,避免学生入口长期显示报名中。
+func (q *Queries) ListContestsDueToEnd(ctx context.Context, endAt pgtype.Timestamptz) ([]Contest, error) {
+	rows, err := q.db.Query(ctx, listContestsDueToEnd, endAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Contest{}
+	for rows.Next() {
+		var i Contest
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.OrganizerID,
+			&i.Name,
+			&i.Mode,
+			&i.MatchMode,
+			&i.TeamMode,
+			&i.SignupStart,
+			&i.SignupEnd,
+			&i.StartAt,
+			&i.EndAt,
+			&i.FreezeMinutes,
+			&i.Rules,
+			&i.Status,
+			&i.ArchiveLeaseToken,
+			&i.ArchiveLeaseUntil,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listContestsDueToFreeze = `-- name: ListContestsDueToFreeze :many
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
+FROM contest
+WHERE deleted_at IS NULL AND status = 3 AND freeze_minutes > 0
+  AND end_at > $1
+  AND end_at - (freeze_minutes * INTERVAL '1 minute') <= $1
+ORDER BY end_at ASC, id ASC
+`
+
+// 封榜窗口由服务端按 freeze_minutes 计算,不接受前端自行推进状态。
+func (q *Queries) ListContestsDueToFreeze(ctx context.Context, endAt pgtype.Timestamptz) ([]Contest, error) {
+	rows, err := q.db.Query(ctx, listContestsDueToFreeze, endAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Contest{}
+	for rows.Next() {
+		var i Contest
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.OrganizerID,
+			&i.Name,
+			&i.Mode,
+			&i.MatchMode,
+			&i.TeamMode,
+			&i.SignupStart,
+			&i.SignupEnd,
+			&i.StartAt,
+			&i.EndAt,
+			&i.FreezeMinutes,
+			&i.Rules,
+			&i.Status,
+			&i.ArchiveLeaseToken,
+			&i.ArchiveLeaseUntil,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listContestsDueToRun = `-- name: ListContestsDueToRun :many
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
+FROM contest
+WHERE deleted_at IS NULL AND status = 2 AND start_at <= $1 AND end_at > $1
+ORDER BY start_at ASC, id ASC
+`
+
+// 后台生命周期扫描只推进仍处于报名中的赛事;已越过结束时间的赛事由结束扫描直接收口。
+func (q *Queries) ListContestsDueToRun(ctx context.Context, startAt pgtype.Timestamptz) ([]Contest, error) {
+	rows, err := q.db.Query(ctx, listContestsDueToRun, startAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Contest{}
+	for rows.Next() {
+		var i Contest
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.OrganizerID,
+			&i.Name,
+			&i.Mode,
+			&i.MatchMode,
+			&i.TeamMode,
+			&i.SignupStart,
+			&i.SignupEnd,
+			&i.StartAt,
+			&i.EndAt,
+			&i.FreezeMinutes,
+			&i.Rules,
+			&i.Status,
+			&i.ArchiveLeaseToken,
+			&i.ArchiveLeaseUntil,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLadder = `-- name: ListLadder :many
-SELECT lr.id, lr.tenant_id, lr.contest_id, lr.team_id, lr.score::float8 AS score, lr.solved_count, lr.last_solve_at, lr.rank, lr.updated_at
-FROM ladder_rank lr
-WHERE lr.tenant_id = $1 AND lr.contest_id = $2
-  AND NOT EXISTS (
-      SELECT 1 FROM cheat_record cr
-      WHERE cr.tenant_id = lr.tenant_id
-        AND cr.contest_id = lr.contest_id
-        AND cr.team_id = lr.team_id
-        AND cr.action = 3
-  )
-ORDER BY lr.rank ASC, lr.score DESC, lr.solved_count DESC, lr.last_solve_at ASC NULLS LAST, lr.team_id ASC
+WITH eligible AS (
+    SELECT lr.id, lr.tenant_id, lr.contest_id, lr.team_id, c.mode AS contest_mode, lr.score::float8 AS score,
+           CASE WHEN c.mode = 1 THEN lr.solved_count ELSE 0 END AS solved_count,
+           CASE WHEN c.mode = 1 THEN lr.last_solve_at ELSE NULL::timestamptz END AS last_solve_at,
+           lr.updated_at
+    FROM ladder_rank lr
+    JOIN contest c ON c.tenant_id = lr.tenant_id AND c.id = lr.contest_id
+    WHERE lr.tenant_id = $1 AND lr.contest_id = $2
+      AND NOT EXISTS (
+          SELECT 1 FROM cheat_record cr
+          WHERE cr.tenant_id = lr.tenant_id
+            AND cr.contest_id = lr.contest_id
+            AND cr.team_id = lr.team_id
+            AND cr.action = 3
+      )
+), ranked AS (
+    SELECT eligible.id, eligible.tenant_id, eligible.contest_id, eligible.team_id, eligible.contest_mode, eligible.score, eligible.solved_count, eligible.last_solve_at, eligible.updated_at,
+           ROW_NUMBER() OVER (
+               ORDER BY score DESC,
+                        CASE WHEN contest_mode = 1 THEN solved_count END DESC,
+                        CASE WHEN contest_mode = 1 THEN last_solve_at END ASC NULLS LAST,
+                        team_id ASC
+           )::int AS rank
+    FROM eligible
+)
+SELECT id, tenant_id, contest_id, team_id, score, solved_count, last_solve_at, rank, updated_at
+FROM ranked
+ORDER BY rank ASC
 LIMIT $3 OFFSET $4
 `
 
@@ -2631,7 +2846,10 @@ func (q *Queries) ListRunningBattleMatchesWithJudgeTask(ctx context.Context, lim
 }
 
 const listStudentContestRecords = `-- name: ListStudentContestRecords :many
-SELECT c.id AS contest_id, t.id AS team_id, COALESCE(l.score::float8, 0)::float8 AS score, COALESCE(l.rank, 0)::int AS rank, c.name AS contest_name, c.status AS contest_status
+SELECT c.id AS contest_id, t.id AS team_id, COALESCE(l.score::float8, 0)::float8 AS score,
+       COALESCE(l.rank, 0)::int AS rank, c.name AS contest_name, c.status AS contest_status,
+       CASE WHEN c.mode = 1 THEN COALESCE(l.solved_count, 0) ELSE 0 END AS solved_count,
+       CASE WHEN c.mode = 1 THEN l.last_solve_at ELSE NULL::timestamptz END AS last_solve_at
 FROM team_member tm
 JOIN team t ON t.tenant_id = tm.tenant_id AND t.id = tm.team_id
 JOIN contest c ON c.tenant_id = t.tenant_id AND c.id = t.contest_id
@@ -2653,12 +2871,14 @@ type ListStudentContestRecordsParams struct {
 }
 
 type ListStudentContestRecordsRow struct {
-	ContestID     int64   `json:"contest_id"`
-	TeamID        int64   `json:"team_id"`
-	Score         float64 `json:"score"`
-	Rank          int32   `json:"rank"`
-	ContestName   string  `json:"contest_name"`
-	ContestStatus int16   `json:"contest_status"`
+	ContestID     int64              `json:"contest_id"`
+	TeamID        int64              `json:"team_id"`
+	Score         float64            `json:"score"`
+	Rank          int32              `json:"rank"`
+	ContestName   string             `json:"contest_name"`
+	ContestStatus int16              `json:"contest_status"`
+	SolvedCount   int32              `json:"solved_count"`
+	LastSolveAt   pgtype.Timestamptz `json:"last_solve_at"`
 }
 
 func (q *Queries) ListStudentContestRecords(ctx context.Context, arg ListStudentContestRecordsParams) ([]ListStudentContestRecordsRow, error) {
@@ -2677,6 +2897,8 @@ func (q *Queries) ListStudentContestRecords(ctx context.Context, arg ListStudent
 			&i.Rank,
 			&i.ContestName,
 			&i.ContestStatus,
+			&i.SolvedCount,
+			&i.LastSolveAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2691,17 +2913,19 @@ func (q *Queries) ListStudentContestRecords(ctx context.Context, arg ListStudent
 const listStudentContests = `-- name: ListStudentContests :many
 SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 FROM contest
-WHERE tenant_id = $1 AND deleted_at IS NULL AND status BETWEEN 2 AND 6
+WHERE tenant_id = $1::bigint AND deleted_at IS NULL AND status BETWEEN 2 AND 6
   AND ($2::smallint = 0 OR status = $2::smallint)
+  AND ($3::text = '' OR strpos(lower(name), lower($3::text)) > 0)
 ORDER BY updated_at DESC, id DESC
-LIMIT $4::int OFFSET $3::int
+LIMIT $5::int OFFSET $4::int
 `
 
 type ListStudentContestsParams struct {
-	TenantID   int64 `json:"tenant_id"`
-	Status     int16 `json:"status"`
-	PageOffset int32 `json:"page_offset"`
-	PageLimit  int32 `json:"page_limit"`
+	TenantID   int64  `json:"tenant_id"`
+	Status     int16  `json:"status"`
+	Keyword    string `json:"keyword"`
+	PageOffset int32  `json:"page_offset"`
+	PageLimit  int32  `json:"page_limit"`
 }
 
 // status 传 0 回学生可发现的全部赛事(草稿态不可见);传具体状态时仍受可见区间约束。
@@ -2709,6 +2933,7 @@ func (q *Queries) ListStudentContests(ctx context.Context, arg ListStudentContes
 	rows, err := q.db.Query(ctx, listStudentContests,
 		arg.TenantID,
 		arg.Status,
+		arg.Keyword,
 		arg.PageOffset,
 		arg.PageLimit,
 	)
@@ -3073,9 +3298,23 @@ func (q *Queries) RecentSolveCount(ctx context.Context, arg RecentSolveCountPara
 
 const refreshContestRanks = `-- name: RefreshContestRanks :exec
 WITH ranked AS (
-    SELECT lr0.id, ROW_NUMBER() OVER (ORDER BY lr0.score DESC, lr0.solved_count DESC, lr0.last_solve_at ASC NULLS LAST, lr0.team_id ASC)::int AS new_rank
+    SELECT lr0.id,
+           ROW_NUMBER() OVER (
+               ORDER BY lr0.score DESC,
+                        CASE WHEN c.mode = 1 THEN lr0.solved_count END DESC,
+                        CASE WHEN c.mode = 1 THEN lr0.last_solve_at END ASC NULLS LAST,
+                        lr0.team_id ASC
+           )::int AS new_rank
     FROM ladder_rank lr0
+    JOIN contest c ON c.tenant_id = lr0.tenant_id AND c.id = lr0.contest_id
     WHERE lr0.tenant_id = $1 AND lr0.contest_id = $2
+      AND NOT EXISTS (
+          SELECT 1 FROM cheat_record cr
+          WHERE cr.tenant_id = lr0.tenant_id
+            AND cr.contest_id = lr0.contest_id
+            AND cr.team_id = lr0.team_id
+            AND cr.action = 3
+      )
 )
 UPDATE ladder_rank lr
 SET rank = ranked.new_rank, updated_at = now()

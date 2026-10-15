@@ -3,6 +3,7 @@ package contest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -158,6 +159,42 @@ func (s *Service) resolvePublishedContestTenant(ctx context.Context, contestID i
 		return 0, apperr.ErrContestNotFound
 	}
 	return organizerTenantID, nil
+}
+
+// resolveContestTenantForProblemRead 解析题目摘要读取所需的组织租户。
+// 已发布竞赛沿用跨校公开入口;草稿只允许同租户内的教师作者或学校管理员读取,
+// 学生即使与组织租户相同也不能通过共享摘要接口观察草稿存在性。
+func (s *Service) resolveContestTenantForProblemRead(ctx context.Context, id tenant.Identity, contestID int64) (int64, error) {
+	organizerTenantID, err := s.resolvePublishedContestTenant(ctx, contestID)
+	if err == nil {
+		return organizerTenantID, nil
+	}
+	if !errors.Is(err, apperr.ErrContestNotFound) {
+		return 0, err
+	}
+	teacher, err := s.roles.HasRole(ctx, id.AccountID, contracts.RoleTeacher)
+	if err != nil {
+		return 0, apperr.ErrForbidden.WithCause(err)
+	}
+	schoolAdmin, err := s.isSchoolAdmin(ctx, id.AccountID)
+	if err != nil {
+		return 0, err
+	}
+	if !teacher && !schoolAdmin {
+		return 0, apperr.ErrContestNotFound
+	}
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if _, err := s.loadContestForRead(ctx, tx, id.TenantID, id.AccountID, contestID); err != nil {
+			if errors.Is(err, apperr.ErrForbidden) {
+				return apperr.ErrContestNotFound
+			}
+			return err
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	return id.TenantID, nil
 }
 
 // contestReadAccessAllowed 判断当前身份是否具备已发布竞赛的读取资格。

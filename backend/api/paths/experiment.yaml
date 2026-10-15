@@ -9,6 +9,7 @@
     parameters:
       - { name: course_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
       - { $ref: "#/components/parameters/StatusQuery" }
+      - { $ref: "#/components/parameters/KeywordQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [experiment]
@@ -36,6 +37,7 @@
     security: [{ bearerAuth: [] }]
     parameters:
       - { name: course_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
+      - { $ref: "#/components/parameters/KeywordQuery" }
       - { $ref: "#/components/parameters/PageQuery" }
       - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -168,6 +170,14 @@
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/experiment/instances/{id}/report:
+  get:
+    tags: [experiment]
+    summary: 查看本人实验报告结果
+    operationId: experimentGetStudentReport
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [experiment]
     summary: 提交实验报告

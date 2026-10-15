@@ -1,11 +1,8 @@
 // ===== M7 Experiment 模块 =====
 
 import type { SnowflakeID } from './common'
-import type {
-  CompositionComponentRef,
-  CompositionLink,
-  CompositionRuntimeRef,
-} from './composition'
+import type { CompositionComponentRef, CompositionLink, CompositionRuntimeRef } from './composition'
+import type { ContentType } from '../constants/content'
 import type { SandboxAccessProfile } from '../constants/composition'
 import type { JudgeSandboxMode } from '../constants/judge'
 import type {
@@ -84,6 +81,9 @@ export interface StudentCheckpointConfig {
   id: string
   score: number
   mode?: JudgeSandboxMode
+  title?: string
+  type?: ContentType
+  face?: Record<string, unknown>
 }
 
 export interface StudentStageConfig {
@@ -301,6 +301,16 @@ export interface ReportDTO {
   student_name: string
   student_no?: string
   content_ref: string
+  manual_score: number
+  comment?: string
+  status: ExperimentReportStatus
+  submitted_at: string
+}
+
+/** 学生读取本人报告批改结果的安全投影,不包含对象存储引用。 */
+export interface StudentReportDTO {
+  id: SnowflakeID
+  instance_id: SnowflakeID
   manual_score: number
   comment?: string
   status: ExperimentReportStatus

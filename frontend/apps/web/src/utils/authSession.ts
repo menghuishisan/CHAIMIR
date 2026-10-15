@@ -6,9 +6,47 @@ import { errorDiagnostics } from './userFacingError'
 
 const MUST_CHANGE_PASSWORD_KEY = 'chaimir.must_change_password'
 const PENDING_ENTRY_PATH_KEY = 'chaimir.pending_entry_path'
+const AUTH_SESSION_CHANNEL = 'chaimir-auth-session'
 let accessToken: string | null = null
 let mustChangePassword = false
 let pendingEntryPath: string | null = null
+let authChannel: BroadcastChannel | undefined
+const authSessionListeners = new Set<() => void>()
+
+/** authSessionChannel 初始化只传递固定变更信号,不广播账号、租户或令牌。 */
+function authSessionChannel(): BroadcastChannel | undefined {
+  if (authChannel) return authChannel
+  if (typeof BroadcastChannel === 'undefined') return undefined
+  try {
+    authChannel = new BroadcastChannel(AUTH_SESSION_CHANNEL)
+    authChannel.addEventListener('message', (event: MessageEvent<unknown>) => {
+      if (!isAuthSessionChangedMessage(event.data)) return
+      for (const listener of authSessionListeners) listener()
+    })
+    return authChannel
+  } catch (error) {
+    console.warn('auth_session_broadcast_unavailable', {
+      operation: 'initialize_auth_session_channel',
+      error: errorDiagnostics(error),
+    })
+    return undefined
+  }
+}
+
+/** isAuthSessionChangedMessage 只接受固定的无敏感字段消息。 */
+function isAuthSessionChangedMessage(value: unknown): value is { type: 'session-changed' } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    value.type === 'session-changed'
+  )
+}
+
+/** notifyAuthSessionChanged 通知其他标签重新认证,不传递任何凭据或身份信息。 */
+function notifyAuthSessionChanged(): void {
+  authSessionChannel()?.postMessage({ type: 'session-changed' })
+}
 
 /** clearPasswordChangeState 清理非敏感的改密拦截状态。 */
 function clearPasswordChangeState(): void {
@@ -50,14 +88,29 @@ export function persistLoginTokens(response: LoginResponse): void {
   } else {
     clearPasswordChangeState()
   }
+  notifyAuthSessionChanged()
 }
 
 /**
  * clearLoginTokens 清除内存 access token 和非敏感会话状态；HttpOnly cookie 由登出接口删除。
  */
 export function clearLoginTokens(): void {
+  clearLoginTokensLocally()
+  notifyAuthSessionChanged()
+}
+
+/** clearLoginTokensLocally 清除收到其他标签会话变更后的本地状态,不再次广播。 */
+export function clearLoginTokensLocally(): void {
   accessToken = null
   clearPasswordChangeState()
+}
+
+/** subscribeToAuthSessionChanges 监听其他浏览器标签的会话变更通知。 */
+export function subscribeToAuthSessionChanges(listener: () => void): () => void {
+  const channel = authSessionChannel()
+  if (!channel) return () => undefined
+  authSessionListeners.add(listener)
+  return () => authSessionListeners.delete(listener)
 }
 
 /**
