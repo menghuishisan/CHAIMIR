@@ -48,6 +48,10 @@ const (
 	CodeSandboxSelftestSpecInvalid = "21023"
 	// CodeSandboxRuntimePersistFailed 表示运行时配置保存失败。
 	CodeSandboxRuntimePersistFailed = "21024"
+	// CodeSandboxImageConflict 表示同一运行时下镜像地址或版本号重复。
+	CodeSandboxImageConflict = "21025"
+	// CodeSandboxImagePersistFailed 表示运行环境镜像登记或保存失败。
+	CodeSandboxImagePersistFailed = "21026"
 )
 
 const (
@@ -224,6 +228,10 @@ var (
 	ErrSandboxSelftestSpecInvalid = New(CodeSandboxSelftestSpecInvalid, "运行环境自检配置不正确")
 	// ErrSandboxRuntimePersistFailed 表示运行环境配置保存失败。
 	ErrSandboxRuntimePersistFailed = New(CodeSandboxRuntimePersistFailed, "运行环境配置暂时无法保存,请稍后重试")
+	// ErrSandboxImageConflict 引导先检查已经登记的镜像与版本。
+	ErrSandboxImageConflict = New(CodeSandboxImageConflict, "该镜像或版本已登记,请检查后重试")
+	// ErrSandboxImagePersistFailed 表示镜像登记失败,内部原因仅保留在错误链。
+	ErrSandboxImagePersistFailed = New(CodeSandboxImagePersistFailed, "运行环境镜像暂时无法保存,请稍后重试")
 )
 
 var (

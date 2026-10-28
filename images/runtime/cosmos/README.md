@@ -57,7 +57,7 @@ Cosmos SDK/Tendermint 单链教学运行时镜像。
 ## readiness / health
 
 - 未声明组件 readiness probe；容器运行不等于就绪或业务成功。
-- 镜像自检 gaia-version：["/usr/local/bin/gaiad","version"]。
+- 镜像自检 gaia-version：["/usr/local/bin/gaiad","version","--home","/tmp/chaimir-cosmos-selftest"]。版本查询也会准备HOME,必须显式指向临时可写域;不写只读根或正式链状态。
 
 ## 清理
 

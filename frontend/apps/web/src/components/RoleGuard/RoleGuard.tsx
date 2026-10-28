@@ -3,7 +3,7 @@
 // 校验通过 → 经 SessionContext 下发账号供壳层与页面复用。
 
 import React, { useEffect } from 'react'
-import { Navigate, Outlet } from 'react-router'
+import { Navigate, Outlet, useLocation } from 'react-router'
 import { LoaderCircle, ShieldAlert } from 'lucide-react'
 import type { UserRole } from '@chaimir/api-client'
 import { Button } from '@chaimir/ui'
@@ -47,7 +47,9 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles }) => {
  * VerifiedRoleGuard 读取 /me 校验会话有效性与角色归属。
  */
 const VerifiedRoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles }) => {
-  const resource = useAsyncResource(() => api.identity.getMe(), [])
+  const { pathname } = useLocation()
+  // 跨页时读取当前授权，不能让旧 /me 结果长期保留已关闭模块的导航。
+  const resource = useAsyncResource(() => api.identity.getMe(), [pathname])
 
   if (resource.status === 'loading') {
     return <AppStatusScreen icon={LoaderCircle} spinning title="正在校验访问权限" />
@@ -56,13 +58,14 @@ const VerifiedRoleGuard: React.FC<RoleGuardProps> = ({ allowedRoles }) => {
   if (resource.status === 'error' || !resource.data) {
     // 会话失效不在此处判定:后端签发登录失效码时,API 客户端的 onUnauthorized
     // 已清令牌并按所在角色区跳登录(app/api.ts),全站单一出口。
-    // 这里只表达「校验没能完成」这一类可重试失败,并带出后端报障编号。
+    // 资源钩子已将异常归一为用户向文案,保留学校停用等真实拒绝原因。
+    // 报障编号独立交给共享状态屏,不重复拼接,失败期间不挂载受保护内容。
     return (
       <AppStatusScreen
         icon={ShieldAlert}
         tone="danger"
         title="暂时无法校验访问权限"
-        description="请检查网络后重试;若持续失败,请联系本校管理员。"
+        description={resource.error?.message ?? '请检查网络后重试;若持续失败,请联系本校管理员。'}
         traceId={resource.error?.traceId}
         actions={
           <Button variant="on-dark" onClick={resource.reload}>

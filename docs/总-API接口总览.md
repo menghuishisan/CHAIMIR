@@ -71,6 +71,10 @@
 
 身份会话错误补充:`12015` 表示 Refresh 或服务端会话无效,`12017` 表示已鉴权请求缺少服务端会话上下文；二者都要求客户端清除本地 access token 并重新登录。仅通用 `11001` 在存在 Refresh Cookie 时触发一次令牌轮转。
 
+组织错误补充:`13025` 表示院系编码在本校已被使用;`13026` 表示组织仍被下级组织或账号引用,需先调整归属后删除。组织变更和师生档案挂靠共用租户组织事务锁,软删除不依赖物理外键阻止引用。
+
+租户功能错误补充:`13027` 表示学校未开放本次操作需要的模块。HTTP、WebSocket、浏览器工具及匿名分享按当前租户配置与资源来源检查,不注销会话;`GET /me.enabled_modules` 返回规范顺序的启用集合,供本角色导航和深链门禁使用。
+
 ### 6. 跨模块调用约定
 - 业务实时数据经 M10 `POST /notify/push` 或模块授权后的进度 WS 入口推送;topic 必须带租户前缀 `tenant:{tenant_id}:...`;引擎内部字节流(终端/仿真 stream)走各模块自有 WS。
 - 资源回收:M7/M8 调 M2 `/sandboxes/recycle`、M4 `/sessions/recycle`(按 `scope_ref`);稳定业务归属仍使用 `source_ref`。
@@ -87,7 +91,7 @@
 - `/platform/applications`、`/platform/tenants`:入驻审核、租户管理 `[平台管理员]`。
 - `/tenant/config`、`/tenant/sso`:租户配置。`POST /tenant/logo` 上传校徽(multipart,**上传即生效**,同一请求内落 `logo_ref` 并返回新的配置视图),`DELETE /tenant/logo` 移除;`PATCH /tenant/config` 不接受 `logo_ref`。`GET /tenant/brand` 是**免鉴权且无参数**的品牌读取口,返回 `{ display_name, logo_image }`,仅 `deploy_mode=school` 下有内容 —— SaaS 登录页面对未确定租户,本无校徽可显示,而带 `tenant_code` 的公开端点会成为廉价的租户枚举通道。校徽以 data URI 内联下发而不签发投放授权:登录页没有会话,授权绑不到账号(详见 M1 接口设计 §4)。
 - `/org/*`:院系/专业/班级。读对教师/学校管理员开放,写只对学校管理员开放;`GET /org/classes/{id}/students?page=&size=` 是教师侧挑选学生的唯一入口,只出编号/姓名/学号并返回 `{list,total,page,size}`。
-- `/accounts/*`:账号导入(预览+提交)、增改停用、授予管理员。**只对学校管理员开放** —— 它是账号目录(带手机号掩码、状态、角色),业务模块与教师端取学生一律走 `/org/classes/{id}/students` 或 `contracts.IdentityService`。
+- `/accounts/*`:账号导入(预览+提交)、增改停用、授予管理员。**只对学校管理员开放** —— 它是账号目录(带手机号掩码、状态、角色),业务模块与教师端取学生一律走 `/org/classes/{id}/students` 或 `contracts.IdentityService`。账号与组织的未完成导入统一使用`GET /import-previews?type=student|teacher|org&page=&size=`发现、`GET /import-previews/{id}`恢复、`DELETE /import-previews/{id}`明确放弃,仅当前租户本人可用,公开DTO不含原始导入行或初始密码。
 - `/me/*`:个人中心。`GET /me`、`POST /me/password`、`GET /me/sessions` 对租户账号与平台管理员都开放(平台身份走独立分支,只返回姓名/状态/角色);`POST /me/phone` 只对租户账号开放,平台账号无手机号字段。
 - 审计:M1 只持有并写入 `audit_log`,不注册查询路由;对外查询与导出统一在 M9 `/admin/audit`、`/admin/audit/export`。
 
@@ -121,6 +125,7 @@
 ### M2 沙箱引擎 `/api/v1/sandbox`
 - `/runtimes`、`/tools`:运行时/工具管理 + 接入即测 `[平台管理员]`;镜像预拉取提供触发与状态查询,完成以全目标节点真实拉取成功为准。
 - `/catalog`:能力编排目录 `[教师/学校管理员/平台管理员]` —— 返回可选择的运行时、工具和基础设施能力摘要及参数 schema,不返回原始 WorkloadSpec、镜像 digest 地址、命令白名单或自检详情。业务模块提交声明式 `CompositionSpec` 由 M2 唯一编译;依赖自动展开结果只在编译预览和发布快照中出现。
+- `POST /catalog/composition-preview`:只读复用M2目录与依赖解析返回连接候选和完整性,唯一候选预选、多候选明确选择;不决定业务访问边界、不写快照、不预拉取。四编排入口共用,最终仍提交显式links并经原编译器校验。
 - `/sandboxes`:创建/查询/销毁/回收 `[内部]`;创建请求只接受已编译组合快照 digest、`source_ref`、`scope_ref`、访问主体和生命周期参数;拒绝运行时/工具/镜像/命令/端口等旁路字段。`WS /sandboxes/{id}/progress`、`/terminal`。
 - `/sandboxes/{id}/files`、`/tools/{code}/*`、`/command-tools/{code}/run`:文件、Web 工具代理和受控命令工具 `[用户]`;竞赛授权网关的保存接口只返回工作区修订号,不暴露内部代码对象引用或哈希。Web 工具代理支持浏览器一次性 `token` 入口并换成路径受限 Cookie。
 - `GET /sandboxes/{id}` 响应中的 `capabilities` 由运行时命令清单与服务端注册表计算,是前端文件、终端、命令工具和链操作入口的权威能力声明。
@@ -156,7 +161,7 @@
 - `/chapters`、`/lessons`:章节课时**写入口**(课时关联 M7 实验/M4 仿真);只读一律走 `GET /courses/{id}/outline`,它一次返回课程 + 章节 + 课时 + 本人进度,不再另设章节/课时列表接口。`POST /lessons/{id}/material` 上传视频或附件、`POST /lessons/{id}/material/access` 换取投放授权(视频 `mode=stream` 可续播,附件 `mode=download` 一次性取件)。
 - `/courses/join`、`/members`:选课成员。`POST /courses/{id}/members/batch` 的粒度是一个班级(请求体 `{ class_id }`),学生由 M6 经 `contracts.IdentityService.ListClassStudents` 解析;成员响应带 `student_name`/`student_no`,客户端不再另取账号目录。
 - `/assignments/*`、`/submissions/*`:作业/提交/批改(判题调 M3)。`GET /courses/{id}/assignments?page=&size=` 与 `GET /assignments/{id}/submissions` 师生同路由按身份分视角:授课教师见含草稿全量与全班提交,课程内学生只见已发布作业与本人提交;列表统一返回 `{list,total,page,size}` —— 这两条是学生取得作业编号与提交编号的唯一入口。
-- `/posts`、`/announcements`、`/review`:讨论/公告/评价。`GET /courses/{id}/announcements?page=&size=` 返回分页信封。
+- `/posts`、`/announcements`、`/review`:讨论/公告/评价。`GET /courses/{id}/announcements?page=&size=` 返回分页信封;学生本人评价使用`GET /courses/{id}/review`读取、`POST`创建或更新,均要求已加入且课程结课或归档;未评价返回`review:null`。
 - `/courses/{id}/grades/*`:单课程成绩;`GET /courses/{id}/grades?page=&size=` 返回分页信封,`/grades` 只读契约供 M11 聚合;M6 改分后发布 `teaching.grade.updated` 事件。
 
 ### M7 实验 `/api/v1/experiment`

@@ -17,6 +17,7 @@ import type {
 } from '@chaimir/api-client'
 import { api } from '../../../../app/api'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { isExplicitComponent } from '../../../sandbox/composition'
 
 /** 向导四步:与 wizard_step 的取值一一对应(1 起,便于服务端读出即定位)。 */
 export const WIZARD_STEPS = [
@@ -51,6 +52,35 @@ export function emptyComponents(): ComponentConfigRequest {
   return { envs: [], sims: [], checkpoints: [], stages: [] }
 }
 
+/** stageAssignmentError 校验分阶段时所有资源各归属一个阶段,与服务端规则一致。 */
+export function stageAssignmentError(components: ComponentConfigRequest): string | null {
+  if (components.stages.length === 0) return null
+  const assignedEnvs = new Set<string>()
+  const assignedSims = new Set<string>()
+  for (const stage of components.stages) {
+    const envs = stage.components.envs ?? []
+    const sims = stage.components.sims ?? []
+    if (envs.length === 0 && sims.length === 0)
+      return '有阶段没有启用任何环境或场景,请补齐或删除该阶段'
+    for (const id of envs) {
+      if (!components.envs.some((env) => env.id === id) || assignedEnvs.has(id)) {
+        return '阶段中的代码环境已被移除或重复分配,请重新选择'
+      }
+      assignedEnvs.add(id)
+    }
+    for (const id of sims) {
+      if (!components.sims.some((sim) => sim.id === id) || assignedSims.has(id)) {
+        return '阶段中的仿真场景已被移除或重复分配,请重新选择'
+      }
+      assignedSims.add(id)
+    }
+  }
+  return assignedEnvs.size !== components.envs.length ||
+    assignedSims.size !== components.sims.length
+    ? '请把每个代码环境和仿真场景分配到一个阶段'
+    : null
+}
+
 /**
  * draftFromExperiment 把服务端实验定义转成向导草稿。
  * 这是「进入向导先拉服务端草稿」的落点:服务端草稿为权威,本地不预填任何内容。
@@ -74,12 +104,16 @@ export function draftFromExperiment(experiment: Experiment): ExperimentDraft {
   }
 }
 
-/** envRequestFromProjection 剥掉读取投影里的服务端摘要,只留可提交的声明。 */
+/** envRequestFromProjection 剥掉摘要和自动依赖,未编辑环境也只提交显式声明。 */
 function envRequestFromProjection({
   composition_digest: _digest,
   ...declaration
 }: Experiment['components']['envs'][number]): EnvComponentRequest {
-  return declaration
+  return {
+    ...declaration,
+    infra: declaration.infra.filter(isExplicitComponent),
+    tools: declaration.tools.filter(isExplicitComponent),
+  }
 }
 
 /** toRequest 把草稿转成后端更新请求;course_id 可缺省(不挂课程的独立实验)。 */
@@ -117,13 +151,10 @@ export interface WizardPersistence {
  * useWizardPersistence 管理向导的服务端持久化与步骤推进。
  * 步骤下标以服务端 wizard_step 为初值:刷新后回到上次所在的步骤。
  */
-export function useWizardPersistence(
-  experimentId: string,
-  initialStep: number,
-): WizardPersistence {
+export function useWizardPersistence(experimentId: string, initialStep: number): WizardPersistence {
   // 服务端 wizard_step 从 1 起;越界时夹到有效范围,避免刷新后落到不存在的步骤
   const [stepIndex, setStepIndex] = useState(() =>
-    Math.min(Math.max(initialStep - 1, 0), WIZARD_STEP_COUNT - 1),
+    Math.min(Math.max(initialStep - 1, 0), WIZARD_STEP_COUNT - 1)
   )
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string>()
@@ -149,7 +180,7 @@ export function useWizardPersistence(
         setSaving(false)
       }
     },
-    [experimentId],
+    [experimentId]
   )
 
   const goBack = useCallback(() => {

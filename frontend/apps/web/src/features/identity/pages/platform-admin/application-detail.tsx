@@ -36,6 +36,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
@@ -225,23 +226,22 @@ function ApproveModal({ application, onClose, onDone }: ReviewModalProps) {
   const [tenantCode, setTenantCode] = useState('')
   const [adminName, setAdminName] = useState(application.contact_name)
   const [adminPhone, setAdminPhone] = useState(application.contact_phone)
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
   const [activation, setActivation] = useState<{ code?: string; tenantId: string }>()
 
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    tenantCode: TENANT_CODE_PATTERN.test(tenantCode.trim())
+      ? null
+      : '用小写字母开头,只含小写字母、数字与连字符,长度 3 到 32 位',
+    adminName: adminName.trim() === '' ? '请填写管理员姓名' : null,
+    adminPhone: isPhoneNumber(adminPhone) ? null : '请填写有效的 11 位手机号',
+  }), [adminName, adminPhone, tenantCode]))
+
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const next: Record<string, string | null> = {
-        tenantCode: TENANT_CODE_PATTERN.test(tenantCode.trim())
-          ? null
-          : '用小写字母开头,只含小写字母、数字与连字符,长度 3 到 32 位',
-        adminName: adminName.trim() === '' ? '请填写管理员姓名' : null,
-        adminPhone: isPhoneNumber(adminPhone) ? null : '请填写有效的 11 位手机号',
-      }
-      setErrors(next)
-      if (Object.values(next).some((value) => value !== null)) return
+      if (!validate()) return
 
       setFormError(undefined)
       setWorking(true)
@@ -259,7 +259,7 @@ function ApproveModal({ application, onClose, onDone }: ReviewModalProps) {
         setWorking(false)
       }
     },
-    [adminName, adminPhone, application.application_id, tenantCode],
+    [adminName, adminPhone, application.application_id, tenantCode, validate],
   )
 
   // 激活码展示态:关闭即刷新,不让管理员以为没开通成功
@@ -398,13 +398,14 @@ function RejectModal({ application, onClose, onDone }: ReviewModalProps) {
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    reason: reason.trim() === '' ? '请写下驳回理由,学校需要知道该补什么' : null,
+  }), [reason]))
+
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (reason.trim() === '') {
-        setFormError('请写下驳回理由,学校需要知道该补什么')
-        return
-      }
+      if (!validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -417,7 +418,7 @@ function RejectModal({ application, onClose, onDone }: ReviewModalProps) {
         setWorking(false)
       }
     },
-    [application.application_id, onDone, reason],
+    [application.application_id, onDone, reason, validate],
   )
 
   return (
@@ -443,17 +444,19 @@ function RejectModal({ application, onClose, onDone }: ReviewModalProps) {
               label="驳回理由"
               htmlFor="reject-reason"
               required
-              error={formError}
+              error={errors.reason}
               helper="写清缺什么或哪里不符合,便于学校补齐后再来"
             >
               <Textarea
                 id="reject-reason"
                 value={reason}
                 rows={4}
-                invalid={Boolean(formError)}
+                invalid={!!errors.reason}
                 onChange={(event) => setReason(event.target.value)}
+                onBlur={() => validate(['reason'])}
               />
             </FormField>
+            {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </ModalBody>
           <ModalFooter>
             <Button type="button" variant="outline" onClick={onClose}>

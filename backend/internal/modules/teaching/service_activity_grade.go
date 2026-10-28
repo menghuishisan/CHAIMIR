@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -138,7 +139,20 @@ func (s *Service) CreatePost(ctx context.Context, courseID int64, req PostReques
 		if err := s.ensureCourseReadable(ctx, tx, id.TenantID, courseID, id.AccountID); err != nil {
 			return err
 		}
+		// 父帖在同一事务内加锁读取,隔离课程并阻止校验与创建之间被删除。
+		var parentContent *string
+		if req.ParentID > 0 {
+			parent, err := tx.GetPost(ctx, id.TenantID, req.ParentID.Int64())
+			if err != nil {
+				return apperr.ErrTeachingDiscussionInvalid.WithCause(err)
+			}
+			if parent.CourseID != courseID {
+				return apperr.ErrTeachingDiscussionInvalid
+			}
+			parentContent = &parent.Content
+		}
 		post, err = tx.CreatePost(ctx, DiscussionPost{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: courseID, ParentID: req.ParentID.Int64(), AuthorID: id.AccountID, Content: req.Content})
+		post.ParentContent = parentContent
 		return err
 	}); err != nil {
 		return PostDTO{}, mapCourseError(err)
@@ -326,6 +340,48 @@ func (s *Service) PinAnnouncement(ctx context.Context, announcementID int64, pin
 	return announcementDTO(item), nil
 }
 
+// ensureCourseReviewAccess对评价读写复用同一成员和课程结束门禁。
+func ensureCourseReviewAccess(ctx context.Context, tx TxStore, tenantID, courseID, studentID int64) error {
+	if _, err := tx.GetCourseMember(ctx, tenantID, courseID, studentID); err != nil {
+		return apperr.ErrTeachingCourseForbidden.WithCause(err)
+	}
+	course, err := tx.GetCourse(ctx, tenantID, courseID)
+	if err != nil {
+		return err
+	}
+	if course.Status != CourseStatusEnded && course.Status != CourseStatusArchived {
+		return apperr.ErrTeachingCourseStateInvalid
+	}
+	return nil
+}
+
+// GetMyCourseReview读取当前成员本人已保存的评价,未评价返回明确空值。
+func (s *Service) GetMyCourseReview(ctx context.Context, courseID int64) (MyCourseReviewDTO, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return MyCourseReviewDTO{}, err
+	}
+	var result MyCourseReviewDTO
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		if err := ensureCourseReviewAccess(ctx, tx, id.TenantID, courseID, id.AccountID); err != nil {
+			return err
+		}
+		review, err := tx.GetReview(ctx, id.TenantID, courseID, id.AccountID)
+		if isNoRows(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		dto := reviewDTO(review)
+		result.Review = &dto
+		return nil
+	}); err != nil {
+		return MyCourseReviewDTO{}, mapCourseError(err)
+	}
+	return result, nil
+}
+
 // ReviewCourse 创建或更新课程评价。
 func (s *Service) ReviewCourse(ctx context.Context, courseID int64, req ReviewRequest) (ReviewDTO, error) {
 	id, err := currentIdentity(ctx)
@@ -338,8 +394,8 @@ func (s *Service) ReviewCourse(ctx context.Context, courseID int64, req ReviewRe
 	}
 	var review CourseReview
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		if _, err := tx.GetCourseMember(ctx, id.TenantID, courseID, id.AccountID); err != nil {
-			return apperr.ErrTeachingCourseForbidden
+		if err := ensureCourseReviewAccess(ctx, tx, id.TenantID, courseID, id.AccountID); err != nil {
+			return err
 		}
 		review, err = tx.UpsertReview(ctx, CourseReview{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: courseID, StudentID: id.AccountID, Rating: req.Rating, Comment: req.Comment})
 		return err
@@ -371,6 +427,12 @@ func (s *Service) SetGradeWeights(ctx context.Context, courseID int64, req Grade
 		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
 			return err
 		}
+		if err := tx.EnsureCourseGradesWritable(ctx, id.TenantID, courseID); err != nil {
+			return err
+		}
+		if _, err := validateCourseGradeWeights(ctx, tx, id.TenantID, courseID, weights); err != nil {
+			return err
+		}
 		weights, err = tx.ReplaceGradeWeights(ctx, id.TenantID, courseID, weights)
 		return err
 	}); err != nil {
@@ -381,6 +443,35 @@ func (s *Service) SetGradeWeights(ctx context.Context, courseID int64, req Grade
 		out = append(out, gradeWeightDTO(weight))
 	}
 	return out, nil
+}
+
+// validateCourseGradeWeights 保存和计算共用课程有效来源，拒绝失效对象及非法满分。
+func validateCourseGradeWeights(ctx context.Context, tx TxStore, tenantID, courseID int64, weights []GradeWeight) (map[string]CourseGradeSource, error) {
+	items := make([]GradeWeightInput, 0, len(weights))
+	for _, weight := range weights {
+		items = append(items, GradeWeightInput{SourceType: weight.SourceType, SourceRef: weight.SourceRef, Weight: weight.Weight})
+	}
+	req, err := validateGradeWeightRequest(GradeWeightRequest{Items: items})
+	if err != nil {
+		return nil, err
+	}
+	sources, err := tx.ListCourseGradeSources(ctx, tenantID, courseID)
+	if err != nil {
+		return nil, err
+	}
+	available := make(map[string]CourseGradeSource, len(sources))
+	for _, source := range sources {
+		if !validGradeScore(source.MaxScore) || source.MaxScore <= 0 {
+			return nil, apperr.ErrTeachingGradeWeightInvalid
+		}
+		available[fmt.Sprintf("%d:%s", source.SourceType, source.SourceRef.String())] = source
+	}
+	for _, item := range req.Items {
+		if _, ok := available[fmt.Sprintf("%d:%s", item.SourceType, item.SourceRef)]; !ok {
+			return nil, apperr.ErrTeachingGradeWeightInvalid.WithCause(fmt.Errorf("课程成绩来源不可用: course_id=%d source_type=%d source_ref=%s", courseID, item.SourceType, item.SourceRef))
+		}
+	}
+	return available, nil
 }
 
 // ListGradeWeights 查询课程成绩权重。
@@ -422,55 +513,63 @@ func (s *Service) ComputeCourseGrades(ctx context.Context, courseID int64) ([]Gr
 		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
 			return err
 		}
+		if err := tx.EnsureCourseGradesWritable(ctx, id.TenantID, courseID); err != nil {
+			return err
+		}
 		weights, err := tx.ListGradeWeights(ctx, id.TenantID, courseID)
 		if err != nil {
 			return err
 		}
-		members, _, err := tx.ListCourseMembers(ctx, id.TenantID, courseID, 1, s.cfg.CourseGradesMaxRows)
+		// 在读取提交和写入成绩前检查整份配置,避免空配置或失效来源覆盖全班成绩。
+		sources, err := validateCourseGradeWeights(ctx, tx, id.TenantID, courseID, weights)
 		if err != nil {
 			return err
 		}
-		scores := map[int64]float64{}
+		scores := make(map[int64]float64)
 		for _, weight := range weights {
-			if weight.SourceType != GradeSourceAssignment {
-				continue
-			}
-			assignmentID, ok := ids.Parse(weight.SourceRef)
-			if !ok {
-				return apperr.ErrTeachingGradeWeightInvalid
-			}
-			// StudentID 留 0:成绩计算要覆盖全班每个学生的提交,不限定单人
-			// Status 留 0:成绩取各人最高分,未出分的提交按 0 分参与比较,不预先筛状态
-			subs, _, err := tx.ListSubmissionsByAssignment(ctx, SubmissionListQuery{
-				TenantID:     id.TenantID,
-				AssignmentID: assignmentID,
-				Page:         1,
-				Size:         s.cfg.CourseGradesMaxRows,
-			})
+			source := sources[fmt.Sprintf("%d:%s", weight.SourceType, weight.SourceRef)]
+			sourceScores, err := tx.ListGradeSourceScores(ctx, id.TenantID, source.SourceRef.Int64(), weight.SourceType)
 			if err != nil {
 				return err
 			}
-			best := map[int64]int32{}
-			for _, sub := range subs {
-				if sub.FinalScore > best[sub.StudentID] {
-					best[sub.StudentID] = sub.FinalScore
+			for _, item := range sourceScores {
+				if item.Pending {
+					return apperr.ErrTeachingGradePending.WithCause(fmt.Errorf("课程来源仍待评分: course_id=%d source_type=%d source_id=%s student_id=%d", courseID, source.SourceType, source.SourceRef.String(), item.StudentID))
 				}
-			}
-			for studentID, score := range best {
-				scores[studentID] += float64(score) * weight.Weight / 100
+				if !validGradeScore(item.Score) {
+					return apperr.ErrTeachingGradeInvalid
+				}
+				normalized := item.Score
+				if weight.SourceType != GradeSourceExperiment {
+					normalized = item.Score * 100 / source.MaxScore
+				}
+				if normalized > 100 {
+					return apperr.ErrTeachingGradeInvalid.WithCause(fmt.Errorf("课程来源得分超过满分: course_id=%d source_id=%s student_id=%d", courseID, source.SourceRef.String(), item.StudentID))
+				}
+				scores[item.StudentID] += normalized * weight.Weight / 100
 			}
 		}
-		grades = make([]CourseGrade, 0, len(members))
-		for _, member := range members {
-			grade, err := tx.UpsertCourseGrade(ctx, CourseGrade{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: courseID, StudentID: member.StudentID, AutoTotal: scores[member.StudentID], Credits: course.Credits})
+		grades = make([]CourseGrade, 0)
+		// 全部成员均在本事务内写入成绩及 outbox,任一页失败都不得提交部分结果。
+		for page := 1; ; page++ {
+			members, total, err := tx.ListCourseMembers(ctx, id.TenantID, courseID, page, pagex.MaximumSize())
 			if err != nil {
 				return err
 			}
-			if err := s.enqueueTeachingGradeEventOutbox(ctx, tx, grade.TenantID, grade.CourseID, grade.StudentID); err != nil {
-				return err
+			for _, member := range members {
+				grade, err := tx.UpsertCourseGrade(ctx, CourseGrade{ID: s.ids.Generate(), TenantID: id.TenantID, CourseID: courseID, StudentID: member.StudentID, AutoTotal: scores[member.StudentID], Credits: course.Credits})
+				if err != nil {
+					return err
+				}
+				if err := s.enqueueTeachingGradeEventOutbox(ctx, tx, grade.TenantID, grade.CourseID, grade.StudentID); err != nil {
+					return err
+				}
+				grade.Credits = course.Credits
+				grades = append(grades, grade)
 			}
-			grade.Credits = course.Credits
-			grades = append(grades, grade)
+			if int64(page)*int64(pagex.MaximumSize()) >= total || len(members) == 0 {
+				break
+			}
 		}
 		return nil
 	}); err != nil {
@@ -534,6 +633,9 @@ func (s *Service) OverrideGrade(ctx context.Context, courseID, studentID int64, 
 			return err
 		}
 		if err := ensureTeacherOwned(course, id.AccountID); err != nil {
+			return err
+		}
+		if err := tx.EnsureCourseGradesWritable(ctx, id.TenantID, courseID); err != nil {
 			return err
 		}
 		grade, err = tx.OverrideCourseGrade(ctx, id.TenantID, courseID, studentID, req.Total)
@@ -763,8 +865,11 @@ func (s *Service) deleteGradeExportRequest(ctx context.Context, req CourseGradeE
 
 // HandleGradeLockChanged 处理 M11 驱动的写保护投影事件。
 func (s *Service) HandleGradeLockChanged(ctx context.Context, event contracts.GradeReviewLockChangedEvent) error {
+	if event.TenantID <= 0 || event.CourseID <= 0 || event.ReviewID <= 0 || event.Revision <= 0 {
+		return apperr.ErrTeachingGradeInvalid
+	}
 	return s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
-		return tx.SetCourseGradesLock(ctx, event.TenantID, event.CourseID, event.Locked)
+		return tx.SetCourseGradesLock(ctx, event.TenantID, event.CourseID, event.Locked, event.Revision)
 	})
 }
 
@@ -827,6 +932,10 @@ func (s *Service) enqueueTeachingGradeEventOutbox(ctx context.Context, tx TxStor
 	if tenantID <= 0 || courseID <= 0 || studentID <= 0 || traceID == "" {
 		return apperr.ErrTeachingGradeEventPublishFailed
 	}
+	// 与课程写入共用行锁,事件捕获本次改分实际看到的解锁修订。
+	if err := tx.EnsureCourseGradesWritable(ctx, tenantID, courseID); err != nil {
+		return err
+	}
 	if _, err := tx.CreateTeachingGradeEventOutbox(ctx, s.ids.Generate(), tenantID, courseID, studentID, traceID, timex.Now()); err != nil {
 		return apperr.ErrTeachingGradeEventPublishFailed.WithCause(err)
 	}
@@ -870,8 +979,11 @@ func (s *Service) RunTeachingGradeEventOutboxOnce(ctx context.Context) error {
 
 // publishGradeEventOutboxItem 发布单条成绩事件并按结果回写 outbox 状态。
 func (s *Service) publishGradeEventOutboxItem(ctx context.Context, item TeachingGradeEventOutbox) error {
+	if item.Revision <= 0 || item.LockRevision < 0 || item.EventUpdatedAt.IsZero() {
+		return apperr.ErrTeachingGradeEventPublishFailed.WithCause(fmt.Errorf("成绩事件缺少权威修订或原始时间: outbox_id=%d", item.ID))
+	}
 	eventCtx := response.WithTrace(ctx, item.TraceID)
-	payload := contracts.TeachingGradeUpdatedEvent{TenantID: item.TenantID, TraceID: item.TraceID, CourseID: item.CourseID, StudentID: item.StudentID, UpdatedAt: item.EventUpdatedAt}
+	payload := contracts.TeachingGradeUpdatedEvent{Revision: item.Revision, LockRevision: item.LockRevision, TenantID: item.TenantID, TraceID: item.TraceID, CourseID: item.CourseID, StudentID: item.StudentID, UpdatedAt: item.EventUpdatedAt}
 	if err := s.bus.Publish(eventCtx, contracts.SubjectTeachingGradeUpdated, payload); err != nil {
 		s.recordTeachingGradeEventOutboxFailure(eventCtx, item, err)
 		return apperr.ErrTeachingGradeEventPublishFailed.WithCause(err)

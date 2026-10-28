@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/pkg/apperr"
 )
 
@@ -115,12 +116,12 @@ func ValidateTenantFeatureFlags(flags map[string]any) error {
 
 // isKnownTenantModule 判断租户功能开关是否属于平台登记的模块集合。
 func isKnownTenantModule(module string) bool {
-	switch module {
-	case TenantModuleTeaching, TenantModuleExperiment, TenantModuleContest, TenantModuleSim, TenantModuleGrade:
-		return true
-	default:
-		return false
+	for _, known := range contracts.TenantModules() {
+		if module == known {
+			return true
+		}
 	}
+	return false
 }
 
 // EnsureAccountCanLogin 校验账号状态是否允许进入认证成功路径。

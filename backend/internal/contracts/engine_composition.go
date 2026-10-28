@@ -113,6 +113,7 @@ type CompiledRuntimeSnapshot struct {
 	Eco            string          `json:"eco"`
 	AdapterLevel   int16           `json:"adapter_level"`
 	CapabilityImpl string          `json:"capability_impl"`
+	PluginRef      string          `json:"plugin_ref,omitempty"`
 	AdapterSpec    json.RawMessage `json:"adapter_spec"`
 	ImageURL       string          `json:"image_url"`
 	ImageVersion   string          `json:"image_version"`
@@ -221,19 +222,8 @@ func CanonicalDigest(spec SandboxCompositionSpec) (string, error) {
 	if strings.TrimSpace(spec.ID) == "" || !spec.AccessProfile.Valid() || strings.TrimSpace(spec.WorkspaceRuntimeInstance) == "" {
 		return "", fmt.Errorf("组合标识或访问配置无效")
 	}
-	if err := validateRuntimeRefs(spec.Runtimes); err != nil {
+	if err := ValidateCompositionRuntimeSelection(spec.Runtimes, spec.WorkspaceRuntimeInstance); err != nil {
 		return "", err
-	}
-	workspaceInstance := strings.TrimSpace(spec.WorkspaceRuntimeInstance)
-	workspaceFound := false
-	for _, runtime := range spec.Runtimes {
-		if strings.TrimSpace(runtime.InstanceCode) == workspaceInstance {
-			workspaceFound = true
-			break
-		}
-	}
-	if !workspaceFound {
-		return "", fmt.Errorf("工作区运行时实例未声明: %s", workspaceInstance)
 	}
 	canonical := normalizeComposition(spec)
 	b, err := json.Marshal(canonical)
@@ -242,6 +232,25 @@ func CanonicalDigest(spec SandboxCompositionSpec) (string, error) {
 	}
 	h := sha256.Sum256(b)
 	return "sha256:" + hex.EncodeToString(h[:]), nil
+}
+
+// ValidateCompositionRuntimeSelection 让连接预览与最终摘要共用实例、版本和工作区归属校验。
+func ValidateCompositionRuntimeSelection(runtimes []CompositionRuntimeRef, workspace string) error {
+	if err := validateRuntimeRefs(runtimes); err != nil {
+		return err
+	}
+	workspaceInstance := strings.TrimSpace(workspace)
+	workspaceFound := false
+	for _, runtime := range runtimes {
+		if strings.TrimSpace(runtime.InstanceCode) == workspaceInstance {
+			workspaceFound = true
+			break
+		}
+	}
+	if !workspaceFound {
+		return fmt.Errorf("工作区运行时实例未声明: %s", workspaceInstance)
+	}
+	return nil
 }
 
 // CanonicalSnapshotDigest 对完整编译结果生成摘要，确保目录变化不能静默改变已发布工作负载。

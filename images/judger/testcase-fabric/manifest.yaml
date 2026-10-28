@@ -43,6 +43,9 @@ judger:
   command:
     - run-fabric-tests
   exec_target: sandbox/testcase-fabric
+  sidecar_command:
+    - sleep
+    - "2147483647"
   env:
     - name: CHAIMIR_TEST_SCRIPT
       value: /judge-private/tests/run.sh

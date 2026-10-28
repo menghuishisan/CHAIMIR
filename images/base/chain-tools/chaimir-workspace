@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 本文件提供沙箱学生工作区的目录、文件、归档、脚本和终端入口。
+# 本文件提供公开工作区文件/终端入口及独立非学生容器的初始化脚本和清理入口。
 set -euo pipefail
 
 # fail 输出用户不可见的稳定错误标识,具体上下文由调用侧结构化记录。
@@ -26,9 +26,17 @@ workspace_path() {
     resolved="$(realpath -m "$root/$input")"
   fi
   case "$resolved" in
+    "$root/.chaimir-init-script"|"$root/.chaimir-init-script/"*) fail "workspace_path_reserved" ;;
     "$root"|"$root"/*) printf '%s\n' "$resolved" ;;
     *) fail "workspace_path_outside_root" ;;
   esac
+}
+
+# remove_init_script_copy 清除历史平台根副本,不跟随链接、不递归删除学生目录。
+remove_init_script_copy() {
+  local root
+  root="$(workspace_root "$1")"
+  rm -f -- "$root/.chaimir-init-script"
 }
 
 # read_file 输出工作区内文件内容。
@@ -120,20 +128,28 @@ unpack_tar() {
     fail "workspace_archive_invalid_path"
   fi
   tar -C "$destination" --no-same-owner --no-same-permissions -xf "$chaimir_unpack_archive"
+  remove_init_script_copy "$root"
   rm -f -- "$chaimir_unpack_archive"
   chaimir_unpack_archive=""
 }
 
-# run_script 在工作区内执行指定脚本,工作目录也必须位于同一工作区。
+# run_script 仅由非学生容器调用,把 stdin 脚本放入其私有临时目录,保留公开工作区产物。
 run_script() {
-  local root workdir script
+  local root workdir
   root="$(workspace_root "$1")"
   workdir="$(workspace_path "$root" "${2:-.}")"
-  script="$(workspace_path "$root" "$3")"
   [[ -d "$workdir" ]] || fail "workspace_workdir_not_found"
-  [[ -f "$script" ]] || fail "workspace_script_not_found"
+  umask 077
+  chaimir_init_script="$(mktemp /tmp/chaimir-init.XXXXXX)"
+  trap 'rm -f -- "${chaimir_init_script:-}"' EXIT
+  cat >"$chaimir_init_script"
+  [[ -s "$chaimir_init_script" ]] || fail "workspace_script_empty"
+  unset BASH_ENV ENV
   cd "$workdir"
-  exec bash "$script"
+  bash --noprofile --norc "$chaimir_init_script" </dev/null
+  rm -f -- "$chaimir_init_script"
+  chaimir_init_script=""
+  trap - EXIT
 }
 
 # terminal 在工作区根目录启动受控交互 shell。
@@ -169,13 +185,17 @@ selftest() {
 # main 只接受平台声明的固定动作,不解释任意子命令。
 main() {
   local action="${1:-}"
+  if [[ "$action" != selftest && $# -ge 2 ]]; then
+    remove_init_script_copy "$2"
+  fi
   case "$action" in
+    clean) [[ $# -eq 2 ]] || fail "workspace_invalid_arguments" ;;
     read) [[ $# -eq 3 ]] || fail "workspace_invalid_arguments"; read_file "$2" "$3" ;;
     write) [[ $# -eq 3 ]] || fail "workspace_invalid_arguments"; write_file "$2" "$3" ;;
     list) [[ $# -ge 2 && $# -le 3 ]] || fail "workspace_invalid_arguments"; list_files "$2" "${3:-.}" ;;
     pack) [[ $# -ge 2 && $# -le 3 ]] || fail "workspace_invalid_arguments"; pack_tar "$2" "${3:-.}" ;;
     unpack) [[ $# -ge 2 && $# -le 3 ]] || fail "workspace_invalid_arguments"; unpack_tar "$2" "${3:-.}" ;;
-    run) [[ $# -eq 4 ]] || fail "workspace_invalid_arguments"; run_script "$2" "$3" "$4" ;;
+    run) [[ $# -eq 3 ]] || fail "workspace_invalid_arguments"; run_script "$2" "$3" ;;
     terminal) [[ $# -eq 2 ]] || fail "workspace_invalid_arguments"; terminal "$2" ;;
     selftest) [[ $# -eq 1 ]] || fail "workspace_invalid_arguments"; selftest ;;
     *) fail "workspace_unknown_action" ;;

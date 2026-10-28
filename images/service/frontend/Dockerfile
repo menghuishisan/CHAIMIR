@@ -99,9 +99,9 @@ RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${N
             c-ares=1.34.8-r0 \
             curl=8.22.0-r0 \
             libcurl=8.22.0-r0 \
-            libcrypto3=3.5.8-r0 \
-            libexpat=2.8.4-r0 \
-            libssl3=3.5.8-r0 \
+            libcrypto3=3.5.9-r0 \
+            libexpat=2.9.0-r0 \
+            libssl3=3.5.9-r0 \
             libuuid=2.41.6-r1; then break; fi; \
         if [ "${attempt}" -eq 8 ]; then echo "安全包安装失败" >&2; exit 1; fi; \
         sleep $((attempt * 3)); \

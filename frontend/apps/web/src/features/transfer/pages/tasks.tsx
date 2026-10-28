@@ -68,14 +68,16 @@ export default function TransferTasksPage() {
   // 指标带取服务端全量口径,与表格的通道筛选无关:这里回答「我的任务整体如何」,
   // 表格回答「我筛的这一段是什么」。状态全集是 pending/running/retrying/succeeded/failed,
   // 因此「进行中」= 总数 − 已完成 − 失败 是精确减法,不是近似。
-  const totalCount = useResourceTotal((params) => api.transfer.listTasks(params), [])
+  const totalCount = useResourceTotal((params) => api.transfer.listTasks(params), [], tasks.refreshVersion)
   const succeededCount = useResourceTotal(
     (params) => api.transfer.listTasks({ status: TRANSFER_STATUS.SUCCEEDED, ...params }),
     [],
+    tasks.refreshVersion,
   )
   const failedCount = useResourceTotal(
     (params) => api.transfer.listTasks({ status: TRANSFER_STATUS.FAILED, ...params }),
     [],
+    tasks.refreshVersion,
   )
   const activeCount =
     totalCount === undefined || succeededCount === undefined || failedCount === undefined

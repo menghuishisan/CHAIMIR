@@ -50,6 +50,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { facetCount } from '../../../../utils/facets'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import { CONTENT_DIFFICULTIES, CONTENT_TYPES } from '../../options'
@@ -71,8 +72,9 @@ export default function TeacherExamsPage() {
   const papers = usePagedResource<Paper>((params) => api.content.listPapers(params), [])
 
   // 组卷方式分布取后端 facets.gen_mode:全量分组计数,不用当前页切片去数(§6.5.4)
-  const manualCount = facetCount(papers.data?.facets, 'gen_mode', PaperMode.MANUAL)
-  const randomCount = facetCount(papers.data?.facets, 'gen_mode', PaperMode.RANDOM)
+  const facets = papers.total === undefined ? undefined : papers.data?.facets
+  const manualCount = facetCount(facets, 'gen_mode', PaperMode.MANUAL)
+  const randomCount = facetCount(facets, 'gen_mode', PaperMode.RANDOM)
 
   const columns: TableColumn<Paper>[] = [
     {
@@ -115,6 +117,18 @@ export default function TeacherExamsPage() {
       ),
     },
   ]
+
+  if (createOpen) {
+    return (
+      <PaperFormPage
+        onClose={() => setCreateOpen(false)}
+        onSaved={() => {
+          setCreateOpen(false)
+          papers.reload()
+        }}
+      />
+    )
+  }
 
   return (
     <PageScaffold>
@@ -165,7 +179,9 @@ export default function TeacherExamsPage() {
               新建试卷
             </Button>
           }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+          skeleton={
+            <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
+          }
         >
           {(page) => (
             <Table
@@ -192,16 +208,6 @@ export default function TeacherExamsPage() {
           )}
         </ResourceState>
       </DataPanel>
-
-      {createOpen ? (
-        <PaperFormModal
-          onClose={() => setCreateOpen(false)}
-          onSaved={() => {
-            setCreateOpen(false)
-            papers.reload()
-          }}
-        />
-      ) : null}
 
       {detailTarget ? (
         <PaperDetailModal
@@ -231,19 +237,19 @@ function criteriaSummary(criteria: PaperCriteria): string {
   return parts.length > 0 ? parts.join(' · ') : '未设置条件'
 }
 
-interface PaperFormModalProps {
+interface PaperFormPageProps {
   onClose: () => void
   onSaved: () => void
 }
 
 /**
- * PaperFormModal 创建试卷。
+ * PaperFormPage 在完整内容页创建试卷,与选题列表切换时保留当前编辑态。
  * 组卷方式决定填什么:手动选题填题目清单,条件抽题填筛选条件。
  */
-function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
+function PaperFormPage({ onClose, onSaved }: PaperFormPageProps) {
   const [name, setName] = useState('')
   const [mode, setMode] = useState(String(PaperMode.MANUAL))
-  const [items, setItems] = useState<PaperItemInput[]>([])
+  const [items, setItems] = useState<Array<Omit<PaperItemInput, 'score'> & { score: string }>>([])
   const [criteriaType, setCriteriaType] = useState(String(ContentType.THEORY_QUESTION))
   const [criteriaDifficulties, setCriteriaDifficulties] = useState<ContentDifficulty[]>([
     ContentDifficulty.BASIC,
@@ -256,22 +262,24 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
   const [working, setWorking] = useState(false)
 
   const isRandom = Number(mode) === PaperMode.RANDOM
+  const { errors, validate } = useFormValidation(() => ({
+    name: name.trim() === '' ? '请输入试卷名称' : null,
+    items: !isRandom && items.length === 0 ? '手动选题需要至少添加一道题目' : null,
+    count: isRandom && (!Number.isInteger(Number(criteriaCount)) || Number(criteriaCount) <= 0)
+      ? '抽题数量需要是大于 0 的整数' : null,
+    score: isRandom && (!Number.isInteger(Number(criteriaScore)) || Number(criteriaScore) <= 0)
+      ? '每题分值需要是大于 0 的整数' : null,
+    ...Object.fromEntries(items.map((item, index) => [
+      `item-score-${index}`,
+      !isRandom && (!Number.isInteger(Number(item.score)) || Number(item.score) <= 0)
+        ? '分值需要是大于 0 的整数' : null,
+    ])),
+  }))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (name.trim() === '') {
-        setFormError('请输入试卷名称')
-        return
-      }
-      if (!isRandom && items.length === 0) {
-        setFormError('手动选题需要至少添加一道题目')
-        return
-      }
-      if (isRandom && (Number(criteriaCount) || 0) <= 0) {
-        setFormError('抽题数量需要大于 0')
-        return
-      }
+      if (working || !validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -284,11 +292,11 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
                 type: Number(criteriaType) as ContentType,
                 difficulty: criteriaDifficulties,
                 knowledge_points: splitCommas(criteriaKnowledge),
-                count: Number(criteriaCount) || 0,
-                default_score: Number(criteriaScore) || 0,
+                count: Number(criteriaCount),
+                default_score: Number(criteriaScore),
               }
             : {},
-          items: isRandom ? [] : items,
+          items: isRandom ? [] : items.map((item) => ({ ...item, score: Number(item.score) })),
         })
         toast.success('试卷已创建')
         onSaved()
@@ -309,24 +317,45 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
       mode,
       name,
       onSaved,
-    ],
+      validate,
+      working,
+    ]
   )
 
-  const totalScore = items.reduce((sum, item) => sum + item.score, 0)
+  const totalScore = items.reduce(
+    (sum, item) => sum + (Number.isFinite(Number(item.score)) ? Number(item.score) : 0), 0,
+  )
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>新建试卷</ModalTitle>
-          <ModalDescription>
-            手动选题适合精心编排的考试;按条件抽题适合练习卷,可以反复重抽得到不同组合。
-          </ModalDescription>
-        </ModalHeader>
+    <PageScaffold>
+      <PageHeader
+        title={pickerOpen ? '从题库选题' : '新建试卷'}
+        description="手动选题适合精心编排的考试;按条件抽题适合练习卷,可以反复重抽得到不同组合。"
+      />
+      {pickerOpen ? (
+        <ContentItemPicker
+          selectedCodes={new Set(items.map((item) => item.code))}
+          targetName="试卷"
+          onClose={() => setPickerOpen(false)}
+          onPick={(picked) => {
+            setItems((current) => [
+              ...current,
+              ...picked.map((item) => ({ code: item.code, version: item.version, score: '10' })),
+            ])
+            setPickerOpen(false)
+          }}
+        />
+      ) : (
         <form onSubmit={submit} noValidate>
-          <ModalBody className="flex flex-col gap-4">
-            <FormField label="试卷名称" htmlFor="paper-name" required>
-              <Input id="paper-name" value={name} onChange={(event) => setName(event.target.value)} />
+          <div className="flex flex-col gap-4 rounded-xl bg-surface p-5">
+            <FormField label="试卷名称" htmlFor="paper-name" required error={errors.name}>
+              <Input
+                id="paper-name"
+                value={name}
+                invalid={Boolean(errors.name)}
+                onBlur={() => validate(['name'])}
+                onChange={(event) => setName(event.target.value)}
+              />
             </FormField>
 
             <FormField label="组卷方式" required>
@@ -357,12 +386,14 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
                       onValueChange={setCriteriaType}
                     />
                   </FormField>
-                  <FormField label="抽题数量" htmlFor="criteria-count" required>
+                  <FormField label="抽题数量" htmlFor="criteria-count" required error={errors.count}>
                     <Input
                       id="criteria-count"
                       type="number"
                       min="1"
                       value={criteriaCount}
+                      invalid={Boolean(errors.count)}
+                      onBlur={() => validate(['count'])}
                       onChange={(event) => setCriteriaCount(event.target.value)}
                     />
                   </FormField>
@@ -379,7 +410,7 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
                           setCriteriaDifficulties((current) =>
                             checked === true
                               ? [...current, value]
-                              : current.filter((one) => one !== value),
+                              : current.filter((one) => one !== value)
                           )
                         }
                       />
@@ -399,12 +430,14 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
                       onChange={(event) => setCriteriaKnowledge(event.target.value)}
                     />
                   </FormField>
-                  <FormField label="每题分值" htmlFor="criteria-score" required>
+                  <FormField label="每题分值" htmlFor="criteria-score" required error={errors.score}>
                     <Input
                       id="criteria-score"
                       type="number"
                       min="1"
                       value={criteriaScore}
+                      invalid={Boolean(errors.score)}
+                      onBlur={() => validate(['score'])}
                       onChange={(event) => setCriteriaScore(event.target.value)}
                     />
                   </FormField>
@@ -426,6 +459,8 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
                     从题库选题
                   </Button>
                 </div>
+
+                {errors.items ? <Callout tone="danger">{errors.items}</Callout> : null}
 
                 {items.length === 0 ? (
                   <Empty
@@ -449,17 +484,26 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
                             版本 {item.version}
                           </div>
                         </div>
-                        <FormField label="分值" htmlFor={`paper-item-score-${index}`} className="mb-0 w-24">
+                        <FormField
+                          label="分值"
+                          htmlFor={`paper-item-score-${index}`}
+                          error={errors[`item-score-${index}`]}
+                          className="mb-0 w-24"
+                        >
                           <Input
                             id={`paper-item-score-${index}`}
                             type="number"
                             min="1"
-                            value={String(item.score)}
+                            value={item.score}
+                            invalid={Boolean(errors[`item-score-${index}`])}
+                            onBlur={() => validate([`item-score-${index}`])}
                             onChange={(event) =>
                               setItems((current) =>
                                 current.map((one, i) =>
-                                  i === index ? { ...one, score: Number(event.target.value) || 0 } : one,
-                                ),
+                                  i === index
+                                    ? { ...one, score: event.target.value }
+                                    : one
+                                )
                               )
                             }
                           />
@@ -468,7 +512,9 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
                           type="button"
                           variant="ghost"
                           size="sm"
-                          onClick={() => setItems((current) => current.filter((_, i) => i !== index))}
+                          onClick={() =>
+                            setItems((current) => current.filter((_, i) => i !== index))
+                          }
                         >
                           移除
                         </Button>
@@ -480,33 +526,18 @@ function PaperFormModal({ onClose, onSaved }: PaperFormModalProps) {
             )}
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
-          </ModalBody>
-          <ModalFooter>
+          </div>
+          <div className="mt-5 flex flex-wrap justify-end gap-3">
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
             <Button type="submit" variant="primary" loading={working}>
               创建试卷
             </Button>
-          </ModalFooter>
+          </div>
         </form>
-
-        {pickerOpen ? (
-          <ContentItemPicker
-            selectedCodes={new Set(items.map((item) => item.code))}
-            targetName="试卷"
-            onClose={() => setPickerOpen(false)}
-            onPick={(picked) => {
-              setItems((current) => [
-                ...current,
-                ...picked.map((item) => ({ code: item.code, version: item.version, score: 10 })),
-              ])
-              setPickerOpen(false)
-            }}
-          />
-        ) : null}
-      </ModalContent>
-    </Modal>
+      )}
+    </PageScaffold>
   )
 }
 
@@ -524,7 +555,11 @@ function PaperDetailModal({ paper, onClose, onChanged }: PaperDetailModalProps) 
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
-  const detail = useAsyncResource(() => api.content.getPaper(paper.id), [paper.id], () => false)
+  const detail = useAsyncResource(
+    () => api.content.getPaper(paper.id),
+    [paper.id],
+    () => false
+  )
 
   const regenerate = useCallback(async () => {
     setWorking(true)
@@ -582,9 +617,7 @@ function PaperDetailModal({ paper, onClose, onChanged }: PaperDetailModalProps) 
           </ResourceState>
 
           {isRandom ? (
-            <Callout tone="info">
-              重新抽题会按同样的条件抽取一批新题目,替换当前题目列表。
-            </Callout>
+            <Callout tone="info">重新抽题会按同样的条件抽取一批新题目,替换当前题目列表。</Callout>
           ) : null}
         </ModalBody>
         <ModalFooter>
@@ -592,7 +625,12 @@ function PaperDetailModal({ paper, onClose, onChanged }: PaperDetailModalProps) 
             关闭
           </Button>
           {isRandom ? (
-            <Button variant="primary" leftIcon={RefreshCw} loading={working} onClick={() => void regenerate()}>
+            <Button
+              variant="primary"
+              leftIcon={RefreshCw}
+              loading={working}
+              onClick={() => void regenerate()}
+            >
               重新抽题
             </Button>
           ) : null}

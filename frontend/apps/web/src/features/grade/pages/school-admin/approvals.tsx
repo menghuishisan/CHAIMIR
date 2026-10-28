@@ -45,7 +45,8 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, useResourceTotal, type AsyncResourceState } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDateTime } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { GradeReviewStatusCell } from '../../components/GradeReviewStatusCell'
@@ -118,7 +119,7 @@ export default function SchoolAdminApprovalsPage() {
     () => false,
   )
 
-  const semesters = useAsyncResource(() => api.grade.listSemesters(), [], () => false)
+  const semesters = useAsyncResource(() => api.grade.listSemesters(), [])
 
   const courseNameById = useMemo(
     () => new Map((courses.data?.list ?? []).map((course: Course) => [course.id, course.name])),
@@ -132,22 +133,26 @@ export default function SchoolAdminApprovalsPage() {
 
   // 指标带取服务端全量口径,不随下方筛选变化(§6.5.4)。
   // 「已锁定」现在也走服务端 is_locked 参数,不再用当前页切片数 —— 那是错数。
-  const totalCount = useResourceTotal((params) => api.grade.listReviews(params), [])
+  const totalCount = useResourceTotal((params) => api.grade.listReviews(params), [], reviews.refreshVersion)
   const pendingCount = useResourceTotal(
     (params) => api.grade.listReviews({ status: GradeReviewStatus.PENDING, ...params }),
     [],
+    reviews.refreshVersion,
   )
   const approvedCount = useResourceTotal(
     (params) => api.grade.listReviews({ status: GradeReviewStatus.APPROVED, ...params }),
     [],
+    reviews.refreshVersion,
   )
   const rejectedCount = useResourceTotal(
     (params) => api.grade.listReviews({ status: GradeReviewStatus.REJECTED, ...params }),
     [],
+    reviews.refreshVersion,
   )
   const lockedCount = useResourceTotal(
     (params) => api.grade.listReviews({ is_locked: BOOL_FILTER.YES, ...params }),
     [],
+    reviews.refreshVersion,
   )
 
   /**
@@ -217,7 +222,7 @@ export default function SchoolAdminApprovalsPage() {
                 返回队列
               </Button>
               <span className="text-sm text-ink-sub tabular-nums">
-                第 {selectedIndex + 1} 条 / 共 {reviews.total} 条
+                第 {selectedIndex + 1} 条 / 共 {reviews.total ?? '—'} 条
               </span>
             </div>
           ) : undefined
@@ -346,7 +351,7 @@ export default function SchoolAdminApprovalsPage() {
           review={target.review}
           action={target.action}
           courseName={courseNameById.get(target.review.course_id) ?? '该课程'}
-          semesters={semesters.data ?? []}
+          semesters={semesters}
           onClose={() => setTarget(undefined)}
           onSaved={() => {
             setTarget(undefined)
@@ -364,14 +369,14 @@ interface ReviewDecisionModalProps {
   review: GradeReview
   action: ReviewAction
   courseName: string
-  semesters: Semester[]
+  semesters: AsyncResourceState<Semester[]>
   onClose: () => void
   onSaved: () => void
 }
 
 /**
  * ReviewDecisionModal 提交通过、驳回或解锁决定。
- * 通过时可以指定归档学期(教师报送时可缺省),驳回与解锁只需意见。
+ * 通过时可指定与课程一致的归档学期，否则沿用报送学期；驳回与解锁只需意见。
  */
 function ReviewDecisionModal({
   review,
@@ -381,19 +386,23 @@ function ReviewDecisionModal({
   onClose,
   onSaved,
 }: ReviewDecisionModalProps) {
-  const [semesterId, setSemesterId] = useState(review.semester_id ?? '')
+  const [semesterId, setSemesterId] = useState('')
   const [comment, setComment] = useState('')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
   const copy = ACTION_COPY[action]
   const needsComment = action !== 'approve'
+  const { errors, validate } = useFormValidation(() => ({
+    semester: action === 'approve' && semesters.status !== 'success'
+      ? '请先完成学期信息读取,再通过审核' : null,
+    comment: needsComment && comment.trim() === ''
+      ? action === 'reject' ? '请写下驳回理由,教师需要知道改什么' : '请写下解锁原因,记录会留档'
+      : null,
+  }))
 
   const submit = useCallback(async () => {
-    if (needsComment && comment.trim() === '') {
-      setFormError(action === 'reject' ? '请写下驳回理由,教师需要知道改什么' : '请写下解锁原因,记录会留档')
-      return
-    }
+    if (working || !validate()) return
     setFormError(undefined)
     setWorking(true)
     try {
@@ -413,7 +422,7 @@ function ReviewDecisionModal({
     } finally {
       setWorking(false)
     }
-  }, [action, comment, needsComment, onSaved, review.id, semesterId])
+  }, [action, comment, onSaved, review.id, semesterId, validate, working])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -436,18 +445,31 @@ function ReviewDecisionModal({
             <FormField
               label="归档学期"
               htmlFor="approve-semester"
-              helper="不选则按教师报送时的学期归属"
+              error={errors.semester}
+              helper="不选则沿用报送学期；未登记时按课程学期核对,不自动转换名称"
             >
-              <Select
-                id="approve-semester"
-                options={[
-                  { value: '', label: '按报送时的学期' },
-                  ...semesters.map((semester) => ({ value: semester.id, label: semester.name })),
-                ]}
-                value={semesterId}
-                placeholder="按报送时的学期"
-                onValueChange={setSemesterId}
-              />
+              <ResourceState
+                resource={semesters}
+                emptyIcon={CircleCheck}
+                emptyTitle="学校尚未登记学期"
+                emptyDescription="请先在成绩配置中登记课程所属学期,再通过审核。"
+              >
+                {(items) => (
+                  <Select
+                    id="approve-semester"
+                    options={[
+                      { value: '', label: '按报送时的学期' },
+                      ...items.map((semester) => ({ value: semester.id, label: semester.name })),
+                    ]}
+                    value={semesterId}
+                    invalid={Boolean(errors.semester)}
+                    onBlur={() => validate(['semester'])}
+                    placeholder="按报送时的学期"
+                    disabled={working}
+                    onValueChange={setSemesterId}
+                  />
+                )}
+              </ResourceState>
             </FormField>
           ) : null}
 
@@ -455,7 +477,7 @@ function ReviewDecisionModal({
             label="审核意见"
             htmlFor="review-comment"
             required={needsComment}
-            error={formError}
+            error={errors.comment}
             helper={
               action === 'reject'
                 ? '写清需要教师调整什么,教师会看到这段话'
@@ -468,10 +490,13 @@ function ReviewDecisionModal({
               id="review-comment"
               value={comment}
               rows={4}
-              invalid={Boolean(formError)}
+              invalid={Boolean(errors.comment)}
+              onBlur={() => validate(['comment'])}
               onChange={(event) => setComment(event.target.value)}
             />
           </FormField>
+
+          {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
           {action === 'unlock' ? (
             <Callout tone="warning">
@@ -483,7 +508,12 @@ function ReviewDecisionModal({
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant={copy.danger ? 'danger' : 'seal'} loading={working} onClick={() => void submit()}>
+          <Button
+            variant={copy.danger ? 'danger' : 'seal'}
+            loading={working}
+            disabled={action === 'approve' && semesters.status !== 'success'}
+            onClick={() => void submit()}
+          >
             {copy.confirm}
           </Button>
         </ModalFooter>

@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS course (
     cover_ref VARCHAR(255),
     semester VARCHAR(32) NOT NULL,
     credits NUMERIC(3,1) NOT NULL CHECK (credits >= 0),
+    grades_locked BOOLEAN NOT NULL DEFAULT false,
+    grade_lock_revision BIGINT NOT NULL DEFAULT 0 CHECK (grade_lock_revision >= 0),
     schedule JSONB NOT NULL DEFAULT '[]'::jsonb,
     start_at TIMESTAMPTZ NOT NULL,
     end_at TIMESTAMPTZ NOT NULL,
@@ -253,7 +255,6 @@ CREATE TABLE IF NOT EXISTS course_grade (
     auto_total NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (auto_total >= 0),
     override_total NUMERIC(5,2),
     is_overridden BOOLEAN NOT NULL DEFAULT false,
-    is_locked BOOLEAN NOT NULL DEFAULT false,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, course_id, student_id),
@@ -273,8 +274,47 @@ CREATE TABLE IF NOT EXISTS course_grade_export_request (
     FOREIGN KEY (tenant_id, account_id) REFERENCES account(tenant_id, id)
 );
 
+-- 权重与成绩统一锁课程行,保护现有/未来成绩及直接SQL写入口。
+CREATE FUNCTION enforce_course_grades_writable() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    target_tenant BIGINT;
+    target_course BIGINT;
+    locked BOOLEAN;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        target_tenant := OLD.tenant_id;
+        target_course := OLD.course_id;
+    ELSE
+        target_tenant := NEW.tenant_id;
+        target_course := NEW.course_id;
+        IF TG_OP = 'UPDATE' AND (NEW.tenant_id, NEW.course_id) IS DISTINCT FROM (OLD.tenant_id, OLD.course_id) THEN
+            RAISE EXCEPTION 'grade course ownership is immutable' USING ERRCODE = '23514';
+        END IF;
+    END IF;
+    SELECT c.grades_locked INTO locked FROM course c
+    WHERE c.tenant_id = target_tenant AND c.id = target_course AND c.deleted_at IS NULL
+    FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'grade course unavailable' USING ERRCODE = '23503';
+    END IF;
+    IF locked THEN
+        RAISE EXCEPTION 'course grades are locked' USING ERRCODE = '55000';
+    END IF;
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER course_grade_write_guard BEFORE INSERT OR UPDATE OR DELETE ON course_grade
+FOR EACH ROW EXECUTE FUNCTION enforce_course_grades_writable();
+CREATE TRIGGER grade_weight_write_guard BEFORE INSERT OR UPDATE OR DELETE ON grade_weight
+FOR EACH ROW EXECUTE FUNCTION enforce_course_grades_writable();
+
 CREATE TABLE IF NOT EXISTS teaching_grade_event_outbox (
     id BIGINT PRIMARY KEY,
+    revision BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL UNIQUE CHECK (revision > 0),
+    lock_revision BIGINT NOT NULL CHECK (lock_revision >= 0),
     tenant_id BIGINT NOT NULL,
     course_id BIGINT NOT NULL,
     student_id BIGINT NOT NULL,
@@ -349,3 +389,36 @@ CREATE POLICY grade_weight_tenant_rls ON grade_weight USING (tenant_id = current
 CREATE POLICY course_grade_tenant_rls ON course_grade USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY course_grade_export_request_tenant_rls ON course_grade_export_request USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY teaching_grade_event_outbox_tenant_rls ON teaching_grade_event_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT);
+
+-- 实验事件由 M6 消费后写入本模块投影。
+CREATE TABLE course_experiment_source (
+    tenant_id BIGINT NOT NULL REFERENCES tenant(id),
+    experiment_id BIGINT NOT NULL,
+    course_id BIGINT,
+    title VARCHAR(255) NOT NULL,
+    max_score DOUBLE PRECISION NOT NULL CHECK (max_score >= 0 AND max_score < 'Infinity'::float8),
+    available BOOLEAN NOT NULL,
+    source_revision BIGINT NOT NULL CHECK (source_revision > 0),
+    PRIMARY KEY (tenant_id, experiment_id),
+    FOREIGN KEY (tenant_id, course_id) REFERENCES course(tenant_id, id)
+);
+CREATE INDEX idx_course_experiment_source_course ON course_experiment_source(tenant_id, course_id) WHERE available;
+CREATE TABLE course_experiment_score (
+    tenant_id BIGINT NOT NULL,
+    experiment_id BIGINT NOT NULL,
+    instance_id BIGINT NOT NULL,
+    student_id BIGINT NOT NULL,
+    score DOUBLE PRECISION NOT NULL CHECK (score >= 0 AND score < 'Infinity'::float8),
+    max_score DOUBLE PRECISION NOT NULL CHECK (max_score > 0 AND max_score < 'Infinity'::float8),
+    score_revision BIGINT NOT NULL CHECK (score_revision > 0),
+    pending BOOLEAN NOT NULL,
+    PRIMARY KEY (tenant_id, instance_id, student_id),
+    FOREIGN KEY (tenant_id, experiment_id) REFERENCES course_experiment_source(tenant_id, experiment_id),
+    FOREIGN KEY (tenant_id, student_id) REFERENCES account(tenant_id, id),
+    CHECK (score <= max_score)
+);
+CREATE INDEX idx_course_experiment_score_source ON course_experiment_score(tenant_id, experiment_id, student_id);
+ALTER TABLE course_experiment_source ENABLE ROW LEVEL SECURITY;
+ALTER TABLE course_experiment_score ENABLE ROW LEVEL SECURITY;
+CREATE POLICY course_experiment_source_tenant_rls ON course_experiment_source USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY course_experiment_score_tenant_rls ON course_experiment_score USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);

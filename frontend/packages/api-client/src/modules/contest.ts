@@ -533,13 +533,13 @@ export class ContestApi {
   }
 
   /**
-   * 执行漏洞题预验证。
+   * 执行漏洞题预验证,等待服务端完成沙箱准备和正反向执行后返回最终结果。
    */
   async prevalidateVulnProblem(
     problemId: string,
     data: VulnPrevalidateRequest
   ): Promise<VulnProblem> {
-    return this.client.post(
+    return this.client.postLongRunning(
       `/contest/vuln-problems/${encodePathSegment(problemId)}/prevalidate`,
       data
     )

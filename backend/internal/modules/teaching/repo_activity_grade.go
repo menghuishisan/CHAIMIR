@@ -9,6 +9,7 @@ import (
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
+	"chaimir/pkg/apperr"
 )
 
 // UpsertProgress 写入或累计学习进度。
@@ -118,7 +119,16 @@ func (s *txStore) ListPosts(ctx context.Context, tenantID, courseID int64, page,
 	}
 	out := make([]DiscussionPost, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, postFromRow(row))
+		post := postFromRow(sqlcgen.DiscussionPost{
+			ID: row.ID, TenantID: row.TenantID, CourseID: row.CourseID,
+			ParentID: row.ParentID, AuthorID: row.AuthorID, Content: row.Content,
+			IsPinned: row.IsPinned, LikeCount: row.LikeCount,
+			CreatedAt: row.CreatedAt, DeletedAt: row.DeletedAt,
+		})
+		if row.ParentContent.Valid {
+			post.ParentContent = &row.ParentContent.String
+		}
+		out = append(out, post)
 	}
 	total, err := s.q.CountDiscussionPosts(ctx, sqlcgen.CountDiscussionPostsParams{TenantID: tenantID, CourseID: courseID})
 	if err != nil {
@@ -188,6 +198,15 @@ func (s *txStore) PinAnnouncement(ctx context.Context, tenantID, id int64, pinne
 		return Announcement{}, err
 	}
 	return announcementFromRow(row), nil
+}
+
+// GetReview按租户、课程和学生读取本人的唯一评价。
+func (s *txStore) GetReview(ctx context.Context, tenantID, courseID, studentID int64) (CourseReview, error) {
+	row, err := s.q.GetCourseReview(ctx, sqlcgen.GetCourseReviewParams{TenantID: tenantID, CourseID: courseID, StudentID: studentID})
+	if err != nil {
+		return CourseReview{}, err
+	}
+	return reviewFromRow(row), nil
 }
 
 // UpsertReview 创建或更新课程评价。
@@ -291,9 +310,28 @@ func (s *txStore) OverrideCourseGrade(ctx context.Context, tenantID, courseID, s
 	return gradeFromOverrideRow(row), nil
 }
 
-// SetCourseGradesLock 同步课程成绩写保护投影。
-func (s *txStore) SetCourseGradesLock(ctx context.Context, tenantID, courseID int64, locked bool) error {
-	return s.q.SetCourseGradesLock(ctx, sqlcgen.SetCourseGradesLockParams{TenantID: tenantID, CourseID: courseID, IsLocked: locked})
+// EnsureCourseGradesWritable 锁住唯一课程行,在整个写入事务中拒绝锁定课程。
+func (s *txStore) EnsureCourseGradesWritable(ctx context.Context, tenantID, courseID int64) error {
+	locked, err := s.q.LockCourseGradeWrites(ctx, sqlcgen.LockCourseGradeWritesParams{TenantID: tenantID, ID: courseID})
+	if err != nil {
+		return err
+	}
+	if locked {
+		return apperr.ErrTeachingGradeLocked
+	}
+	return nil
+}
+
+// SetCourseGradesLock 只应用更大权威修订,重复和迟到事件保留现有课程投影。
+func (s *txStore) SetCourseGradesLock(ctx context.Context, tenantID, courseID int64, locked bool, revision int64) error {
+	count, err := s.q.SetCourseGradesLock(ctx, sqlcgen.SetCourseGradesLockParams{TenantID: tenantID, ID: courseID, GradesLocked: locked, GradeLockRevision: revision})
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		_, err = s.GetCourse(ctx, tenantID, courseID)
+	}
+	return err
 }
 
 // CreateTeachingGradeEventOutbox 在成绩写入事务内保存成绩变更事件。
@@ -302,7 +340,7 @@ func (s *txStore) CreateTeachingGradeEventOutbox(ctx context.Context, id, tenant
 	if err != nil {
 		return TeachingGradeEventOutbox{}, err
 	}
-	return teachingGradeEventOutboxFromFields(row.ID, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.NextAttemptAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil), nil
+	return teachingGradeEventOutboxFromFields(row.ID, row.Revision, row.LockRevision, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.NextAttemptAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil), nil
 }
 
 // ClaimPendingTeachingGradeEventOutbox 跨租户领取待发布或失败待重试的成绩事件。
@@ -313,7 +351,7 @@ func (s *txStore) ClaimPendingTeachingGradeEventOutbox(ctx context.Context, limi
 	}
 	out := make([]TeachingGradeEventOutbox, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, teachingGradeEventOutboxFromFields(row.ID, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.NextAttemptAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil))
+		out = append(out, teachingGradeEventOutboxFromFields(row.ID, row.Revision, row.LockRevision, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.NextAttemptAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil))
 	}
 	return out, nil
 }
@@ -324,7 +362,7 @@ func (s *txStore) MarkTeachingGradeEventOutboxPublished(ctx context.Context, ten
 	if err != nil {
 		return TeachingGradeEventOutbox{}, err
 	}
-	return teachingGradeEventOutboxFromFields(row.ID, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.NextAttemptAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil), nil
+	return teachingGradeEventOutboxFromFields(row.ID, row.Revision, row.LockRevision, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.NextAttemptAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil), nil
 }
 
 // MarkTeachingGradeEventOutboxFailed 标记成绩事件发布失败并保留脱敏原因。
@@ -333,7 +371,7 @@ func (s *txStore) MarkTeachingGradeEventOutboxFailed(ctx context.Context, tenant
 	if err != nil {
 		return TeachingGradeEventOutbox{}, err
 	}
-	return teachingGradeEventOutboxFromFields(row.ID, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.NextAttemptAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil), nil
+	return teachingGradeEventOutboxFromFields(row.ID, row.Revision, row.LockRevision, row.TenantID, row.CourseID, row.StudentID, row.TraceID, row.EventUpdatedAt, row.NextAttemptAt, row.CreatedAt, row.UpdatedAt, row.Status, row.RetryCount, row.LastError, row.LeaseToken, row.LeaseUntil), nil
 }
 
 // Stats 查询教学统计摘要。

@@ -13,7 +13,8 @@ import { api } from '../../../../app/api'
 import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
 import { safeExternalHttpsUrl } from '../../../../utils/safeNavigation'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { passwordRequiredError, requiredError, useFieldErrors } from '../../authForm'
+import { passwordRequiredError, requiredError } from '../../authForm'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import {
   AuthFormError,
   AuthHeading,
@@ -41,7 +42,10 @@ export default function SsoCallbackPage() {
   const [redirecting, setRedirecting] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const { errors, setError } = useFieldErrors()
+  const { errors, validate } = useFormValidation(() => ({
+    username: requiredError(username, '请输入统一认证账号'),
+    password: passwordRequiredError(password, '请输入统一认证密码'),
+  }))
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   // 票据一次性:严格模式下 effect 会执行两次,重复验票会因票据已消耗而失败
@@ -92,9 +96,7 @@ export default function SsoCallbackPage() {
   const handleLdapSubmit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const nameOk = setError('username', requiredError(username, '请输入统一认证账号'))
-      const passwordOk = setError('password', passwordRequiredError(password, '请输入统一认证密码'))
-      if (!nameOk || !passwordOk) return
+      if (!validate()) return
 
       setSubmitting(true)
       setFormError(null)
@@ -108,7 +110,7 @@ export default function SsoCallbackPage() {
         setSubmitting(false)
       }
     },
-    [navigate, password, setError, tenantCode, username],
+    [navigate, password, tenantCode, username, validate],
   )
 
   if (verifying) {
@@ -151,7 +153,7 @@ export default function SsoCallbackPage() {
             value={username}
             error={errors.username}
             onValueChange={setUsername}
-            onBlur={() => setError('username', requiredError(username, '请输入统一认证账号'))}
+            onBlur={() => validate(['username'])}
           />
 
           <AuthTextField
@@ -162,7 +164,7 @@ export default function SsoCallbackPage() {
             value={password}
             error={errors.password}
             onValueChange={setPassword}
-            onBlur={() => setError('password', passwordRequiredError(password, '请输入统一认证密码'))}
+            onBlur={() => validate(['password'])}
           />
 
           <AuthFormError message={formError} />

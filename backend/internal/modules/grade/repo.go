@@ -49,6 +49,12 @@ type TxStore interface {
 	RejectGradeReview(context.Context, int64, int64, string) (ReviewDTO, error)
 	UnlockGradeReview(context.Context, int64, int64, string) (ReviewDTO, error)
 	RelockGradeReview(context.Context, int64, int64, string) (ReviewDTO, error)
+	LockGradeCourseScope(context.Context, int64, int64) error
+	LockGradeStudentScope(context.Context, int64, int64) error
+	ApplyGradeEventRevision(context.Context, int64, int64, int64, int64) (bool, error)
+	GetLatestGradeLockOutboxByCourse(context.Context, int64) (GradeLockOutbox, error)
+	HasAcceptedAppealsByCourse(context.Context, int64) (bool, error)
+	AcceptGradeAppeal(context.Context, int64, int64, string, int64) (AppealDTO, error)
 	CreateGradeLockOutbox(context.Context, int64, ReviewDTO, bool, string, string) (GradeLockOutbox, error)
 	ClaimPendingGradeLockOutbox(context.Context, int32, int32, time.Time, time.Time) ([]GradeLockOutbox, error)
 	RequeueExhaustedGradeLockOutbox(context.Context, int32) (int64, error)
@@ -60,15 +66,27 @@ type TxStore interface {
 	CreateGradeAppeal(context.Context, int64, int64, int64, AppealRequest) (AppealDTO, error)
 	HasOpenGradeAppeal(context.Context, int64, int64) (bool, error)
 	GetGradeAppeal(context.Context, int64) (AppealDTO, error)
-	ListGradeAppeals(context.Context, int16, int, int) ([]AppealDTO, int64, error)
+	ListGradeAppeals(context.Context, AppealListQuery) ([]AppealDTO, int64, error)
 	ListAcceptedAppealsByCourseStudent(context.Context, int64, int64) ([]AppealDTO, error)
 	UpdateGradeAppealStatus(context.Context, int64, int16, int16, int64, string) (AppealDTO, error)
 	CreateAcademicWarning(context.Context, int64, int64, int64, int64, int16, map[string]any) (WarningDTO, error)
+	ClaimGradeWarningNotifications(context.Context, int32, time.Time, string, time.Time) ([]WarningNotification, error)
+	MarkGradeWarningNotificationPublished(context.Context, int64, int64, string) (int64, error)
+	MarkGradeWarningNotificationFailed(context.Context, int64, int64, string, string, time.Time) (int64, error)
 	ListAcademicWarnings(context.Context, int64, int16, int, int) ([]WarningDTO, int64, error)
 	AckAcademicWarning(context.Context, int64, int64) (WarningDTO, error)
 	CreateTranscriptRecord(context.Context, int64, int64, TranscriptRequest, string) (TranscriptDTO, error)
 	GetTranscriptRecord(context.Context, int64) (TranscriptDTO, error)
 	ListTranscriptRecords(context.Context, int64, int, int) ([]TranscriptDTO, error)
+}
+
+// AppealListQuery 描述服务端确定的申诉读取范围,默认空课程集合不允许读取任何记录。
+type AppealListQuery struct {
+	Status     int16
+	AllCourses bool
+	CourseIDs  []int64
+	Page       int
+	Size       int
 }
 
 type store struct{ database *db.DB }

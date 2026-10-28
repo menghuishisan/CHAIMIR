@@ -291,7 +291,7 @@ function AnnouncementList() {
   )
 
   return (
-    <PageSection title="系统公告" description={`共 ${announcements.total} 条`}>
+    <PageSection title="系统公告" description={`共 ${announcements.total ?? '—'} 条`}>
       <div className="flex flex-col gap-4">
         {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 

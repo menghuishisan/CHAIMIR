@@ -138,7 +138,7 @@ type acceptanceSeedIDs struct {
 	ExperimentJudgeResultA int64
 	ExperimentJudgeTaskB   int64
 	ExperimentJudgeResultB int64
-	ExperimentScoreOutbox  int64
+	ExperimentEventOutbox  int64
 }
 
 var acceptanceIDs = acceptanceSeedIDs{
@@ -177,7 +177,7 @@ var acceptanceIDs = acceptanceSeedIDs{
 	BattleLadderRankA: 910000000000008141, BattleLadderRankB: 910000000000008142,
 	ExperimentJudgeTaskA: 910000000000006031, ExperimentJudgeResultA: 910000000000006032,
 	ExperimentJudgeTaskB: 910000000000006033, ExperimentJudgeResultB: 910000000000006034,
-	ExperimentScoreOutbox: 910000000000006035,
+	ExperimentEventOutbox: 910000000000006035,
 }
 
 type acceptanceAccount struct {
@@ -257,7 +257,7 @@ func seedAcceptance(ctx context.Context, cfg *config.Config) error {
 	}
 	if err := seedAcceptanceBusiness(ctx, database, includeIsolationTenant, replayRef, cfg.ObjectStorage.BucketReport, materialRefs); err != nil {
 		if cleanupErr := objectStore.Delete(ctx, cfg.ObjectStorage.BucketReport, replayKey); cleanupErr != nil {
-			return fmt.Errorf("写入验收业务数据失败: %w; 清理回放对象失败: %v", err, cleanupErr)
+			return fmt.Errorf("写入验收业务数据失败: %w; 清理回放对象失败: %w", err, cleanupErr)
 		}
 		return err
 	}

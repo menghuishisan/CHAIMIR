@@ -367,16 +367,16 @@ func (s *Service) GradeReport(ctx context.Context, reportID int64, req GradeRepo
 		if err != nil {
 			return err
 		}
-		if !changed {
+		if !changed && current.Status == ReportStatusGraded {
 			return nil
 		}
 		shouldPublish = true
-		return s.enqueueExperimentScoreOutbox(ctx, tx, inst)
+		return s.enqueueExperimentEventOutbox(ctx, tx, inst)
 	}); err != nil {
 		return ReportDTO{}, err
 	}
 	if shouldPublish {
-		s.drainExperimentScoreOutboxBestEffort(ctx)
+		s.drainExperimentEventOutboxBestEffort(ctx)
 	}
 	profiles, err := s.reportProfiles(ctx, []ExperimentReport{report})
 	if err != nil {

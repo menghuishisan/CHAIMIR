@@ -129,10 +129,11 @@ type RecycleRequest struct {
 
 // FileWriteRequest 是用户或内部服务写入工作区文件的请求。
 type FileWriteRequest struct {
-	TenantID         ids.ID `json:"tenant_id"`
-	RelativePath     string `json:"relative_path"`
-	ContentBase64    string `json:"content_base64"`
-	ExpectedRevision int64  `json:"expected_revision"`
+	TenantID     ids.ID `json:"tenant_id"`
+	RelativePath string `json:"relative_path"`
+	// 指针区分未提供内容与合法的零字节文件,不把空字符串判作缺字段。
+	ContentBase64    *string `json:"content_base64" binding:"required"`
+	ExpectedRevision int64   `json:"expected_revision"`
 }
 
 // ChainRequest 是链部署或交易的统一请求体。
@@ -201,19 +202,19 @@ type RuntimeSelftestResponse struct {
 
 // SandboxResponse 描述用户侧可见的沙箱状态,不暴露 Kubernetes Namespace 等内部资源名。
 type SandboxResponse struct {
-	SandboxID           ids.ID                         `json:"sandbox_id"`
-	TenantID            ids.ID                         `json:"tenant_id"`
-	SourceRef           string                         `json:"source_ref"`
-	OwnerAccountID      ids.ID                         `json:"owner_account_id"`
-	RuntimeCode         string                         `json:"runtime_code"`
-	RuntimeImageVersion string                         `json:"runtime_image_version"`
-	RuntimeInstances    []string                       `json:"runtime_instances"`
-	Phase               int16                          `json:"phase"`
-	Status              int16                          `json:"status"`
-	ToolAccess          []contracts.SandboxToolAccess  `json:"tool_access"`
-	Capabilities        contracts.SandboxCapabilities  `json:"capabilities"`
-	ResourceUsage       contracts.SandboxResourceUsage `json:"resource_usage"`
-	WorkspaceRevision   int64                          `json:"workspace_revision"`
+	SandboxID           ids.ID                          `json:"sandbox_id"`
+	TenantID            ids.ID                          `json:"tenant_id"`
+	SourceRef           string                          `json:"source_ref"`
+	OwnerAccountID      ids.ID                          `json:"owner_account_id"`
+	RuntimeCode         string                          `json:"runtime_code"`
+	RuntimeImageVersion string                          `json:"runtime_image_version"`
+	RuntimeInstances    []string                        `json:"runtime_instances"`
+	Phase               int16                           `json:"phase"`
+	Status              int16                           `json:"status"`
+	ToolAccess          []contracts.SandboxToolAccess   `json:"tool_access"`
+	Capabilities        contracts.SandboxCapabilities   `json:"capabilities"`
+	ResourceUsage       *contracts.SandboxResourceUsage `json:"resource_usage"`
+	WorkspaceRevision   int64                           `json:"workspace_revision"`
 }
 
 // FileSaveResponse 描述立即保存工作区后的对象引用和内容哈希。

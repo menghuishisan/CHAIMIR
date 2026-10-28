@@ -33,11 +33,12 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { useAsyncResource } from '../../../../hooks'
 import { CompositionDeclarationFields } from '../../../sandbox/components/CompositionDeclarationFields'
 import {
+  compositionDeclarationError,
   declarationFromSpec,
-  derivedInfraFromSpec,
   readScenarioNeutralSpec,
   scenarioNeutralSpecFromDeclaration,
 } from '../../../sandbox/composition'
@@ -197,7 +198,6 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
   const [submitKey, setSubmitKey] = useState(readString(body, BODY_KEYS.submitKey))
   const [attachments, setAttachments] = useState<ContentAttachment[]>(readAttachments(body))
 
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
 
@@ -231,8 +231,7 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
               [BODY_KEYS.composition]: scenarioNeutralSpecFromDeclaration(
                 code.trim() || item?.code || 'contest-problem',
                 declaration,
-                derivedInfraFromSpec(savedComposition),
-                savedComposition?.links ?? [],
+                savedComposition,
               ),
             }
           : {}),
@@ -265,7 +264,7 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
     typeValue,
   ])
 
-  const validate = useCallback((): boolean => {
+  const { errors, validate } = useFormValidation(useCallback(() => {
     const next: Record<string, string | null> = {
       code: editing ? null : /^[a-z0-9-]{3,}$/.test(code.trim()) ? null : '编号用小写字母、数字与连字符,至少 3 位',
       version: editing ? null : /^\d+\.\d+\.\d+$/.test(version.trim()) ? null : '版本号形如 1.0.0',
@@ -278,14 +277,14 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
     }
     if (typeValue === ContentType.CONTEST_PROBLEM) {
       next.statement = statement.trim() === '' ? '请输入题面' : null
+      next.composition = envEnabled ? compositionDeclarationError(declaration) ?? null : null
     }
     if (typeValue === ContentType.EXPERIMENT_TEMPLATE) {
       next.summary = summary.trim() === '' ? '请填写实验概述' : null
     }
 
-    setErrors(next)
-    return Object.values(next).every((value) => value === null)
-  }, [answer, code, editing, statement, summary, title, typeValue, version])
+    return next
+  }, [answer, code, declaration, editing, envEnabled, statement, summary, title, typeValue, version]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -568,9 +567,6 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
                           value={declaration}
                           onChange={setDeclaration}
                           toolsHelper="学生答这道题时能打开哪些工具"
-                          derivedInfraCodes={derivedInfraFromSpec(savedComposition).map(
-                            (infra) => infra.code,
-                          )}
                         />
                       </>
                     ) : (
@@ -667,7 +663,7 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="primary" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting} disabled={typeValue === ContentType.CONTEST_PROBLEM && envEnabled && compositionDeclarationError(declaration) !== undefined}>
               {editing ? '保存修改' : '创建题目'}
             </Button>
           </ModalFooter>

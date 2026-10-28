@@ -123,7 +123,7 @@ func (s *txStore) CreateSubmission(ctx context.Context, sub Submission) (Submiss
 	if err != nil {
 		return Submission{}, err
 	}
-	row, err := s.q.CreateSubmission(ctx, sqlcgen.CreateSubmissionParams{ID: sub.ID, TenantID: sub.TenantID, AssignmentID: sub.AssignmentID, StudentID: sub.StudentID, AttemptNo: sub.AttemptNo, ContentRef: content, FinalScore: pgtypex.Int4(sub.FinalScore), IsLate: sub.IsLate, Status: sub.Status})
+	row, err := s.q.CreateSubmission(ctx, sqlcgen.CreateSubmissionParams{ID: sub.ID, TenantID: sub.TenantID, AssignmentID: sub.AssignmentID, StudentID: sub.StudentID, AttemptNo: sub.AttemptNo, ContentRef: content, FinalScore: pgtypex.Int4Ptr(sub.FinalScore), IsLate: sub.IsLate, Status: sub.Status})
 	if err != nil {
 		return Submission{}, err
 	}

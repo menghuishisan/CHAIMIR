@@ -12,15 +12,15 @@ import { AuditLogPage } from '../../components/AuditLogPage'
 /** 本校审计可筛选的对象类型。 */
 const TARGET_TYPE_OPTIONS = [
   { value: '', label: '全部对象' },
-  { value: 'account', label: '账号' },
-  { value: 'course', label: '课程' },
-  { value: 'assignment', label: '作业' },
+  { value: 'identity.account', label: '账号' },
+  { value: 'teaching.course', label: '课程' },
+  { value: 'teaching.assignment', label: '作业' },
   { value: 'experiment', label: '实验' },
   { value: 'contest', label: '竞赛' },
   { value: 'grade.review', label: '成绩审核' },
   { value: 'grade.appeal', label: '成绩申诉' },
   { value: 'content.item', label: '题目' },
-  { value: 'session', label: '登录会话' },
+  { value: 'identity.auth_session', label: '登录会话' },
 ] as const
 
 /** 本校审计常用动作。 */
@@ -28,7 +28,7 @@ const ACTION_OPTIONS = [
   { value: '', label: '全部动作' },
   { value: 'auth.login', label: '登录' },
   { value: 'account.create', label: '创建账号' },
-  { value: 'account.disable', label: '停用账号' },
+  { value: 'account.status.update', label: '更新账号状态' },
   { value: 'account.reset_password', label: '重置账号密码' },
   { value: 'account.grant_admin', label: '授予管理员' },
   { value: 'account.import', label: '批量导入账号' },

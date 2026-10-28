@@ -22,7 +22,7 @@ ADD --checksum=sha256:d5f23436f443edb85d8e76906d12f0a86ce0490e7663a9e608efeb7a93
 # 内置多个经校验的 Solidity 编译器,实验按精确版本路径选择且不允许运行时联网下载。
 RUN apt-get -o Acquire::Retries=3 update \
     && apt-get -o Acquire::Retries=3 install -y --no-install-recommends jq ca-certificates \
-        openssl=3.0.2-0ubuntu1.29 libssl3=3.0.2-0ubuntu1.29 \
+        openssl=3.0.2-0ubuntu1.30 libssl3=3.0.2-0ubuntu1.30 \
     && echo "${SOLC_0_8_15_SHA256}  /tmp/solc-0.8.15" | sha256sum -c - \
     && echo "${SOLC_0_8_19_SHA256}  /tmp/solc-0.8.19" | sha256sum -c - \
     && echo "${SOLC_0_8_20_SHA256}  /tmp/solc-0.8.20" | sha256sum -c - \

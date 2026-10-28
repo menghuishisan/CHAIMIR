@@ -59,14 +59,14 @@ type SemesterRequest struct {
 	IsCurrent bool   `json:"is_current"`
 }
 
-// ReviewRequest 是提交成绩审核请求。
+// ReviewRequest 是提交成绩审核请求，省略学期时服务端精确解析课程学期并保存实际编号。
 type ReviewRequest struct {
 	CourseID   ids.ID `json:"course_id"`
 	SemesterID ids.ID `json:"semester_id,omitempty"`
 	Comment    string `json:"comment"`
 }
 
-// ReviewDecisionRequest 是审核通过、驳回和解锁请求。
+// ReviewDecisionRequest 是审核通过、驳回和解锁请求，通过时显式学期优先于报送学期并复核课程归属。
 type ReviewDecisionRequest struct {
 	SemesterID ids.ID `json:"semester_id,omitempty"`
 	Comment    string `json:"comment"`
@@ -159,16 +159,17 @@ type ReviewDTO struct {
 
 // AppealDTO 表示成绩申诉响应。
 type AppealDTO struct {
-	ID            ids.ID `json:"id"`
-	TenantID      ids.ID `json:"tenant_id"`
-	StudentID     ids.ID `json:"student_id"`
-	CourseID      ids.ID `json:"course_id"`
-	Reason        string `json:"reason"`
-	Status        int16  `json:"status"`
-	HandlerID     ids.ID `json:"handler_id,omitempty"`
-	ResultComment string `json:"result_comment,omitempty"`
-	CreatedAt     string `json:"created_at"`
-	HandledAt     string `json:"handled_at,omitempty"`
+	UnlockRevision int64  `json:"-"`
+	ID             ids.ID `json:"id"`
+	TenantID       ids.ID `json:"tenant_id"`
+	StudentID      ids.ID `json:"student_id"`
+	CourseID       ids.ID `json:"course_id"`
+	Reason         string `json:"reason"`
+	Status         int16  `json:"status"`
+	HandlerID      ids.ID `json:"handler_id,omitempty"`
+	ResultComment  string `json:"result_comment,omitempty"`
+	CreatedAt      string `json:"created_at"`
+	HandledAt      string `json:"handled_at,omitempty"`
 }
 
 // WarningDTO 表示学业预警响应。

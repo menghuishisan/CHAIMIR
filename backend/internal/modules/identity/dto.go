@@ -79,16 +79,18 @@ type TenantOptionDTO struct {
 }
 
 type AccountDTO struct {
-	ID           ids.ID  `json:"id"`
-	TenantID     ids.ID  `json:"tenant_id,omitempty"`
-	Name         string  `json:"name"`
-	PhoneMasked  string  `json:"phone_masked,omitempty"`
-	No           string  `json:"no,omitempty"`
-	BaseIdentity int16   `json:"base_identity"`
-	Roles        []int16 `json:"roles"`
-	Status       int16   `json:"status"`
-	Title        string  `json:"title,omitempty"`
-	CreatedAt    string  `json:"created_at,omitempty"`
+	ID             ids.ID  `json:"id"`
+	TenantID       ids.ID  `json:"tenant_id,omitempty"`
+	Name           string  `json:"name"`
+	PhoneMasked    string  `json:"phone_masked,omitempty"`
+	No             string  `json:"no,omitempty"`
+	OrgID          ids.ID  `json:"org_id,omitempty"`
+	EnrollmentYear int16   `json:"enrollment_year,omitempty"`
+	BaseIdentity   int16   `json:"base_identity"`
+	Roles          []int16 `json:"roles"`
+	Status         int16   `json:"status"`
+	Title          string  `json:"title,omitempty"`
+	CreatedAt      string  `json:"created_at,omitempty"`
 }
 
 // AccountCreateResponse 返回已创建账号和仅本次可见的激活码。
@@ -98,7 +100,8 @@ type AccountCreateResponse struct {
 }
 
 type MeResponse struct {
-	Account AccountDTO `json:"account"`
+	Account        AccountDTO `json:"account"`
+	EnabledModules []string   `json:"enabled_modules"`
 }
 
 type ChangePasswordRequest struct {
@@ -324,12 +327,21 @@ type ImportActivationCodeDTO struct {
 	ActivationCode string `json:"activation_code"`
 }
 
+// ImportPreviewSummaryDTO只携带可公开的预览元信息,不含原始行和开通凭据。
+type ImportPreviewSummaryDTO struct {
+	PreviewID  ids.ID `json:"preview_id"`
+	TargetType int16  `json:"target_type"`
+	FileName   string `json:"file_name"`
+	ExpireAt   string `json:"expire_at"`
+	Total      int    `json:"total"`
+	Valid      int    `json:"valid"`
+	Invalid    int    `json:"invalid"`
+}
+
+// ImportPreviewResponse供新上传和恢复预览复用同一公开结构。
 type ImportPreviewResponse struct {
-	PreviewID ids.ID            `json:"preview_id"`
-	Total     int               `json:"total"`
-	Valid     int               `json:"valid"`
-	Invalid   int               `json:"invalid"`
-	Rows      []ImportRowResult `json:"rows"`
+	ImportPreviewSummaryDTO
+	Rows []ImportRowResult `json:"rows"`
 }
 
 type ImportRowResult struct {

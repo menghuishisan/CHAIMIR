@@ -45,9 +45,9 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	api := simAPI{svc: svc}
 	g := r.Group("/api/v1/sim")
 	api.registerPublicRoutes(g)
-	api.registerUserRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
-	api.registerStreamRoutes(g.Group("", authn.WebSocketMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
-	api.registerTeacherRoutes(g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
+	api.registerUserRoutes(g.Group("", authn.Middleware(contracts.TenantModuleSim), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
+	api.registerStreamRoutes(g.Group("", authn.WebSocketMiddleware(contracts.TenantModuleSim), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
+	api.registerTeacherRoutes(g.Group("", authn.Middleware(contracts.TenantModuleSim), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin)))
 	api.registerInternalRoutes(g.Group("/internal", authn.ServiceMiddleware()))
 	api.registerPlatformRoutes(g.Group("", authn.Middleware(), auth.RequirePlatformIdentity()))
 	return nil
@@ -403,7 +403,7 @@ func (a simAPI) streamSession(c *gin.Context) {
 		return
 	}
 	if err := a.svc.wsHub.ServeInteractive(c.Writer, c.Request, func(conn *ws.Conn) error {
-		return a.svc.ServeBackendStream(c.Request.Context(), conn, current.TenantID, current.AccountID, id)
+		return a.svc.ServeBackendStream(conn.Context(), conn, current.TenantID, current.AccountID, id)
 	}); err != nil {
 		response.Fail(c, apperr.ErrSimBackendComputeUnavailable.WithCause(err))
 	}

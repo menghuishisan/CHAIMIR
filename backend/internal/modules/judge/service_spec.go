@@ -29,12 +29,9 @@ type JudgerExecutionSpec struct {
 
 // JudgerResourceSpec 描述数据库中唯一持久化的判题执行事实。
 type JudgerResourceSpec struct {
-	// DisabledReason records why a runtime-backed judger has no frozen composition yet.
-	// It keeps the directory fail-closed without serializing an empty snapshot as if it were usable.
+	// DisabledReason 区分依赖/自检导致的自动停用与管理员主动停用。
 	DisabledReason string `json:"disabled_reason,omitempty"`
-	// Composition 保存判题器的原始平台组合声明,供运行时自检完成后重新编译唯一快照。
-	// 它不是可执行事实;真正执行仍只能使用 CompositionSnapshot。
-	Composition         contracts.SandboxCompositionSpec     `json:"composition,omitempty"`
+	// 待编译记录只保存 Snapshot.Spec,没有 Digest 时不可执行。
 	CompositionSnapshot contracts.SandboxCompositionSnapshot `json:"composition_snapshot,omitempty"`
 	GenesisRef          string                               `json:"genesis_ref,omitempty"`
 	InitScriptRef       string                               `json:"init_script_ref,omitempty"`
@@ -47,15 +44,14 @@ type JudgerResourceSpec struct {
 	Selftest            map[string]any                       `json:"selftest,omitempty"`
 }
 
-// MarshalJSON omits the zero composition snapshot so a disabled judger cannot
-// be mistaken for one with a compiled, executable sandbox closure.
+// MarshalJSON 仅省略完全空的快照,保留尚待编译的唯一声明。
 func (s JudgerResourceSpec) MarshalJSON() ([]byte, error) {
 	type alias JudgerResourceSpec
 	payload, err := json.Marshal(alias(s))
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(s.CompositionSnapshot.Digest) != "" {
+	if strings.TrimSpace(s.CompositionSnapshot.Digest) != "" || strings.TrimSpace(s.CompositionSnapshot.Spec.ID) != "" {
 		return payload, nil
 	}
 	fields := map[string]json.RawMessage{}

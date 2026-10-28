@@ -11,29 +11,23 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const claimPendingExperimentScoreOutbox = `-- name: ClaimPendingExperimentScoreOutbox :many
+const claimPendingExperimentEventOutbox = `-- name: ClaimPendingExperimentEventOutbox :many
 WITH exhausted AS (
-    UPDATE experiment_score_outbox AS expired
-    SET status = 4, last_error = 'score lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
+    UPDATE experiment_event_outbox AS expired
+    SET status = 4, last_error = 'event lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
     WHERE expired.status = 2 AND expired.lease_until <= $3::timestamptz AND expired.retry_count >= $4
     RETURNING expired.id
 ), candidates AS (
-    SELECT o.id
-    FROM experiment_score_outbox o
-    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= $3::timestamptz))
-      AND o.retry_count < $4
-    ORDER BY o.created_at ASC, o.id ASC
-    LIMIT $5
-    FOR UPDATE SKIP LOCKED
+    SELECT o.id FROM experiment_event_outbox o
+    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= $3::timestamptz)) AND o.retry_count < $4
+    ORDER BY o.created_at ASC, o.id ASC LIMIT $5 FOR UPDATE SKIP LOCKED
 )
-UPDATE experiment_score_outbox AS outbox
+UPDATE experiment_event_outbox AS outbox
 SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = $1, lease_until = $2::timestamptz
-FROM candidates
-WHERE outbox.id = candidates.id
-RETURNING outbox.id, outbox.tenant_id, outbox.experiment_id, outbox.instance_id, outbox.student_id, outbox.score, outbox.score_revision, outbox.trace_id, outbox.scored_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
+FROM candidates WHERE outbox.id = candidates.id RETURNING outbox.id, outbox.tenant_id, outbox.experiment_id, outbox.aggregate_id, outbox.event_revision, outbox.subject, outbox.payload, outbox.trace_id, outbox.occurred_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
 `
 
-type ClaimPendingExperimentScoreOutboxParams struct {
+type ClaimPendingExperimentEventOutboxParams struct {
 	LeaseToken  string             `json:"lease_token"`
 	LeaseUntil  pgtype.Timestamptz `json:"lease_until"`
 	StaleBefore pgtype.Timestamptz `json:"stale_before"`
@@ -41,8 +35,8 @@ type ClaimPendingExperimentScoreOutboxParams struct {
 	PageLimit   int32              `json:"page_limit"`
 }
 
-func (q *Queries) ClaimPendingExperimentScoreOutbox(ctx context.Context, arg ClaimPendingExperimentScoreOutboxParams) ([]ExperimentScoreOutbox, error) {
-	rows, err := q.db.Query(ctx, claimPendingExperimentScoreOutbox,
+func (q *Queries) ClaimPendingExperimentEventOutbox(ctx context.Context, arg ClaimPendingExperimentEventOutboxParams) ([]ExperimentEventOutbox, error) {
+	rows, err := q.db.Query(ctx, claimPendingExperimentEventOutbox,
 		arg.LeaseToken,
 		arg.LeaseUntil,
 		arg.StaleBefore,
@@ -53,19 +47,19 @@ func (q *Queries) ClaimPendingExperimentScoreOutbox(ctx context.Context, arg Cla
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ExperimentScoreOutbox{}
+	items := []ExperimentEventOutbox{}
 	for rows.Next() {
-		var i ExperimentScoreOutbox
+		var i ExperimentEventOutbox
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
 			&i.ExperimentID,
-			&i.InstanceID,
-			&i.StudentID,
-			&i.Score,
-			&i.ScoreRevision,
+			&i.AggregateID,
+			&i.EventRevision,
+			&i.Subject,
+			&i.Payload,
 			&i.TraceID,
-			&i.ScoredAt,
+			&i.OccurredAt,
 			&i.Status,
 			&i.RetryCount,
 			&i.LastError,
@@ -337,6 +331,70 @@ func (q *Queries) CreateExperiment(ctx context.Context, arg CreateExperimentPara
 	return i, err
 }
 
+const createExperimentEventOutbox = `-- name: CreateExperimentEventOutbox :one
+WITH next_revision AS (
+    SELECT CASE WHEN $7::text = 'experiment.scored'
+        THEN COALESCE(MAX(event_revision), 0) + 1 ELSE $9::bigint END AS revision
+    FROM experiment_event_outbox
+    WHERE tenant_id = $2::bigint AND aggregate_id = $4::bigint AND subject = $7::text
+)
+INSERT INTO experiment_event_outbox (id, tenant_id, experiment_id, aggregate_id, event_revision, trace_id, occurred_at, subject, payload)
+SELECT $1::bigint, $2::bigint, $3::bigint, $4::bigint, n.revision,
+    $5::text, $6::timestamptz, $7::text,
+    CASE WHEN $7::text = 'experiment.scored'
+        THEN jsonb_set($8::jsonb, '{score_revision}', to_jsonb(n.revision)) ELSE $8::jsonb END
+FROM next_revision n
+ON CONFLICT (tenant_id, subject, aggregate_id, event_revision) DO UPDATE SET payload = experiment_event_outbox.payload
+RETURNING id, tenant_id, experiment_id, aggregate_id, event_revision, subject, payload, trace_id, occurred_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+`
+
+type CreateExperimentEventOutboxParams struct {
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	ExperimentID  int64              `json:"experiment_id"`
+	AggregateID   int64              `json:"aggregate_id"`
+	TraceID       string             `json:"trace_id"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	Subject       string             `json:"subject"`
+	Payload       []byte             `json:"payload"`
+	EventRevision int64              `json:"event_revision"`
+}
+
+// 实例行锁内生成得分修订，绑定使用定义的单调修订；载荷与修订同次提交。
+func (q *Queries) CreateExperimentEventOutbox(ctx context.Context, arg CreateExperimentEventOutboxParams) (ExperimentEventOutbox, error) {
+	row := q.db.QueryRow(ctx, createExperimentEventOutbox,
+		arg.ID,
+		arg.TenantID,
+		arg.ExperimentID,
+		arg.AggregateID,
+		arg.TraceID,
+		arg.OccurredAt,
+		arg.Subject,
+		arg.Payload,
+		arg.EventRevision,
+	)
+	var i ExperimentEventOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ExperimentID,
+		&i.AggregateID,
+		&i.EventRevision,
+		&i.Subject,
+		&i.Payload,
+		&i.TraceID,
+		&i.OccurredAt,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+	)
+	return i, err
+}
+
 const createExperimentGroup = `-- name: CreateExperimentGroup :one
 INSERT INTO experiment_group (id, tenant_id, experiment_id, name, created_at)
 VALUES ($1, $2, $3, $4, now())
@@ -427,62 +485,6 @@ func (q *Queries) CreateExperimentInstance(ctx context.Context, arg CreateExperi
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.LastActiveAt,
-	)
-	return i, err
-}
-
-const createExperimentScoreOutbox = `-- name: CreateExperimentScoreOutbox :one
-WITH next_revision AS (
-    SELECT COALESCE(MAX(score_revision), 0) + 1 AS score_revision
-    FROM experiment_score_outbox
-    WHERE tenant_id = $2 AND instance_id = $4
-)
-INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
-SELECT $1, $2, $3, $4, $5, $6::text::numeric, next_revision.score_revision, $7, $8, 1, 0, NULL, now(), now(), '', NULL
-FROM next_revision
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
-`
-
-type CreateExperimentScoreOutboxParams struct {
-	ID           int64              `json:"id"`
-	TenantID     int64              `json:"tenant_id"`
-	ExperimentID int64              `json:"experiment_id"`
-	InstanceID   int64              `json:"instance_id"`
-	StudentID    int64              `json:"student_id"`
-	Column6      string             `json:"column_6"`
-	TraceID      string             `json:"trace_id"`
-	ScoredAt     pgtype.Timestamptz `json:"scored_at"`
-}
-
-func (q *Queries) CreateExperimentScoreOutbox(ctx context.Context, arg CreateExperimentScoreOutboxParams) (ExperimentScoreOutbox, error) {
-	row := q.db.QueryRow(ctx, createExperimentScoreOutbox,
-		arg.ID,
-		arg.TenantID,
-		arg.ExperimentID,
-		arg.InstanceID,
-		arg.StudentID,
-		arg.Column6,
-		arg.TraceID,
-		arg.ScoredAt,
-	)
-	var i ExperimentScoreOutbox
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.ExperimentID,
-		&i.InstanceID,
-		&i.StudentID,
-		&i.Score,
-		&i.ScoreRevision,
-		&i.TraceID,
-		&i.ScoredAt,
-		&i.Status,
-		&i.RetryCount,
-		&i.LastError,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.LeaseToken,
-		&i.LeaseUntil,
 	)
 	return i, err
 }
@@ -1169,6 +1171,22 @@ func (q *Queries) GradeExperimentReport(ctx context.Context, arg GradeExperiment
 	return i, err
 }
 
+const hasPendingInstanceReports = `-- name: HasPendingInstanceReports :one
+SELECT EXISTS(SELECT 1 FROM experiment_report WHERE tenant_id = $1 AND instance_id = $2 AND status = 1)::boolean
+`
+
+type HasPendingInstanceReportsParams struct {
+	TenantID   int64 `json:"tenant_id"`
+	InstanceID int64 `json:"instance_id"`
+}
+
+func (q *Queries) HasPendingInstanceReports(ctx context.Context, arg HasPendingInstanceReportsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasPendingInstanceReports, arg.TenantID, arg.InstanceID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const listCheckpointResults = `-- name: ListCheckpointResults :many
 SELECT id, tenant_id, instance_id, checkpoint_id, judge_task_ref, passed, score::float8 AS score, detail_ref, binding_output, judged_at
 FROM checkpoint_result
@@ -1674,38 +1692,36 @@ func (q *Queries) LockInstanceCreation(ctx context.Context, lockKey int64) error
 	return err
 }
 
-const markExperimentScoreOutboxFailed = `-- name: MarkExperimentScoreOutboxFailed :one
-UPDATE experiment_score_outbox
-SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+const markExperimentEventOutboxFailed = `-- name: MarkExperimentEventOutboxFailed :one
+UPDATE experiment_event_outbox SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now() RETURNING id, tenant_id, experiment_id, aggregate_id, event_revision, subject, payload, trace_id, occurred_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
-type MarkExperimentScoreOutboxFailedParams struct {
+type MarkExperimentEventOutboxFailedParams struct {
 	TenantID   int64       `json:"tenant_id"`
 	ID         int64       `json:"id"`
 	LastError  pgtype.Text `json:"last_error"`
 	LeaseToken string      `json:"lease_token"`
 }
 
-func (q *Queries) MarkExperimentScoreOutboxFailed(ctx context.Context, arg MarkExperimentScoreOutboxFailedParams) (ExperimentScoreOutbox, error) {
-	row := q.db.QueryRow(ctx, markExperimentScoreOutboxFailed,
+func (q *Queries) MarkExperimentEventOutboxFailed(ctx context.Context, arg MarkExperimentEventOutboxFailedParams) (ExperimentEventOutbox, error) {
+	row := q.db.QueryRow(ctx, markExperimentEventOutboxFailed,
 		arg.TenantID,
 		arg.ID,
 		arg.LastError,
 		arg.LeaseToken,
 	)
-	var i ExperimentScoreOutbox
+	var i ExperimentEventOutbox
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.ExperimentID,
-		&i.InstanceID,
-		&i.StudentID,
-		&i.Score,
-		&i.ScoreRevision,
+		&i.AggregateID,
+		&i.EventRevision,
+		&i.Subject,
+		&i.Payload,
 		&i.TraceID,
-		&i.ScoredAt,
+		&i.OccurredAt,
 		&i.Status,
 		&i.RetryCount,
 		&i.LastError,
@@ -1717,32 +1733,30 @@ func (q *Queries) MarkExperimentScoreOutboxFailed(ctx context.Context, arg MarkE
 	return i, err
 }
 
-const markExperimentScoreOutboxPublished = `-- name: MarkExperimentScoreOutboxPublished :one
-UPDATE experiment_score_outbox
-SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+const markExperimentEventOutboxPublished = `-- name: MarkExperimentEventOutboxPublished :one
+UPDATE experiment_event_outbox SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now() RETURNING id, tenant_id, experiment_id, aggregate_id, event_revision, subject, payload, trace_id, occurred_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
-type MarkExperimentScoreOutboxPublishedParams struct {
+type MarkExperimentEventOutboxPublishedParams struct {
 	TenantID   int64  `json:"tenant_id"`
 	ID         int64  `json:"id"`
 	LeaseToken string `json:"lease_token"`
 }
 
-func (q *Queries) MarkExperimentScoreOutboxPublished(ctx context.Context, arg MarkExperimentScoreOutboxPublishedParams) (ExperimentScoreOutbox, error) {
-	row := q.db.QueryRow(ctx, markExperimentScoreOutboxPublished, arg.TenantID, arg.ID, arg.LeaseToken)
-	var i ExperimentScoreOutbox
+func (q *Queries) MarkExperimentEventOutboxPublished(ctx context.Context, arg MarkExperimentEventOutboxPublishedParams) (ExperimentEventOutbox, error) {
+	row := q.db.QueryRow(ctx, markExperimentEventOutboxPublished, arg.TenantID, arg.ID, arg.LeaseToken)
+	var i ExperimentEventOutbox
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.ExperimentID,
-		&i.InstanceID,
-		&i.StudentID,
-		&i.Score,
-		&i.ScoreRevision,
+		&i.AggregateID,
+		&i.EventRevision,
+		&i.Subject,
+		&i.Payload,
 		&i.TraceID,
-		&i.ScoredAt,
+		&i.OccurredAt,
 		&i.Status,
 		&i.RetryCount,
 		&i.LastError,
@@ -1756,7 +1770,7 @@ func (q *Queries) MarkExperimentScoreOutboxPublished(ctx context.Context, arg Ma
 
 const setExperimentStatus = `-- name: SetExperimentStatus :one
 UPDATE experiment
-SET status = $3, updated_at = now()
+SET status = $3, updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 RETURNING id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at
 `
@@ -1944,7 +1958,7 @@ SET course_id = $3,
     group_config = $10,
     require_report = $11,
     wizard_step = $12,
-    updated_at = now()
+    updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE tenant_id = $1 AND id = $2 AND status = 1 AND deleted_at IS NULL
 RETURNING id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at
 `

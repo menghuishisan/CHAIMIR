@@ -3,6 +3,7 @@
 
 import type { ImportPreviewResponse } from '@chaimir/api-client'
 import { Badge, Callout, Table, type TableColumn } from '@chaimir/ui'
+import { formatDateTime } from '../../../utils/formatters'
 
 interface ImportPreviewPanelProps {
   preview?: ImportPreviewResponse
@@ -27,6 +28,7 @@ export function ImportPreviewPanel({ preview, emptyDescription }: ImportPreviewP
 
   return (
     <div className="flex flex-col gap-3 well p-4">
+      <p className="text-sm text-ink-sub">已保存文件:{preview.file_name} · 有效期至{formatDateTime(preview.expire_at)}</p>
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone="neutral">共 {preview.total} 行</Badge>
         <Badge tone="success">可导入 {preview.valid} 行</Badge>

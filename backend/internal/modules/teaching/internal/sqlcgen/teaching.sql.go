@@ -181,7 +181,7 @@ UPDATE teaching_grade_event_outbox AS outbox
 SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = $1, lease_until = $2::timestamptz
 FROM candidates
 WHERE outbox.id = candidates.id
-RETURNING outbox.id, outbox.tenant_id, outbox.course_id, outbox.student_id, outbox.trace_id, outbox.event_updated_at, outbox.status, outbox.retry_count, outbox.next_attempt_at, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
+RETURNING outbox.id, outbox.revision, outbox.lock_revision, outbox.tenant_id, outbox.course_id, outbox.student_id, outbox.trace_id, outbox.event_updated_at, outbox.status, outbox.retry_count, outbox.next_attempt_at, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
 `
 
 type ClaimPendingTeachingGradeEventOutboxParams struct {
@@ -207,6 +207,8 @@ func (q *Queries) ClaimPendingTeachingGradeEventOutbox(ctx context.Context, arg 
 		var i TeachingGradeEventOutbox
 		if err := rows.Scan(
 			&i.ID,
+			&i.Revision,
+			&i.LockRevision,
 			&i.TenantID,
 			&i.CourseID,
 			&i.StudentID,
@@ -407,6 +409,25 @@ func (q *Queries) CountDiscussionPosts(ctx context.Context, arg CountDiscussionP
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countSharedCourses = `-- name: CountSharedCourses :one
+SELECT COUNT(*)
+FROM course
+WHERE tenant_id <> $1::bigint AND visibility = 2 AND status <> 1 AND deleted_at IS NULL
+  AND ($2::text = '' OR strpos(lower(name), lower($2)) > 0 OR strpos(lower(description), lower($2)) > 0)
+`
+
+type CountSharedCoursesParams struct {
+	ExcludeTenantID int64  `json:"exclude_tenant_id"`
+	Keyword         string `json:"keyword"`
+}
+
+func (q *Queries) CountSharedCourses(ctx context.Context, arg CountSharedCoursesParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSharedCourses, arg.ExcludeTenantID, arg.Keyword)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countStudentAttempts = `-- name: CountStudentAttempts :one
@@ -1123,9 +1144,11 @@ func (q *Queries) CreateSubmission(ctx context.Context, arg CreateSubmissionPara
 }
 
 const createTeachingGradeEventOutbox = `-- name: CreateTeachingGradeEventOutbox :one
-INSERT INTO teaching_grade_event_outbox (id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until)
-VALUES ($1, $2, $3, $4, $5, $6, 1, 0, now(), NULL, now(), now(), '', NULL)
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until
+INSERT INTO teaching_grade_event_outbox (id, tenant_id, course_id, student_id, trace_id, event_updated_at, lock_revision, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until)
+SELECT $1, $2, $3, $4, $5, $6, c.grade_lock_revision, 1, 0, now(), NULL, now(), now(), '', NULL
+FROM course AS c
+WHERE c.tenant_id = $2 AND c.id = $3 AND c.deleted_at IS NULL AND NOT c.grades_locked
+RETURNING id, revision, lock_revision, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CreateTeachingGradeEventOutboxParams struct {
@@ -1149,6 +1172,8 @@ func (q *Queries) CreateTeachingGradeEventOutbox(ctx context.Context, arg Create
 	var i TeachingGradeEventOutbox
 	err := row.Scan(
 		&i.ID,
+		&i.Revision,
+		&i.LockRevision,
 		&i.TenantID,
 		&i.CourseID,
 		&i.StudentID,
@@ -1177,6 +1202,21 @@ type DeleteAssignmentItemsParams struct {
 
 func (q *Queries) DeleteAssignmentItems(ctx context.Context, arg DeleteAssignmentItemsParams) error {
 	_, err := q.db.Exec(ctx, deleteAssignmentItems, arg.TenantID, arg.AssignmentID)
+	return err
+}
+
+const deleteCourseExperimentScoresBeforeRevision = `-- name: DeleteCourseExperimentScoresBeforeRevision :exec
+DELETE FROM course_experiment_score WHERE tenant_id = $1 AND instance_id = $2 AND score_revision < $3
+`
+
+type DeleteCourseExperimentScoresBeforeRevisionParams struct {
+	TenantID      int64 `json:"tenant_id"`
+	InstanceID    int64 `json:"instance_id"`
+	ScoreRevision int64 `json:"score_revision"`
+}
+
+func (q *Queries) DeleteCourseExperimentScoresBeforeRevision(ctx context.Context, arg DeleteCourseExperimentScoresBeforeRevisionParams) error {
+	_, err := q.db.Exec(ctx, deleteCourseExperimentScoresBeforeRevision, arg.TenantID, arg.InstanceID, arg.ScoreRevision)
 	return err
 }
 
@@ -1354,6 +1394,7 @@ const getCloneableCourseByID = `-- name: GetCloneableCourseByID :one
 SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE id = $1 AND deleted_at IS NULL AND (tenant_id = $2 OR visibility = 2)
+FOR SHARE
 `
 
 type GetCloneableCourseByIDParams struct {
@@ -1525,10 +1566,27 @@ func (q *Queries) GetCourseByInviteCode(ctx context.Context, inviteCode string) 
 	return i, err
 }
 
+const getCourseExperimentScoreRevision = `-- name: GetCourseExperimentScoreRevision :one
+SELECT COALESCE(MAX(score_revision), 0)::bigint FROM course_experiment_score WHERE tenant_id = $1 AND instance_id = $2
+`
+
+type GetCourseExperimentScoreRevisionParams struct {
+	TenantID   int64 `json:"tenant_id"`
+	InstanceID int64 `json:"instance_id"`
+}
+
+func (q *Queries) GetCourseExperimentScoreRevision(ctx context.Context, arg GetCourseExperimentScoreRevisionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getCourseExperimentScoreRevision, arg.TenantID, arg.InstanceID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const getCourseGrade = `-- name: GetCourseGrade :one
-SELECT id, tenant_id, course_id, student_id, auto_total::float8 AS auto_total, COALESCE(override_total::float8, 0)::float8 AS override_total, is_overridden, is_locked, updated_at
-FROM course_grade
-WHERE tenant_id = $1 AND course_id = $2 AND student_id = $3
+SELECT g.id, g.tenant_id, g.course_id, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, c.grades_locked AS is_locked, g.updated_at
+FROM course_grade g
+JOIN course c ON c.tenant_id = g.tenant_id AND c.id = g.course_id
+WHERE g.tenant_id = $1 AND g.course_id = $2 AND g.student_id = $3
 `
 
 type GetCourseGradeParams struct {
@@ -1592,10 +1650,38 @@ func (q *Queries) GetCourseMember(ctx context.Context, arg GetCourseMemberParams
 	return i, err
 }
 
+const getCourseReview = `-- name: GetCourseReview :one
+SELECT id, tenant_id, course_id, student_id, rating, comment, created_at
+FROM course_review
+WHERE tenant_id = $1 AND course_id = $2 AND student_id = $3
+`
+
+type GetCourseReviewParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	CourseID  int64 `json:"course_id"`
+	StudentID int64 `json:"student_id"`
+}
+
+func (q *Queries) GetCourseReview(ctx context.Context, arg GetCourseReviewParams) (CourseReview, error) {
+	row := q.db.QueryRow(ctx, getCourseReview, arg.TenantID, arg.CourseID, arg.StudentID)
+	var i CourseReview
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.CourseID,
+		&i.StudentID,
+		&i.Rating,
+		&i.Comment,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getDiscussionPost = `-- name: GetDiscussionPost :one
 SELECT id, tenant_id, course_id, parent_id, author_id, content, is_pinned, like_count, created_at, deleted_at
 FROM discussion_post
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE
 `
 
 type GetDiscussionPostParams struct {
@@ -1850,6 +1936,43 @@ func (q *Queries) ListAnnouncements(ctx context.Context, arg ListAnnouncementsPa
 	return items, nil
 }
 
+const listAssignmentGradeSourceScores = `-- name: ListAssignmentGradeSourceScores :many
+SELECT student_id, MAX(final_score)::float8 AS score, bool_or(status <> 3) AS pending
+FROM submission WHERE tenant_id = $1 AND assignment_id = $2 GROUP BY student_id ORDER BY student_id
+`
+
+type ListAssignmentGradeSourceScoresParams struct {
+	TenantID     int64 `json:"tenant_id"`
+	AssignmentID int64 `json:"assignment_id"`
+}
+
+type ListAssignmentGradeSourceScoresRow struct {
+	StudentID int64   `json:"student_id"`
+	Score     float64 `json:"score"`
+	Pending   bool    `json:"pending"`
+}
+
+// 每名学生取已出分提交的最高分，待评分提交阻断计算，未提交才计零。
+func (q *Queries) ListAssignmentGradeSourceScores(ctx context.Context, arg ListAssignmentGradeSourceScoresParams) ([]ListAssignmentGradeSourceScoresRow, error) {
+	rows, err := q.db.Query(ctx, listAssignmentGradeSourceScores, arg.TenantID, arg.AssignmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAssignmentGradeSourceScoresRow{}
+	for rows.Next() {
+		var i ListAssignmentGradeSourceScoresRow
+		if err := rows.Scan(&i.StudentID, &i.Score, &i.Pending); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAssignmentItems = `-- name: ListAssignmentItems :many
 SELECT id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code, created_at
 FROM assignment_item
@@ -1995,8 +2118,60 @@ func (q *Queries) ListChapters(ctx context.Context, arg ListChaptersParams) ([]C
 	return items, nil
 }
 
+const listCourseGradeSources = `-- name: ListCourseGradeSources :many
+WITH assignment_sources AS (
+    SELECT a.id, a.title, sum(i.score)::float8 AS max_score
+    FROM assignment a JOIN assignment_item i ON i.tenant_id = a.tenant_id AND i.assignment_id = a.id
+    WHERE a.tenant_id = $1 AND a.course_id = $2 AND a.status = 2 AND a.deleted_at IS NULL
+    GROUP BY a.id, a.title HAVING sum(i.score) > 0
+)
+SELECT 1::smallint AS source_type, a.id AS source_id, a.title, a.max_score FROM assignment_sources a
+UNION ALL SELECT 3::smallint, a.id, a.title, a.max_score FROM assignment_sources a
+UNION ALL SELECT 2::smallint, e.experiment_id, e.title, e.max_score FROM course_experiment_source e
+WHERE e.tenant_id = $1 AND e.course_id = $2 AND e.available AND e.max_score > 0
+ORDER BY source_type, title, source_id
+`
+
+type ListCourseGradeSourcesParams struct {
+	TenantID int64 `json:"tenant_id"`
+	CourseID int64 `json:"course_id"`
+}
+
+type ListCourseGradeSourcesRow struct {
+	SourceType int16   `json:"source_type"`
+	SourceID   int64   `json:"source_id"`
+	Title      string  `json:"title"`
+	MaxScore   float64 `json:"max_score"`
+}
+
+// 三类来源共用真实对象；作业与考试复用同一提交执行路径。
+func (q *Queries) ListCourseGradeSources(ctx context.Context, arg ListCourseGradeSourcesParams) ([]ListCourseGradeSourcesRow, error) {
+	rows, err := q.db.Query(ctx, listCourseGradeSources, arg.TenantID, arg.CourseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCourseGradeSourcesRow{}
+	for rows.Next() {
+		var i ListCourseGradeSourcesRow
+		if err := rows.Scan(
+			&i.SourceType,
+			&i.SourceID,
+			&i.Title,
+			&i.MaxScore,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCourseGrades = `-- name: ListCourseGrades :many
-SELECT g.id, g.tenant_id, g.course_id, c.semester, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, g.is_locked, g.updated_at, c.credits::float8 AS credits
+SELECT g.id, g.tenant_id, g.course_id, c.semester, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, c.grades_locked AS is_locked, g.updated_at, c.credits::float8 AS credits
 FROM course_grade g
 JOIN course c ON c.tenant_id = g.tenant_id AND c.id = g.course_id
 WHERE g.tenant_id = $1 AND g.course_id = $2
@@ -2248,10 +2423,15 @@ func (q *Queries) ListCoursesDueToRun(ctx context.Context, startAt pgtype.Timest
 }
 
 const listDiscussionPosts = `-- name: ListDiscussionPosts :many
-SELECT id, tenant_id, course_id, parent_id, author_id, content, is_pinned, like_count, created_at, deleted_at
-FROM discussion_post
-WHERE tenant_id = $1 AND course_id = $2 AND deleted_at IS NULL
-ORDER BY is_pinned DESC, created_at DESC, id DESC
+SELECT post.id, post.tenant_id, post.course_id, post.parent_id, post.author_id, post.content,
+       post.is_pinned, post.like_count, post.created_at, post.deleted_at,
+       parent.content AS parent_content
+FROM discussion_post AS post
+LEFT JOIN discussion_post AS parent ON parent.id = post.parent_id
+    AND parent.tenant_id = post.tenant_id AND parent.course_id = post.course_id
+    AND parent.deleted_at IS NULL
+WHERE post.tenant_id = $1 AND post.course_id = $2 AND post.deleted_at IS NULL
+ORDER BY post.is_pinned DESC, post.created_at DESC, post.id DESC
 LIMIT $3 OFFSET $4
 `
 
@@ -2262,7 +2442,21 @@ type ListDiscussionPostsParams struct {
 	Offset   int32 `json:"offset"`
 }
 
-func (q *Queries) ListDiscussionPosts(ctx context.Context, arg ListDiscussionPostsParams) ([]DiscussionPost, error) {
+type ListDiscussionPostsRow struct {
+	ID            int64              `json:"id"`
+	TenantID      int64              `json:"tenant_id"`
+	CourseID      int64              `json:"course_id"`
+	ParentID      pgtype.Int8        `json:"parent_id"`
+	AuthorID      int64              `json:"author_id"`
+	Content       string             `json:"content"`
+	IsPinned      bool               `json:"is_pinned"`
+	LikeCount     int32              `json:"like_count"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	DeletedAt     pgtype.Timestamptz `json:"deleted_at"`
+	ParentContent pgtype.Text        `json:"parent_content"`
+}
+
+func (q *Queries) ListDiscussionPosts(ctx context.Context, arg ListDiscussionPostsParams) ([]ListDiscussionPostsRow, error) {
 	rows, err := q.db.Query(ctx, listDiscussionPosts,
 		arg.TenantID,
 		arg.CourseID,
@@ -2273,9 +2467,9 @@ func (q *Queries) ListDiscussionPosts(ctx context.Context, arg ListDiscussionPos
 		return nil, err
 	}
 	defer rows.Close()
-	items := []DiscussionPost{}
+	items := []ListDiscussionPostsRow{}
 	for rows.Next() {
-		var i DiscussionPost
+		var i ListDiscussionPostsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -2287,6 +2481,7 @@ func (q *Queries) ListDiscussionPosts(ctx context.Context, arg ListDiscussionPos
 			&i.LikeCount,
 			&i.CreatedAt,
 			&i.DeletedAt,
+			&i.ParentContent,
 		); err != nil {
 			return nil, err
 		}
@@ -2329,6 +2524,42 @@ func (q *Queries) ListDueCourseGradeExportRequests(ctx context.Context, arg List
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExperimentGradeSourceScores = `-- name: ListExperimentGradeSourceScores :many
+SELECT student_id, COALESCE(MAX(score * 100.0 / NULLIF(max_score, 0)) FILTER (WHERE NOT pending), 0)::float8 AS score, bool_or(pending)::boolean AS pending
+FROM course_experiment_score WHERE tenant_id = $1 AND experiment_id = $2 GROUP BY student_id ORDER BY student_id
+`
+
+type ListExperimentGradeSourceScoresParams struct {
+	TenantID     int64 `json:"tenant_id"`
+	ExperimentID int64 `json:"experiment_id"`
+}
+
+type ListExperimentGradeSourceScoresRow struct {
+	StudentID int64   `json:"student_id"`
+	Score     float64 `json:"score"`
+	Pending   bool    `json:"pending"`
+}
+
+func (q *Queries) ListExperimentGradeSourceScores(ctx context.Context, arg ListExperimentGradeSourceScoresParams) ([]ListExperimentGradeSourceScoresRow, error) {
+	rows, err := q.db.Query(ctx, listExperimentGradeSourceScores, arg.TenantID, arg.ExperimentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListExperimentGradeSourceScoresRow{}
+	for rows.Next() {
+		var i ListExperimentGradeSourceScoresRow
+		if err := rows.Scan(&i.StudentID, &i.Score, &i.Pending); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -2578,6 +2809,67 @@ func (q *Queries) ListProgressByCourse(ctx context.Context, arg ListProgressByCo
 	return items, nil
 }
 
+const listSharedCourses = `-- name: ListSharedCourses :many
+SELECT id, name, description, type, difficulty, semester, credits::float8 AS credits, updated_at
+FROM course
+WHERE tenant_id <> $1::bigint AND visibility = 2 AND status <> 1 AND deleted_at IS NULL
+  AND ($2::text = '' OR strpos(lower(name), lower($2)) > 0 OR strpos(lower(description), lower($2)) > 0)
+ORDER BY updated_at DESC, id DESC
+LIMIT $4 OFFSET $3
+`
+
+type ListSharedCoursesParams struct {
+	ExcludeTenantID int64  `json:"exclude_tenant_id"`
+	Keyword         string `json:"keyword"`
+	PageOffset      int32  `json:"page_offset"`
+	PageLimit       int32  `json:"page_limit"`
+}
+
+type ListSharedCoursesRow struct {
+	ID          int64              `json:"id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Type        int16              `json:"type"`
+	Difficulty  int16              `json:"difficulty"`
+	Semester    string             `json:"semester"`
+	Credits     float64            `json:"credits"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListSharedCourses(ctx context.Context, arg ListSharedCoursesParams) ([]ListSharedCoursesRow, error) {
+	rows, err := q.db.Query(ctx, listSharedCourses,
+		arg.ExcludeTenantID,
+		arg.Keyword,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSharedCoursesRow{}
+	for rows.Next() {
+		var i ListSharedCoursesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.Type,
+			&i.Difficulty,
+			&i.Semester,
+			&i.Credits,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStudentCourses = `-- name: ListStudentCourses :many
 SELECT c.id, c.tenant_id, c.teacher_id, c.name, c.description, c.type, c.difficulty, c.cover_ref, c.semester, c.credits::float8 AS credits, c.schedule, c.start_at, c.end_at, c.invite_code, c.status, c.visibility, c.created_at, c.updated_at, c.deleted_at
 FROM course c
@@ -2670,7 +2962,7 @@ func (q *Queries) ListStudentCourses(ctx context.Context, arg ListStudentCourses
 }
 
 const listStudentGrades = `-- name: ListStudentGrades :many
-SELECT g.id, g.tenant_id, g.course_id, c.semester, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, g.is_locked, g.updated_at, c.credits::float8 AS credits
+SELECT g.id, g.tenant_id, g.course_id, c.semester, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, c.grades_locked AS is_locked, g.updated_at, c.credits::float8 AS credits
 FROM course_grade g
 JOIN course c ON c.tenant_id = g.tenant_id AND c.id = g.course_id
 WHERE g.tenant_id = $1 AND g.student_id = $2 AND ($3::text = '' OR c.semester = $3::text)
@@ -2849,6 +3141,38 @@ func (q *Queries) ListSubmissionsByAssignment(ctx context.Context, arg ListSubmi
 	return items, nil
 }
 
+const listTeacherCourseIDs = `-- name: ListTeacherCourseIDs :many
+SELECT id
+FROM course
+WHERE tenant_id = $1 AND teacher_id = $2 AND deleted_at IS NULL
+ORDER BY id
+`
+
+type ListTeacherCourseIDsParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	TeacherID int64 `json:"teacher_id"`
+}
+
+func (q *Queries) ListTeacherCourseIDs(ctx context.Context, arg ListTeacherCourseIDsParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listTeacherCourseIDs, arg.TenantID, arg.TeacherID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTeacherCourses = `-- name: ListTeacherCourses :many
 SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
@@ -2937,6 +3261,24 @@ func (q *Queries) ListTeacherCourses(ctx context.Context, arg ListTeacherCourses
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockCourseGradeWrites = `-- name: LockCourseGradeWrites :one
+SELECT grades_locked FROM course
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type LockCourseGradeWritesParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) LockCourseGradeWrites(ctx context.Context, arg LockCourseGradeWritesParams) (bool, error) {
+	row := q.db.QueryRow(ctx, lockCourseGradeWrites, arg.TenantID, arg.ID)
+	var grades_locked bool
+	err := row.Scan(&grades_locked)
+	return grades_locked, err
 }
 
 const markJudgeOutboxFailedResult = `-- name: MarkJudgeOutboxFailedResult :one
@@ -3050,7 +3392,7 @@ UPDATE teaching_grade_event_outbox
 SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL,
     next_attempt_at = now() + LEAST(interval '1 hour', power(2::numeric, LEAST(retry_count, 10)) * interval '1 second')
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, revision, lock_revision, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkTeachingGradeEventOutboxFailedParams struct {
@@ -3070,6 +3412,8 @@ func (q *Queries) MarkTeachingGradeEventOutboxFailed(ctx context.Context, arg Ma
 	var i TeachingGradeEventOutbox
 	err := row.Scan(
 		&i.ID,
+		&i.Revision,
+		&i.LockRevision,
 		&i.TenantID,
 		&i.CourseID,
 		&i.StudentID,
@@ -3091,7 +3435,7 @@ const markTeachingGradeEventOutboxPublished = `-- name: MarkTeachingGradeEventOu
 UPDATE teaching_grade_event_outbox
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, revision, lock_revision, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkTeachingGradeEventOutboxPublishedParams struct {
@@ -3105,6 +3449,8 @@ func (q *Queries) MarkTeachingGradeEventOutboxPublished(ctx context.Context, arg
 	var i TeachingGradeEventOutbox
 	err := row.Scan(
 		&i.ID,
+		&i.Revision,
+		&i.LockRevision,
 		&i.TenantID,
 		&i.CourseID,
 		&i.StudentID,
@@ -3125,8 +3471,8 @@ func (q *Queries) MarkTeachingGradeEventOutboxPublished(ctx context.Context, arg
 const overrideCourseGrade = `-- name: OverrideCourseGrade :one
 UPDATE course_grade
 SET override_total = $4::text::numeric, is_overridden = true, updated_at = now()
-WHERE tenant_id = $1 AND course_id = $2 AND student_id = $3 AND is_locked = false
-RETURNING id, tenant_id, course_id, student_id, auto_total::float8 AS auto_total, COALESCE(override_total::float8, 0)::float8 AS override_total, is_overridden, is_locked, updated_at
+WHERE tenant_id = $1 AND course_id = $2 AND student_id = $3
+RETURNING id, tenant_id, course_id, student_id, auto_total::float8 AS auto_total, COALESCE(override_total::float8, 0)::float8 AS override_total, is_overridden, false::boolean AS is_locked, updated_at
 `
 
 type OverrideCourseGradeParams struct {
@@ -3408,21 +3754,31 @@ func (q *Queries) SetCourseGradeExportRequestNextCheck(ctx context.Context, arg 
 	return i, err
 }
 
-const setCourseGradesLock = `-- name: SetCourseGradesLock :exec
-UPDATE course_grade
-SET is_locked = $3, updated_at = now()
-WHERE tenant_id = $1 AND course_id = $2
+const setCourseGradesLock = `-- name: SetCourseGradesLock :execrows
+UPDATE course
+SET grades_locked = $3, grade_lock_revision = $4
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+  AND $4::bigint > 0 AND grade_lock_revision < $4
 `
 
 type SetCourseGradesLockParams struct {
-	TenantID int64 `json:"tenant_id"`
-	CourseID int64 `json:"course_id"`
-	IsLocked bool  `json:"is_locked"`
+	TenantID          int64 `json:"tenant_id"`
+	ID                int64 `json:"id"`
+	GradesLocked      bool  `json:"grades_locked"`
+	GradeLockRevision int64 `json:"grade_lock_revision"`
 }
 
-func (q *Queries) SetCourseGradesLock(ctx context.Context, arg SetCourseGradesLockParams) error {
-	_, err := q.db.Exec(ctx, setCourseGradesLock, arg.TenantID, arg.CourseID, arg.IsLocked)
-	return err
+func (q *Queries) SetCourseGradesLock(ctx context.Context, arg SetCourseGradesLockParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setCourseGradesLock,
+		arg.TenantID,
+		arg.ID,
+		arg.GradesLocked,
+		arg.GradeLockRevision,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setCourseStatus = `-- name: SetCourseStatus :one
@@ -4063,14 +4419,76 @@ func (q *Queries) UpdateSubmissionManualGrade(ctx context.Context, arg UpdateSub
 	return i, err
 }
 
+const upsertCourseExperimentScore = `-- name: UpsertCourseExperimentScore :exec
+INSERT INTO course_experiment_score (tenant_id, experiment_id, instance_id, student_id, score, max_score, score_revision, pending)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (tenant_id, instance_id, student_id) DO UPDATE SET score = EXCLUDED.score, max_score = EXCLUDED.max_score, score_revision = EXCLUDED.score_revision, pending = EXCLUDED.pending
+WHERE course_experiment_score.experiment_id = EXCLUDED.experiment_id AND EXCLUDED.score_revision > course_experiment_score.score_revision
+`
+
+type UpsertCourseExperimentScoreParams struct {
+	TenantID      int64   `json:"tenant_id"`
+	ExperimentID  int64   `json:"experiment_id"`
+	InstanceID    int64   `json:"instance_id"`
+	StudentID     int64   `json:"student_id"`
+	Score         float64 `json:"score"`
+	MaxScore      float64 `json:"max_score"`
+	ScoreRevision int64   `json:"score_revision"`
+	Pending       bool    `json:"pending"`
+}
+
+func (q *Queries) UpsertCourseExperimentScore(ctx context.Context, arg UpsertCourseExperimentScoreParams) error {
+	_, err := q.db.Exec(ctx, upsertCourseExperimentScore,
+		arg.TenantID,
+		arg.ExperimentID,
+		arg.InstanceID,
+		arg.StudentID,
+		arg.Score,
+		arg.MaxScore,
+		arg.ScoreRevision,
+		arg.Pending,
+	)
+	return err
+}
+
+const upsertCourseExperimentSource = `-- name: UpsertCourseExperimentSource :exec
+INSERT INTO course_experiment_source (tenant_id, experiment_id, course_id, title, max_score, available, source_revision)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (tenant_id, experiment_id) DO UPDATE SET course_id = EXCLUDED.course_id, title = EXCLUDED.title,
+    max_score = EXCLUDED.max_score, available = EXCLUDED.available, source_revision = EXCLUDED.source_revision
+WHERE EXCLUDED.source_revision > course_experiment_source.source_revision
+`
+
+type UpsertCourseExperimentSourceParams struct {
+	TenantID       int64       `json:"tenant_id"`
+	ExperimentID   int64       `json:"experiment_id"`
+	CourseID       pgtype.Int8 `json:"course_id"`
+	Title          string      `json:"title"`
+	MaxScore       float64     `json:"max_score"`
+	Available      bool        `json:"available"`
+	SourceRevision int64       `json:"source_revision"`
+}
+
+// 来源修订按定义单调递增；乱序得分事件不能恢复已下架或改绑的来源。
+func (q *Queries) UpsertCourseExperimentSource(ctx context.Context, arg UpsertCourseExperimentSourceParams) error {
+	_, err := q.db.Exec(ctx, upsertCourseExperimentSource,
+		arg.TenantID,
+		arg.ExperimentID,
+		arg.CourseID,
+		arg.Title,
+		arg.MaxScore,
+		arg.Available,
+		arg.SourceRevision,
+	)
+	return err
+}
+
 const upsertCourseGrade = `-- name: UpsertCourseGrade :one
-INSERT INTO course_grade (id, tenant_id, course_id, student_id, auto_total, override_total, is_overridden, is_locked, updated_at)
-VALUES ($1, $2, $3, $4, $5::text::numeric, NULL, false, false, now())
+INSERT INTO course_grade (id, tenant_id, course_id, student_id, auto_total, override_total, is_overridden, updated_at)
+VALUES ($1, $2, $3, $4, $5::text::numeric, NULL, false, now())
 ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE
-SET auto_total = EXCLUDED.auto_total,
-    updated_at = now()
-WHERE course_grade.is_locked = false
-RETURNING id, tenant_id, course_id, student_id, auto_total::float8 AS auto_total, COALESCE(override_total::float8, 0)::float8 AS override_total, is_overridden, is_locked, updated_at
+SET auto_total = EXCLUDED.auto_total, updated_at = now()
+RETURNING id, tenant_id, course_id, student_id, auto_total::float8 AS auto_total, COALESCE(override_total::float8, 0)::float8 AS override_total, is_overridden, false::boolean AS is_locked, updated_at
 `
 
 type UpsertCourseGradeParams struct {

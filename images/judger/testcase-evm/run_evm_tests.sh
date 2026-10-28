@@ -7,11 +7,21 @@ RESULT_STDOUT="/tmp/chaimir-judge-stdout.txt"
 : "${HOME:?HOME is required}"
 export FOUNDRY_OFFLINE=true
 
+# 工作卷可能禁止执行;缓存只链接只读镜像内的固定编译器,不写私有输入。
+for version in 0.8.20 0.8.24 0.8.26; do
+  compiler="/usr/local/bin/solc-${version}"
+  target="${HOME}/.svm/${version}/solc-${version}"
+  test -x "${compiler}"
+  mkdir -p "${HOME}/.svm/${version}"
+  rm -f "${target}"
+  ln -s "${compiler}" "${target}"
+done
+
 # 私有归档只读挂载;判题编译产物必须落在 judger 自有工作目录,不能回写隐藏输入。
 test -d "${CHAIMIR_SUBMISSION_DIR}"
 rm -rf /judge/input
 mkdir -p /judge/input
-cp -a "${CHAIMIR_SUBMISSION_DIR}/." /judge/input/
+cp -R "${CHAIMIR_SUBMISSION_DIR}/." /judge/input/
 CHAIMIR_WORK_DIR=/judge/input
 
 # 判题进入编译/测试前必须确认实际连接到组合提供的 EVM runtime。
@@ -44,8 +54,8 @@ if [ -f hardhat.config.js ] || [ -f hardhat.config.ts ]; then
   fi
   mkdir -p node_modules/.bin
   rm -rf node_modules/hardhat node_modules/.bin/hardhat
-  ln -s /opt/chaimir/testcase-evm/node_modules/hardhat node_modules/hardhat
-  ln -s /opt/chaimir/testcase-evm/node_modules/.bin/hardhat node_modules/.bin/hardhat
+  ln -s /opt/chaimir/evm-hardhat/node_modules/hardhat node_modules/hardhat
+  ln -s /opt/chaimir/evm-hardhat/node_modules/.bin/hardhat node_modules/.bin/hardhat
   hardhat_config="$(pwd)/$(if [ -f hardhat.config.js ]; then printf '%s' hardhat.config.js; else printf '%s' hardhat.config.ts; fi)"
   hardhat_wrapper="$(pwd)/.chaimir-hardhat-offline-wrapper.mjs"
   cp /opt/chaimir/testcase-evm/hardhat-offline-wrapper.mjs "${hardhat_wrapper}"

@@ -16,7 +16,7 @@ import { cn } from "../../lib/cn";
 export interface MetricStripItem {
   /** 指标名(用户向) */
   label: string;
-  /** 数值;拿不到全量聚合就不要这一项(§6.5.4),不做近似 */
+  /** 数值;全量聚合读取前或失败时传null/undefined,统一显示「—」,不做近似。 */
   value: ReactNode;
   /** 口径补充,如「不受下方筛选影响」;只在会引起误读时给 */
   hint?: string;
@@ -54,7 +54,7 @@ export function MetricStrip({ label, items, className }: MetricStripProps) {
         >
           <dt className="min-w-0 break-words text-xs text-ink-sub">{item.label}</dt>
           <dd className="min-w-0 break-words text-right text-lg font-semibold text-ink tabular-nums md:mt-0.5 md:text-xl">
-            {item.value}
+            {item.value ?? '—'}
           </dd>
           {/* 口径补充只在 ≥md 出现:窄屏一行放不下三段信息,口径让位于数值本身 */}
           {item.hint && <p className="hidden text-xs text-ink-sub md:block">{item.hint}</p>}

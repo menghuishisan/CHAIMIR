@@ -46,15 +46,15 @@ export default function PlatformVulnerabilitiesPage() {
     (value) => value.length === 0,
   )
 
-  const list = useMemo(() => sources.data ?? [], [sources.data])
-
-  const stats = useMemo(
-    () => ({
+  const stats = useMemo(() => {
+    if ((sources.status !== 'success' && sources.status !== 'empty') || !sources.data) return undefined
+    const list = sources.data
+    return {
+      total: list.length,
       enabled: list.filter((item) => item.enabled).length,
       synced: list.filter((item) => item.last_sync_at !== undefined).length,
-    }),
-    [list],
-  )
+    }
+  }, [sources.data, sources.status])
 
   return (
     <PageScaffold>
@@ -79,9 +79,9 @@ export default function PlatformVulnerabilitiesPage() {
         label="全局来源摘要"
         className="mb-5"
         items={[
-          { label: '全局来源', value: list.length, hint: '全平台共享' },
-          { label: '已启用', value: stats.enabled, hint: '学校可以从它同步' },
-          { label: '曾同步过', value: stats.synced, hint: '有同步记录的来源' },
+          { label: '全局来源', value: stats?.total, hint: '全平台共享' },
+          { label: '已启用', value: stats?.enabled, hint: '学校可以从它同步' },
+          { label: '曾同步过', value: stats?.synced, hint: '有同步记录的来源' },
         ]}
       />
 

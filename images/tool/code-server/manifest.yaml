@@ -14,7 +14,7 @@ labels:
   chaimir.io/sensitivity: student-tool
   chaimir.io/scope: sandbox
   chaimir.io/source: thin-wrapper
-description: VS Code Web 编辑器镜像。
+description: VS Code Web 编辑器镜像,内置离线 Solidity 语言识别与语法配置。
 source:
   type: thin-wrapper
 upstream:
@@ -55,11 +55,14 @@ tool:
     - bitcoin
     - edu
   mount_workspace: true
+  readiness_path: /healthz
   ephemeral_mounts:
     - name: code-server-config
       mount_path: /home/coder/.config
     - name: code-server-data
       mount_path: /home/coder/.local/share/code-server
+    - name: code-server-cache
+      mount_path: /home/coder/.cache
 auth:
   delegated_to_platform: true
   reason: Web IDE 内置认证关闭,外部入口必须经平台代理按租户和环境鉴权。
@@ -86,6 +89,7 @@ security_exceptions:
       - workspace
       - /home/coder/.config
       - /home/coder/.local/share/code-server
+      - /home/coder/.cache
 student_access:
   enabled: true
   shell: restricted

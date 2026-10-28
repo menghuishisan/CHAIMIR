@@ -2,8 +2,6 @@
 package contest
 
 import (
-	"encoding/json"
-	"fmt"
 	"time"
 
 	"chaimir/internal/contracts"
@@ -115,9 +113,10 @@ type EnvDTO struct {
 
 // ContestSandboxFileWriteRequest 是 M8 授权网关写入竞赛工作区的请求。
 type ContestSandboxFileWriteRequest struct {
-	RelativePath     string `json:"relative_path"`
-	ContentBase64    string `json:"content_base64"`
-	ExpectedRevision int64  `json:"expected_revision"`
+	RelativePath string `json:"relative_path"`
+	// 内容字段必须存在,空字符串仍是可写入的零字节文件。
+	ContentBase64    *string `json:"content_base64" binding:"required"`
+	ExpectedRevision int64   `json:"expected_revision"`
 }
 
 // ContestSandboxFileWriteResponse 返回原子写入后新的工作区 revision。
@@ -145,38 +144,24 @@ type ContestSandboxChainRequest struct {
 
 // ContestSandboxResponse 是 M8 网关对学生暴露的沙箱摘要，不泄露组织租户的 Namespace。
 type ContestSandboxResponse struct {
-	SandboxID           ids.ID                         `json:"sandbox_id"`
-	SourceRef           string                         `json:"source_ref"`
-	OwnerAccountID      ids.ID                         `json:"owner_account_id"`
-	RuntimeCode         string                         `json:"runtime_code"`
-	RuntimeImageVersion string                         `json:"runtime_image_version"`
-	RuntimeInstances    []string                       `json:"runtime_instances"`
-	Phase               int16                          `json:"phase"`
-	Status              int16                          `json:"status"`
-	ToolAccess          []contracts.SandboxToolAccess  `json:"tool_access"`
-	Capabilities        contracts.SandboxCapabilities  `json:"capabilities"`
-	ResourceUsage       contracts.SandboxResourceUsage `json:"resource_usage"`
-	WorkspaceRevision   int64                          `json:"workspace_revision"`
+	SandboxID           ids.ID                          `json:"sandbox_id"`
+	SourceRef           string                          `json:"source_ref"`
+	OwnerAccountID      ids.ID                          `json:"owner_account_id"`
+	RuntimeCode         string                          `json:"runtime_code"`
+	RuntimeImageVersion string                          `json:"runtime_image_version"`
+	RuntimeInstances    []string                        `json:"runtime_instances"`
+	Phase               int16                           `json:"phase"`
+	Status              int16                           `json:"status"`
+	ToolAccess          []contracts.SandboxToolAccess   `json:"tool_access"`
+	Capabilities        contracts.SandboxCapabilities   `json:"capabilities"`
+	ResourceUsage       *contracts.SandboxResourceUsage `json:"resource_usage"`
+	WorkspaceRevision   int64                           `json:"workspace_revision"`
 }
 
 // SubmitRequest 是解题赛提交请求。
 type SubmitRequest struct {
 	ContentRef map[string]any `json:"content_ref"`
 	SandboxRef string         `json:"sandbox_ref"`
-}
-
-// UnmarshalJSON 使解题提交请求严格遵循已发布的闭合字段契约。
-func (req *SubmitRequest) UnmarshalJSON(data []byte) error {
-	type wire SubmitRequest
-	if err := rejectUnknownContestRequestFields(data, "content_ref", "sandbox_ref"); err != nil {
-		return err
-	}
-	var decoded wire
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	*req = SubmitRequest(decoded)
-	return nil
 }
 
 // SubmissionDTO 是解题赛提交输出。
@@ -201,41 +186,6 @@ type BattleEntryRequest struct {
 	ProblemID ids.ID `json:"problem_id"`
 	SandboxID ids.ID `json:"sandbox_id"`
 	Role      int16  `json:"role"`
-}
-
-// UnmarshalJSON 拒绝对抗参战请求中未公开的对象引用或附加字段。
-func (req *BattleEntryRequest) UnmarshalJSON(data []byte) error {
-	type wire BattleEntryRequest
-	if err := rejectUnknownContestRequestFields(data, "problem_id", "sandbox_id", "role"); err != nil {
-		return err
-	}
-	var decoded wire
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return err
-	}
-	*req = BattleEntryRequest(decoded)
-	return nil
-}
-
-// rejectUnknownContestRequestFields 校验这些具备对象归属安全边界的请求没有额外 JSON 字段。
-func rejectUnknownContestRequestFields(data []byte, allowed ...string) error {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return err
-	}
-	for name := range fields {
-		known := false
-		for _, field := range allowed {
-			if name == field {
-				known = true
-				break
-			}
-		}
-		if !known {
-			return fmt.Errorf("请求包含未声明字段 %q", name)
-		}
-	}
-	return nil
 }
 
 // BattleEntryDTO 是参战物输出。
@@ -414,7 +364,7 @@ type VulnSourceDTO struct {
 	Config       map[string]any `json:"config"`
 	DefaultLevel int16          `json:"default_level"`
 	Enabled      bool           `json:"enabled"`
-	LastSyncAt   time.Time      `json:"last_sync_at,omitempty"`
+	LastSyncAt   time.Time      `json:"last_sync_at,omitzero"`
 }
 
 // ImportVulnProblemRequest 是手动导入漏洞案例请求。

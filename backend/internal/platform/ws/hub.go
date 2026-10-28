@@ -3,10 +3,12 @@ package ws
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -14,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"chaimir/pkg/apperr"
 	"chaimir/pkg/logging"
 
 	"github.com/gorilla/websocket"
@@ -30,12 +33,23 @@ type Hub struct {
 
 // Conn 表示一条 WebSocket 连接及其订阅集合。
 type Conn struct {
-	socket  *websocket.Conn
-	send    chan []byte
-	topics  map[string]struct{}
-	done    chan struct{}
-	hub     *Hub
-	session SessionKey
+	socket    *websocket.Conn
+	send      chan outboundMessage
+	topics    map[string]struct{}
+	done      <-chan struct{}
+	ctx       context.Context
+	cancel    context.CancelCauseFunc
+	closeOnce sync.Once
+	closeErr  error
+	hub       *Hub
+	session   SessionKey
+}
+
+// outboundMessage 在同一发送队列保留负载类型,区分业务文本和原始终端字节。
+type outboundMessage struct {
+	messageType int
+	payload     []byte
+	written     chan error
 }
 
 // SessionKey 标识一条需要单端互斥的连接主体；Scope 允许同一账号在不同受控资源上独立连接和精确撤销。
@@ -165,9 +179,19 @@ func NewHub(policy OriginPolicy, options HubOptions) (*Hub, error) {
 // ReadJSON 从客户端读取一条 JSON 消息。
 func (c *Conn) ReadJSON(v any) error {
 	if err := c.socket.ReadJSON(v); err != nil {
+		c.close(err)
 		return err
 	}
-	return c.refreshReadDeadline()
+	if err := c.refreshReadDeadline(); err != nil {
+		c.close(err)
+		return err
+	}
+	return nil
+}
+
+// Context 保留请求身份与trace,并在连接结束时取消关联执行。
+func (c *Conn) Context() context.Context {
+	return c.ctx
 }
 
 // SendJSON 向客户端发送一条 JSON 消息,复用发送队列避免并发写同一连接。
@@ -176,7 +200,7 @@ func (c *Conn) SendJSON(v any) error {
 	if err != nil {
 		return err
 	}
-	if !c.enqueue(data) {
+	if !c.enqueue(websocket.TextMessage, data) {
 		return io.ErrClosedPipe
 	}
 	return nil
@@ -192,15 +216,15 @@ func (c *Conn) Writer() io.Writer {
 	return connWriter{conn: c}
 }
 
-// BindSession 把连接绑定到单端互斥主体,若旧连接仍在线则主动关闭旧连接。
-func (c *Conn) BindSession(session SessionKey) error {
+// BindSession 转移主体的唯一连接索引;旧连接关闭异常只记录,不否定已完成的新连接登记。
+func (c *Conn) BindSession(ctx context.Context, session SessionKey) error {
 	if c == nil || c.hub == nil {
 		return fmt.Errorf("WebSocket 连接未挂接 Hub")
 	}
 	if session.TenantID <= 0 || session.AccountID <= 0 {
 		return fmt.Errorf("WebSocket 会话主体非法")
 	}
-	return c.hub.bindSession(c, session)
+	return c.hub.bindSession(ctx, c, session)
 }
 
 // Serve 建立固定订阅型连接,由业务回调完成鉴权和初始订阅。
@@ -219,30 +243,25 @@ func (h *Hub) Serve(w http.ResponseWriter, r *http.Request, subscribe func(c *Co
 	if err != nil {
 		return err
 	}
-	conn := &Conn{
-		socket: socket,
-		send:   make(chan []byte, 32),
-		topics: make(map[string]struct{}),
-		done:   make(chan struct{}),
-		hub:    h,
-	}
+	conn := h.newConn(r.Context(), socket)
 	if err := conn.initializeReadLifecycle(); err != nil {
-		logging.ErrorContext(r.Context(), "WebSocket 读生命周期初始化失败", errors.Join(err, socket.Close()).Error())
+		conn.close(err)
+		logging.ErrorContext(r.Context(), "WebSocket 读生命周期初始化失败", apperr.ErrInternal.WithCause(errors.Join(err, conn.closeErr)).LogString())
 		return nil
 	}
 	// 第一步:升级成功后立即建立发送队列和订阅容器,避免业务回调期间并发写 socket。
 	if err := subscribe(conn); err != nil {
-		logging.ErrorContext(r.Context(), "WebSocket 订阅初始化失败", errors.Join(err, socket.Close()).Error())
+		// 回调可能已经登记会话或订阅,初始化失败不能留下指向已关闭连接的索引。
+		conn.close(err)
+		logging.ErrorContext(r.Context(), "WebSocket 订阅初始化失败", apperr.ErrInternal.WithCause(errors.Join(err, conn.closeErr)).LogString())
 		return nil
 	}
 	// 第二步:写循环负责服务端推送;读循环只用于感知客户端断开并触发清理。
 	go conn.writeLoop()
 	go conn.pingLoop()
 	readErr := conn.readLoop()
-	close(conn.done)
-	h.Unsubscribe(conn)
-	close(conn.send)
-	logConnectionError(r, "WebSocket 连接异常结束", errors.Join(readErr, socket.Close()))
+	conn.close(readErr)
+	logConnectionError(r, "WebSocket 连接异常结束", readErr)
 	return nil
 }
 
@@ -262,36 +281,99 @@ func (h *Hub) ServeInteractive(w http.ResponseWriter, r *http.Request, handle fu
 	if err != nil {
 		return err
 	}
-	conn := &Conn{
-		socket: socket,
-		send:   make(chan []byte, 32),
-		topics: make(map[string]struct{}),
-		done:   make(chan struct{}),
-		hub:    h,
-	}
+	conn := h.newConn(r.Context(), socket)
 	if err := conn.initializeReadLifecycle(); err != nil {
-		logging.ErrorContext(r.Context(), "WebSocket 交互读生命周期初始化失败", errors.Join(err, socket.Close()).Error())
+		conn.close(err)
+		logging.ErrorContext(r.Context(), "WebSocket 交互读生命周期初始化失败", apperr.ErrInternal.WithCause(errors.Join(err, conn.closeErr)).LogString())
 		return nil
 	}
 	go conn.writeLoop()
 	go conn.pingLoop()
 	handleErr := handle(conn)
-	close(conn.done)
-	h.Unsubscribe(conn)
-	close(conn.send)
+	if handleErr == nil && conn.ctx.Err() == nil {
+		// 正常执行结束时先发关闭控制帧,避免直接断开底层连接被浏览器视为传输失败。
+		handleErr = conn.closeWithControl(websocket.CloseNormalClosure, "")
+	} else {
+		conn.close(handleErr)
+	}
 	// 协议升级成功后连接已被 hijack,业务流结束或断开不能再返回给 HTTP handler 写 JSON 响应。
 	// 升级前的错误仍由调用方按统一错误结构返回给客户端;升级后错误在这里进入结构化日志。
-	logConnectionError(r, "WebSocket 交互连接异常结束", errors.Join(handleErr, socket.Close()))
+	logConnectionError(r, "WebSocket 交互连接异常结束", errors.Join(handleErr, context.Cause(conn.ctx)))
 	return nil
+}
+
+// newConn 为两类入口建立同一队列与连接context,父请求结束时终止底层I/O。
+func (h *Hub) newConn(parent context.Context, socket *websocket.Conn) *Conn {
+	ctx, cancel := context.WithCancelCause(parent)
+	conn := &Conn{
+		socket: socket,
+		send:   make(chan outboundMessage, 32),
+		topics: make(map[string]struct{}),
+		done:   ctx.Done(),
+		ctx:    ctx,
+		cancel: cancel,
+		hub:    h,
+	}
+	context.AfterFunc(ctx, func() { conn.close(context.Cause(ctx)) })
+	return conn
+}
+
+// close 幂等结束连接并保留首个原因,关闭错误仅记内部日志,不包含任何负载。
+func (c *Conn) close(cause error) {
+	c.closeOnce.Do(func() {
+		if cause == nil {
+			cause = io.ErrClosedPipe
+		}
+		c.cancel(cause)
+		c.closeErr = c.socket.Close()
+		c.hub.Unsubscribe(c)
+		if c.closeErr != nil {
+			logging.ErrorContext(c.ctx, "WebSocket 连接关闭失败", apperr.ErrInternal.WithCause(c.closeErr).LogString())
+		}
+	})
+}
+
+// connectionError 把结束原因交给仍在等待的流式读写者,保留实际网络错误。
+func (c *Conn) connectionError() error {
+	if cause := context.Cause(c.ctx); cause != nil {
+		return cause
+	}
+	return io.ErrClosedPipe
 }
 
 // logConnectionError 记录升级后的非预期连接错误,正常关闭和客户端断连不作为服务故障上报。
 func logConnectionError(r *http.Request, message string, err error) {
-	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) ||
-		websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
+	if err == nil {
 		return
 	}
-	logging.ErrorContext(r.Context(), message, err.Error())
+	// 应用失败必须保留,不能因同一原因链里包含正常断连而整组忽略。
+	if expectedConnectionEnd(err) {
+		return
+	}
+	logging.ErrorContext(r.Context(), message, apperr.ErrInternal.WithCause(err).LogString())
+}
+
+// expectedConnectionEnd 只在全部原因均为正常断开时忽略日志,不掩盖同组协议或执行失败。
+func expectedConnectionEnd(err error) bool {
+	if err == nil {
+		return true
+	}
+	if _, isAppError := apperr.As(err); isAppError {
+		return false
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, cause := range joined.Unwrap() {
+			if !expectedConnectionEnd(cause) {
+				return false
+			}
+		}
+		return true
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		return expectedConnectionEnd(wrapped.Unwrap())
+	}
+	return errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, net.ErrClosed) ||
+		websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived)
 }
 
 // Subscribe 把连接加入指定 topic,并维护反向索引供断连时清理。
@@ -308,6 +390,9 @@ func (h *Hub) Subscribe(c *Conn, topic string) error {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if c.ctx.Err() != nil {
+		return c.connectionError()
+	}
 	if h.topics[topic] == nil {
 		h.topics[topic] = make(map[*Conn]struct{})
 	}
@@ -351,7 +436,7 @@ func (h *Hub) Broadcast(topic string, payload []byte) int {
 	defer h.mu.RUnlock()
 	delivered := 0
 	for c := range h.topics[topic] {
-		if c.enqueue(payload) {
+		if c.enqueue(websocket.TextMessage, payload) {
 			delivered++
 		}
 	}
@@ -375,36 +460,52 @@ func (h *Hub) CloseAll(reason string) error {
 		return nil
 	}
 	h.mu.RLock()
-	connections := make(map[*Conn]struct{})
+	connections := make(map[*Conn]SessionKey)
 	for _, conn := range h.sessions {
 		if conn != nil {
-			connections[conn] = struct{}{}
+			connections[conn] = conn.session
 		}
 	}
 	for _, topicConnections := range h.topics {
 		for conn := range topicConnections {
 			if conn != nil {
-				connections[conn] = struct{}{}
+				connections[conn] = conn.session
 			}
 		}
 	}
 	h.mu.RUnlock()
-	for conn := range connections {
+	var failures []error
+	for conn, session := range connections {
 		if err := conn.closeWithControl(websocket.CloseGoingAway, reason); err != nil {
-			return err
+			failures = append(failures, fmt.Errorf("关闭 WebSocket 连接失败: tenant_id=%d account_id=%d scope=%s: %w", session.TenantID, session.AccountID, session.Scope, err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
-// writeLoop 把服务端广播顺序写入客户端连接。
+// writeLoop 按入队类型顺序写入消息,不把原始终端字节改成UTF-8文本。
 func (c *Conn) writeLoop() {
-	for msg := range c.send {
-		// 每次写入前设置统一写超时,避免慢连接永久占住发送协程。
-		if err := c.socket.SetWriteDeadline(time.Now().Add(c.hub.options.WriteTimeout)); err != nil {
+	for {
+		var msg outboundMessage
+		select {
+		case <-c.done:
+			return
+		case msg = <-c.send:
+		}
+		if c.ctx.Err() != nil {
 			return
 		}
-		if err := c.socket.WriteMessage(websocket.TextMessage, msg); err != nil {
+		// 每次写入前设置统一写超时,避免慢连接永久占住发送协程。
+		err := c.socket.SetWriteDeadline(time.Now().Add(c.hub.options.WriteTimeout))
+		if err == nil {
+			err = c.socket.WriteMessage(msg.messageType, msg.payload)
+		}
+		if msg.written != nil {
+			msg.written <- err
+		}
+		if err != nil {
+			c.close(err)
+			logging.ErrorContext(c.ctx, "WebSocket 消息写入失败", apperr.ErrInternal.WithCause(errors.Join(err, c.closeErr)).LogString())
 			return
 		}
 	}
@@ -456,6 +557,8 @@ func (c *Conn) pingLoop() {
 		select {
 		case <-ticker.C:
 			if err := c.writeControl(websocket.PingMessage, []byte("ping")); err != nil {
+				c.close(err)
+				logging.ErrorContext(c.ctx, "WebSocket 心跳写入失败", apperr.ErrInternal.WithCause(errors.Join(err, c.closeErr)).LogString())
 				return
 			}
 		case <-c.done:
@@ -469,9 +572,13 @@ func (h *Hub) upgrader() websocket.Upgrader {
 	return websocket.Upgrader{CheckOrigin: h.originPolicy.Check}
 }
 
-// bindSession 建立主体到连接的唯一索引,并在同主体重连时主动淘汰旧连接。
-func (h *Hub) bindSession(conn *Conn, session SessionKey) error {
+// bindSession 在锁内转移唯一索引,旧连接关闭失败不回滚也不传给新连接。
+func (h *Hub) bindSession(ctx context.Context, conn *Conn, session SessionKey) error {
 	h.mu.Lock()
+	if conn.ctx.Err() != nil {
+		h.mu.Unlock()
+		return conn.connectionError()
+	}
 	previous := h.sessions[session]
 	h.sessions[session] = conn
 	conn.session = session
@@ -479,7 +586,8 @@ func (h *Hub) bindSession(conn *Conn, session SessionKey) error {
 
 	if previous != nil && previous != conn {
 		if err := previous.closeWithControl(websocket.ClosePolicyViolation, "session_replaced"); err != nil {
-			return err
+			logging.ErrorContext(ctx, "WebSocket 旧连接清理失败,新连接已登记", err.Error(),
+				slog.Int64("tenant_id", session.TenantID), slog.Int64("account_id", session.AccountID), slog.String("scope", session.Scope))
 		}
 	}
 	return nil
@@ -494,8 +602,8 @@ func (c *Conn) writeControl(messageType int, payload []byte) error {
 func (c *Conn) closeWithControl(code int, reason string) error {
 	message := websocket.FormatCloseMessage(code, reason)
 	writeErr := c.writeControl(websocket.CloseMessage, message)
-	closeErr := c.socket.Close()
-	return errors.Join(writeErr, closeErr)
+	c.close(writeErr)
+	return errors.Join(writeErr, c.closeErr)
 }
 
 type connReader struct {
@@ -511,9 +619,11 @@ func (r *connReader) Read(p []byte) (int, error) {
 		}
 		messageType, data, err := r.conn.socket.ReadMessage()
 		if err != nil {
+			r.conn.close(err)
 			return 0, err
 		}
 		if err := r.conn.refreshReadDeadline(); err != nil {
+			r.conn.close(err)
 			return 0, err
 		}
 		if messageType == websocket.TextMessage || messageType == websocket.BinaryMessage {
@@ -529,27 +639,39 @@ type connWriter struct {
 	conn *Conn
 }
 
-// Write 把字节作为一条 WebSocket 消息加入统一发送队列。
+// Write 经唯一队列等待原始二进制消息实际写入,背压到PTY且不提前丢弃尾块。
 func (w connWriter) Write(p []byte) (int, error) {
-	data := append([]byte(nil), p...)
-	if !w.conn.enqueue(data) {
-		return 0, io.ErrClosedPipe
+	if len(p) == 0 {
+		return 0, nil
 	}
-	return len(p), nil
+	if w.conn.ctx.Err() != nil {
+		return 0, w.conn.connectionError()
+	}
+	data := append([]byte(nil), p...)
+	written := make(chan error, 1)
+	select {
+	case w.conn.send <- outboundMessage{messageType: websocket.BinaryMessage, payload: data, written: written}:
+	case <-w.conn.done:
+		return 0, w.conn.connectionError()
+	}
+	select {
+	case err := <-written:
+		if err != nil {
+			return 0, err
+		}
+		return len(p), nil
+	case <-w.conn.done:
+		return 0, w.conn.connectionError()
+	}
 }
 
-// enqueue 非阻塞写入发送队列,连接关闭或缓冲满时返回 false,避免业务广播阻塞或 panic。
-func (c *Conn) enqueue(data []byte) (ok bool) {
-	if c == nil {
+// enqueue 为业务文本非阻塞入队;消费者不关闭队列,结束信号消除发送与关闭竞争。
+func (c *Conn) enqueue(messageType int, data []byte) bool {
+	if c == nil || c.ctx.Err() != nil {
 		return false
 	}
-	defer func() {
-		if recover() != nil {
-			ok = false
-		}
-	}()
 	select {
-	case c.send <- data:
+	case c.send <- outboundMessage{messageType: messageType, payload: data}:
 		return true
 	case <-c.done:
 		return false

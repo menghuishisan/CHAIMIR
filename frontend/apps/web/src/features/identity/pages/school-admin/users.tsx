@@ -250,18 +250,21 @@ export default function SchoolAdminUsersPage() {
   }, [])
 
   // 指标带取服务端全量口径,不随下方筛选变化:它回答「本校账号整体状况」
-  const totalCount = useResourceTotal((params) => api.identity.getAccounts(params), [])
+  const totalCount = useResourceTotal((params) => api.identity.getAccounts(params), [], accounts.refreshVersion)
   const pendingCount = useResourceTotal(
     (params) => api.identity.getAccounts({ status: AccountStatus.PENDING, ...params }),
     [],
+    accounts.refreshVersion,
   )
   const activeCount = useResourceTotal(
     (params) => api.identity.getAccounts({ status: AccountStatus.ACTIVE, ...params }),
     [],
+    accounts.refreshVersion,
   )
   const disabledCount = useResourceTotal(
     (params) => api.identity.getAccounts({ status: AccountStatus.DISABLED, ...params }),
     [],
+    accounts.refreshVersion,
   )
 
   const classOptions = useMemo(

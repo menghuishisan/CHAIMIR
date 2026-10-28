@@ -95,18 +95,21 @@ export default function PlatformSchoolsPage() {
   )
 
   // 指标带取全量口径,不随下方筛选变化:它回答「平台整体有多少学校、多少在正常使用」。
-  const totalCount = useResourceTotal((params) => api.identity.getTenants(params), [])
+  const totalCount = useResourceTotal((params) => api.identity.getTenants(params), [], tenants.refreshVersion)
   const activeCount = useResourceTotal(
     (params) => api.identity.getTenants({ status: TenantStatus.ACTIVE, ...params }),
     [],
+    tenants.refreshVersion,
   )
   const disabledCount = useResourceTotal(
     (params) => api.identity.getTenants({ status: TenantStatus.DISABLED, ...params }),
     [],
+    tenants.refreshVersion,
   )
   const expiredCount = useResourceTotal(
     (params) => api.identity.getTenants({ status: TenantStatus.EXPIRED, ...params }),
     [],
+    tenants.refreshVersion,
   )
 
   const columns: TableColumn<Tenant>[] = [

@@ -59,7 +59,7 @@ func (s *Service) prepareBattleReplay(ctx context.Context, tenantID, taskID int6
 	var entryA, entryB BattleEntry
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		match, err = tx.GetBattleMatchByJudgeTask(ctx, tenantID, ids.Format(taskID))
+		match, err = tx.LockBattleMatchByJudgeTask(ctx, tenantID, ids.Format(taskID))
 		if err != nil {
 			return err
 		}
@@ -128,7 +128,7 @@ func (s *Service) prepareBattleReplay(ctx context.Context, tenantID, taskID int6
 	objectRef, err := storage.ObjectRefString(s.replayBucket, key)
 	if err != nil {
 		if cleanupErr := s.replayStore.Delete(ctx, s.replayBucket, key); cleanupErr != nil {
-			return "", false, apperr.ErrContestReplayUnavailable.WithCause(fmt.Errorf("生成回放引用失败: %w; 清理对象失败: %v", err, cleanupErr))
+			return "", false, apperr.ErrContestReplayUnavailable.WithCause(fmt.Errorf("生成回放引用失败: %w; 清理对象失败: %w", err, cleanupErr))
 		}
 		return "", false, apperr.ErrContestReplayUnavailable.WithCause(err)
 	}

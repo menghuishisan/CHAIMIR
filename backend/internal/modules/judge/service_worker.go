@@ -319,6 +319,7 @@ func privateSidecarsForSandbox(items []workload.ComponentSpec) []contracts.Sandb
 			ReadOnlyRootFilesystem: item.ReadOnlyRootFilesystem,
 			Labels:                 maps.Clone(item.Labels),
 			MountWorkspace:         item.MountWorkspace,
+			MountDomains:           append([]string(nil), item.MountDomains...),
 			EphemeralMounts:        mounts,
 		})
 	}
@@ -354,7 +355,8 @@ func (s *Service) waitSandboxReady(ctx context.Context, task JudgeTask, sandboxI
 		if info.Status == contracts.SandboxStatusFailed || info.Status == contracts.SandboxStatusDestroyed {
 			return apperr.ErrJudgeWorkerFailed
 		}
-		if (info.Status == contracts.SandboxStatusReady || info.Status == contracts.SandboxStatusRunning || info.Status == contracts.SandboxStatusIdle) && info.Phase >= contracts.SandboxPhaseReady {
+		phaseReady := info.Phase == contracts.SandboxPhaseReady || info.Phase == contracts.SandboxPhaseFullyReady
+		if (info.Status == contracts.SandboxStatusReady || info.Status == contracts.SandboxStatusRunning || info.Status == contracts.SandboxStatusIdle) && phaseReady {
 			return nil
 		}
 		if timex.Now().After(deadline) {
@@ -410,6 +412,15 @@ func (s *Service) injectStudentCode(ctx context.Context, task JudgeTask, sandbox
 	injectCtx, cancel := context.WithTimeout(ctx, time.Duration(s.cfg.InputInjectTimeoutSeconds)*time.Second)
 	defer cancel()
 	_, data, err := s.readObjectRef(injectCtx, task.InputSnapshot.SanitizedCodeArchiveRef)
+	if err != nil {
+		return apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
+	}
+	// 历史排队/重判任务的执行归档可能早于净化规则,注入前统一校验并剔除平台私有副本。
+	data, err = upload.SafeArchiveTar(archiveName, data, upload.ArchiveLimits{MaxFiles: s.cfg.InputArchiveMaxFiles, MaxUnpackedBytes: s.cfg.InputArchiveMaxUnpackedBytes})
+	if err != nil {
+		return apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
+	}
+	data, err = workload.SanitizeWorkspaceArchive(data)
 	if err != nil {
 		return apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
 	}

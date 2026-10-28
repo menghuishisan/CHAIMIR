@@ -59,6 +59,12 @@ EVM Hardhat/Foundry 测试用例判题镜像。
 - 未声明组件 readiness probe；容器运行不等于就绪或业务成功。
 - 镜像自检 tool-versions：["sh","-lc","set -eu; hardhat --version; forge --version; for version in 0.8.20 0.8.24 0.8.26; do case \"$(/usr/local/bin/solc-${version} --version)\" in *\"Version: ${version}\"*) ;; *) exit 1 ;; esac; done"]。
 
+## 离线编译器与发布一致性
+
+- `toolchain.compiler_versions` 声明的每个编译器都必须由固定摘要的 `runtime/evm-hardhat` 复制到镜像内;执行时在可写`/judge/home/.svm`建立指向这些固定文件的符号链接。编译器从只读镜像执行,工作卷无需执行权限。`/judge`挂空工作卷仍须可离线按项目版本编译,不得依赖被卷遮蔽的镜像层缓存、向只读`/judge-private`写HOME、运行时下载或回退版本。
+- 2026-10-17 正式产物核对发现旧 `testcase-evm` 摘要仅包含0.8.20,与当前Dockerfile及manifest要求不一致。当前正式Hardhat和静态扫描镜像的三个编译器文件与SHA256均已核对；本次重建判题镜像,manifest同步同时纳入内置目录声明的 `service/migrate`,不能以删除自检步骤或手改目录可用状态代替交付。
+- 新镜像必须经过唯一候选构建、回拉、扫描/签名验证和摘要晋升流程,再由平台目录自检及真实判分验证。文件清单和构建通过分别记录,均不能代替真实判分通过。
+
 ## 清理
 
 - 验收后按 CompositionSpec 所属租户/实例和项目 owner 标签删除容器、Pod、Service、NetworkPolicy、临时卷、Secret 投影和临时材料；保留平台长期资源。

@@ -150,7 +150,7 @@ func progressDTO(p LessonProgress) ProgressDTO {
 
 // postDTO 将讨论帖或回复转换为 HTTP 响应结构。
 func postDTO(p DiscussionPost) PostDTO {
-	return PostDTO{ID: ids.ID(p.ID), CourseID: ids.ID(p.CourseID), ParentID: ids.ID(p.ParentID), AuthorID: ids.ID(p.AuthorID), Content: p.Content, IsPinned: p.IsPinned, LikeCount: p.LikeCount, CreatedAt: timex.RFC3339OrEmpty(p.CreatedAt)}
+	return PostDTO{ID: ids.ID(p.ID), CourseID: ids.ID(p.CourseID), ParentID: ids.ID(p.ParentID), ParentContent: p.ParentContent, AuthorID: ids.ID(p.AuthorID), Content: p.Content, IsPinned: p.IsPinned, LikeCount: p.LikeCount, CreatedAt: timex.RFC3339OrEmpty(p.CreatedAt)}
 }
 
 // announcementDTO 将课程公告转换为 HTTP 响应结构。

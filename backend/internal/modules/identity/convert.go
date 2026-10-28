@@ -38,14 +38,16 @@ func ToTenantDTO(t Tenant) (TenantDTO, error) {
 // ToAccountDTO 把账号领域快照转换为 HTTP 响应 DTO。
 func ToAccountDTO(a Account, phonePlain string) AccountDTO {
 	dto := AccountDTO{
-		ID:           ids.ID(a.ID),
-		TenantID:     ids.ID(a.TenantID),
-		Name:         a.Name,
-		No:           a.No,
-		BaseIdentity: a.BaseIdentity,
-		Roles:        a.Roles,
-		Status:       a.Status,
-		Title:        a.Title,
+		ID:             ids.ID(a.ID),
+		TenantID:       ids.ID(a.TenantID),
+		Name:           a.Name,
+		No:             a.No,
+		OrgID:          ids.ID(a.OrgID),
+		EnrollmentYear: a.EnrollmentYear,
+		BaseIdentity:   a.BaseIdentity,
+		Roles:          a.Roles,
+		Status:         a.Status,
+		Title:          a.Title,
 	}
 	dto.CreatedAt = timex.RFC3339OrEmpty(a.CreatedAt)
 	if phonePlain != "" {

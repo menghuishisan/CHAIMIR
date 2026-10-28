@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS judger (
     executor_ref VARCHAR(128) NOT NULL,
     runtime_required BOOLEAN NOT NULL DEFAULT false,
     default_timeout_sec INT NOT NULL CHECK (default_timeout_sec > 0),
-    resource_spec JSONB NOT NULL DEFAULT '{}'::jsonb,
+    resource_spec JSONB NOT NULL DEFAULT '{}'::jsonb CHECK (NOT (resource_spec ? 'composition')),
     selftest_status SMALLINT NOT NULL CHECK (selftest_status IN (1, 2, 3)),
     status SMALLINT NOT NULL CHECK (status IN (1, 2)),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),

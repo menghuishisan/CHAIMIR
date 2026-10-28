@@ -12,8 +12,8 @@ export interface PagedResourceState<T, R extends PaginatedResponse<T> = Paginate
   extends AsyncResourceState<R> {
   page: number
   pageSize: number
-  /** 后端返回的总记录数;首次读取完成前为 0 */
-  total: number
+  /** 当前请求成功返回的总记录数;读取中或失败时未知,不能按零展示。 */
+  total: number | undefined
   setPage: (page: number) => void
 }
 
@@ -58,7 +58,7 @@ export function usePagedResource<T, R extends PaginatedResponse<T> = PaginatedRe
     ...resource,
     page,
     pageSize,
-    total: resource.data ? resource.data.total : 0,
+    total: resource.status === 'success' || resource.status === 'empty' ? resource.data?.total : undefined,
     setPage,
   }
 }

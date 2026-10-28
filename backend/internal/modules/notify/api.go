@@ -166,7 +166,7 @@ func serviceTenantMatches(c *gin.Context, bodyTenantID int64) bool {
 // websocket 建立通知订阅 WebSocket。
 func (a notifyAPI) websocket(c *gin.Context) {
 	err := a.svc.hub.ServeInteractive(c.Writer, c.Request, func(conn *ws.Conn) error {
-		return a.svc.HandleSubscribe(c.Request.Context(), conn)
+		return a.svc.HandleSubscribe(conn.Context(), conn)
 	})
 	if err != nil {
 		httpx.Write(c, struct{}{}, apperr.ErrNotifyChannelUnavailable.WithCause(err))

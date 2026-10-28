@@ -3,6 +3,7 @@ package identity
 
 import (
 	"context"
+	"sort"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -265,27 +266,35 @@ func (s *Service) UpdateAccountStatusByAdmin(ctx context.Context, accountID int6
 	if err != nil {
 		return err
 	}
-	deleted := status == AccountStatusCancelled
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		current, err := tx.GetAccount(ctx, accountID)
-		if err != nil {
-			return err
-		}
-		if err := ValidateAccountStatusTransition(current.Status, status); err != nil {
-			return err
-		}
-		_, err = tx.UpdateAccountStatus(ctx, accountID, id.TenantID, status, deleted)
-		if err != nil {
-			return err
-		}
-		if status == AccountStatusDisabled || status == AccountStatusCancelled || status == AccountStatusArchived {
-			return tx.RevokeAccountSessions(ctx, id.TenantID, accountID)
-		}
-		return nil
+		return s.updateAccountStatusInTx(ctx, tx, id, accountID, status)
 	}); err != nil {
 		return apperr.AsAppError(err)
 	}
-	return s.auditAccount(ctx, id, "account.status.update", accountID)
+	return nil
+}
+
+// updateAccountStatusInTx 统一在行锁下校验状态,并使状态、会话撤销和审计同成同败。
+func (s *Service) updateAccountStatusInTx(ctx context.Context, tx TxStore, id tenant.Identity, accountID int64, status int16) error {
+	if err := tx.LockAccount(ctx, id.TenantID, accountID); err != nil {
+		return err
+	}
+	current, err := tx.GetAccount(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	if err := ValidateAccountStatusTransition(current.Status, status); err != nil {
+		return err
+	}
+	if _, err := tx.UpdateAccountStatus(ctx, accountID, id.TenantID, status, status == AccountStatusCancelled); err != nil {
+		return err
+	}
+	if status == AccountStatusDisabled || status == AccountStatusCancelled || status == AccountStatusArchived {
+		if err := tx.RevokeAccountSessions(ctx, id.TenantID, accountID); err != nil {
+			return err
+		}
+	}
+	return s.writeTenantAuditInTx(ctx, tx, id, "account.status.update", "identity.account", accountID, map[string]any{"status": status})
 }
 
 // ForceLogoutAccountByAdmin 吊销指定账号全部会话。
@@ -305,19 +314,38 @@ func (s *Service) ForceLogoutAccountByAdmin(ctx context.Context, accountID int64
 	return s.auditAccount(ctx, id, "account.force_logout", accountID)
 }
 
-// BatchUpdateAccountStatusByAdmin 批量更新账号状态,逐个复用同一状态机路径。
+// BatchUpdateAccountStatusByAdmin 在一个事务中按固定锁顺序批量执行同一账号状态机。
 func (s *Service) BatchUpdateAccountStatusByAdmin(ctx context.Context, req BatchAccountIDsRequest, status int16) error {
 	if len(req.AccountIDs) == 0 {
 		return apperr.ErrIdentityAccountBatchEmpty
 	}
+	accountIDs := make([]int64, 0, len(req.AccountIDs))
+	seen := make(map[int64]struct{}, len(req.AccountIDs))
 	for _, publicAccountID := range req.AccountIDs {
 		accountID := publicAccountID.Int64()
 		if accountID <= 0 {
 			return apperr.ErrIdentityAccountBatchInvalid
 		}
-		if err := s.UpdateAccountStatusByAdmin(ctx, accountID, status); err != nil {
-			return err
+		if _, exists := seen[accountID]; !exists {
+			seen[accountID] = struct{}{}
+			accountIDs = append(accountIDs, accountID)
 		}
+	}
+	sort.Slice(accountIDs, func(i, j int) bool { return accountIDs[i] < accountIDs[j] })
+	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
+	if err != nil {
+		return err
+	}
+	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		for _, accountID := range accountIDs {
+			if err := s.updateAccountStatusInTx(ctx, tx, id, accountID, status); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return apperr.AsAppError(err)
 	}
 	return nil
 }

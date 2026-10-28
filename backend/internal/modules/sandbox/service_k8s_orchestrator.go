@@ -25,6 +25,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	netv1 "k8s.io/api/networking/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -35,7 +36,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
-	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
 var errMetricsUnavailable = errors.New("kubernetes metrics api unavailable")
@@ -408,7 +408,6 @@ func (o *K8sOrchestrator) ResourceUsage(ctx context.Context, sb Sandbox) (contra
 		}
 		return usage, fmt.Errorf("查询沙箱实时资源用量失败: %w", err)
 	}
-	addPodMetricsUsage(&usage, metrics.Items)
 	pods, err := cs.CoreV1().Pods(sb.Namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "chaimir.io/sandbox-id=" + ids.Format(sb.ID),
 	})
@@ -421,6 +420,42 @@ func (o *K8sOrchestrator) ResourceUsage(ctx context.Context, sb Sandbox) (contra
 	for _, pod := range pods.Items {
 		for _, container := range pod.Spec.Containers {
 			addResourceUsage(&usage, container.Resources)
+		}
+		if pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		found := false
+		for _, sample := range metrics.Items {
+			if sample.Name == pod.Name {
+				// 采样必须覆盖所有仍在运行的容器，未采样不能当成真实零用量。
+				for _, state := range pod.Status.ContainerStatuses {
+					if state.State.Running == nil {
+						continue
+					}
+					matched := false
+					for _, container := range sample.Containers {
+						if container.Name == state.Name {
+							cpu, hasCPU := container.Usage[corev1.ResourceCPU]
+							memory, hasMemory := container.Usage[corev1.ResourceMemory]
+							if !hasCPU || !hasMemory {
+								return contracts.SandboxResourceUsage{}, fmt.Errorf("运行容器资源采样缺少CPU或内存: pod=%s container=%s", pod.Name, state.Name)
+							}
+							matched = true
+							usage.CPUUsageMilli += cpu.MilliValue()
+							usage.MemoryUsageMiB += bytesToMiB(memory.Value())
+							break
+						}
+					}
+					if !matched {
+						return contracts.SandboxResourceUsage{}, fmt.Errorf("运行容器尚无完整资源采样: pod=%s container=%s", pod.Name, state.Name)
+					}
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			return contracts.SandboxResourceUsage{}, fmt.Errorf("运行环境尚无资源采样: pod=%s", pod.Name)
 		}
 	}
 	pvcs, err := cs.CoreV1().PersistentVolumeClaims(sb.Namespace).List(ctx, metav1.ListOptions{
@@ -833,41 +868,105 @@ func (o *K8sOrchestrator) waitPodReady(ctx context.Context, cs kubernetes.Interf
 	}
 }
 
-// sandboxPodReadyPollInterval 使用短轮询压缩阶段一可进入延迟,仍以真实 Pod Ready 为准。
+// sandboxPodReadyPollInterval 使用统一配置,避免高频轮询挤占共享Kubernetes客户端预算。
 func sandboxPodReadyPollInterval(configuredSeconds int) time.Duration {
 	if configuredSeconds <= 0 {
 		return time.Second
 	}
-	configured := time.Duration(configuredSeconds) * time.Second
-	fast := 200 * time.Millisecond
-	if configured < fast {
-		return configured
-	}
-	return fast
+	return time.Duration(configuredSeconds) * time.Second
 }
 
-// ToolReady 校验 Web 工具的所有声明组件都已通过 Kubernetes Ready 条件。
+// ToolReady 校验当前工具Pod与Web服务端点,不以容器曾经Ready代替当前可接入状态。
 func (o *K8sOrchestrator) ToolReady(ctx context.Context, sb Sandbox, tool Tool) error {
 	if len(tool.ResourceSpec.Components) == 0 {
 		return fmt.Errorf("工具组件未声明")
 	}
+	pods := make(map[string]*corev1.Pod, len(tool.ResourceSpec.Components))
 	for _, component := range tool.ResourceSpec.Components {
 		pod, err := o.client.Clientset().CoreV1().Pods(sb.Namespace).Get(ctx, toolComponentPodName(tool.Code, component.Name), metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("%w: 工具Pod %s 不存在", errToolNotReady, component.Name)
+		}
 		if err != nil {
 			return fmt.Errorf("查询工具 Pod 状态失败: %w", err)
+		}
+		if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning || !sandboxPodReady(pod) {
+			return fmt.Errorf("%w: 工具Pod %s 当前不可接入", errToolNotReady, pod.Name)
 		}
 		found := false
 		for _, status := range pod.Status.ContainerStatuses {
 			if status.Name == component.Name {
 				found = true
-				if !status.Ready {
-					return fmt.Errorf("工具组件尚未就绪")
+				if !status.Ready || status.State.Running == nil {
+					return fmt.Errorf("%w: 工具组件 %s 尚未就绪", errToolNotReady, component.Name)
 				}
 				break
 			}
 		}
 		if !found {
-			return fmt.Errorf("工具组件不存在")
+			return fmt.Errorf("%w: 工具组件 %s 不存在", errToolNotReady, component.Name)
+		}
+		pods[component.Name] = pod
+	}
+	if tool.Kind == SandboxToolKindWebEmbed {
+		if len(tool.ResourceSpec.Services) == 0 {
+			return fmt.Errorf("Web工具未声明Service")
+		}
+		for _, service := range tool.ResourceSpec.Services {
+			pod := pods[service.Component]
+			if pod == nil {
+				return fmt.Errorf("工具Service %s 的组件不存在", service.Name)
+			}
+			if err := o.toolServiceEndpointsReady(ctx, sb.Namespace, service, pod); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// toolServiceEndpointsReady 确认声明的每个端口已收敛到当前Pod UID,拒绝旧Pod或终止端点。
+func (o *K8sOrchestrator) toolServiceEndpointsReady(ctx context.Context, namespace string, service workload.ServiceSpec, pod *corev1.Pod) error {
+	slices, err := o.client.Clientset().DiscoveryV1().EndpointSlices(namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: discoveryv1.LabelServiceName + "=" + service.Name,
+	})
+	if err != nil {
+		return fmt.Errorf("查询工具Service %s 端点失败: %w", service.Name, err)
+	}
+	for _, port := range service.Ports {
+		ready := false
+		for _, slice := range slices.Items {
+			if slice.DeletionTimestamp != nil {
+				continue
+			}
+			portFound := false
+			for _, endpointPort := range slice.Ports {
+				if endpointPort.Name != nil && *endpointPort.Name == port.Name && endpointPort.Port != nil && *endpointPort.Port > 0 {
+					portFound = true
+					break
+				}
+			}
+			if !portFound {
+				continue
+			}
+			for _, endpoint := range slice.Endpoints {
+				if endpoint.Conditions.Ready == nil || !*endpoint.Conditions.Ready ||
+					(endpoint.Conditions.Serving != nil && !*endpoint.Conditions.Serving) ||
+					(endpoint.Conditions.Terminating != nil && *endpoint.Conditions.Terminating) {
+					continue
+				}
+				if endpoint.TargetRef != nil && endpoint.TargetRef.Kind == "Pod" && endpoint.TargetRef.Name == pod.Name &&
+					endpoint.TargetRef.UID == pod.UID && len(endpoint.Addresses) > 0 {
+					ready = true
+					break
+				}
+			}
+			if ready {
+				break
+			}
+		}
+		if !ready {
+			return fmt.Errorf("%w: Service %s 端口 %s 无当前Pod的可用端点", errToolNotReady, service.Name, port.Name)
 		}
 	}
 	return nil
@@ -3151,20 +3250,6 @@ func addResourceUsage(usage *contracts.SandboxResourceUsage, resources corev1.Re
 	}
 	if memory, ok := resources.Limits[corev1.ResourceMemory]; ok {
 		usage.MemoryLimitMiB += bytesToMiB(memory.Value())
-	}
-}
-
-// addPodMetricsUsage 把 metrics-server 返回的实时容器用量累加到沙箱资源摘要。
-func addPodMetricsUsage(usage *contracts.SandboxResourceUsage, metrics []metricsv1beta1.PodMetrics) {
-	for _, pod := range metrics {
-		for _, container := range pod.Containers {
-			if cpu, ok := container.Usage[corev1.ResourceCPU]; ok {
-				usage.CPUUsageMilli += cpu.MilliValue()
-			}
-			if memory, ok := container.Usage[corev1.ResourceMemory]; ok {
-				usage.MemoryUsageMiB += bytesToMiB(memory.Value())
-			}
-		}
 	}
 }
 

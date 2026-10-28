@@ -109,7 +109,7 @@ func submissionFromRow(row sqlcgen.Submission) (Submission, error) {
 	if err != nil {
 		return Submission{}, err
 	}
-	return Submission{ID: row.ID, TenantID: row.TenantID, AssignmentID: row.AssignmentID, StudentID: row.StudentID, AttemptNo: row.AttemptNo, ContentRef: ref, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), AutoScore: pgtypex.Int4Value(row.AutoScore), ManualScore: pgtypex.Int4Value(row.ManualScore), FinalScore: pgtypex.Int4Value(row.FinalScore), Comment: pgtypex.TextValue(row.Comment), IsLate: row.IsLate, Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
+	return Submission{ID: row.ID, TenantID: row.TenantID, AssignmentID: row.AssignmentID, StudentID: row.StudentID, AttemptNo: row.AttemptNo, ContentRef: ref, JudgeTaskRef: pgtypex.TextValue(row.JudgeTaskRef), AutoScore: pgtypex.Int4PtrValue(row.AutoScore), ManualScore: pgtypex.Int4PtrValue(row.ManualScore), FinalScore: pgtypex.Int4PtrValue(row.FinalScore), Comment: pgtypex.TextValue(row.Comment), IsLate: row.IsLate, Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
 }
 
 // outboxFromRow 转换自动判题 outbox 行并解析额外输入。
@@ -195,8 +195,8 @@ func courseGradeExportRequestFromRow(row sqlcgen.CourseGradeExportRequest) Cours
 }
 
 // teachingGradeEventOutbox 转换成绩变更事件 outbox 行。
-func teachingGradeEventOutboxFromFields(id, tenantID, courseID, studentID int64, traceID string, eventUpdatedAt, nextAttemptAt, createdAt, updatedAt pgtype.Timestamptz, status int16, retryCount int32, lastError pgtype.Text, leaseToken string, leaseUntil pgtype.Timestamptz) TeachingGradeEventOutbox {
-	return TeachingGradeEventOutbox{ID: id, TenantID: tenantID, CourseID: courseID, StudentID: studentID, TraceID: traceID, EventUpdatedAt: timex.FromTimestamptz(eventUpdatedAt), Status: status, RetryCount: retryCount, NextAttemptAt: timex.FromTimestamptz(nextAttemptAt), LastError: pgtypex.TextValue(lastError), CreatedAt: timex.FromTimestamptz(createdAt), UpdatedAt: timex.FromTimestamptz(updatedAt), LeaseToken: leaseToken, LeaseUntil: timex.FromTimestamptz(leaseUntil)}
+func teachingGradeEventOutboxFromFields(id, revision, lockRevision, tenantID, courseID, studentID int64, traceID string, eventUpdatedAt, nextAttemptAt, createdAt, updatedAt pgtype.Timestamptz, status int16, retryCount int32, lastError pgtype.Text, leaseToken string, leaseUntil pgtype.Timestamptz) TeachingGradeEventOutbox {
+	return TeachingGradeEventOutbox{ID: id, Revision: revision, LockRevision: lockRevision, TenantID: tenantID, CourseID: courseID, StudentID: studentID, TraceID: traceID, EventUpdatedAt: timex.FromTimestamptz(eventUpdatedAt), Status: status, RetryCount: retryCount, NextAttemptAt: timex.FromTimestamptz(nextAttemptAt), LastError: pgtypex.TextValue(lastError), CreatedAt: timex.FromTimestamptz(createdAt), UpdatedAt: timex.FromTimestamptz(updatedAt), LeaseToken: leaseToken, LeaseUntil: timex.FromTimestamptz(leaseUntil)}
 }
 
 // encodeMap 将 JSON 对象编码为 JSONB 参数。

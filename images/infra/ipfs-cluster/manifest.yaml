@@ -62,6 +62,7 @@ capabilities:
     type: object
     properties:
       trusted_peers:
+        title: 信任节点（逗号分隔）
         type: string
         description: 逗号分隔的官方 IPFS Cluster peer ID；留空时仅信任当前官方 identity。
         x-chaimir-env: infra/CHAIMIR_IPFS_CLUSTER_TRUSTED_PEERS

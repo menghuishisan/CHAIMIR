@@ -48,9 +48,9 @@ import {
   passwordRuleError,
   phoneError,
   requiredError,
-  useFieldErrors,
   useSmsCooldown,
 } from '../../authForm'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 
 export interface ProfilePageProps {
   /**
@@ -162,7 +162,11 @@ function PasswordCard() {
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const { errors, setError } = useFieldErrors()
+  const { errors, validate, reset } = useFormValidation(() => ({
+    old: requiredError(oldPassword, '请输入当前密码'),
+    new: passwordRuleError(newPassword, '新密码'),
+    confirm: confirmPasswordError(confirmPassword, newPassword, '新密码'),
+  }))
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
@@ -170,18 +174,13 @@ function PasswordCard() {
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const oldOk = setError('old', requiredError(oldPassword, '请输入当前密码'))
-      const newOk = setError('new', passwordRuleError(newPassword, '新密码'))
-      const confirmOk = setError(
-        'confirm',
-        confirmPasswordError(confirmPassword, newPassword, '新密码'),
-      )
-      if (!oldOk || !newOk || !confirmOk) return
+      if (!validate()) return
 
       setSubmitting(true)
       setFormError(null)
       try {
         await api.identity.changePassword({ old_password: oldPassword, new_password: newPassword })
+        reset()
         setOldPassword('')
         setNewPassword('')
         setConfirmPassword('')
@@ -193,7 +192,7 @@ function PasswordCard() {
         setSubmitting(false)
       }
     },
-    [confirmPassword, newPassword, oldPassword, setError],
+    [newPassword, oldPassword, reset, validate],
   )
 
   return (
@@ -222,7 +221,7 @@ function PasswordCard() {
               value={oldPassword}
               invalid={Boolean(errors.old)}
               onChange={(event) => setOldPassword(event.target.value)}
-              onBlur={() => setError('old', requiredError(oldPassword, '请输入当前密码'))}
+              onBlur={() => validate(['old'])}
             />
           </FormField>
           <FormField
@@ -239,7 +238,7 @@ function PasswordCard() {
               value={newPassword}
               invalid={Boolean(errors.new)}
               onChange={(event) => setNewPassword(event.target.value)}
-              onBlur={() => setError('new', passwordRuleError(newPassword, '新密码'))}
+              onBlur={() => validate(['new'])}
             />
           </FormField>
           <FormField
@@ -256,9 +255,7 @@ function PasswordCard() {
               value={confirmPassword}
               invalid={Boolean(errors.confirm)}
               onChange={(event) => setConfirmPassword(event.target.value)}
-              onBlur={() =>
-                setError('confirm', confirmPasswordError(confirmPassword, newPassword, '新密码'))
-              }
+              onBlur={() => validate(['confirm'])}
             />
           </FormField>
           {formError ? (
@@ -283,7 +280,10 @@ function PhoneCard({ onChanged }: { onChanged: () => void }) {
   const fieldId = useId()
   const [phone, setPhone] = useState('')
   const [smsCode, setSmsCode] = useState('')
-  const { errors, setError } = useFieldErrors()
+  const { errors, validate, reset } = useFormValidation(() => ({
+    phone: phoneError(phone, '新手机号'),
+    code: requiredError(smsCode, '请输入验证码'),
+  }))
   const [formError, setFormError] = useState<string | null>(null)
   const [sendingSms, setSendingSms] = useState(false)
   const { seconds: cooldown, start: startCooldown } = useSmsCooldown()
@@ -291,7 +291,7 @@ function PhoneCard({ onChanged }: { onChanged: () => void }) {
 
   /** sendSms 发送换绑场景验证码。 */
   const sendSms = useCallback(async () => {
-    if (!setError('phone', phoneError(phone, '新手机号'))) return
+    if (!validate(['phone'])) return
     setSendingSms(true)
     setFormError(null)
     try {
@@ -302,19 +302,18 @@ function PhoneCard({ onChanged }: { onChanged: () => void }) {
     } finally {
       setSendingSms(false)
     }
-  }, [phone, setError, startCooldown])
+  }, [phone, startCooldown, validate])
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const phoneOk = setError('phone', phoneError(phone, '新手机号'))
-      const codeOk = setError('code', requiredError(smsCode, '请输入验证码'))
-      if (!phoneOk || !codeOk) return
+      if (!validate()) return
 
       setSubmitting(true)
       setFormError(null)
       try {
         await api.identity.changePhone({ phone: phone.trim(), code: smsCode.trim() })
+        reset()
         setPhone('')
         setSmsCode('')
         toast.success('手机号已更新')
@@ -326,7 +325,7 @@ function PhoneCard({ onChanged }: { onChanged: () => void }) {
         setSubmitting(false)
       }
     },
-    [onChanged, phone, setError, smsCode],
+    [onChanged, phone, reset, smsCode, validate],
   )
 
   return (
@@ -351,7 +350,7 @@ function PhoneCard({ onChanged }: { onChanged: () => void }) {
               value={phone}
               invalid={Boolean(errors.phone)}
               onChange={(event) => setPhone(event.target.value)}
-              onBlur={() => setError('phone', phoneError(phone, '新手机号'))}
+              onBlur={() => validate(['phone'])}
             />
           </FormField>
           <FormField label="验证码" htmlFor={`${fieldId}-code`} required error={errors.code} className="mt-4">
@@ -363,7 +362,7 @@ function PhoneCard({ onChanged }: { onChanged: () => void }) {
                 value={smsCode}
                 invalid={Boolean(errors.code)}
                 onChange={(event) => setSmsCode(event.target.value)}
-                onBlur={() => setError('code', requiredError(smsCode, '请输入验证码'))}
+                onBlur={() => validate(['code'])}
               />
               <Button
                 type="button"

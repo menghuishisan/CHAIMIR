@@ -457,7 +457,7 @@ func (s *Service) courseReadAccess(ctx context.Context, tx TxStore, tenantID, co
 		return true, nil
 	}
 	if _, err := tx.GetCourseMember(ctx, tenantID, courseID, accountID); err != nil {
-		return false, apperr.ErrTeachingCourseForbidden
+		return false, apperr.ErrTeachingCourseForbidden.WithCause(err)
 	}
 	return false, nil
 }

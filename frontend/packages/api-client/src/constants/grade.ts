@@ -21,7 +21,6 @@ export enum GradeWarningType {
 export enum GradeWarningStatus {
   PENDING = 1,
   ACKNOWLEDGED = 2,
-  NOTIFY_FAILED = 3,
 }
 
 export enum TranscriptScope {

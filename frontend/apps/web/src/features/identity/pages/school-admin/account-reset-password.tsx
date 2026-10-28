@@ -21,6 +21,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { isPasswordStrong } from '../../authForm'
 
@@ -39,13 +40,14 @@ export function ResetPasswordModal({ account, onClose, onDone }: ResetPasswordMo
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    password: isPasswordStrong(password) ? null : '密码至少 8 位,且要同时包含字母和数字',
+  }), [password]))
+
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (!isPasswordStrong(password)) {
-        setFormError('密码至少 8 位,且要同时包含字母和数字')
-        return
-      }
+      if (!validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -61,7 +63,7 @@ export function ResetPasswordModal({ account, onClose, onDone }: ResetPasswordMo
         setWorking(false)
       }
     },
-    [account.id, mustChange, onDone, password],
+    [account.id, mustChange, onDone, password, validate],
   )
 
   return (
@@ -80,7 +82,7 @@ export function ResetPasswordModal({ account, onClose, onDone }: ResetPasswordMo
               label="新密码"
               htmlFor="reset-password"
               required
-              error={formError}
+              error={errors.password}
               helper="至少 8 位,同时包含字母和数字"
             >
               <Input
@@ -88,8 +90,9 @@ export function ResetPasswordModal({ account, onClose, onDone }: ResetPasswordMo
                 type="password"
                 value={password}
                 autoComplete="new-password"
-                invalid={Boolean(formError)}
+                invalid={!!errors.password}
                 onChange={(event) => setPassword(event.target.value)}
+                onBlur={() => validate(['password'])}
               />
             </FormField>
 
@@ -102,6 +105,7 @@ export function ResetPasswordModal({ account, onClose, onDone }: ResetPasswordMo
             <Callout tone="warning">
               新密码请通过本人可信的渠道转交。你也知道这个密码,建议保持勾选上面的选项。
             </Callout>
+            {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </ModalBody>
           <ModalFooter>
             <Button type="button" variant="outline" onClick={onClose}>

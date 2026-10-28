@@ -4,6 +4,8 @@
 
 Foundry/Anvil EVM 运行时镜像。
 
+Ubuntu Jammy 运行层的 `openssl`、`libssl3` 固定为官方安全仓库提供的 `3.0.2-0ubuntu1.30`,Dockerfile 与 manifest 保持同一版本。更新仍须经过完整扫描与签名门禁,不取消版本固定或绕过漏洞检查。
+
 ## 能力边界
 
 - 支持 capability：chain-runtime, evm-json-rpc, foundry-toolchain, fork-capable, chain-capability-helper

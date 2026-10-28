@@ -11,11 +11,50 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acceptGradeAppeal = `-- name: AcceptGradeAppeal :one
+UPDATE grade_appeal
+SET status = 2, handler_id = $2, result_comment = $3, handled_at = now(), unlock_revision = $4
+WHERE grade_appeal.id = $1 AND grade_appeal.status = 1 AND $4::bigint > 0
+  AND EXISTS (SELECT 1 FROM grade_lock_outbox o WHERE o.revision = $4 AND o.tenant_id = grade_appeal.tenant_id AND o.course_id = grade_appeal.course_id AND NOT o.locked)
+RETURNING grade_appeal.id, grade_appeal.tenant_id, grade_appeal.student_id, grade_appeal.course_id, grade_appeal.reason, grade_appeal.status, grade_appeal.handler_id, grade_appeal.result_comment, grade_appeal.created_at, grade_appeal.handled_at, grade_appeal.unlock_revision
+`
+
+type AcceptGradeAppealParams struct {
+	ID             int64       `json:"id"`
+	HandlerID      pgtype.Int8 `json:"handler_id"`
+	ResultComment  pgtype.Text `json:"result_comment"`
+	UnlockRevision pgtype.Int8 `json:"unlock_revision"`
+}
+
+func (q *Queries) AcceptGradeAppeal(ctx context.Context, arg AcceptGradeAppealParams) (GradeAppeal, error) {
+	row := q.db.QueryRow(ctx, acceptGradeAppeal,
+		arg.ID,
+		arg.HandlerID,
+		arg.ResultComment,
+		arg.UnlockRevision,
+	)
+	var i GradeAppeal
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.StudentID,
+		&i.CourseID,
+		&i.Reason,
+		&i.Status,
+		&i.HandlerID,
+		&i.ResultComment,
+		&i.CreatedAt,
+		&i.HandledAt,
+		&i.UnlockRevision,
+	)
+	return i, err
+}
+
 const ackAcademicWarning = `-- name: AckAcademicWarning :one
 UPDATE academic_warning
 SET status = 2
 WHERE id = $1 AND student_id = $2
-RETURNING id, tenant_id, student_id, semester_id, type, detail, status, created_at
+RETURNING id, tenant_id, student_id, semester_id, type, detail, status, created_at, notify_trace_id, notify_status, notify_attempts, notify_lease_token, notify_lease_until, notify_next_attempt_at, notify_last_error
 `
 
 type AckAcademicWarningParams struct {
@@ -35,8 +74,43 @@ func (q *Queries) AckAcademicWarning(ctx context.Context, arg AckAcademicWarning
 		&i.Detail,
 		&i.Status,
 		&i.CreatedAt,
+		&i.NotifyTraceID,
+		&i.NotifyStatus,
+		&i.NotifyAttempts,
+		&i.NotifyLeaseToken,
+		&i.NotifyLeaseUntil,
+		&i.NotifyNextAttemptAt,
+		&i.NotifyLastError,
 	)
 	return i, err
+}
+
+const applyGradeEventRevision = `-- name: ApplyGradeEventRevision :one
+INSERT INTO grade_update_cursor (tenant_id, course_id, student_id, revision)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE
+SET revision = EXCLUDED.revision
+WHERE grade_update_cursor.revision < EXCLUDED.revision
+RETURNING revision
+`
+
+type ApplyGradeEventRevisionParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	CourseID  int64 `json:"course_id"`
+	StudentID int64 `json:"student_id"`
+	Revision  int64 `json:"revision"`
+}
+
+func (q *Queries) ApplyGradeEventRevision(ctx context.Context, arg ApplyGradeEventRevisionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, applyGradeEventRevision,
+		arg.TenantID,
+		arg.CourseID,
+		arg.StudentID,
+		arg.Revision,
+	)
+	var revision int64
+	err := row.Scan(&revision)
+	return revision, err
 }
 
 const approveGradeReview = `-- name: ApproveGradeReview :one
@@ -77,6 +151,72 @@ func (q *Queries) ApproveGradeReview(ctx context.Context, arg ApproveGradeReview
 	return i, err
 }
 
+const claimGradeWarningNotifications = `-- name: ClaimGradeWarningNotifications :many
+WITH candidates AS (
+ SELECT id FROM academic_warning
+ WHERE (notify_status IN (1,4) AND notify_next_attempt_at <= $3::timestamptz)
+    OR (notify_status = 2 AND notify_lease_until <= $3::timestamptz)
+ ORDER BY created_at, id LIMIT $4::int FOR UPDATE SKIP LOCKED
+)
+UPDATE academic_warning AS w
+SET notify_status=2, notify_attempts=w.notify_attempts+1,
+    notify_lease_token=$1, notify_lease_until=$2::timestamptz
+FROM candidates WHERE w.id=candidates.id
+RETURNING w.id, w.tenant_id, w.student_id, w.semester_id, w.created_at, w.notify_trace_id, w.notify_lease_token, COALESCE(w.detail->>'gpa', '')::text AS gpa_text
+`
+
+type ClaimGradeWarningNotificationsParams struct {
+	LeaseToken string             `json:"lease_token"`
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+	NowAt      pgtype.Timestamptz `json:"now_at"`
+	PageLimit  int32              `json:"page_limit"`
+}
+
+type ClaimGradeWarningNotificationsRow struct {
+	ID               int64              `json:"id"`
+	TenantID         int64              `json:"tenant_id"`
+	StudentID        int64              `json:"student_id"`
+	SemesterID       int64              `json:"semester_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	NotifyTraceID    string             `json:"notify_trace_id"`
+	NotifyLeaseToken string             `json:"notify_lease_token"`
+	GpaText          string             `json:"gpa_text"`
+}
+
+func (q *Queries) ClaimGradeWarningNotifications(ctx context.Context, arg ClaimGradeWarningNotificationsParams) ([]ClaimGradeWarningNotificationsRow, error) {
+	rows, err := q.db.Query(ctx, claimGradeWarningNotifications,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+		arg.NowAt,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ClaimGradeWarningNotificationsRow{}
+	for rows.Next() {
+		var i ClaimGradeWarningNotificationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.StudentID,
+			&i.SemesterID,
+			&i.CreatedAt,
+			&i.NotifyTraceID,
+			&i.NotifyLeaseToken,
+			&i.GpaText,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimPendingGradeLockOutbox = `-- name: ClaimPendingGradeLockOutbox :many
 WITH exhausted AS (
     UPDATE grade_lock_outbox AS expired
@@ -96,7 +236,7 @@ UPDATE grade_lock_outbox AS outbox
 SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = $1, lease_until = $2::timestamptz
 FROM candidates
 WHERE outbox.id = candidates.id
-RETURNING outbox.id, outbox.tenant_id, outbox.review_id, outbox.course_id, outbox.locked, outbox.reason, outbox.trace_id, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
+RETURNING outbox.id, outbox.revision, outbox.tenant_id, outbox.review_id, outbox.course_id, outbox.locked, outbox.reason, outbox.trace_id, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until
 `
 
 type ClaimPendingGradeLockOutboxParams struct {
@@ -124,6 +264,7 @@ func (q *Queries) ClaimPendingGradeLockOutbox(ctx context.Context, arg ClaimPend
 		var i GradeLockOutbox
 		if err := rows.Scan(
 			&i.ID,
+			&i.Revision,
 			&i.TenantID,
 			&i.ReviewID,
 			&i.CourseID,
@@ -191,10 +332,17 @@ const countGradeAppeals = `-- name: CountGradeAppeals :one
 SELECT count(*)::bigint
 FROM grade_appeal
 WHERE ($1::smallint = 0 OR status = $1::smallint)
+  AND ($2::boolean OR course_id = ANY($3::bigint[]))
 `
 
-func (q *Queries) CountGradeAppeals(ctx context.Context, status int16) (int64, error) {
-	row := q.db.QueryRow(ctx, countGradeAppeals, status)
+type CountGradeAppealsParams struct {
+	Status     int16   `json:"status"`
+	AllCourses bool    `json:"all_courses"`
+	CourseIds  []int64 `json:"course_ids"`
+}
+
+func (q *Queries) CountGradeAppeals(ctx context.Context, arg CountGradeAppealsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countGradeAppeals, arg.Status, arg.AllCourses, arg.CourseIds)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -239,18 +387,19 @@ func (q *Queries) CountOwnGradeReviews(ctx context.Context, arg CountOwnGradeRev
 }
 
 const createAcademicWarning = `-- name: CreateAcademicWarning :one
-INSERT INTO academic_warning (id, tenant_id, student_id, semester_id, type, detail, status, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, 1, now())
-RETURNING id, tenant_id, student_id, semester_id, type, detail, status, created_at
+INSERT INTO academic_warning (id, tenant_id, student_id, semester_id, type, detail, status, created_at, notify_trace_id)
+VALUES ($1, $2, $3, $4, $5, $6, 1, now(), $7)
+RETURNING id, tenant_id, student_id, semester_id, type, detail, status, created_at, notify_trace_id, notify_status, notify_attempts, notify_lease_token, notify_lease_until, notify_next_attempt_at, notify_last_error
 `
 
 type CreateAcademicWarningParams struct {
-	ID         int64  `json:"id"`
-	TenantID   int64  `json:"tenant_id"`
-	StudentID  int64  `json:"student_id"`
-	SemesterID int64  `json:"semester_id"`
-	Type       int16  `json:"type"`
-	Detail     []byte `json:"detail"`
+	ID            int64  `json:"id"`
+	TenantID      int64  `json:"tenant_id"`
+	StudentID     int64  `json:"student_id"`
+	SemesterID    int64  `json:"semester_id"`
+	Type          int16  `json:"type"`
+	Detail        []byte `json:"detail"`
+	NotifyTraceID string `json:"notify_trace_id"`
 }
 
 func (q *Queries) CreateAcademicWarning(ctx context.Context, arg CreateAcademicWarningParams) (AcademicWarning, error) {
@@ -261,6 +410,7 @@ func (q *Queries) CreateAcademicWarning(ctx context.Context, arg CreateAcademicW
 		arg.SemesterID,
 		arg.Type,
 		arg.Detail,
+		arg.NotifyTraceID,
 	)
 	var i AcademicWarning
 	err := row.Scan(
@@ -272,6 +422,13 @@ func (q *Queries) CreateAcademicWarning(ctx context.Context, arg CreateAcademicW
 		&i.Detail,
 		&i.Status,
 		&i.CreatedAt,
+		&i.NotifyTraceID,
+		&i.NotifyStatus,
+		&i.NotifyAttempts,
+		&i.NotifyLeaseToken,
+		&i.NotifyLeaseUntil,
+		&i.NotifyNextAttemptAt,
+		&i.NotifyLastError,
 	)
 	return i, err
 }
@@ -279,7 +436,7 @@ func (q *Queries) CreateAcademicWarning(ctx context.Context, arg CreateAcademicW
 const createGradeAppeal = `-- name: CreateGradeAppeal :one
 INSERT INTO grade_appeal (id, tenant_id, student_id, course_id, reason, status, created_at)
 VALUES ($1, $2, $3, $4, $5, 1, now())
-RETURNING id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at
+RETURNING id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at, unlock_revision
 `
 
 type CreateGradeAppealParams struct {
@@ -310,6 +467,7 @@ func (q *Queries) CreateGradeAppeal(ctx context.Context, arg CreateGradeAppealPa
 		&i.ResultComment,
 		&i.CreatedAt,
 		&i.HandledAt,
+		&i.UnlockRevision,
 	)
 	return i, err
 }
@@ -317,7 +475,7 @@ func (q *Queries) CreateGradeAppeal(ctx context.Context, arg CreateGradeAppealPa
 const createGradeLockOutbox = `-- name: CreateGradeLockOutbox :one
 INSERT INTO grade_lock_outbox (id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
 VALUES ($1, $2, $3, $4, $5, $6, $7, 1, 0, NULL, now(), now(), '', NULL)
-RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, revision, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type CreateGradeLockOutboxParams struct {
@@ -343,6 +501,7 @@ func (q *Queries) CreateGradeLockOutbox(ctx context.Context, arg CreateGradeLock
 	var i GradeLockOutbox
 	err := row.Scan(
 		&i.ID,
+		&i.Revision,
 		&i.TenantID,
 		&i.ReviewID,
 		&i.CourseID,
@@ -557,7 +716,7 @@ func (q *Queries) GetDefaultLevelConfig(ctx context.Context) (GradeLevelConfig, 
 }
 
 const getGradeAppeal = `-- name: GetGradeAppeal :one
-SELECT id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at
+SELECT id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at, unlock_revision
 FROM grade_appeal
 WHERE id = $1
 `
@@ -576,6 +735,7 @@ func (q *Queries) GetGradeAppeal(ctx context.Context, id int64) (GradeAppeal, er
 		&i.ResultComment,
 		&i.CreatedAt,
 		&i.HandledAt,
+		&i.UnlockRevision,
 	)
 	return i, err
 }
@@ -632,6 +792,34 @@ func (q *Queries) GetLatestApprovedReviewByCourse(ctx context.Context, courseID 
 	return i, err
 }
 
+const getLatestGradeLockOutboxByCourse = `-- name: GetLatestGradeLockOutboxByCourse :one
+SELECT id, revision, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+FROM grade_lock_outbox WHERE course_id = $1 ORDER BY revision DESC LIMIT 1
+`
+
+func (q *Queries) GetLatestGradeLockOutboxByCourse(ctx context.Context, courseID int64) (GradeLockOutbox, error) {
+	row := q.db.QueryRow(ctx, getLatestGradeLockOutboxByCourse, courseID)
+	var i GradeLockOutbox
+	err := row.Scan(
+		&i.ID,
+		&i.Revision,
+		&i.TenantID,
+		&i.ReviewID,
+		&i.CourseID,
+		&i.Locked,
+		&i.Reason,
+		&i.TraceID,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+	)
+	return i, err
+}
+
 const getLatestReviewByCourse = `-- name: GetLatestReviewByCourse :one
 SELECT id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at
 FROM grade_review
@@ -680,6 +868,17 @@ func (q *Queries) GetTranscriptRecord(ctx context.Context, id int64) (Transcript
 	return i, err
 }
 
+const hasAcceptedAppealsByCourse = `-- name: HasAcceptedAppealsByCourse :one
+SELECT EXISTS (SELECT 1 FROM grade_appeal WHERE course_id = $1 AND status = 2)::boolean
+`
+
+func (q *Queries) HasAcceptedAppealsByCourse(ctx context.Context, courseID int64) (bool, error) {
+	row := q.db.QueryRow(ctx, hasAcceptedAppealsByCourse, courseID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const hasOpenGradeAppeal = `-- name: HasOpenGradeAppeal :one
 SELECT EXISTS (
     SELECT 1
@@ -701,7 +900,7 @@ func (q *Queries) HasOpenGradeAppeal(ctx context.Context, arg HasOpenGradeAppeal
 }
 
 const listAcademicWarnings = `-- name: ListAcademicWarnings :many
-SELECT id, tenant_id, student_id, semester_id, type, detail, status, created_at
+SELECT id, tenant_id, student_id, semester_id, type, detail, status, created_at, notify_trace_id, notify_status, notify_attempts, notify_lease_token, notify_lease_until, notify_next_attempt_at, notify_last_error
 FROM academic_warning
 WHERE ($1::bigint = 0 OR student_id = $1::bigint)
   AND ($2::smallint = 0 OR status = $2::smallint)
@@ -739,6 +938,13 @@ func (q *Queries) ListAcademicWarnings(ctx context.Context, arg ListAcademicWarn
 			&i.Detail,
 			&i.Status,
 			&i.CreatedAt,
+			&i.NotifyTraceID,
+			&i.NotifyStatus,
+			&i.NotifyAttempts,
+			&i.NotifyLeaseToken,
+			&i.NotifyLeaseUntil,
+			&i.NotifyNextAttemptAt,
+			&i.NotifyLastError,
 		); err != nil {
 			return nil, err
 		}
@@ -751,7 +957,7 @@ func (q *Queries) ListAcademicWarnings(ctx context.Context, arg ListAcademicWarn
 }
 
 const listAcceptedAppealsByCourseStudent = `-- name: ListAcceptedAppealsByCourseStudent :many
-SELECT id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at
+SELECT id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at, unlock_revision
 FROM grade_appeal
 WHERE course_id = $1 AND student_id = $2 AND status = 2
 ORDER BY created_at DESC
@@ -782,6 +988,7 @@ func (q *Queries) ListAcceptedAppealsByCourseStudent(ctx context.Context, arg Li
 			&i.ResultComment,
 			&i.CreatedAt,
 			&i.HandledAt,
+			&i.UnlockRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -794,21 +1001,30 @@ func (q *Queries) ListAcceptedAppealsByCourseStudent(ctx context.Context, arg Li
 }
 
 const listGradeAppeals = `-- name: ListGradeAppeals :many
-SELECT id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at
+SELECT id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at, unlock_revision
 FROM grade_appeal
 WHERE ($1::smallint = 0 OR status = $1::smallint)
-ORDER BY created_at DESC
-LIMIT $3::int OFFSET $2::int
+  AND ($2::boolean OR course_id = ANY($3::bigint[]))
+ORDER BY created_at DESC, id DESC
+LIMIT $5::int OFFSET $4::int
 `
 
 type ListGradeAppealsParams struct {
-	Status     int16 `json:"status"`
-	PageOffset int32 `json:"page_offset"`
-	PageLimit  int32 `json:"page_limit"`
+	Status     int16   `json:"status"`
+	AllCourses bool    `json:"all_courses"`
+	CourseIds  []int64 `json:"course_ids"`
+	PageOffset int32   `json:"page_offset"`
+	PageLimit  int32   `json:"page_limit"`
 }
 
 func (q *Queries) ListGradeAppeals(ctx context.Context, arg ListGradeAppealsParams) ([]GradeAppeal, error) {
-	rows, err := q.db.Query(ctx, listGradeAppeals, arg.Status, arg.PageOffset, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listGradeAppeals,
+		arg.Status,
+		arg.AllCourses,
+		arg.CourseIds,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -827,6 +1043,7 @@ func (q *Queries) ListGradeAppeals(ctx context.Context, arg ListGradeAppealsPara
 			&i.ResultComment,
 			&i.CreatedAt,
 			&i.HandledAt,
+			&i.UnlockRevision,
 		); err != nil {
 			return nil, err
 		}
@@ -1126,12 +1343,40 @@ func (q *Queries) ListTranscriptRecords(ctx context.Context, arg ListTranscriptR
 	return items, nil
 }
 
+const lockGradeCourseScope = `-- name: LockGradeCourseScope :exec
+SELECT pg_advisory_xact_lock(hashtextextended('grade.course:' || $1::bigint::text || ':' || $2::bigint::text, 0))
+`
+
+type LockGradeCourseScopeParams struct {
+	Column1 int64 `json:"column_1"`
+	Column2 int64 `json:"column_2"`
+}
+
+func (q *Queries) LockGradeCourseScope(ctx context.Context, arg LockGradeCourseScopeParams) error {
+	_, err := q.db.Exec(ctx, lockGradeCourseScope, arg.Column1, arg.Column2)
+	return err
+}
+
 const lockGradeLevelDefaultScope = `-- name: LockGradeLevelDefaultScope :exec
 SELECT pg_advisory_xact_lock($1::bigint)
 `
 
 func (q *Queries) LockGradeLevelDefaultScope(ctx context.Context, lockKey int64) error {
 	_, err := q.db.Exec(ctx, lockGradeLevelDefaultScope, lockKey)
+	return err
+}
+
+const lockGradeStudentScope = `-- name: LockGradeStudentScope :exec
+SELECT pg_advisory_xact_lock(hashtextextended('grade.student:' || $1::bigint::text || ':' || $2::bigint::text, 0))
+`
+
+type LockGradeStudentScopeParams struct {
+	Column1 int64 `json:"column_1"`
+	Column2 int64 `json:"column_2"`
+}
+
+func (q *Queries) LockGradeStudentScope(ctx context.Context, arg LockGradeStudentScopeParams) error {
+	_, err := q.db.Exec(ctx, lockGradeStudentScope, arg.Column1, arg.Column2)
 	return err
 }
 
@@ -1148,7 +1393,7 @@ const markGradeLockOutboxFailed = `-- name: MarkGradeLockOutboxFailed :one
 UPDATE grade_lock_outbox
 SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, revision, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkGradeLockOutboxFailedParams struct {
@@ -1168,6 +1413,7 @@ func (q *Queries) MarkGradeLockOutboxFailed(ctx context.Context, arg MarkGradeLo
 	var i GradeLockOutbox
 	err := row.Scan(
 		&i.ID,
+		&i.Revision,
 		&i.TenantID,
 		&i.ReviewID,
 		&i.CourseID,
@@ -1189,7 +1435,7 @@ const markGradeLockOutboxPublished = `-- name: MarkGradeLockOutboxPublished :one
 UPDATE grade_lock_outbox
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
+RETURNING id, revision, tenant_id, review_id, course_id, locked, reason, trace_id, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkGradeLockOutboxPublishedParams struct {
@@ -1203,6 +1449,7 @@ func (q *Queries) MarkGradeLockOutboxPublished(ctx context.Context, arg MarkGrad
 	var i GradeLockOutbox
 	err := row.Scan(
 		&i.ID,
+		&i.Revision,
 		&i.TenantID,
 		&i.ReviewID,
 		&i.CourseID,
@@ -1218,6 +1465,55 @@ func (q *Queries) MarkGradeLockOutboxPublished(ctx context.Context, arg MarkGrad
 		&i.LeaseUntil,
 	)
 	return i, err
+}
+
+const markGradeWarningNotificationFailed = `-- name: MarkGradeWarningNotificationFailed :execrows
+UPDATE academic_warning
+SET notify_status=4, notify_last_error=$4, notify_lease_token='', notify_lease_until=NULL,
+    notify_next_attempt_at=$5::timestamptz
+WHERE tenant_id=$1 AND id=$2 AND notify_status=2 AND notify_lease_token=$3 AND notify_lease_until > now()
+`
+
+type MarkGradeWarningNotificationFailedParams struct {
+	TenantID         int64              `json:"tenant_id"`
+	ID               int64              `json:"id"`
+	NotifyLeaseToken string             `json:"notify_lease_token"`
+	NotifyLastError  pgtype.Text        `json:"notify_last_error"`
+	NextAt           pgtype.Timestamptz `json:"next_at"`
+}
+
+func (q *Queries) MarkGradeWarningNotificationFailed(ctx context.Context, arg MarkGradeWarningNotificationFailedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markGradeWarningNotificationFailed,
+		arg.TenantID,
+		arg.ID,
+		arg.NotifyLeaseToken,
+		arg.NotifyLastError,
+		arg.NextAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markGradeWarningNotificationPublished = `-- name: MarkGradeWarningNotificationPublished :execrows
+UPDATE academic_warning
+SET notify_status=3, notify_last_error=NULL, notify_lease_token='', notify_lease_until=NULL
+WHERE tenant_id=$1 AND id=$2 AND notify_status=2 AND notify_lease_token=$3 AND notify_lease_until > now()
+`
+
+type MarkGradeWarningNotificationPublishedParams struct {
+	TenantID         int64  `json:"tenant_id"`
+	ID               int64  `json:"id"`
+	NotifyLeaseToken string `json:"notify_lease_token"`
+}
+
+func (q *Queries) MarkGradeWarningNotificationPublished(ctx context.Context, arg MarkGradeWarningNotificationPublishedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markGradeWarningNotificationPublished, arg.TenantID, arg.ID, arg.NotifyLeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const rejectGradeReview = `-- name: RejectGradeReview :one
@@ -1343,7 +1639,7 @@ SET status = $1::smallint,
     result_comment = $3::text,
     handled_at = now()
 WHERE id = $4::bigint AND status = $5::smallint
-RETURNING id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at
+RETURNING id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at, unlock_revision
 `
 
 type UpdateGradeAppealStatusParams struct {
@@ -1374,6 +1670,7 @@ func (q *Queries) UpdateGradeAppealStatus(ctx context.Context, arg UpdateGradeAp
 		&i.ResultComment,
 		&i.CreatedAt,
 		&i.HandledAt,
+		&i.UnlockRevision,
 	)
 	return i, err
 }

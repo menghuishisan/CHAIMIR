@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/netx"
 	"chaimir/internal/platform/pagex"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/secretmap"
 	"chaimir/internal/platform/tenant"
 	"chaimir/internal/platform/timex"
@@ -24,7 +26,6 @@ import (
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/chainassert"
 	"chaimir/pkg/logging"
-	"chaimir/pkg/textx"
 )
 
 // UpsertPlatformVulnSource 创建或更新平台全局漏洞源，不产生租户漏洞题草稿。
@@ -431,13 +432,17 @@ func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID 
 	positive, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, req, snapshot, "positive", true)
 	detail["positive"] = positive
 	if err != nil {
+		logging.ErrorContext(ctx, "vulnerability prevalidation failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("problem_id", problem.ID), slog.String("phase", "positive"))
 		detail["error"] = safeDetailError(err)
+		detail["trace_id"] = response.TraceFromContext(ctx)
 		return VulnPrevalidateFailed, detail
 	}
 	negative, err := s.runVulnValidationCase(ctx, tenantID, accountID, problem, req, snapshot, "negative", false)
 	detail["negative"] = negative
 	if err != nil {
+		logging.ErrorContext(ctx, "vulnerability prevalidation failed", apperr.AsAppError(err).LogString(), slog.Int64("tenant_id", tenantID), slog.Int64("problem_id", problem.ID), slog.String("phase", "negative"))
 		detail["error"] = safeDetailError(err)
+		detail["trace_id"] = response.TraceFromContext(ctx)
 		return VulnPrevalidateFailed, detail
 	}
 	if !boolFromMap(positive, "passed") || !boolFromMap(negative, "passed") {
@@ -449,19 +454,26 @@ func (s *Service) runVulnPrevalidation(ctx context.Context, tenantID, accountID 
 // runVulnValidationCase 执行一条正向或反向预验证用例。
 func (s *Service) runVulnValidationCase(ctx context.Context, tenantID, accountID int64, problem VulnProblem, req PrevalidateRequest, snapshot contracts.SandboxCompositionSnapshot, phase string, positive bool) (result map[string]any, retErr error) {
 	sourceRef := fmt.Sprintf("contest:%04d:vuln-prevalidate-%s:%s", timex.Now().Year(), phase, ids.Format(problem.ID))
-	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: tenantID, CompositionSnapshot: snapshot, InitCodeRef: req.InitCodeRef, InitScriptRef: req.InitScriptRef, OwnerAccountID: accountID, SourceRef: sourceRef, ScopeRef: sourceRef, KeepAlive: false, SnapshotEnabled: false})
-	if err != nil {
-		return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
-	}
+	scopeRef := sourceRef + ":scope:" + ids.Format(s.ids.Generate())
+	// 创建响应丢失时也按本次唯一作用域回收,不依赖调用方拿到沙箱编号。
 	defer func() {
-		if recycleErr := s.sandbox.RecycleByScopeRef(ctx, contracts.SandboxRecycleRequest{TenantID: tenantID, ScopeRef: sourceRef, SourceRef: sourceRef, Reason: "vuln_prevalidate"}); recycleErr != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(s.cfg.BattleSandboxReadyTimeoutSeconds)*time.Second)
+		defer cancel()
+		if recycleErr := s.sandbox.RecycleByScopeRef(cleanupCtx, contracts.SandboxRecycleRequest{TenantID: tenantID, ScopeRef: scopeRef, SourceRef: sourceRef, Reason: "vuln_prevalidate"}); recycleErr != nil {
 			if retErr != nil {
-				retErr = apperr.ErrContestSandboxUnavailable.WithCause(fmt.Errorf("漏洞预验证失败: %w; 回收沙箱失败: %v", retErr, recycleErr))
+				retErr = apperr.ErrContestSandboxUnavailable.WithCause(fmt.Errorf("漏洞预验证失败: %w; 回收沙箱失败: %w", retErr, recycleErr))
 				return
 			}
 			retErr = apperr.ErrContestSandboxUnavailable.WithCause(recycleErr)
 		}
 	}()
+	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: tenantID, CompositionSnapshot: snapshot, InitCodeRef: req.InitCodeRef, InitScriptRef: req.InitScriptRef, OwnerAccountID: accountID, SourceRef: sourceRef, ScopeRef: scopeRef, KeepAlive: false, SnapshotEnabled: false})
+	if err != nil {
+		return nil, apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	if err := s.waitSandboxReady(ctx, tenantID, info.SandboxID); err != nil {
+		return nil, err
+	}
 	runtimeInstance := strings.TrimSpace(snapshot.Spec.WorkspaceRuntimeInstance)
 	if runtimeInstance == "" {
 		return nil, apperr.ErrContestVulnProblemInvalid
@@ -565,13 +577,12 @@ func boolFromMap(m map[string]any, key string) bool {
 	return v
 }
 
-// safeDetailError 返回可写入预验证详情的脱敏错误摘要。
+// safeDetailError 只返回应用错误的用户向文案,内部错误链交由执行日志记录。
 func safeDetailError(err error) string {
 	if err == nil {
 		return ""
 	}
-	msg := logging.SanitizeError(err.Error())
-	return textx.TruncateRunes(msg, 256)
+	return apperr.AsAppError(err).UserMessage()
 }
 
 // vulnSourceFromRequest 归一化漏洞源请求。

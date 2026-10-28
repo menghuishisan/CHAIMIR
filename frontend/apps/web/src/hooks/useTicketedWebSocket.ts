@@ -19,8 +19,8 @@ export interface TicketedSocketState {
   status: SocketStatus
   /** 用户向失败文案;技术原因进控制台,不上界面 */
   error?: string
-  /** 向服务端发送一段文本;未连接时返回 false 并给出用户向状态 */
-  send: (data: string) => boolean
+  /** 向服务端发送文本或原始字节;未连接时返回 false 并给出用户向状态 */
+  send: (data: string | ArrayBuffer) => boolean
   /** 重新换票并建连 */
   reconnect: () => void
 }
@@ -28,8 +28,10 @@ export interface TicketedSocketState {
 export interface TicketedSocketOptions {
   /** 目标 WS 地址;传 undefined 表示当前不需要连接(如运行时未声明该能力) */
   url: string | undefined
-  /** 收到一段服务端消息(二进制帧已转成文本) */
+  /** 收到一段服务端文本消息 */
   onMessage?: (data: string) => void
+  /** 按到达顺序收到原始二进制消息,由消费者按其流协议处理 */
+  onBinaryMessage?: (data: Uint8Array) => void
   /** 连接就绪 */
   onOpen?: () => void
 }
@@ -38,15 +40,15 @@ export interface TicketedSocketOptions {
  * useTicketedWebSocket 换取短时票据后建立连接,并在卸载时关闭。
  */
 export function useTicketedWebSocket(options: TicketedSocketOptions): TicketedSocketState {
-  const { url, onMessage, onOpen } = options
+  const { url, onMessage, onBinaryMessage, onOpen } = options
   const [status, setStatus] = useState<SocketStatus>('idle')
   const [error, setError] = useState<string>()
   const [attempt, setAttempt] = useState(0)
   const socketRef = useRef<WebSocket | undefined>(undefined)
 
   // 回调放进 ref:换票是异步的,把回调列进 effect 依赖会让每次渲染都重连
-  const handlersRef = useRef({ onMessage, onOpen })
-  handlersRef.current = { onMessage, onOpen }
+  const handlersRef = useRef({ onMessage, onBinaryMessage, onOpen })
+  handlersRef.current = { onMessage, onBinaryMessage, onOpen }
 
   useEffect(() => {
     if (!url) {
@@ -80,6 +82,7 @@ export function useTicketedWebSocket(options: TicketedSocketOptions): TicketedSo
 
       const separator = url.includes('?') ? '&' : '?'
       const socket = new WebSocket(`${url}${separator}ticket=${encodeURIComponent(ticket)}`)
+      socket.binaryType = 'arraybuffer'
       socketRef.current = socket
 
       socket.onopen = () => {
@@ -89,16 +92,12 @@ export function useTicketedWebSocket(options: TicketedSocketOptions): TicketedSo
       }
       socket.onmessage = (event: MessageEvent<unknown>) => {
         if (!active) return
-        const handle = handlersRef.current.onMessage
-        if (!handle) return
         if (typeof event.data === 'string') {
-          handle(event.data)
+          handlersRef.current.onMessage?.(event.data)
           return
         }
-        if (event.data instanceof Blob) {
-          void event.data.text().then((text) => {
-            if (active) handle(text)
-          })
+        if (event.data instanceof ArrayBuffer) {
+          handlersRef.current.onBinaryMessage?.(new Uint8Array(event.data))
         }
       }
       socket.onerror = () => {
@@ -126,7 +125,7 @@ export function useTicketedWebSocket(options: TicketedSocketOptions): TicketedSo
     }
   }, [attempt, url])
 
-  const send = useCallback((data: string) => {
+  const send = useCallback((data: string | ArrayBuffer) => {
     const socket = socketRef.current
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(data)

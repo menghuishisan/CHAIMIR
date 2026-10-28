@@ -107,9 +107,9 @@ type Submission struct {
 	AttemptNo    int32
 	ContentRef   map[string]any
 	JudgeTaskRef string
-	AutoScore    int32
-	ManualScore  int32
-	FinalScore   int32
+	AutoScore    *int32
+	ManualScore  *int32
+	FinalScore   *int32
 	Comment      string
 	IsLate       bool
 	Status       int16
@@ -165,15 +165,17 @@ type LessonProgress struct {
 }
 
 type DiscussionPost struct {
-	ID        int64
-	TenantID  int64
-	CourseID  int64
-	ParentID  int64
-	AuthorID  int64
-	Content   string
-	IsPinned  bool
-	LikeCount int32
-	CreatedAt time.Time
+	ID       int64
+	TenantID int64
+	CourseID int64
+	ParentID int64
+	// ParentContent 是读取时派生的可见父帖正文,不存储副本。
+	ParentContent *string
+	AuthorID      int64
+	Content       string
+	IsPinned      bool
+	LikeCount     int32
+	CreatedAt     time.Time
 }
 
 type Announcement struct {
@@ -236,6 +238,8 @@ type CourseGradeExportRequest struct {
 
 // TeachingGradeEventOutbox 是成绩变更事件的生产者 outbox 记录。
 type TeachingGradeEventOutbox struct {
+	Revision       int64
+	LockRevision   int64
 	ID             int64
 	TenantID       int64
 	CourseID       int64
@@ -254,6 +258,7 @@ type TeachingGradeEventOutbox struct {
 
 type CourseListFilter struct {
 	Role     string
+	Keyword  string
 	Status   int16
 	IsShared int16
 	Page     int

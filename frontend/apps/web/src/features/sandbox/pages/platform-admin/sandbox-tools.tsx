@@ -90,14 +90,15 @@ export default function PlatformSandboxToolsPage() {
     [kindFilter, list]
   )
 
-  const stats = useMemo(
-    () => ({
+  const stats = useMemo(() => {
+    if ((tools.status !== 'success' && tools.status !== 'empty') || !tools.data) return undefined
+    return {
+      total: list.length,
       available: list.filter((item) => item.status === ToolStatus.AVAILABLE).length,
       studentTools: list.filter((item) => item.category === SANDBOX_COMPONENT_CATEGORY.TOOL).length,
       infra: list.filter((item) => item.category === SANDBOX_COMPONENT_CATEGORY.INFRA).length,
-    }),
-    [list]
-  )
+    }
+  }, [list, tools.data, tools.status])
 
   return (
     <PageScaffold>
@@ -122,10 +123,10 @@ export default function PlatformSandboxToolsPage() {
         label="工具总量摘要"
         className="mb-5"
         items={[
-          { label: '组件总数', value: list.length, hint: '含已停用' },
-          { label: '可用', value: stats.available, hint: '可被实验引用' },
-          { label: '学生工具', value: stats.studentTools, hint: '学生能打开' },
-          { label: '基础设施', value: stats.infra, hint: '只参与编排' },
+          { label: '组件总数', value: stats?.total, hint: '含已停用' },
+          { label: '可用', value: stats?.available, hint: '可被实验引用' },
+          { label: '学生工具', value: stats?.studentTools, hint: '学生能打开' },
+          { label: '基础设施', value: stats?.infra, hint: '只参与编排' },
         ]}
       />
 

@@ -21,6 +21,8 @@ import (
 
 type contestEnvContext struct {
 	OrganizerTenantID int64
+	MemberTenantID    int64
+	MemberAccountID   int64
 	Contest           Contest
 	Problem           ContestProblem
 	Team              Team
@@ -47,7 +49,7 @@ func (s *Service) resolveContestEnvContext(ctx context.Context, contestID, probl
 	if requestRef == "" || len(requestRef) > 128 {
 		return contestEnvContext{}, apperr.ErrContestSandboxUnavailable
 	}
-	out := contestEnvContext{OrganizerTenantID: organizerTenantID}
+	out := contestEnvContext{OrganizerTenantID: organizerTenantID, MemberTenantID: id.TenantID, MemberAccountID: id.AccountID}
 	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
 		out.Contest, err = tx.GetContest(ctx, organizerTenantID, contestID)
 		if err != nil {
@@ -90,7 +92,18 @@ func (s *Service) CreateEnv(ctx context.Context, contestID, problemID int64, req
 	if err != nil {
 		return EnvDTO{}, err
 	}
-	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: env.OrganizerTenantID, CompositionSnapshot: snapshot, InitCodeRef: snapshot.Spec.InitCodeRef, InitScriptRef: snapshot.Spec.InitScriptRef, OwnerAccountID: env.Contest.OrganizerID, SourceRef: env.SourceRef, ScopeRef: env.SourceRef, KeepAlive: false, SnapshotEnabled: false})
+	savedCodeRef, err := s.sandbox.FindSavedSandboxWorkspaceArchiveBySourceRef(ctx, env.OrganizerTenantID, env.SourceRef)
+	if err != nil {
+		return EnvDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	if err := s.recycleFailedContestEnv(ctx, env); err != nil {
+		return EnvDTO{}, err
+	}
+	initCodeRef := snapshot.Spec.InitCodeRef
+	if savedCodeRef != "" {
+		initCodeRef = savedCodeRef
+	}
+	info, err := s.sandbox.CreateSandbox(ctx, contracts.SandboxCreateRequest{TenantID: env.OrganizerTenantID, CompositionSnapshot: snapshot, InitCodeRef: initCodeRef, InitScriptRef: snapshot.Spec.InitScriptRef, OwnerAccountID: env.Contest.OrganizerID, SourceRef: env.SourceRef, ScopeRef: env.SourceRef, KeepAlive: false, SnapshotEnabled: false})
 	if err != nil {
 		return EnvDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
@@ -108,10 +121,47 @@ func (s *Service) CreateEnv(ctx context.Context, contestID, problemID int64, req
 		}
 		return nil
 	}); err != nil {
-		_ = s.sandbox.DestroySandbox(ctx, contracts.SandboxControlRequest{TenantID: env.OrganizerTenantID, SandboxID: info.SandboxID, SourceRef: info.SourceRef})
+		// 并发幂等请求可能已授权使用同一沙箱,不能因本次事务失败销毁共享环境。
+		// 原来源键允许重试补齐授权;未继续使用的资源仍由M2正式生命周期回收。
 		return EnvDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
 	}
 	return EnvDTO{SandboxID: ids.ID(info.SandboxID), SourceRef: info.SourceRef, Status: info.Status}, nil
+}
+
+// recycleFailedContestEnv 仅在用户重新准备时回收确切失败沙箱，避免稳定作用域误伤并发新环境。
+func (s *Service) recycleFailedContestEnv(ctx context.Context, env contestEnvContext) error {
+	info, err := s.sandbox.GetSandboxBySourceRef(ctx, env.OrganizerTenantID, env.SourceRef)
+	if errors.Is(err, apperr.ErrSandboxNotFound) {
+		return nil
+	}
+	if err != nil {
+		return apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	if info.Status != contracts.SandboxStatusFailed {
+		return nil
+	}
+	var revoked []ContestAccessGrant
+	if err := s.store.TenantTx(ctx, env.OrganizerTenantID, func(ctx context.Context, tx TxStore) error {
+		grants, err := tx.ListContestAccessGrantsForContest(ctx, env.OrganizerTenantID, env.Contest.ID)
+		if err != nil {
+			return err
+		}
+		for _, grant := range grants {
+			if grant.SandboxID == info.SandboxID {
+				revoked = append(revoked, grant)
+			}
+		}
+		return tx.RevokeContestAccessGrantsForSandbox(ctx, env.OrganizerTenantID, info.SandboxID)
+	}); err != nil {
+		return apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	if err := s.closeRevokedContestSandboxSessions(revoked); err != nil {
+		return apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	if err := s.sandbox.DestroySandbox(ctx, contracts.SandboxControlRequest{TenantID: env.OrganizerTenantID, SandboxID: info.SandboxID, SourceRef: info.SourceRef}); err != nil {
+		return apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	return nil
 }
 
 // GetEnv 恢复当前队伍仍未销毁的竞赛实操环境,不创建新资源也不接受客户端运行时配置。
@@ -126,6 +176,21 @@ func (s *Service) GetEnv(ctx context.Context, contestID, problemID int64, req En
 			return EnvDTO{}, apperr.ErrNotFound.WithCause(err)
 		}
 		return EnvDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	var grant ContestAccessGrant
+	if err := s.store.TenantTx(ctx, env.OrganizerTenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		grant, err = tx.GetContestAccessGrantForSubject(ctx, env.OrganizerTenantID, info.SandboxID, env.MemberTenantID, env.MemberAccountID)
+		return err
+	}); err != nil {
+		if isNoRows(err) {
+			// 首次授权事务失败时仍显示准备入口,由同一POST和幂等键恢复授权。
+			return EnvDTO{}, apperr.ErrNotFound.WithCause(err)
+		}
+		return EnvDTO{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+	}
+	if grant.ContestID != env.Contest.ID || grant.TeamID != env.Team.ID || grant.SourceRef != info.SourceRef || grant.Status != contestAccessGrantActive || !grant.ExpiresAt.After(timex.Now()) {
+		return EnvDTO{}, apperr.ErrContestTeamAccessDenied
 	}
 	return EnvDTO{SandboxID: ids.ID(info.SandboxID), SourceRef: info.SourceRef, Status: info.Status}, nil
 }

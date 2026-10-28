@@ -160,6 +160,33 @@ func (q *Queries) ClaimAutoArchiveContestsAcrossTenants(ctx context.Context, arg
 	return items, nil
 }
 
+const claimBattleMatchFinalization = `-- name: ClaimBattleMatchFinalization :execrows
+UPDATE battle_match
+SET lease_token = $3, lease_until = $4::timestamptz
+WHERE tenant_id = $1 AND id = $2 AND status IN (3, 4) AND finalized_at IS NULL
+  AND (lease_token = '' OR lease_until <= now())
+`
+
+type ClaimBattleMatchFinalizationParams struct {
+	TenantID   int64              `json:"tenant_id"`
+	ID         int64              `json:"id"`
+	LeaseToken string             `json:"lease_token"`
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+}
+
+func (q *Queries) ClaimBattleMatchFinalization(ctx context.Context, arg ClaimBattleMatchFinalizationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimBattleMatchFinalization,
+		arg.TenantID,
+		arg.ID,
+		arg.LeaseToken,
+		arg.LeaseUntil,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const claimManualArchiveContest = `-- name: ClaimManualArchiveContest :one
 UPDATE contest AS c
 SET archive_lease_token = $1, archive_lease_until = $2::timestamptz, updated_at = now()
@@ -227,7 +254,7 @@ SET status = 2,
     attempt_count = m.attempt_count + 1
 FROM candidates c
 WHERE m.id = c.id
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at
 `
 
 type ClaimPendingBattleMatchesAcrossTenantsParams struct {
@@ -273,6 +300,7 @@ func (q *Queries) ClaimPendingBattleMatchesAcrossTenants(ctx context.Context, ar
 			&i.LeaseToken,
 			&i.LeaseUntil,
 			&i.AttemptCount,
+			&i.FinalizedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -303,6 +331,27 @@ type CompleteAutoArchiveContestParams struct {
 
 func (q *Queries) CompleteAutoArchiveContest(ctx context.Context, arg CompleteAutoArchiveContestParams) (int64, error) {
 	result, err := q.db.Exec(ctx, completeAutoArchiveContest, arg.TenantID, arg.ContestID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const completeBattleMatchFinalization = `-- name: CompleteBattleMatchFinalization :execrows
+UPDATE battle_match
+SET finalized_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status IN (3, 4) AND finalized_at IS NULL
+  AND lease_token = $3 AND lease_until > now()
+`
+
+type CompleteBattleMatchFinalizationParams struct {
+	TenantID   int64  `json:"tenant_id"`
+	ID         int64  `json:"id"`
+	LeaseToken string `json:"lease_token"`
+}
+
+func (q *Queries) CompleteBattleMatchFinalization(ctx context.Context, arg CompleteBattleMatchFinalizationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeBattleMatchFinalization, arg.TenantID, arg.ID, arg.LeaseToken)
 	if err != nil {
 		return 0, err
 	}
@@ -602,7 +651,7 @@ WHERE EXISTS (
     SELECT 1 FROM contest c
     WHERE c.tenant_id = $2 AND c.id = $3 AND c.status IN (3, 4) AND c.end_at > now()
 )
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count, finalized_at
 `
 
 type CreateBattleMatchParams struct {
@@ -646,6 +695,7 @@ func (q *Queries) CreateBattleMatch(ctx context.Context, arg CreateBattleMatchPa
 		&i.LeaseToken,
 		&i.LeaseUntil,
 		&i.AttemptCount,
+		&i.FinalizedAt,
 	)
 	return i, err
 }
@@ -938,7 +988,7 @@ SET status = 4, finished_at = now(), lease_token = '', lease_until = NULL
 WHERE status = 2 AND COALESCE(judge_task_ref, '') = ''
   AND lease_until <= $1::timestamptz
   AND attempt_count >= $2::int
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count, finalized_at
 `
 
 type ExhaustUnstartedBattleMatchesParams struct {
@@ -976,6 +1026,7 @@ func (q *Queries) ExhaustUnstartedBattleMatches(ctx context.Context, arg Exhaust
 			&i.LeaseToken,
 			&i.LeaseUntil,
 			&i.AttemptCount,
+			&i.FinalizedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -996,7 +1047,7 @@ WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.judge_task_ref = $3
       WHERE c.tenant_id = m.tenant_id AND c.id = m.contest_id
         AND (c.status IN (3, 4) OR (c.status = 5 AND c.archive_lease_token = ''))
   )
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at
 `
 
 type FailBattleMatchByJudgeTaskParams struct {
@@ -1028,6 +1079,7 @@ func (q *Queries) FailBattleMatchByJudgeTask(ctx context.Context, arg FailBattle
 		&i.LeaseToken,
 		&i.LeaseUntil,
 		&i.AttemptCount,
+		&i.FinalizedAt,
 	)
 	return i, err
 }
@@ -1037,7 +1089,7 @@ UPDATE battle_match AS m
 SET status = 4, finished_at = now(), lease_token = '', lease_until = NULL
 WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.lease_token = $3 AND m.lease_until > now()
   AND COALESCE(m.judge_task_ref, '') = ''
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at
 `
 
 type FailBattleMatchStartParams struct {
@@ -1069,6 +1121,7 @@ func (q *Queries) FailBattleMatchStart(ctx context.Context, arg FailBattleMatchS
 		&i.LeaseToken,
 		&i.LeaseUntil,
 		&i.AttemptCount,
+		&i.FinalizedAt,
 	)
 	return i, err
 }
@@ -1247,7 +1300,7 @@ WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.judge_task_ref = $4
       WHERE c.tenant_id = m.tenant_id AND c.id = m.contest_id
         AND (c.status IN (3, 4) OR (c.status = 5 AND c.archive_lease_token = ''))
   )
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at
 `
 
 type FinishBattleMatchParams struct {
@@ -1291,6 +1344,7 @@ func (q *Queries) FinishBattleMatch(ctx context.Context, arg FinishBattleMatchPa
 		&i.LeaseToken,
 		&i.LeaseUntil,
 		&i.AttemptCount,
+		&i.FinalizedAt,
 	)
 	return i, err
 }
@@ -1326,7 +1380,7 @@ func (q *Queries) GetBattleEntry(ctx context.Context, arg GetBattleEntryParams) 
 }
 
 const getBattleMatch = `-- name: GetBattleMatch :one
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count, finalized_at
 FROM battle_match
 WHERE tenant_id = $1 AND id = $2
 `
@@ -1359,44 +1413,7 @@ func (q *Queries) GetBattleMatch(ctx context.Context, arg GetBattleMatchParams) 
 		&i.LeaseToken,
 		&i.LeaseUntil,
 		&i.AttemptCount,
-	)
-	return i, err
-}
-
-const getBattleMatchByJudgeTask = `-- name: GetBattleMatchByJudgeTask :one
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
-FROM battle_match
-WHERE tenant_id = $1 AND judge_task_ref = $2
-`
-
-type GetBattleMatchByJudgeTaskParams struct {
-	TenantID     int64       `json:"tenant_id"`
-	JudgeTaskRef pgtype.Text `json:"judge_task_ref"`
-}
-
-func (q *Queries) GetBattleMatchByJudgeTask(ctx context.Context, arg GetBattleMatchByJudgeTaskParams) (BattleMatch, error) {
-	row := q.db.QueryRow(ctx, getBattleMatchByJudgeTask, arg.TenantID, arg.JudgeTaskRef)
-	var i BattleMatch
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.ContestID,
-		&i.ProblemID,
-		&i.EntryAID,
-		&i.EntryBID,
-		&i.SourceRef,
-		&i.ScopeRef,
-		&i.SandboxRef,
-		&i.JudgeTaskRef,
-		&i.Result,
-		&i.ScoreDelta,
-		&i.ReplayRef,
-		&i.Status,
-		&i.MatchedAt,
-		&i.FinishedAt,
-		&i.LeaseToken,
-		&i.LeaseUntil,
-		&i.AttemptCount,
+		&i.FinalizedAt,
 	)
 	return i, err
 }
@@ -1574,6 +1591,46 @@ func (q *Queries) GetContestAccessGrantForSubject(ctx context.Context, arg GetCo
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getContestForUpdate = `-- name: GetContestForUpdate :one
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
+FROM contest
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type GetContestForUpdateParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+// 编排保存和人工状态流转共用赛事父行锁,读取等待后的最新状态。
+func (q *Queries) GetContestForUpdate(ctx context.Context, arg GetContestForUpdateParams) (Contest, error) {
+	row := q.db.QueryRow(ctx, getContestForUpdate, arg.TenantID, arg.ID)
+	var i Contest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.OrganizerID,
+		&i.Name,
+		&i.Mode,
+		&i.MatchMode,
+		&i.TeamMode,
+		&i.SignupStart,
+		&i.SignupEnd,
+		&i.StartAt,
+		&i.EndAt,
+		&i.FreezeMinutes,
+		&i.Rules,
+		&i.Status,
+		&i.ArchiveLeaseToken,
+		&i.ArchiveLeaseUntil,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -2124,7 +2181,7 @@ func (q *Queries) ListBattleEntriesForTeam(ctx context.Context, arg ListBattleEn
 }
 
 const listBattleMatchesForTeam = `-- name: ListBattleMatchesForTeam :many
-SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at
 FROM battle_match m
 JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
@@ -2179,6 +2236,65 @@ func (q *Queries) ListBattleMatchesForTeam(ctx context.Context, arg ListBattleMa
 			&i.LeaseToken,
 			&i.LeaseUntil,
 			&i.AttemptCount,
+			&i.FinalizedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBattleMatchesToReconcile = `-- name: ListBattleMatchesToReconcile :many
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count, finalized_at
+FROM battle_match
+WHERE ((status = 2 AND COALESCE(judge_task_ref, '') <> '')
+       OR (status IN (3, 4) AND finalized_at IS NULL))
+  AND id > $1::bigint
+  AND matched_at <= $2::timestamptz
+ORDER BY id ASC
+LIMIT $3::int
+`
+
+type ListBattleMatchesToReconcileParams struct {
+	AfterID       int64              `json:"after_id"`
+	MatchedBefore pgtype.Timestamptz `json:"matched_before"`
+	PageLimit     int32              `json:"page_limit"`
+}
+
+func (q *Queries) ListBattleMatchesToReconcile(ctx context.Context, arg ListBattleMatchesToReconcileParams) ([]BattleMatch, error) {
+	rows, err := q.db.Query(ctx, listBattleMatchesToReconcile, arg.AfterID, arg.MatchedBefore, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BattleMatch{}
+	for rows.Next() {
+		var i BattleMatch
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ContestID,
+			&i.ProblemID,
+			&i.EntryAID,
+			&i.EntryBID,
+			&i.SourceRef,
+			&i.ScopeRef,
+			&i.SandboxRef,
+			&i.JudgeTaskRef,
+			&i.Result,
+			&i.ScoreDelta,
+			&i.ReplayRef,
+			&i.Status,
+			&i.MatchedAt,
+			&i.FinishedAt,
+			&i.LeaseToken,
+			&i.LeaseUntil,
+			&i.AttemptCount,
+			&i.FinalizedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2570,6 +2686,7 @@ SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_st
 FROM contest
 WHERE deleted_at IS NULL AND status IN (2, 3, 4) AND end_at <= $1
 ORDER BY end_at ASC, id ASC
+FOR UPDATE SKIP LOCKED
 `
 
 // 报名中、进行中和封榜中的赛事过了结束时间都必须进入结束态,避免学生入口长期显示报名中。
@@ -2620,6 +2737,7 @@ WHERE deleted_at IS NULL AND status = 3 AND freeze_minutes > 0
   AND end_at > $1
   AND end_at - (freeze_minutes * INTERVAL '1 minute') <= $1
 ORDER BY end_at ASC, id ASC
+FOR UPDATE SKIP LOCKED
 `
 
 // 封榜窗口由服务端按 freeze_minutes 计算,不接受前端自行推进状态。
@@ -2668,6 +2786,7 @@ SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_st
 FROM contest
 WHERE deleted_at IS NULL AND status = 2 AND start_at <= $1 AND end_at > $1
 ORDER BY start_at ASC, id ASC
+FOR UPDATE SKIP LOCKED
 `
 
 // 后台生命周期扫描只推进仍处于报名中的赛事;已越过结束时间的赛事由结束扫描直接收口。
@@ -2786,54 +2905,6 @@ func (q *Queries) ListLadder(ctx context.Context, arg ListLadderParams) ([]ListL
 			&i.LastSolveAt,
 			&i.Rank,
 			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listRunningBattleMatchesWithJudgeTask = `-- name: ListRunningBattleMatchesWithJudgeTask :many
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
-FROM battle_match
-WHERE status = 2 AND COALESCE(judge_task_ref, '') <> ''
-ORDER BY matched_at ASC, id ASC
-LIMIT $1
-`
-
-func (q *Queries) ListRunningBattleMatchesWithJudgeTask(ctx context.Context, limit int32) ([]BattleMatch, error) {
-	rows, err := q.db.Query(ctx, listRunningBattleMatchesWithJudgeTask, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []BattleMatch{}
-	for rows.Next() {
-		var i BattleMatch
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.ContestID,
-			&i.ProblemID,
-			&i.EntryAID,
-			&i.EntryBID,
-			&i.SourceRef,
-			&i.ScopeRef,
-			&i.SandboxRef,
-			&i.JudgeTaskRef,
-			&i.Result,
-			&i.ScoreDelta,
-			&i.ReplayRef,
-			&i.Status,
-			&i.MatchedAt,
-			&i.FinishedAt,
-			&i.LeaseToken,
-			&i.LeaseUntil,
-			&i.AttemptCount,
 		); err != nil {
 			return nil, err
 		}
@@ -3140,6 +3211,48 @@ func (q *Queries) ListVulnSources(ctx context.Context, tenantID pgtype.Int8) ([]
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockBattleMatchByJudgeTask = `-- name: LockBattleMatchByJudgeTask :one
+SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at
+FROM contest c
+JOIN battle_match m ON m.tenant_id = c.tenant_id AND m.contest_id = c.id
+WHERE m.tenant_id = $1 AND m.judge_task_ref = $2
+FOR UPDATE OF c, m
+`
+
+type LockBattleMatchByJudgeTaskParams struct {
+	TenantID     int64       `json:"tenant_id"`
+	JudgeTaskRef pgtype.Text `json:"judge_task_ref"`
+}
+
+// 结算统一锁赛事和对局,同一赛事的 ELO 读取与回写串行完成。
+func (q *Queries) LockBattleMatchByJudgeTask(ctx context.Context, arg LockBattleMatchByJudgeTaskParams) (BattleMatch, error) {
+	row := q.db.QueryRow(ctx, lockBattleMatchByJudgeTask, arg.TenantID, arg.JudgeTaskRef)
+	var i BattleMatch
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ContestID,
+		&i.ProblemID,
+		&i.EntryAID,
+		&i.EntryBID,
+		&i.SourceRef,
+		&i.ScopeRef,
+		&i.SandboxRef,
+		&i.JudgeTaskRef,
+		&i.Result,
+		&i.ScoreDelta,
+		&i.ReplayRef,
+		&i.Status,
+		&i.MatchedAt,
+		&i.FinishedAt,
+		&i.LeaseToken,
+		&i.LeaseUntil,
+		&i.AttemptCount,
+		&i.FinalizedAt,
+	)
+	return i, err
 }
 
 const lockContestTeams = `-- name: LockContestTeams :exec
@@ -3510,7 +3623,7 @@ SET sandbox_ref = $3,
     lease_token = '',
     lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $5 AND lease_until > now()
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count, finalized_at
 `
 
 type StartBattleMatchParams struct {
@@ -3550,6 +3663,7 @@ func (q *Queries) StartBattleMatch(ctx context.Context, arg StartBattleMatchPara
 		&i.LeaseToken,
 		&i.LeaseUntil,
 		&i.AttemptCount,
+		&i.FinalizedAt,
 	)
 	return i, err
 }
@@ -3704,7 +3818,12 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, 1, $10, now(), now())
 ON CONFLICT (tenant_id, sandbox_id, member_tenant_id, member_account_id) DO UPDATE
 SET capabilities = EXCLUDED.capabilities,
     source_ref = EXCLUDED.source_ref,
-    grant_version = contest_access_grant.grant_version + 1,
+    grant_version = CASE
+        WHEN (contest_access_grant.capabilities, contest_access_grant.source_ref, contest_access_grant.status, contest_access_grant.expires_at)
+            IS DISTINCT FROM (EXCLUDED.capabilities, EXCLUDED.source_ref, EXCLUDED.status, EXCLUDED.expires_at)
+        THEN contest_access_grant.grant_version + 1
+        ELSE contest_access_grant.grant_version
+    END,
     status = 1,
     expires_at = EXCLUDED.expires_at,
     updated_at = now()
@@ -3724,6 +3843,7 @@ type UpsertContestAccessGrantParams struct {
 	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
 }
 
+// 重复准备环境复用未变化的授权版本;权限、来源、状态或有效期变化才使旧主体失效。
 func (q *Queries) UpsertContestAccessGrant(ctx context.Context, arg UpsertContestAccessGrantParams) (ContestAccessGrant, error) {
 	row := q.db.QueryRow(ctx, upsertContestAccessGrant,
 		arg.ID,
@@ -3949,13 +4069,14 @@ func (q *Queries) UpsertVulnProblem(ctx context.Context, arg UpsertVulnProblemPa
 const upsertVulnSource = `-- name: UpsertVulnSource :one
 INSERT INTO vuln_source (id, tenant_id, type, name, config, default_level, enabled, last_sync_at, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, now(), now())
-ON CONFLICT (tenant_id, id) DO UPDATE
+ON CONFLICT (id) DO UPDATE
 SET type = EXCLUDED.type,
     name = EXCLUDED.name,
     config = EXCLUDED.config,
     default_level = EXCLUDED.default_level,
     enabled = EXCLUDED.enabled,
     updated_at = now()
+WHERE vuln_source.tenant_id IS NOT DISTINCT FROM EXCLUDED.tenant_id
 RETURNING id, tenant_id, type, name, config, default_level, enabled, last_sync_at, created_at, updated_at
 `
 

@@ -181,6 +181,8 @@ type SubmissionJudgeOutbox struct {
 
 type TeachingGradeEventOutbox struct {
 	ID             int64              `json:"id"`
+	Revision       int64              `json:"revision"`
+	LockRevision   int64              `json:"lock_revision"`
 	TenantID       int64              `json:"tenant_id"`
 	CourseID       int64              `json:"course_id"`
 	StudentID      int64              `json:"student_id"`

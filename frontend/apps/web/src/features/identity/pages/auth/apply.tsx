@@ -11,7 +11,8 @@ import {
   tenantApplicationSchoolTypeLabel,
 } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { emailError, phoneError, requiredError, useFieldErrors } from '../../authForm'
+import { emailError, phoneError, requiredError } from '../../authForm'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import {
   TENANT_APPLICATION_SCHOOL_TYPES,
   type TenantApplicationSchoolType,
@@ -27,30 +28,102 @@ import {
   AuthTextField,
 } from '../../components/AuthUI'
 
+const APPLICATION_DRAFT_KEY = 'chaimir.tenant-application.draft'
+
+interface ApplicationDraft {
+  schoolName: string
+  schoolType: TenantApplicationSchoolType
+  contactName: string
+  contactPhone: string
+  contactEmail: string
+}
+
+interface ApplicationDraftState {
+  draft: ApplicationDraft
+  warning: string | null
+}
+
+/** readApplicationDraft 只恢复匿名申请字段,损坏或不可读的本机草稿显式告知申请人。 */
+function readApplicationDraft(): ApplicationDraftState {
+  const empty: ApplicationDraft = {
+    schoolName: '',
+    schoolType: TENANT_APPLICATION_SCHOOL_TYPES[0],
+    contactName: '',
+    contactPhone: '',
+    contactEmail: '',
+  }
+  let stored: string | null
+  try {
+    stored = window.localStorage.getItem(APPLICATION_DRAFT_KEY)
+  } catch {
+    return { draft: empty, warning: '无法读取此浏览器中的草稿,请保持页面打开并完成申请。' }
+  }
+  if (stored === null) return { draft: empty, warning: null }
+
+  try {
+    const value: unknown = JSON.parse(stored)
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new Error('Invalid application draft')
+    }
+    const fields = value as Record<string, unknown>
+    if (
+      typeof fields.schoolName !== 'string'
+      || typeof fields.contactName !== 'string'
+      || typeof fields.contactPhone !== 'string'
+      || typeof fields.contactEmail !== 'string'
+      || !TENANT_APPLICATION_SCHOOL_TYPES.some((type) => type === fields.schoolType)
+    ) {
+      throw new Error('Invalid application draft fields')
+    }
+    return {
+      draft: {
+        schoolName: fields.schoolName,
+        schoolType: fields.schoolType as TenantApplicationSchoolType,
+        contactName: fields.contactName,
+        contactPhone: fields.contactPhone,
+        contactEmail: fields.contactEmail,
+      },
+      warning: null,
+    }
+  } catch {
+    return { draft: empty, warning: '草稿无法恢复,请重新填写申请信息。' }
+  }
+}
+
 /**
  * ApplyPage 处理学校入驻申请提交。
  */
 export default function ApplyPage() {
   const fieldId = useId()
-  const [schoolName, setSchoolName] = useState('')
-  const [schoolType, setSchoolType] = useState<TenantApplicationSchoolType>(TENANT_APPLICATION_SCHOOL_TYPES[0])
-  const [contactName, setContactName] = useState('')
-  const [contactPhone, setContactPhone] = useState('')
-  const [contactEmail, setContactEmail] = useState('')
-  const { errors, setError } = useFieldErrors()
+  const [draftState, setDraftState] = useState(readApplicationDraft)
+  const { schoolName, schoolType, contactName, contactPhone, contactEmail } = draftState.draft
+  const { errors, validate } = useFormValidation(() => ({
+    schoolName: requiredError(schoolName, '请输入学校名称'),
+    contactName: requiredError(contactName, '请输入联系人姓名'),
+    contactPhone: phoneError(contactPhone, '联系电话'),
+    contactEmail: emailError(contactEmail),
+  }))
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
+
+  /** updateDraft 在输入事件结束前保存字段白名单,刷新或离开时不丢尚未提交的申请。 */
+  const updateDraft = useCallback((change: Partial<ApplicationDraft>) => {
+    const draft = { ...draftState.draft, ...change }
+    let warning: string | null = null
+    try {
+      window.localStorage.setItem(APPLICATION_DRAFT_KEY, JSON.stringify(draft))
+    } catch {
+      warning = '无法在此浏览器保存草稿,请保持页面打开并完成申请。'
+    }
+    setDraftState({ draft, warning })
+  }, [draftState.draft])
 
   /** handleSubmit 提交入驻申请 */
   const handleSubmit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const nameOk = setError('schoolName', requiredError(schoolName, '请输入学校名称'))
-      const contactOk = setError('contactName', requiredError(contactName, '请输入联系人姓名'))
-      const phoneOk = setError('contactPhone', phoneError(contactPhone, '联系电话'))
-      const emailOk = setError('contactEmail', emailError(contactEmail))
-      if (!nameOk || !contactOk || !phoneOk || !emailOk) return
+      if (!validate()) return
 
       setSubmitting(true)
       setFormError(null)
@@ -62,6 +135,15 @@ export default function ApplyPage() {
           contact_phone: contactPhone.trim(),
           contact_email: contactEmail.trim(),
         })
+        try {
+          window.localStorage.removeItem(APPLICATION_DRAFT_KEY)
+          setDraftState((previous) => ({ ...previous, warning: null }))
+        } catch {
+          setDraftState((previous) => ({
+            ...previous,
+            warning: '申请已提交,但此浏览器未能清除草稿。请清除本站浏览数据后再关闭页面。',
+          }))
+        }
         setDone(true)
       } catch (applyError) {
         setFormError(userFacingErrorMessage(applyError, '申请提交失败,请稍后重试。'))
@@ -69,7 +151,7 @@ export default function ApplyPage() {
         setSubmitting(false)
       }
     },
-    [contactEmail, contactName, contactPhone, schoolName, schoolType, setError],
+    [contactEmail, contactName, contactPhone, schoolName, schoolType, validate],
   )
 
   if (done) {
@@ -80,6 +162,7 @@ export default function ApplyPage() {
           title="申请已提交"
           description="平台运营人员会通过您留下的电话或邮箱与您联系,请留意来电与邮件。"
         >
+          <AuthFormError message={draftState.warning} />
           <AuthQuietLink to="/auth/login" icon={ArrowLeft}>
             返回登录
           </AuthQuietLink>
@@ -102,8 +185,8 @@ export default function ApplyPage() {
           autoComplete="organization"
           value={schoolName}
           error={errors.schoolName}
-          onValueChange={setSchoolName}
-          onBlur={() => setError('schoolName', requiredError(schoolName, '请输入学校名称'))}
+          onValueChange={(value) => updateDraft({ schoolName: value })}
+          onBlur={() => validate(['schoolName'])}
         />
 
         {/* 机构类型:认证页是墨色底层,用设计系统 Select 的深色变体(不在页面手拼深色控件) */}
@@ -117,7 +200,7 @@ export default function ApplyPage() {
               label: tenantApplicationSchoolTypeLabel(type),
             }))}
             // 选项只由 TENANT_APPLICATION_SCHOOL_TYPES 渲染,取值必然落在枚举内
-            onValueChange={(value) => setSchoolType(Number(value) as TenantApplicationSchoolType)}
+            onValueChange={(value) => updateDraft({ schoolType: Number(value) as TenantApplicationSchoolType })}
           />
         </AuthField>
 
@@ -127,8 +210,8 @@ export default function ApplyPage() {
           autoComplete="name"
           value={contactName}
           error={errors.contactName}
-          onValueChange={setContactName}
-          onBlur={() => setError('contactName', requiredError(contactName, '请输入联系人姓名'))}
+          onValueChange={(value) => updateDraft({ contactName: value })}
+          onBlur={() => validate(['contactName'])}
         />
 
         <AuthTextField
@@ -139,8 +222,8 @@ export default function ApplyPage() {
           inputMode="numeric"
           value={contactPhone}
           error={errors.contactPhone}
-          onValueChange={setContactPhone}
-          onBlur={() => setError('contactPhone', phoneError(contactPhone, '联系电话'))}
+          onValueChange={(value) => updateDraft({ contactPhone: value })}
+          onBlur={() => validate(['contactPhone'])}
         />
 
         <AuthTextField
@@ -150,10 +233,11 @@ export default function ApplyPage() {
           autoComplete="email"
           value={contactEmail}
           error={errors.contactEmail}
-          onValueChange={setContactEmail}
-          onBlur={() => setError('contactEmail', emailError(contactEmail))}
+          onValueChange={(value) => updateDraft({ contactEmail: value })}
+          onBlur={() => validate(['contactEmail'])}
         />
 
+        <AuthFormError message={draftState.warning} />
         <AuthFormError message={formError} />
 
         <AuthSubmit loading={submitting}>提交申请</AuthSubmit>

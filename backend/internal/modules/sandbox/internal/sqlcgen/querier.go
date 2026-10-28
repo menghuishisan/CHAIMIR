@@ -37,6 +37,10 @@ type Querier interface {
 	GetRuntimeImageByVersion(ctx context.Context, arg GetRuntimeImageByVersionParams) (RuntimeImage, error)
 	GetRuntimeImageByVersionForShare(ctx context.Context, arg GetRuntimeImageByVersionForShareParams) (RuntimeImage, error)
 	GetSandbox(ctx context.Context, arg GetSandboxParams) (Sandbox, error)
+	// 沙箱生命周期、公开文件和归档共用权威行锁，跨副本串行化状态与版本写入。
+	GetSandboxForUpdate(ctx context.Context, arg GetSandboxForUpdateParams) (Sandbox, error)
+	// 回收保留持久化代码指针，重建中断后仍可从同一稳定来源恢复。
+	GetSavedSandboxBySourceRef(ctx context.Context, arg GetSavedSandboxBySourceRefParams) (Sandbox, error)
 	GetTenantQuota(ctx context.Context, tenantID int64) (TenantQuotum, error)
 	GetTenantQuotaForUpdate(ctx context.Context, tenantID int64) (TenantQuotum, error)
 	GetToolByCode(ctx context.Context, code string) (Tool, error)

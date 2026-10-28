@@ -9,13 +9,16 @@ import (
 )
 
 type Querier interface {
+	AcceptGradeAppeal(ctx context.Context, arg AcceptGradeAppealParams) (GradeAppeal, error)
 	AckAcademicWarning(ctx context.Context, arg AckAcademicWarningParams) (AcademicWarning, error)
+	ApplyGradeEventRevision(ctx context.Context, arg ApplyGradeEventRevisionParams) (int64, error)
 	ApproveGradeReview(ctx context.Context, arg ApproveGradeReviewParams) (GradeReview, error)
+	ClaimGradeWarningNotifications(ctx context.Context, arg ClaimGradeWarningNotificationsParams) ([]ClaimGradeWarningNotificationsRow, error)
 	ClaimPendingGradeLockOutbox(ctx context.Context, arg ClaimPendingGradeLockOutboxParams) ([]GradeLockOutbox, error)
 	ClearCurrentSemesters(ctx context.Context) error
 	ClearDefaultLevelConfigs(ctx context.Context) error
 	CountAcademicWarnings(ctx context.Context, arg CountAcademicWarningsParams) (int64, error)
-	CountGradeAppeals(ctx context.Context, status int16) (int64, error)
+	CountGradeAppeals(ctx context.Context, arg CountGradeAppealsParams) (int64, error)
 	CountGradeReviews(ctx context.Context, arg CountGradeReviewsParams) (int64, error)
 	CountOwnGradeReviews(ctx context.Context, arg CountOwnGradeReviewsParams) (int64, error)
 	CreateAcademicWarning(ctx context.Context, arg CreateAcademicWarningParams) (AcademicWarning, error)
@@ -30,8 +33,10 @@ type Querier interface {
 	GetGradeAppeal(ctx context.Context, id int64) (GradeAppeal, error)
 	GetGradeReview(ctx context.Context, id int64) (GradeReview, error)
 	GetLatestApprovedReviewByCourse(ctx context.Context, courseID int64) (GradeReview, error)
+	GetLatestGradeLockOutboxByCourse(ctx context.Context, courseID int64) (GradeLockOutbox, error)
 	GetLatestReviewByCourse(ctx context.Context, courseID int64) (GradeReview, error)
 	GetTranscriptRecord(ctx context.Context, id int64) (TranscriptRecord, error)
+	HasAcceptedAppealsByCourse(ctx context.Context, courseID int64) (bool, error)
 	HasOpenGradeAppeal(ctx context.Context, arg HasOpenGradeAppealParams) (bool, error)
 	ListAcademicWarnings(ctx context.Context, arg ListAcademicWarningsParams) ([]AcademicWarning, error)
 	ListAcceptedAppealsByCourseStudent(ctx context.Context, arg ListAcceptedAppealsByCourseStudentParams) ([]GradeAppeal, error)
@@ -43,10 +48,14 @@ type Querier interface {
 	ListSemesters(ctx context.Context) ([]Semester, error)
 	ListStudentSemesterGrades(ctx context.Context, studentID int64) ([]StudentSemesterGrade, error)
 	ListTranscriptRecords(ctx context.Context, arg ListTranscriptRecordsParams) ([]TranscriptRecord, error)
+	LockGradeCourseScope(ctx context.Context, arg LockGradeCourseScopeParams) error
 	LockGradeLevelDefaultScope(ctx context.Context, lockKey int64) error
+	LockGradeStudentScope(ctx context.Context, arg LockGradeStudentScopeParams) error
 	LockSemesterCurrentScope(ctx context.Context, lockKey int64) error
 	MarkGradeLockOutboxFailed(ctx context.Context, arg MarkGradeLockOutboxFailedParams) (GradeLockOutbox, error)
 	MarkGradeLockOutboxPublished(ctx context.Context, arg MarkGradeLockOutboxPublishedParams) (GradeLockOutbox, error)
+	MarkGradeWarningNotificationFailed(ctx context.Context, arg MarkGradeWarningNotificationFailedParams) (int64, error)
+	MarkGradeWarningNotificationPublished(ctx context.Context, arg MarkGradeWarningNotificationPublishedParams) (int64, error)
 	RejectGradeReview(ctx context.Context, arg RejectGradeReviewParams) (GradeReview, error)
 	RelockGradeReview(ctx context.Context, arg RelockGradeReviewParams) (GradeReview, error)
 	RequeueExhaustedGradeLockOutbox(ctx context.Context, dollar_1 int64) (int64, error)

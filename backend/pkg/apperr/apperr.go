@@ -4,6 +4,7 @@ package apperr
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Error 是跨 HTTP/API 边界传递的应用错误。
@@ -43,9 +44,32 @@ func logCauseString(err error) string {
 	if err == nil {
 		return ""
 	}
-	var appErr *Error
-	if errors.As(err, &appErr) {
+	if appErr, ok := err.(*Error); ok {
 		return appErr.LogString()
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		var causes []string
+		var messages []string
+		for _, cause := range joined.Unwrap() {
+			if cause != nil {
+				causes = append(causes, logCauseString(cause))
+				messages = append(messages, cause.Error())
+			}
+		}
+		// 多个%w的自定义包装还可能含操作说明，不能按纯errors.Join丢掉外层文本。
+		if err.Error() != strings.Join(messages, "\n") {
+			return err.Error() + ": " + strings.Join(causes, "\n")
+		}
+		return strings.Join(causes, "\n")
+	}
+	if wrapped, ok := err.(interface{ Unwrap() error }); ok {
+		if cause := wrapped.Unwrap(); cause != nil {
+			// fmt.Errorf的包装说明包含原因的Error文本，仅展开该片段而保留操作上下文。
+			if message := cause.Error(); message != "" && strings.Contains(err.Error(), message) {
+				return strings.Replace(err.Error(), message, logCauseString(cause), 1)
+			}
+			return err.Error() + ": " + logCauseString(cause)
+		}
 	}
 	return err.Error()
 }

@@ -11,6 +11,7 @@ import {
   Badge,
   Breadcrumb,
   Button,
+  Callout,
   DataPanel,
   FilterBar,
   FilterField,
@@ -35,6 +36,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { usePagedResource, useResourceTotal } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDate } from '../../../../utils/formatters'
 import {
   courseStatusLabel,
@@ -77,15 +79,18 @@ export default function StudentCoursesPage() {
   const totalCount = useResourceTotal(
     (params) => api.teaching.getCourses({ role: 'student', ...params }),
     [],
+    courses.refreshVersion,
   )
   const runningCount = useResourceTotal(
     (params) =>
       api.teaching.getCourses({ role: 'student', status: CourseStatus.RUNNING, ...params }),
     [],
+    courses.refreshVersion,
   )
   const endedCount = useResourceTotal(
     (params) => api.teaching.getCourses({ role: 'student', status: CourseStatus.ENDED, ...params }),
     [],
+    courses.refreshVersion,
   )
 
   const columns: TableColumn<Course>[] = [
@@ -261,45 +266,48 @@ interface JoinCourseFormProps {
 function JoinCourseForm({ onJoined }: JoinCourseFormProps) {
   const fieldId = useId()
   const [inviteCode, setInviteCode] = useState('')
-  const [fieldError, setFieldError] = useState<string>()
+  const [submitError, setSubmitError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
+  const { errors, validate, reset } = useFormValidation(() => ({
+    inviteCode: !inviteCode.trim() ? '请输入课程邀请码' : null,
+  }))
 
   const handleSubmit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
       const code = inviteCode.trim()
-      if (!code) {
-        setFieldError('请输入课程邀请码')
-        return
-      }
-      setFieldError(undefined)
+      if (!validate()) return
+      setSubmitError(undefined)
       setSubmitting(true)
       try {
         await api.teaching.joinCourse({ invite_code: code })
         setInviteCode('')
+        reset()
         toast.success('已加入课程')
         onJoined()
       } catch (joinError) {
-        setFieldError(userFacingErrorMessage(joinError, '加入课程失败,请确认邀请码后重试。'))
+        setSubmitError(userFacingErrorMessage(joinError, '加入课程失败,请确认邀请码后重试。'))
       } finally {
         setSubmitting(false)
       }
     },
-    [inviteCode, onJoined],
+    [inviteCode, onJoined, reset, validate],
   )
 
   return (
     <form onSubmit={handleSubmit} noValidate>
-      <FormField label="课程邀请码" htmlFor={fieldId} required error={fieldError}>
+      <FormField label="课程邀请码" htmlFor={fieldId} required error={errors.inviteCode}>
         <Input
           id={fieldId}
           value={inviteCode}
           autoComplete="off"
           placeholder="请输入邀请码"
-          invalid={Boolean(fieldError)}
+          invalid={Boolean(errors.inviteCode)}
           onChange={(event) => setInviteCode(event.target.value)}
+          onBlur={() => validate(['inviteCode'])}
         />
       </FormField>
+      {submitError ? <Callout tone="danger" className="mt-4">{submitError}</Callout> : null}
       <Button
         type="submit"
         variant="primary"

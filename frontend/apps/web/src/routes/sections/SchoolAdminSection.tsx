@@ -8,22 +8,31 @@ import { AdminScope } from '@chaimir/api-client'
 import { MainLayout } from '../../layouts/main/MainLayout'
 import { RoleNotFoundPage } from '../../components/StatusPages'
 import { schoolAdminNavigation } from './schoolAdminNavigation'
+import { useSession } from '../../components/RoleGuard/session'
+import { TenantModuleGuard } from '../../components/RoleGuard/TenantModuleGuard'
+import { availableRoleNavigation } from '../../layouts/main/navigation'
 
 /* 日常页:按侧栏入口与其内页组织,路径只存在于本打包块 */
 const SchoolAdminUsersPage = lazy(() => import('../../features/identity/pages/school-admin/users'))
 const SchoolAdminOrganizationPage = lazy(
-  () => import('../../features/identity/pages/school-admin/organization'),
+  () => import('../../features/identity/pages/school-admin/organization')
 )
-const SchoolAdminDashboardPage = lazy(() => import('../../features/admin/pages/school-admin/dashboard'))
-const SchoolAdminApprovalsPage = lazy(() => import('../../features/grade/pages/school-admin/approvals'))
+const SchoolAdminDashboardPage = lazy(
+  () => import('../../features/admin/pages/school-admin/dashboard')
+)
+const SchoolAdminApprovalsPage = lazy(
+  () => import('../../features/grade/pages/school-admin/approvals')
+)
 const SchoolAdminAppealsPage = lazy(() => import('../../features/grade/pages/school-admin/appeals'))
 const SchoolAdminAlertsPage = lazy(() => import('../../features/grade/pages/school-admin/alerts'))
 const SchoolAdminGradeSettingsPage = lazy(
-  () => import('../../features/grade/pages/school-admin/grade-settings'),
+  () => import('../../features/grade/pages/school-admin/grade-settings')
 )
-const SchoolAdminSettingsPage = lazy(() => import('../../features/identity/pages/school-admin/settings'))
+const SchoolAdminSettingsPage = lazy(
+  () => import('../../features/identity/pages/school-admin/settings')
+)
 const SchoolAdminAuthConfigPage = lazy(
-  () => import('../../features/identity/pages/school-admin/auth-config'),
+  () => import('../../features/identity/pages/school-admin/auth-config')
 )
 const SchoolAdminAnnouncementsPage = lazy(() => import('../../features/notify/pages/announcements'))
 const SchoolAdminAuditPage = lazy(() => import('../../features/admin/pages/school-admin/audit'))
@@ -41,38 +50,42 @@ const ProfilePage = lazy(() => import('../../features/identity/pages/profile/pro
  * 因此这些路径只存在于本块,不会进入入口包。
  */
 export default function SchoolAdminSection() {
+  const { me } = useSession()
+  const navigation = availableRoleNavigation(schoolAdminNavigation, me.enabled_modules)
   return (
-    <Routes>
-      <Route element={<MainLayout config={schoolAdminNavigation} />}>
-        {/* 区根落到侧栏第一个功能页(FE-5:无仪表盘落地页) */}
-        <Route index element={<Navigate to={schoolAdminNavigation.homePath} replace />} />
+    <TenantModuleGuard config={schoolAdminNavigation}>
+      <Routes>
+        <Route element={<MainLayout config={navigation} />}>
+          {/* 区根落到侧栏第一个功能页(FE-5:无仪表盘落地页) */}
+          <Route index element={<Navigate to={navigation.homePath} replace />} />
 
-        <Route path="users" element={<SchoolAdminUsersPage />} />
-        <Route path="organization" element={<SchoolAdminOrganizationPage />} />
+          <Route path="users" element={<SchoolAdminUsersPage />} />
+          <Route path="organization" element={<SchoolAdminOrganizationPage />} />
 
-        <Route path="dashboard" element={<SchoolAdminDashboardPage />} />
+          <Route path="dashboard" element={<SchoolAdminDashboardPage />} />
 
-        <Route path="approvals" element={<SchoolAdminApprovalsPage />} />
-        <Route path="appeals" element={<SchoolAdminAppealsPage />} />
-        <Route path="alerts" element={<SchoolAdminAlertsPage />} />
-        <Route path="grade-settings" element={<SchoolAdminGradeSettingsPage />} />
+          <Route path="approvals" element={<SchoolAdminApprovalsPage />} />
+          <Route path="appeals" element={<SchoolAdminAppealsPage />} />
+          <Route path="alerts" element={<SchoolAdminAlertsPage />} />
+          <Route path="grade-settings" element={<SchoolAdminGradeSettingsPage />} />
 
-        <Route path="settings" element={<SchoolAdminSettingsPage />} />
-        <Route path="auth-config" element={<SchoolAdminAuthConfigPage />} />
-        <Route
-          path="announcements"
-          element={<SchoolAdminAnnouncementsPage publisher="school" />}
-        />
-        <Route path="audit" element={<SchoolAdminAuditPage />} />
-        <Route path="system-alerts" element={<SystemAlertsPage scope={AdminScope.TENANT} />} />
+          <Route path="settings" element={<SchoolAdminSettingsPage />} />
+          <Route path="auth-config" element={<SchoolAdminAuthConfigPage />} />
+          <Route
+            path="announcements"
+            element={<SchoolAdminAnnouncementsPage publisher="school" />}
+          />
+          <Route path="audit" element={<SchoolAdminAuditPage />} />
+          <Route path="system-alerts" element={<SystemAlertsPage scope={AdminScope.TENANT} />} />
 
-        {/* 顶栏派生的三条共享路径(壳层按 pathPrefix 推导,必须在此注册) */}
-        <Route path="notifications" element={<NotificationInboxPage />} />
-        <Route path="tasks" element={<TransferTasksPage />} />
-        <Route path="profile" element={<ProfilePage canChangePhone />} />
+          {/* 顶栏派生的三条共享路径(壳层按 pathPrefix 推导,必须在此注册) */}
+          <Route path="notifications" element={<NotificationInboxPage />} />
+          <Route path="tasks" element={<TransferTasksPage />} />
+          <Route path="profile" element={<ProfilePage canChangePhone />} />
 
-        <Route path="*" element={<RoleNotFoundPage homePath={schoolAdminNavigation.homePath} />} />
-      </Route>
-    </Routes>
+          <Route path="*" element={<RoleNotFoundPage homePath={navigation.homePath} />} />
+        </Route>
+      </Routes>
+    </TenantModuleGuard>
   )
 }

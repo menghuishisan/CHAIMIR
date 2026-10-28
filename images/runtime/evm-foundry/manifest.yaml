@@ -40,8 +40,8 @@ upstream:
   digest: sha256:bdc584033cefab8be282c7f57c263cda42f04700cd1ec88d64bebe2f645aba72
   reuse_policy: thin-wrapper
   runtime_packages:
-    - openssl=3.0.2-0ubuntu1.29
-    - libssl3=3.0.2-0ubuntu1.29
+    - openssl=3.0.2-0ubuntu1.30
+    - libssl3=3.0.2-0ubuntu1.30
 env_keys:
   config:
     - CHAIMIR_CHAIN_RPC_URL

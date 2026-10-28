@@ -35,6 +35,7 @@ $dependencyKubeconfigPath = Join-Path $deployRoot "config\harbor.kubeconfig"
 $tmpRoot = Join-Path $repoRoot ".tmp\cilium-cluster"
 $kindPath = Join-Path $repoRoot ".tmp\tools\kind\$kindVersion\kind.exe"
 Import-Module (Join-Path $repoRoot "images\lib\ImageMetadata.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "lib\CiliumEndpointState.psm1") -Force
 
 # Invoke-Native 执行外部命令并把非零退出码转换为明确错误。
 function Invoke-Native {
@@ -768,14 +769,16 @@ function Sync-ContainerKubeconfigs {
     Write-ContainerKubeconfig -Context $DependencyContext -Path $dependencyKubeconfigPath
 }
 
-# Wait-CiliumComponents 等待现有 Cilium 控制面与全部节点恢复,不触发安装或滚动更新。
+# Wait-CiliumComponents 先恢复派生端点再等待组件状态,避免准入网络与 kubelet 状态更新互相等待。
 function Wait-CiliumComponents {
     param([int]$TimeoutSeconds = 600)
 
+    Repair-StaleCiliumEndpoints
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "-n", "kube-system", "rollout", "status", "daemonset/cilium", "--timeout=${TimeoutSeconds}s")
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "-n", "kube-system", "rollout", "status", "daemonset/cilium-envoy", "--timeout=${TimeoutSeconds}s")
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "-n", "kube-system", "rollout", "status", "deployment/cilium-operator", "--timeout=${TimeoutSeconds}s")
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "wait", "--for=condition=Ready", "nodes", "--all", "--timeout=${TimeoutSeconds}s")
+    Wait-CiliumEndpoints -TimeoutSeconds $TimeoutSeconds
 }
 
 # Install-Cilium 使用固定 OCI Chart digest 和权威镜像锁安装 Cilium,随后等待数据面就绪。
@@ -813,8 +816,12 @@ function Install-Cilium {
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "apply", "-f", $ingressPolicyPath)
 }
 
-# Repair-StaleCiliumEndpoints 在节点地址变化后删除失效的派生端点,并等待当前 Agent 重新发布。
-function Repair-StaleCiliumEndpoints {
+# Get-ClusterCiliumEndpointState 读取当前集群快照并复用监护的唯一 CEP 判定。
+function Get-ClusterCiliumEndpointState {
+    $nodesRaw = (& kubectl --context $runtimeContext --request-timeout=30s get nodes -o json) -join "`n"
+    if ($LASTEXITCODE -ne 0) {
+        throw "读取 Node 列表失败,无法核对当前节点地址"
+    }
     $podsRaw = (& kubectl --context $runtimeContext --request-timeout=30s get pods --all-namespaces -o json) -join "`n"
     if ($LASTEXITCODE -ne 0) {
         throw "读取 Pod 列表失败,无法核对 CiliumEndpoint 节点归属"
@@ -824,20 +831,16 @@ function Repair-StaleCiliumEndpoints {
         throw "读取 CiliumEndpoint 列表失败"
     }
 
-    $pods = ($podsRaw | ConvertFrom-Json).items
-    $podByKey = @{}
-    foreach ($pod in $pods) {
-        $podByKey["$($pod.metadata.namespace)/$($pod.metadata.name)"] = $pod
-    }
+    return Get-CiliumEndpointState -Nodes @(($nodesRaw | ConvertFrom-Json).items) `
+        -Pods @(($podsRaw | ConvertFrom-Json).items) -Endpoints @(($endpointsRaw | ConvertFrom-Json).items)
+}
 
-    $staleEndpoints = @()
-    foreach ($endpoint in ($endpointsRaw | ConvertFrom-Json).items) {
-        $key = "$($endpoint.metadata.namespace)/$($endpoint.metadata.name)"
-        $pod = $podByKey[$key]
-        if ($pod -and $pod.status.hostIP -and $endpoint.status.networking.node -and $endpoint.status.networking.node -ne $pod.status.hostIP) {
-            $staleEndpoints += $endpoint
-        }
-    }
+# Repair-StaleCiliumEndpoints 只删除共享判定确认陈旧的派生端点,并等待当前 Agent 重新发布。
+function Repair-StaleCiliumEndpoints {
+    param([int]$TimeoutSeconds = 300)
+    $state = Get-ClusterCiliumEndpointState
+    # 缺失或尚未发布节点信息的 CEP 留给 Agent 收敛,只删除地址已明确不匹配的端点。
+    $staleEndpoints = @($state.StaleEndpoints)
     if ($staleEndpoints.Count -eq 0) {
         return
     }
@@ -852,36 +855,12 @@ function Repair-StaleCiliumEndpoints {
     $targetKeys = @($staleEndpoints | ForEach-Object { "$($_.metadata.namespace)/$($_.metadata.name)" })
     # Endpoint recreation may wait behind kubelet certificate and Cilium identity convergence;
     # keep the wait bounded while allowing the current agent to finish that reconciliation.
-    $deadline = (Get-Date).AddSeconds(300)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     do {
-        $currentPodsRaw = (& kubectl --context $runtimeContext --request-timeout=30s get pods --all-namespaces -o json) -join "`n"
-        if ($LASTEXITCODE -ne 0) {
-            throw "等待 CiliumEndpoint 重建时读取 Pod 状态失败"
-        }
-        $currentEndpointsRaw = (& kubectl --context $runtimeContext --request-timeout=30s get ciliumendpoints --all-namespaces -o json) -join "`n"
-        if ($LASTEXITCODE -ne 0) {
-            throw "等待 CiliumEndpoint 重建时读取端点状态失败"
-        }
-        $currentPodByKey = @{}
-        foreach ($pod in (($currentPodsRaw | ConvertFrom-Json).items)) {
-            $currentPodByKey["$($pod.metadata.namespace)/$($pod.metadata.name)"] = $pod
-        }
-        $currentEndpointByKey = @{}
-        foreach ($endpoint in (($currentEndpointsRaw | ConvertFrom-Json).items)) {
-            $currentEndpointByKey["$($endpoint.metadata.namespace)/$($endpoint.metadata.name)"] = $endpoint
-        }
-
-        $pending = @()
-        foreach ($key in $targetKeys) {
-            $pod = $currentPodByKey[$key]
-            if (-not $pod) {
-                continue
-            }
-            $endpoint = $currentEndpointByKey[$key]
-            if (-not $endpoint -or $endpoint.status.state -ne "ready" -or $endpoint.status.networking.node -ne $pod.status.hostIP) {
-                $pending += $key
-            }
-        }
+        $currentState = Get-ClusterCiliumEndpointState
+        $pending = @($targetKeys | Where-Object {
+            $_ -in $currentState.ExpectedPodKeys -and $_ -notin $currentState.HealthyPodKeys
+        })
         if ($pending.Count -eq 0) {
             Write-Output "已修复 $($staleEndpoints.Count) 个节点地址失效的 CiliumEndpoint"
             return
@@ -889,6 +868,26 @@ function Repair-StaleCiliumEndpoints {
         if ((Get-Date) -ge $deadline) {
             throw "CiliumEndpoint 未在节点地址变化后完成重建: $($pending -join ',')"
         }
+        Start-Sleep -Seconds 2
+    } while ($true)
+}
+
+# Wait-CiliumEndpoints 覆盖启动期间迟到的节点地址与端点发布,全量共享门禁通过后才返回。
+function Wait-CiliumEndpoints {
+    param([int]$TimeoutSeconds = 300)
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    do {
+        $state = Get-ClusterCiliumEndpointState
+        if ($state.Ready) {
+            Write-Output "全量CiliumEndpoint就绪: expected=$($state.ExpectedPodKeys.Count) healthy=$($state.HealthyPodKeys.Count)"
+            return
+        }
+        $remaining = [int][math]::Ceiling(($deadline - (Get-Date)).TotalSeconds)
+        if ($remaining -le 0) {
+            throw "CiliumEndpoint门禁未收敛: stale=$($state.StaleEndpoints.Count) missing=$($state.MissingKeys.Count) not_ready=$($state.NotReadyKeys.Count) unknown=$($state.UnknownKeys.Count)"
+        }
+        if ($state.StaleEndpoints.Count -gt 0) { Repair-StaleCiliumEndpoints -TimeoutSeconds $remaining }
         Start-Sleep -Seconds 2
     } while ($true)
 }
@@ -1043,6 +1042,7 @@ function Assert-CiliumState {
 
     Invoke-Native -FilePath "kubectl" -Arguments @("--context", $runtimeContext, "-n", "kube-system", "exec", "daemonset/cilium", "-c", "cilium-agent", "--", "cilium-dbg", "status", "--brief")
     Wait-CiliumHealth -Nodes $nodes
+    Wait-CiliumEndpoints
 }
 
 # Invoke-NetworkPolicySmoke 通过真实 Pod 流量验证 ingress/egress 默认拒绝与精确放行。
@@ -1452,6 +1452,17 @@ function Stop-ClusterNodes {
     }
 }
 
+$lifecycleMutex = New-Object Threading.Mutex($false, 'Global\Chaimir.CiliumLifecycle')
+$lifecycleLocked = $false
+try { $lifecycleLocked = $lifecycleMutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $lifecycleLocked = $true }
+if (-not $lifecycleLocked) {
+    $lifecycleMutex.Dispose()
+    throw '已有集群生命周期操作运行,拒绝并发启动或停止'
+}
+try {
+if ($Action -in @('Stop', 'Down')) {
+    & (Join-Path $PSScriptRoot 'docker-runtime-watcher.ps1') -Action Suspend
+}
 if ($Action -eq "Down") {
     Remove-Cluster
     return
@@ -1468,6 +1479,7 @@ $registryHost = Get-ChaimirCanonicalRegistry -Config $projectConfig
 $digestItems = Read-ChaimirDigestLock -Path $digestLockPath -Required
 
 if ($Action -in @("Up", "Start")) {
+    & (Join-Path $PSScriptRoot 'docker-runtime-watcher.ps1') -Action Resume
     Ensure-CanonicalTls
 }
 Assert-RequiredFiles
@@ -1482,7 +1494,6 @@ switch ($Action) {
         Sync-CanonicalTlsSecret -Context $runtimeContext -Namespace "chaimir-system" -Name "chaimir-tls" -CreateNamespace
         Assert-DependencyRegistry
         Install-Cilium
-        Repair-StaleCiliumEndpoints
         Configure-RegistryPodDns
         Remove-DisallowedNodeImages
         Assert-CiliumState
@@ -1494,7 +1505,6 @@ switch ($Action) {
         Restore-RegistryOnNodes
         Approve-KubeletServingCertificates
         Wait-CiliumComponents -TimeoutSeconds 300
-        Repair-StaleCiliumEndpoints
         Sync-CanonicalTlsSecret -Context $DependencyContext -Namespace "harbor" -Name "harbor-tls" -CreateNamespace
         Sync-CanonicalTlsSecret -Context $runtimeContext -Namespace "chaimir-system" -Name "chaimir-tls" -CreateNamespace
         Assert-DependencyRegistry
@@ -1518,4 +1528,8 @@ switch ($Action) {
         Sync-ContainerKubeconfigs
         Sync-CanonicalTlsSecret -Context $DependencyContext -Namespace "harbor" -Name "harbor-tls" -CreateNamespace
     }
+}
+} finally {
+    $lifecycleMutex.ReleaseMutex()
+    $lifecycleMutex.Dispose()
 }

@@ -36,6 +36,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import {
   vulnAssertOpLabel,
   vulnChainOpLabel,
@@ -100,14 +101,13 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
   const [positiveSteps, setPositiveSteps] = useState<ChainStep[]>([])
   const [assertions, setAssertions] = useState<AssertionDraft[]>([emptyAssertion()])
 
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
 
   const isForked = Number(runtimeMode) === VulnRuntimeMode.FORKED
 
   /** validate 校验必填项与 JSON 参数可解析性。 */
-  const validate = useCallback((): boolean => {
+  const { errors, validate } = useFormValidation(useCallback(() => {
     const next: Record<string, string | null> = {
       title: title.trim() === '' ? '请输入漏洞题标题' : title.trim().length > 255 ? '标题不能超过 255 个字' : null,
       judgerCode: judgerCode.trim() === '' ? '请输入平台已注册的判题器编码' : null,
@@ -124,9 +124,8 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
         ? '有步骤的参数格式不正确,请检查内容后重填'
         : null,
     }
-    setErrors(next)
-    return Object.values(next).every((value) => value === null)
-	}, [assertions, description, forkBlock, initSteps, isForked, judgerCode, maxScore, positiveSteps, title])
+    return next
+  }, [assertions, description, forkBlock, initSteps, isForked, judgerCode, maxScore, positiveSteps, title]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {

@@ -38,6 +38,7 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatFileSize } from '../../../../utils/formatters'
 import {
   lessonContentTypeLabel,
@@ -398,17 +399,17 @@ interface ChapterFormModalProps {
 function ChapterFormModal({ courseId, chapter, nextSort, onClose, onSaved }: ChapterFormModalProps) {
   const [title, setTitle] = useState(chapter?.title ?? '')
   const [sort, setSort] = useState(String(chapter?.sort ?? nextSort))
-  const [fieldError, setFieldError] = useState<string>()
+  const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    title: title.trim() === '' ? '请输入章节标题' : null,
+  }), [title]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (title.trim() === '') {
-        setFieldError('请输入章节标题')
-        return
-      }
-      setFieldError(undefined)
+      if (!validate()) return
+      setFormError(undefined)
       setWorking(true)
       try {
         const payload = { title: title.trim(), sort: Number(sort) || nextSort }
@@ -421,12 +422,12 @@ function ChapterFormModal({ courseId, chapter, nextSort, onClose, onSaved }: Cha
         }
         onSaved()
       } catch (error) {
-        setFieldError(userFacingErrorMessage(error, '保存没有成功,请稍后重试。'))
+        setFormError(userFacingErrorMessage(error, '保存没有成功,请稍后重试。'))
       } finally {
         setWorking(false)
       }
     },
-    [chapter, courseId, nextSort, onSaved, sort, title],
+    [chapter, courseId, nextSort, onSaved, sort, title, validate],
   )
 
   return (
@@ -438,11 +439,12 @@ function ChapterFormModal({ courseId, chapter, nextSort, onClose, onSaved }: Cha
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <FormField label="章节标题" htmlFor="chapter-title" required error={fieldError}>
+            <FormField label="章节标题" htmlFor="chapter-title" required error={errors.title}>
               <Input
                 id="chapter-title"
                 value={title}
-                invalid={Boolean(fieldError)}
+                invalid={Boolean(errors.title)}
+                onBlur={() => validate(['title'])}
                 onChange={(event) => setTitle(event.target.value)}
               />
             </FormField>
@@ -455,6 +457,7 @@ function ChapterFormModal({ courseId, chapter, nextSort, onClose, onSaved }: Cha
                 onChange={(event) => setSort(event.target.value)}
               />
             </FormField>
+            {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </ModalBody>
           <ModalFooter>
             <Button type="button" variant="outline" onClick={onClose}>
@@ -499,6 +502,13 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
 
   const typeValue = Number(contentType) as LessonContentType
   const isMaterial = isLessonMaterialType(typeValue)
+  const materialChanged = isMaterial && (!lesson || lesson.content_type !== typeValue)
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    title: title.trim() === '' ? '请输入课时标题' : null,
+    simCode: typeValue === LessonContentType.SIMULATION && simCode.trim() === ''
+      ? '请填写仿真场景名称' : null,
+    file: materialChanged && !file ? '请选择与当前内容形态对应的文件' : null,
+  }), [file, materialChanged, simCode, title, typeValue]))
 
   const contentTypeOptions = useMemo(
     () =>
@@ -525,19 +535,7 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (title.trim() === '') {
-        setFormError('请输入课时标题')
-        return
-      }
-      if (typeValue === LessonContentType.SIMULATION && simCode.trim() === '') {
-        setFormError('请填写仿真场景名称')
-        return
-      }
-      const materialChanged = isMaterial && (!lesson || lesson.content_type !== typeValue)
-      if (materialChanged && !file) {
-        setFormError('请选择与当前内容形态对应的文件')
-        return
-      }
+      if (!validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -564,7 +562,7 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
         setUploadProgress(undefined)
       }
     },
-    [buildContentRef, chapterId, file, isMaterial, lesson, nextSort, onSaved, simCode, sort, title, typeValue],
+    [buildContentRef, chapterId, file, isMaterial, lesson, nextSort, onSaved, sort, title, typeValue, validate],
   )
 
   return (
@@ -576,10 +574,12 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <FormField label="课时标题" htmlFor="lesson-title" required>
+            <FormField label="课时标题" htmlFor="lesson-title" required error={errors.title}>
               <Input
                 id="lesson-title"
                 value={title}
+                invalid={Boolean(errors.title)}
+                onBlur={() => validate(['title'])}
                 onChange={(event) => setTitle(event.target.value)}
               />
             </FormField>
@@ -631,10 +631,12 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
 
             {typeValue === LessonContentType.SIMULATION ? (
               <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label="仿真场景名称" htmlFor="lesson-sim-code" required>
+                <FormField label="仿真场景名称" htmlFor="lesson-sim-code" required error={errors.simCode}>
                   <Input
                     id="lesson-sim-code"
                     value={simCode}
+                    invalid={Boolean(errors.simCode)}
+                    onBlur={() => validate(['simCode'])}
                     onChange={(event) => setSimCode(event.target.value)}
                   />
                 </FormField>
@@ -652,6 +654,7 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
               <FormField
                 label={typeValue === LessonContentType.VIDEO ? '视频文件' : '资料文件'}
                 htmlFor="lesson-file"
+                error={errors.file}
                 helper={
                   typeValue === LessonContentType.VIDEO
                     ? '支持 mp4、webm;学生可在页面内播放并自动续播'
@@ -661,6 +664,8 @@ function LessonFormModal({ chapterId, lesson, nextSort, onClose, onSaved }: Less
                 <Input
                   id="lesson-file"
                   type="file"
+                  invalid={Boolean(errors.file)}
+                  onBlur={() => validate(['file'])}
                   accept={typeValue === LessonContentType.VIDEO ? 'video/mp4,video/webm' : undefined}
                   onChange={(event) => setFile(event.target.files?.[0])}
                 />

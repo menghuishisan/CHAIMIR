@@ -1,12 +1,14 @@
-// contest service_sandbox 文件实现 M8 跨校竞赛沙箱授权核验与对 M2 受控主体契约的转发。
+// contest service_sandbox 文件实现 M8 沙箱就绪等待、跨校授权核验及 M2 受控主体契约转发。
 package contest
 
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/timex"
@@ -23,6 +25,36 @@ const (
 	contestSandboxCapabilityChain          = "chain"
 	contestSandboxCapabilityWebTools       = "web_tools"
 )
+
+// waitSandboxReady 用同一有界等待保证对局和预验证只在 M2 权威状态可执行后操作。
+func (s *Service) waitSandboxReady(ctx context.Context, tenantID, sandboxID int64) error {
+	timeout := time.Duration(s.cfg.BattleSandboxReadyTimeoutSeconds) * time.Second
+	interval := time.Duration(s.cfg.BattleSandboxReadyPollIntervalMs) * time.Millisecond
+	if timeout <= 0 || interval <= 0 {
+		return apperr.ErrContestSandboxUnavailable
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		info, err := s.sandbox.GetSandbox(waitCtx, tenantID, sandboxID)
+		if err != nil {
+			return apperr.ErrContestSandboxUnavailable.WithCause(err)
+		}
+		if info.Status == contracts.SandboxStatusFailed || info.Status == contracts.SandboxStatusDestroyed {
+			return apperr.ErrContestSandboxUnavailable
+		}
+		if contestSubmissionSandboxReady(info) {
+			return nil
+		}
+		select {
+		case <-waitCtx.Done():
+			return apperr.ErrContestSandboxUnavailable.WithCause(waitCtx.Err())
+		case <-ticker.C:
+		}
+	}
+}
 
 // contestSandboxGrantCapabilities 从 M2 返回的运行时能力快照生成最小授权集合。
 // grant 不再因为业务路径固定而把未声明的终端、链或网页工具暴露给所有成员。
@@ -156,7 +188,8 @@ func (s *Service) saveContestSubmissionWorkspace(ctx context.Context, contest Co
 // contestSubmissionSandboxReady 接受已可编辑或因空闲进入待回收状态的环境,拒绝准备中和终止环境。
 func contestSubmissionSandboxReady(info contracts.SandboxInfo) bool {
 	statusReady := info.Status == contracts.SandboxStatusReady || info.Status == contracts.SandboxStatusRunning || info.Status == contracts.SandboxStatusIdle
-	return statusReady && info.Phase >= contracts.SandboxPhaseReady
+	phaseReady := info.Phase == contracts.SandboxPhaseReady || info.Phase == contracts.SandboxPhaseFullyReady
+	return statusReady && phaseReady
 }
 
 // grantAllows 判断已签发能力集合是否覆盖本次访问动作。
@@ -326,21 +359,19 @@ func (s *Service) revokeContestSandboxGrants(ctx context.Context, tx TxStore, te
 	return grants, nil
 }
 
-// closeRevokedContestSandboxSessions 精确关闭被撤销 grant 对应的终端和进度连接。
+// closeRevokedContestSandboxSessions 尝试关闭全部被撤销 grant 的终端和进度连接,最后汇总清理错误。
 func (s *Service) closeRevokedContestSandboxSessions(grants []ContestAccessGrant) error {
+	if len(grants) > 0 && s.wsHub == nil {
+		return apperr.ErrSandboxToolProxyUnavailable
+	}
+	var closeErrs []error
 	for _, grant := range grants {
-		if s.wsHub == nil {
-			return apperr.ErrSandboxToolProxyUnavailable
-		}
 		terminal := ws.SessionKey{TenantID: grant.MemberTenantID, AccountID: grant.MemberAccountID, Scope: contestSandboxSessionScope(grant.ID, grant.SandboxID)}
-		if err := s.wsHub.CloseSession(terminal); err != nil {
-			return err
-		}
 		progress := terminal
 		progress.Scope += ":progress"
-		if err := s.wsHub.CloseSession(progress); err != nil {
-			return err
+		if err := errors.Join(s.wsHub.CloseSession(terminal), s.wsHub.CloseSession(progress)); err != nil {
+			closeErrs = append(closeErrs, fmt.Errorf("关闭已撤销竞赛沙箱连接失败: grant_id=%d sandbox_id=%d: %w", grant.ID, grant.SandboxID, err))
 		}
 	}
-	return nil
+	return errors.Join(closeErrs...)
 }

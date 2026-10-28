@@ -9,8 +9,8 @@ import type { AsyncResourceState } from '../../hooks/useAsyncResource'
 import { RESOURCE_LOAD_FAILED_MESSAGE, traceHintText } from '../../utils/userFacingError'
 
 export interface ResourceStateProps<T> {
-  /** useAsyncResource 的返回值 */
-  resource: AsyncResourceState<T>
+  /** 只消费资源展示状态,刷新次数由列表与统计自行绑定。 */
+  resource: Pick<AsyncResourceState<T>, 'status' | 'data' | 'error' | 'reload'>
   /** 空态图标(Lucide) */
   emptyIcon: LucideIcon
   /** 空态标题:说明这里本该有什么 */

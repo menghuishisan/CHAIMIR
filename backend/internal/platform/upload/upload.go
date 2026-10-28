@@ -3,11 +3,15 @@ package upload
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"path"
 	"path/filepath"
 	"strings"
 )
+
+// ErrInvalidFile 标记文件本身未通过统一校验,由业务模块映射用户提示并保留内部原因链。
+var ErrInvalidFile = errors.New("上传文件校验未通过")
 
 // SizeResult 是上传大小校验的通用结果,由调用模块映射为自己的错误码。
 type SizeResult int

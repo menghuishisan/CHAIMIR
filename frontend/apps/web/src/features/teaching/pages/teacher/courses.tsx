@@ -3,17 +3,9 @@
 // 状态流转是有向的(草稿→发布→进行中→结课→归档),故动作按当前状态给出,
 // 不把全部动作平铺成永远可点的按钮组。
 
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import {
-  Book,
-  BookPlus,
-  ClipboardCopy,
-  Copy,
-  KeyRound,
-  MoreVertical,
-  Share2,
-} from 'lucide-react'
+import { Book, BookPlus, ClipboardCopy, Copy, KeyRound, MoreVertical, Share2 } from 'lucide-react'
 import {
   BOOL_FILTER,
   CourseStatus,
@@ -29,9 +21,7 @@ import {
   DataPanel,
   FilterBar,
   FilterField,
-  FormField,
   IconButton,
-  Input,
   Menu,
   MenuContent,
   MenuItem,
@@ -68,6 +58,7 @@ import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { CourseIdentityCell } from '../../components/CourseIdentityCell'
 import { courseStatusTone } from '../../statusPresentation'
 import { CourseFormModal } from '../../components/CourseFormModal'
+import { CloneCourseModal } from '../../components/CloneCourseModal'
 
 /** 状态筛选项:值为空串表示不过滤。 */
 const STATUS_FILTERS = [
@@ -90,23 +81,24 @@ const SHARED_FILTERS = [
 /** 需要二次确认的状态流转:这三个动作不可逆或影响学生可见性。 */
 type ConfirmAction = 'publish' | 'end' | 'archive'
 
-const CONFIRM_COPY: Record<ConfirmAction, { title: string; description: string; confirm: string }> = {
-  publish: {
-    title: '确认发布课程',
-    description: '发布后学生可以用邀请码加入,课程基础信息将不能再随意修改。',
-    confirm: '确认发布',
-  },
-  end: {
-    title: '确认结束课程',
-    description: '结束后学生不能再提交作业,可以开始评价课程。你仍可查看全部数据。',
-    confirm: '确认结束',
-  },
-  archive: {
-    title: '确认归档课程',
-    description: '归档后课程转为只读,学生不再看到它。归档不可撤销。',
-    confirm: '确认归档',
-  },
-}
+const CONFIRM_COPY: Record<ConfirmAction, { title: string; description: string; confirm: string }> =
+  {
+    publish: {
+      title: '确认发布课程',
+      description: '发布后学生可以用邀请码加入,课程基础信息将不能再随意修改。',
+      confirm: '确认发布',
+    },
+    end: {
+      title: '确认结束课程',
+      description: '结束后学生不能再提交作业,可以开始评价课程。你仍可查看全部数据。',
+      confirm: '确认结束',
+    },
+    archive: {
+      title: '确认归档课程',
+      description: '归档后课程转为只读,学生不再看到它。归档不可撤销。',
+      confirm: '确认归档',
+    },
+  }
 
 /**
  * TeacherCoursesPage 列出本人课程并承载课程生命周期操作。
@@ -120,6 +112,8 @@ export default function TeacherCoursesPage() {
   const [cloneTarget, setCloneTarget] = useState<Course>()
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
+  const [sharingCourseId, setSharingCourseId] = useState<string>()
+  const sharingCourseRef = useRef<string | undefined>(undefined)
 
   const courses = usePagedResource<Course>(
     (params) =>
@@ -129,7 +123,7 @@ export default function TeacherCoursesPage() {
         is_shared: sharedFilter,
         ...params,
       }),
-    [sharedFilter, statusFilter],
+    [sharedFilter, statusFilter]
   )
 
   /** runStatusAction 执行状态流转并刷新列表。 */
@@ -151,19 +145,27 @@ export default function TeacherCoursesPage() {
     }
   }, [confirm, courses])
 
-  /** shareCourse 把课程共享到课程库,供其他教师克隆复用。 */
-  const shareCourse = useCallback(
+  /** toggleCourseSharing 按权威可见性切换共享,请求期间只允许一次变更。 */
+  const toggleCourseSharing = useCallback(
     async (course: Course) => {
+      if (sharingCourseRef.current !== undefined) return
+      sharingCourseRef.current = course.id
+      setSharingCourseId(course.id)
+      const shared = course.visibility === CourseVisibility.SHARED
       setActionError(undefined)
       try {
-        await api.teaching.shareCourse(course.id)
-        toast.success('已共享到课程库')
+        if (shared) await api.teaching.unshareCourse(course.id)
+        else await api.teaching.shareCourse(course.id)
+        toast.success(shared ? '已取消共享' : '已共享到课程库')
         courses.reload()
       } catch (error) {
-        setActionError(userFacingErrorMessage(error, '共享没有成功,请稍后重试。'))
+        setActionError(userFacingErrorMessage(error, '共享设置没有保存,请稍后重试。'))
+      } finally {
+        sharingCourseRef.current = undefined
+        setSharingCourseId(undefined)
       }
     },
-    [courses],
+    [courses]
   )
 
   /** refreshInviteCode 刷新邀请码:旧邀请码随之失效。 */
@@ -178,7 +180,7 @@ export default function TeacherCoursesPage() {
         setActionError(userFacingErrorMessage(error, '刷新邀请码没有成功,请稍后重试。'))
       }
     },
-    [courses],
+    [courses]
   )
 
   // 指标带取服务端全量口径,不随下方筛选变化(§6.5.4)。
@@ -186,23 +188,28 @@ export default function TeacherCoursesPage() {
   const totalCount = useResourceTotal(
     (params) => api.teaching.getCourses({ role: 'teacher', ...params }),
     [],
+    courses.refreshVersion
   )
   const runningCount = useResourceTotal(
     (params) =>
       api.teaching.getCourses({ role: 'teacher', status: CourseStatus.RUNNING, ...params }),
     [],
+    courses.refreshVersion
   )
   const draftCount = useResourceTotal(
     (params) => api.teaching.getCourses({ role: 'teacher', status: CourseStatus.DRAFT, ...params }),
     [],
+    courses.refreshVersion
   )
   const endedCount = useResourceTotal(
     (params) => api.teaching.getCourses({ role: 'teacher', status: CourseStatus.ENDED, ...params }),
     [],
+    courses.refreshVersion
   )
   const sharedCount = useResourceTotal(
     (params) => api.teaching.getCourses({ role: 'teacher', is_shared: BOOL_FILTER.YES, ...params }),
     [],
+    courses.refreshVersion
   )
 
   const columns: TableColumn<Course>[] = [
@@ -261,7 +268,10 @@ export default function TeacherCoursesPage() {
       header: '状态',
       render: (course) => (
         <div className="flex flex-wrap items-center gap-1.5">
-          <StatusIndicator tone={courseStatusTone(course.status)} label={courseStatusLabel(course.status)} />
+          <StatusIndicator
+            tone={courseStatusTone(course.status)}
+            label={courseStatusLabel(course.status)}
+          />
           {course.visibility === CourseVisibility.SHARED ? <Badge tone="jade">已共享</Badge> : null}
         </div>
       ),
@@ -272,14 +282,19 @@ export default function TeacherCoursesPage() {
       align: 'right',
       render: (course) => (
         <div className="flex items-center justify-end gap-1">
-          <Button variant="ghost" size="sm" onClick={() => navigate(`/teacher/courses/${course.id}`)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate(`/teacher/courses/${course.id}`)}
+          >
             管理内容
           </Button>
           <CourseActionMenu
             course={course}
             onManage={() => navigate(`/teacher/courses/${course.id}`)}
             onRequestStatus={(action) => setConfirm({ action, course })}
-            onShare={() => void shareCourse(course)}
+            sharing={sharingCourseId === course.id}
+            onShare={() => void toggleCourseSharing(course)}
             onRefreshInvite={() => void refreshInviteCode(course)}
             onClone={() => setCloneTarget(course)}
           />
@@ -376,7 +391,9 @@ export default function TeacherCoursesPage() {
               </Button>
             )
           }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+          skeleton={
+            <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
+          }
         >
           {(page) => (
             <Table
@@ -400,7 +417,8 @@ export default function TeacherCoursesPage() {
                     course={course}
                     onManage={() => navigate(`/teacher/courses/${course.id}`)}
                     onRequestStatus={(action) => setConfirm({ action, course })}
-                    onShare={() => void shareCourse(course)}
+                    sharing={sharingCourseId === course.id}
+                    onShare={() => void toggleCourseSharing(course)}
                     onRefreshInvite={() => void refreshInviteCode(course)}
                     onClone={() => setCloneTarget(course)}
                   />
@@ -466,6 +484,7 @@ export default function TeacherCoursesPage() {
 
 interface CourseActionMenuProps {
   course: Course
+  sharing: boolean
   onManage: () => void
   onRequestStatus: (action: ConfirmAction) => void
   onShare: () => void
@@ -479,6 +498,7 @@ interface CourseActionMenuProps {
  */
 function CourseActionMenu({
   course,
+  sharing,
   onManage,
   onRequestStatus,
   onShare,
@@ -488,19 +508,27 @@ function CourseActionMenu({
   const canPublish = course.status === CourseStatus.DRAFT
   const canEnd = course.status === CourseStatus.RUNNING || course.status === CourseStatus.PUBLISHED
   const canArchive = course.status === CourseStatus.ENDED
-  const canShare = course.visibility !== CourseVisibility.SHARED && course.status !== CourseStatus.DRAFT
+  const shared = course.visibility === CourseVisibility.SHARED
+  const canShare = shared || course.status !== CourseStatus.DRAFT
   const canRefreshInvite = course.status !== CourseStatus.ARCHIVED
 
   return (
     <Menu>
       <MenuTrigger asChild>
-        <IconButton variant="ghost" size="sm" icon={MoreVertical} aria-label={`${course.name} 的更多操作`} />
+        <IconButton
+          variant="ghost"
+          size="sm"
+          icon={MoreVertical}
+          aria-label={`${course.name} 的更多操作`}
+        />
       </MenuTrigger>
       <MenuContent align="end">
         <MenuItem icon={Book} onSelect={onManage}>
           管理内容
         </MenuItem>
-        {canPublish ? <MenuItem onSelect={() => onRequestStatus('publish')}>发布课程</MenuItem> : null}
+        {canPublish ? (
+          <MenuItem onSelect={() => onRequestStatus('publish')}>发布课程</MenuItem>
+        ) : null}
         {canEnd ? <MenuItem onSelect={() => onRequestStatus('end')}>结束课程</MenuItem> : null}
         {canRefreshInvite ? (
           <MenuItem icon={KeyRound} onSelect={onRefreshInvite}>
@@ -508,8 +536,8 @@ function CourseActionMenu({
           </MenuItem>
         ) : null}
         {canShare ? (
-          <MenuItem icon={Share2} onSelect={onShare}>
-            共享到课程库
+          <MenuItem icon={Share2} disabled={sharing} onSelect={onShare}>
+            {shared ? '取消共享' : '共享到课程库'}
           </MenuItem>
         ) : null}
         <MenuItem icon={Copy} onSelect={onClone}>
@@ -525,70 +553,5 @@ function CourseActionMenu({
         ) : null}
       </MenuContent>
     </Menu>
-  )
-}
-
-interface CloneCourseModalProps {
-  course: Course
-  onClose: () => void
-  onCloned: () => void
-}
-
-/**
- * CloneCourseModal 克隆课程为新草稿。
- * 克隆会复制章节课时与作业外壳(不含学生数据),结果落草稿态。
- */
-function CloneCourseModal({ course, onClose, onCloned }: CloneCourseModalProps) {
-  const [name, setName] = useState(`${course.name}(副本)`)
-  const [fieldError, setFieldError] = useState<string>()
-  const [working, setWorking] = useState(false)
-
-  const submit = useCallback(async () => {
-    if (name.trim() === '') {
-      setFieldError('请输入新课程名称')
-      return
-    }
-    setFieldError(undefined)
-    setWorking(true)
-    try {
-      await api.teaching.cloneCourse(course.id, { name: name.trim() })
-      toast.success('已克隆为新课程草稿')
-      onCloned()
-    } catch (error) {
-      setFieldError(userFacingErrorMessage(error, '克隆没有成功,请稍后重试。'))
-    } finally {
-      setWorking(false)
-    }
-  }, [course.id, name, onCloned])
-
-  return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="sm">
-        <ModalHeader>
-          <ModalTitle>克隆课程</ModalTitle>
-          <ModalDescription>
-            会复制章节课时与作业设置,不复制学生、提交与成绩。新课程为草稿状态。
-          </ModalDescription>
-        </ModalHeader>
-        <ModalBody>
-          <FormField label="新课程名称" htmlFor="clone-course-name" required error={fieldError}>
-            <Input
-              id="clone-course-name"
-              value={name}
-              invalid={Boolean(fieldError)}
-              onChange={(event) => setName(event.target.value)}
-            />
-          </FormField>
-        </ModalBody>
-        <ModalFooter>
-          <Button variant="outline" onClick={onClose}>
-            取消
-          </Button>
-          <Button variant="primary" loading={working} onClick={() => void submit()}>
-            确认克隆
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
   )
 }

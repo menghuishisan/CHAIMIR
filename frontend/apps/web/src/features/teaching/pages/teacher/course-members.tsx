@@ -31,6 +31,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import { joinModeLabel } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -227,6 +228,9 @@ function AddMembersModal({ courseId, onClose, onAdded }: AddMembersModalProps) {
   const [classId, setClassId] = useState<string>('')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    classId: classId === '' ? '请选择要加入课程的班级' : null,
+  }), [classId]))
 
   const classes = useAsyncResource(() => api.identity.listClasses(), [], () => false)
 
@@ -236,10 +240,7 @@ function AddMembersModal({ courseId, onClose, onAdded }: AddMembersModalProps) {
   )
 
   const submit = useCallback(async () => {
-    if (classId === '') {
-      setFormError('请选择要加入课程的班级')
-      return
-    }
+    if (!validate()) return
     setFormError(undefined)
     setWorking(true)
     try {
@@ -251,7 +252,7 @@ function AddMembersModal({ courseId, onClose, onAdded }: AddMembersModalProps) {
     } finally {
       setWorking(false)
     }
-  }, [classId, courseId, onAdded])
+  }, [classId, courseId, onAdded, validate])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -271,11 +272,13 @@ function AddMembersModal({ courseId, onClose, onAdded }: AddMembersModalProps) {
             skeleton={<Skeleton variant="line" lines={2} />}
           >
             {() => (
-              <FormField label="班级" htmlFor="add-members-class" required>
+              <FormField label="班级" htmlFor="add-members-class" required error={errors.classId}>
                 <Select
                   id="add-members-class"
                   options={classOptions}
                   value={classId}
+                  invalid={Boolean(errors.classId)}
+                  onBlur={() => validate(['classId'])}
                   placeholder="选择班级"
                   onValueChange={setClassId}
                 />

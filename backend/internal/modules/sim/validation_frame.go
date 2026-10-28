@@ -33,6 +33,19 @@ func validateBackendSnapshot(snapshot BackendSnapshot, scaleLimit map[string]any
 	return validateTeachingFrame(snapshot.View, scaleLimit)
 }
 
+// validatePreviewFrames 确认审核依据非空且符合既有快照协议，不以成功徽章替代真实教学帧。
+func validatePreviewFrames(frames []BackendSnapshot, scaleLimit map[string]any) error {
+	if len(frames) == 0 || len(frames) > maxPreviewFrames {
+		return frameError("样例教学帧数量必须为1到32个")
+	}
+	for i, frame := range frames {
+		if err := validateBackendSnapshot(frame, scaleLimit); err != nil {
+			return fmt.Errorf("校验第%d个样例教学帧失败: %w", i+1, err)
+		}
+	}
+	return nil
+}
+
 // validateTeachingFrame 校验一帧的结构、职责声明、引用完整性与规模上限。
 func validateTeachingFrame(view map[string]any, scaleLimit map[string]any) error {
 	if len(view) == 0 {

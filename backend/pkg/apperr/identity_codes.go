@@ -109,6 +109,12 @@ const (
 	CodeIdentityTenantLogoTooLarge = "13023"
 	// CodeIdentityTenantLogoUnavailable 表示已登记的校徽暂时读不出来。
 	CodeIdentityTenantLogoUnavailable = "13024"
+	// CodeIdentityOrgCodeConflict 表示院系编码在本校已被使用。
+	CodeIdentityOrgCodeConflict = "13025"
+	// CodeIdentityOrgInUse 表示组织仍有下级组织或账号引用。
+	CodeIdentityOrgInUse = "13026"
+	// CodeIdentityModuleDisabled 表示租户未启用本次操作所需功能。
+	CodeIdentityModuleDisabled = "13027"
 )
 
 const (
@@ -226,8 +232,14 @@ var (
 	ErrIdentityTenantStatusInvalid = New(CodeIdentityTenantStatusInvalid, "学校状态不正确")
 	// ErrIdentityTenantConfigInvalid 表示租户配置格式不正确。
 	ErrIdentityTenantConfigInvalid = New(CodeIdentityTenantConfigInvalid, "学校配置格式不正确")
+	// ErrIdentityModuleDisabled 不注销会话，允许用户继续其它已开放功能。
+	ErrIdentityModuleDisabled = New(CodeIdentityModuleDisabled, "学校暂未开放此功能,请联系学校管理员")
 	// ErrIdentityOrgInvalidInput 表示组织架构请求信息不正确。
 	ErrIdentityOrgInvalidInput = New(CodeIdentityOrgInvalidInput, "组织架构信息不正确,请检查后重试")
+	// ErrIdentityOrgCodeConflict 引导更换本校已占用的院系编码。
+	ErrIdentityOrgCodeConflict = New(CodeIdentityOrgCodeConflict, "院系编码已被使用,请更换后重试")
+	// ErrIdentityOrgInUse 引导先调整关联归属再删除组织。
+	ErrIdentityOrgInUse = New(CodeIdentityOrgInUse, "该组织仍有关联的组织或账号,请先调整归属再删除")
 	// ErrIdentityPlatformLayerDisabled 表示当前部署不启用平台管理。
 	ErrIdentityPlatformLayerDisabled = New(CodeIdentityPlatformLayerDisabled, "当前部署未启用平台管理入口")
 	// ErrIdentityBootstrapInvalid 表示私有化初始化参数不正确。

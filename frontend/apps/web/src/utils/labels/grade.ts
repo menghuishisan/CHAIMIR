@@ -45,7 +45,6 @@ const WARNING_STATUS_LABELS: Record<GradeWarningStatus, string> = {
   [GradeWarningStatus.PENDING]: '待确认',
   [GradeWarningStatus.ACKNOWLEDGED]: '已确认',
   // 后端语义是「预警通知事件发布失败」,对使用者只有一件事要知道:学生没收到提醒,需要另行联系
-  [GradeWarningStatus.NOTIFY_FAILED]: '提醒未送达',
 }
 
 /** gradeWarningStatusLabel 返回学业预警处理状态文案。 */

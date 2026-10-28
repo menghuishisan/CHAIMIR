@@ -28,15 +28,15 @@ func sandboxProgressSessionScope(sandboxID int64) string {
 	return "sandbox:" + ids.Format(sandboxID) + ":progress"
 }
 
-// closeSandboxSessions 关闭被撤销主体在该沙箱上的长连接。
+// closeSandboxSessions 尝试关闭被撤销主体的全部长连接,不因终端关闭失败跳过进度连接。
 func (s *Service) closeSandboxSessions(tenantID, accountID, sandboxID int64) error {
 	if s.wsHub == nil {
 		return nil
 	}
-	if err := s.wsHub.CloseSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: sandboxTerminalSessionScope(sandboxID)}); err != nil {
-		return err
-	}
-	return s.wsHub.CloseSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: sandboxProgressSessionScope(sandboxID)})
+	return errors.Join(
+		s.wsHub.CloseSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: sandboxTerminalSessionScope(sandboxID)}),
+		s.wsHub.CloseSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: sandboxProgressSessionScope(sandboxID)}),
+	)
 }
 
 // TerminalTarget 描述一次终端连接允许进入的沙箱命名空间和容器。
@@ -67,7 +67,7 @@ func (s *Service) TerminalTargetForOwner(ctx context.Context, tenantID, accountI
 	if !runtimeContainerAllowed(runtime, targetContainer) {
 		return TerminalTarget{}, apperr.ErrSandboxOwnershipInvalid
 	}
-	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.Terminal, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir, "")
+	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.Terminal, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir)
 	return TerminalTarget{TenantID: sb.TenantID, SandboxID: sb.ID, Namespace: sb.Namespace, Container: targetContainer, Command: command}, nil
 }
 
@@ -103,15 +103,17 @@ func (s *Service) ToolProxyTargetForOwner(ctx context.Context, tenantID, account
 	}); err != nil {
 		return Sandbox{}, SandboxTool{}, err
 	}
-	for _, tool := range tools {
-		if tool.Kind == SandboxToolKindWebEmbed && tool.Status == SandboxToolStatusReady && strings.EqualFold(tool.ToolCode, strings.TrimSpace(toolCode)) {
-			if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-				return Sandbox{}, SandboxTool{}, err
-			}
-			return sb, tool, nil
-		}
+	if err := s.requireSandboxModule(ctx, sb); err != nil {
+		return Sandbox{}, SandboxTool{}, err
 	}
-	return Sandbox{}, SandboxTool{}, apperr.ErrSandboxToolNotFound
+	tool, err := s.readySandboxTool(ctx, sb, tools, SandboxToolKindWebEmbed, toolCode)
+	if err != nil {
+		return Sandbox{}, SandboxTool{}, err
+	}
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return Sandbox{}, SandboxTool{}, err
+	}
+	return sb, tool, nil
 }
 
 // RunCommandToolForOwner 在命令工具容器中执行一次受控 argv 命令。
@@ -201,12 +203,14 @@ func (s *Service) commandToolTargetForOwner(ctx context.Context, tenantID, accou
 	}); err != nil {
 		return Sandbox{}, SandboxTool{}, err
 	}
-	for _, tool := range tools {
-		if tool.Kind == SandboxToolKindCommand && tool.Status == SandboxToolStatusReady && strings.EqualFold(tool.ToolCode, strings.TrimSpace(toolCode)) {
-			return sb, tool, nil
-		}
+	if err := s.requireSandboxModule(ctx, sb); err != nil {
+		return Sandbox{}, SandboxTool{}, err
 	}
-	return Sandbox{}, SandboxTool{}, apperr.ErrSandboxToolNotFound
+	tool, err := s.readySandboxTool(ctx, sb, tools, SandboxToolKindCommand, toolCode)
+	if err != nil {
+		return Sandbox{}, SandboxTool{}, err
+	}
+	return sb, tool, nil
 }
 
 // commandToolExecTarget 返回命令工具唯一组件的 exec 目标。

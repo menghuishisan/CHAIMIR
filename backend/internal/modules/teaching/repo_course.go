@@ -57,6 +57,11 @@ func (s *txStore) GetCourseByInviteCode(ctx context.Context, code string) (Cours
 	return courseFromInviteRow(row)
 }
 
+// ListTeacherCourseIDs 只读取教师全部未删除课程编号,不截断聚合层权限范围。
+func (s *txStore) ListTeacherCourseIDs(ctx context.Context, tenantID, teacherID int64) ([]int64, error) {
+	return s.q.ListTeacherCourseIDs(ctx, sqlcgen.ListTeacherCourseIDsParams{TenantID: tenantID, TeacherID: teacherID})
+}
+
 // ListTeacherCourses 查询教师课程分页。
 func (s *txStore) ListTeacherCourses(ctx context.Context, tenantID, teacherID int64, filter CourseListFilter) ([]Course, int64, error) {
 	limit, offset := pagex.LimitOffset(filter.Page, filter.Size)
@@ -97,6 +102,24 @@ func (s *txStore) ListStudentCourses(ctx context.Context, tenantID, studentID in
 			return nil, 0, err
 		}
 		out = append(out, course)
+	}
+	return out, total, nil
+}
+
+// ListSharedCourses仅查询共享课程目录列，计数与分页采用相同可见性和字面关键词条件。
+func (s *txStore) ListSharedCourses(ctx context.Context, tenantID int64, filter CourseListFilter) ([]Course, int64, error) {
+	limit, offset := pagex.LimitOffset(filter.Page, filter.Size)
+	rows, err := s.q.ListSharedCourses(ctx, sqlcgen.ListSharedCoursesParams{ExcludeTenantID: tenantID, Keyword: filter.Keyword, PageLimit: limit, PageOffset: offset})
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := s.q.CountSharedCourses(ctx, sqlcgen.CountSharedCoursesParams{ExcludeTenantID: tenantID, Keyword: filter.Keyword})
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]Course, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, Course{ID: row.ID, Name: row.Name, Description: row.Description, Type: row.Type, Difficulty: row.Difficulty, Semester: row.Semester, Credits: row.Credits, UpdatedAt: timex.FromTimestamptz(row.UpdatedAt)})
 	}
 	return out, total, nil
 }

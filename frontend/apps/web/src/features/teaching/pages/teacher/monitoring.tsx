@@ -7,10 +7,11 @@
 // 刷新是显式动作:高频路径不自动轮询(规范 §4.1 高频路径不动),
 // 由教师按需刷新或在处理完一项后自动刷新。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { Activity, FlaskConical, RefreshCw, RotateCcw, Swords } from 'lucide-react'
 import {
+  TENANT_MODULE,
   BattleMatchStatus,
   ContestStatus,
   ExperimentInstanceStatus,
@@ -49,6 +50,7 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useSession } from '../../../../components/RoleGuard/session'
 import { ResourceState } from '../../../../components/ResourceState'
 import { isJudgeTaskAbnormal, isJudgeTaskActive } from '../../../judge/rules'
 import { judgeTaskStatusTone } from '../../../judge/statusPresentation'
@@ -79,6 +81,40 @@ const JUDGE_FILTERS = [
  * TeacherMonitoringPage 汇总判题、实验与对局的实时状态。
  */
 export default function TeacherMonitoringPage() {
+  const { me } = useSession()
+  const [refreshVersion, setRefreshVersion] = useState(0)
+  const experimentsEnabled = me.enabled_modules.includes(TENANT_MODULE.EXPERIMENT)
+  const contestsEnabled = me.enabled_modules.includes(TENANT_MODULE.CONTEST)
+  const judgeEnabled =
+    experimentsEnabled || contestsEnabled || me.enabled_modules.includes(TENANT_MODULE.TEACHING)
+  return (
+    <PageScaffold>
+      <PageHeader
+        kicker={<Breadcrumb items={[{ label: '实践' }]} />}
+        title="实时监控"
+        description="判题是否堵住、实验环境是否异常、对局是否卡住 —— 需要处理的都会列在这里。"
+        icon={Activity}
+        actions={
+          <IconButton
+            variant="outline"
+            icon={RefreshCw}
+            aria-label="刷新监控数据"
+            onClick={() => setRefreshVersion((value) => value + 1)}
+          />
+        }
+      />
+      {judgeEnabled ? <JudgeMonitoringSummary refreshVersion={refreshVersion} /> : null}
+      {experimentsEnabled ? <ExperimentMonitorSection key={refreshVersion} /> : null}
+      {contestsEnabled ? <ContestMonitoringSummary refreshVersion={refreshVersion} /> : null}
+      {!judgeEnabled ? (
+        <Callout tone="info">学校尚未开放可监控的教学、实验或竞赛功能。</Callout>
+      ) : null}
+    </PageScaffold>
+  )
+}
+
+/** JudgeMonitoringSummary 独立维护已开放来源的判题列表、总数和详情。 */
+function JudgeMonitoringSummary({ refreshVersion }: { refreshVersion: number }) {
   const [judgeFilter, setJudgeFilter] = useState<string>(JUDGE_TASK_STATE.ABNORMAL)
   const [detailTask, setDetailTask] = useState<JudgeTask>()
 
@@ -91,37 +127,70 @@ export default function TeacherMonitoringPage() {
         page: 1,
         size: MONITOR_SIZE,
       }),
-    [judgeFilter],
+    [judgeFilter, refreshVersion],
     () => false
   )
+  const activeTaskCount = useResourceTotal(
+    (params) => api.judge.getTasks({ state: JUDGE_TASK_STATE.ACTIVE, ...params }),
+    [refreshVersion],
+    judgeTasks.refreshVersion
+  )
+  const abnormalTaskCount = useResourceTotal(
+    (params) => api.judge.getTasks({ state: JUDGE_TASK_STATE.ABNORMAL, ...params }),
+    [refreshVersion],
+    judgeTasks.refreshVersion
+  )
+  return (
+    <>
+      <MetricStrip
+        label="判题摘要"
+        className="mb-5"
+        items={[
+          { label: '判题进行中', value: activeTaskCount ?? '—', hint: '排队与判题中的任务' },
+          {
+            label: '判题需要处理',
+            value: abnormalTaskCount ?? '—',
+            hint: abnormalTaskCount === 0 ? '暂无异常' : '判题失败',
+          },
+        ]}
+      />
+      <JudgeMonitorSection
+        tasks={judgeTasks}
+        filter={judgeFilter}
+        onFilterChange={setJudgeFilter}
+        onOpenDetail={setDetailTask}
+      />
+
+      {detailTask ? (
+        <JudgeTaskDetailModal task={detailTask} onClose={() => setDetailTask(undefined)} />
+      ) : null}
+    </>
+  )
+}
+
+/** ContestMonitoringSummary 只在竞赛开放时读取赛事与对局统计。 */
+function ContestMonitoringSummary({ refreshVersion }: { refreshVersion: number }) {
   // 对局监控要的是「正在打的赛事」,按状态向服务端取,而不是在最近 30 场里挑
   const runningContestsResource = useAsyncResource(
     () => api.contest.getContests({ status: ContestStatus.RUNNING, page: 1, size: MONITOR_SIZE }),
-    [],
+    [refreshVersion],
     () => false
   )
   const frozenContestsResource = useAsyncResource(
     () => api.contest.getContests({ status: ContestStatus.FROZEN, page: 1, size: MONITOR_SIZE }),
-    [],
+    [refreshVersion],
     () => false
   )
 
-  // 指标带取服务端全量口径:队列积压多少条不能由最近 30 条推断
-  const activeTaskCount = useResourceTotal(
-    (params) => api.judge.getTasks({ state: JUDGE_TASK_STATE.ACTIVE, ...params }),
-    []
-  )
-  const abnormalTaskCount = useResourceTotal(
-    (params) => api.judge.getTasks({ state: JUDGE_TASK_STATE.ABNORMAL, ...params }),
-    []
-  )
   const runningContestCount = useResourceTotal(
     (params) => api.contest.getContests({ status: ContestStatus.RUNNING, ...params }),
-    []
+    [refreshVersion],
+    runningContestsResource.refreshVersion
   )
   const frozenContestCount = useResourceTotal(
     (params) => api.contest.getContests({ status: ContestStatus.FROZEN, ...params }),
-    []
+    [refreshVersion],
+    frozenContestsResource.refreshVersion
   )
   const liveContestCount =
     runningContestCount === undefined || frozenContestCount === undefined
@@ -136,63 +205,15 @@ export default function TeacherMonitoringPage() {
     [frozenContestsResource.data, runningContestsResource.data]
   )
 
-  const refreshAll = useCallback(() => {
-    judgeTasks.reload()
-    runningContestsResource.reload()
-    frozenContestsResource.reload()
-  }, [frozenContestsResource, judgeTasks, runningContestsResource])
-
   return (
-    <PageScaffold>
-      <PageHeader
-        kicker={<Breadcrumb items={[{ label: '实践' }]} />}
-        title="实时监控"
-        description="判题是否堵住、实验环境是否异常、对局是否卡住 —— 需要处理的都会列在这里。"
-        icon={Activity}
-        actions={
-          <IconButton
-            variant="outline"
-            icon={RefreshCw}
-            aria-label="刷新监控数据"
-            onClick={refreshAll}
-          />
-        }
-      />
-
-      {/*
-        归族:资源列表族(§6.5.3 第 ① 族)—— 本页主体是三块要盯的清单,不是三个数字。
-        指标降为内联摘要:三项都取服务端全量口径,「监控范围 最近 30 条」是范围常量而非
-        可度量数字,由判题任务分组说明承载(§6.5.4)。
-      */}
+    <>
       <MetricStrip
-        label="待处理摘要"
+        label="竞赛摘要"
         className="mb-5"
-        items={[
-          { label: '判题进行中', value: activeTaskCount ?? '—', hint: '排队与判题中的任务' },
-          {
-            label: '判题需要处理',
-            value: abnormalTaskCount ?? '—',
-            hint: abnormalTaskCount === 0 ? '暂无异常' : '判题失败',
-          },
-          { label: '进行中竞赛', value: liveContestCount ?? '—', hint: '含封榜中' },
-        ]}
+        items={[{ label: '进行中竞赛', value: liveContestCount ?? '—', hint: '含封榜中' }]}
       />
-
-      <JudgeMonitorSection
-        tasks={judgeTasks}
-        filter={judgeFilter}
-        onFilterChange={setJudgeFilter}
-        onOpenDetail={setDetailTask}
-      />
-
-      <ExperimentMonitorSection />
-
       <BattleMonitorSection contests={runningContests} />
-
-      {detailTask ? (
-        <JudgeTaskDetailModal task={detailTask} onClose={() => setDetailTask(undefined)} />
-      ) : null}
-    </PageScaffold>
+    </>
   )
 }
 
@@ -627,9 +648,21 @@ function ExperimentMonitorSection() {
         <MetricStrip
           label="实验环境摘要"
           items={[
-            { label: '正在进行', value: running.data?.total ?? '—', hint: '学生正在做' },
-            { label: '已暂停', value: paused.data?.total ?? '—', hint: '环境已挂起' },
-            { label: '出错', value: errored.data?.total ?? '—', hint: '需要提醒学生重进' },
+            {
+              label: '正在进行',
+              value: running.status === 'success' ? running.data?.total : undefined,
+              hint: '学生正在做',
+            },
+            {
+              label: '已暂停',
+              value: paused.status === 'success' ? paused.data?.total : undefined,
+              hint: '环境已挂起',
+            },
+            {
+              label: '出错',
+              value: errored.status === 'success' ? errored.data?.total : undefined,
+              hint: '需要提醒学生重进',
+            },
           ]}
         />
 

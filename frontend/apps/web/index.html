@@ -12,8 +12,7 @@
   </head>
   <body>
     <div id="root"></div>
-    <!-- 部署形态由 Kustomize overlay 挂载的运行时配置提供,必须先于应用模块加载。 -->
-    <script src="/runtime-config.js"></script>
+    <!-- 启动层挂载错误边界后,按顺序读取部署配置并加载应用模块。 -->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

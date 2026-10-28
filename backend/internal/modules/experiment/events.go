@@ -41,7 +41,7 @@ func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, e
 	return subs, nil
 }
 
-// handleSandboxFailedEvent 解码 M2 阶段一启动失败事件。
+// handleSandboxFailedEvent 解码 M2 启动或个性化初始化失败事件。
 func handleSandboxFailedEvent(svc *Service) eventbus.Handler {
 	return func(ctx context.Context, data []byte) error {
 		var event contracts.SandboxFailedEvent

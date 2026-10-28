@@ -73,12 +73,15 @@ capabilities:
     additionalProperties: false
     properties:
       network_name:
+        title: 网络名称
         type: string
         x-chaimir-env: infra/CHAIMIR_GRAPH_NETWORK
       postgres_database:
+        title: 数据库名称
         type: string
         x-chaimir-env: infra/CHAIMIR_GRAPH_POSTGRES_DB
       postgres_user:
+        title: 数据库账户
         type: string
         x-chaimir-env: infra/CHAIMIR_GRAPH_POSTGRES_USER
   student_access: private

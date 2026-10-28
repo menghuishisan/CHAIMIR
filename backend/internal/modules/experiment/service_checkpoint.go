@@ -140,12 +140,12 @@ func (s *Service) HandleJudgeCompleted(ctx context.Context, event contracts.Judg
 			return nil
 		}
 		shouldPublish = true
-		return s.enqueueExperimentScoreOutbox(ctx, tx, scored)
+		return s.enqueueExperimentEventOutbox(ctx, tx, scored)
 	}); err != nil {
 		return err
 	}
 	if shouldPublish {
-		s.drainExperimentScoreOutboxBestEffort(ctx)
+		s.drainExperimentEventOutboxBestEffort(ctx)
 	}
 	return nil
 }
@@ -188,12 +188,12 @@ func (s *Service) HandleJudgeFailed(ctx context.Context, event contracts.JudgeFa
 			return nil
 		}
 		shouldPublish = true
-		return s.enqueueExperimentScoreOutbox(ctx, tx, scored)
+		return s.enqueueExperimentEventOutbox(ctx, tx, scored)
 	}); err != nil {
 		return err
 	}
 	if shouldPublish {
-		s.drainExperimentScoreOutboxBestEffort(ctx)
+		s.drainExperimentEventOutboxBestEffort(ctx)
 	}
 	return nil
 }

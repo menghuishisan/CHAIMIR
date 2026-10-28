@@ -71,7 +71,7 @@ func (s *Service) runtimeForSandboxInstance(ctx context.Context, sb Sandbox, ins
 	}); err != nil {
 		return Runtime{}, apperr.ErrSandboxRuntimeNotFound.WithCause(err)
 	}
-	if runtime.Code != frozen.Code || runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
+	if runtime.Code != frozen.Code || runtime.PluginRef != frozen.PluginRef || runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
 		return Runtime{}, apperr.ErrSandboxCapabilityUnavailable
 	}
 	var compiled AdapterSpec
@@ -81,6 +81,7 @@ func (s *Service) runtimeForSandboxInstance(ctx context.Context, sb Sandbox, ins
 	runtime.AdapterSpec = compiled
 	runtime.AdapterLevel = frozen.AdapterLevel
 	runtime.CapabilityImpl = frozen.CapabilityImpl
+	runtime.PluginRef = frozen.PluginRef
 	return runtime, nil
 }
 

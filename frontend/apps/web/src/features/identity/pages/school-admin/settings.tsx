@@ -37,11 +37,13 @@ import { api } from '../../../../app/api'
 import { ImageUploadField } from '../../../../components/ImageUploadField'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDate } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { authModeLabel, deployModeLabel } from '../../../../utils/labels/identity'
 import { readTenantModules, TENANT_MODULES_KEY } from '../../tenantModules'
 import { TENANT_MODULE_OPTIONS } from '../../options'
+import { useSession } from '../../../../components/RoleGuard/session'
 
 /** 配置分组锚点(§6.5.3 第 ③ 族):id 与下方各分组卡的 id 一一对应。 */
 const SETTINGS_GROUPS = [
@@ -97,6 +99,7 @@ interface SettingsContentProps {
  */
 function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
   const navigate = useNavigate()
+  const { reload: reloadSession } = useSession()
 
   const [displayName, setDisplayName] = useState(tenant.display_name ?? tenant.name)
   // 校徽是即时生效的:上传或移除当场落库,响应就是新的配置视图,故这里只存可显示的图。
@@ -110,6 +113,12 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
 
   const authModeValue = Number(authMode) as AuthMode
   const needsSsoConfig = authModeValue !== AuthMode.LOCAL
+
+  // 字段错误随当前输入重算,提交失败的服务端提示单独保留。
+  const { errors, validate, reset: resetValidation } = useFormValidation(useCallback(() => ({
+    displayName: displayName.trim() === '' ? '请输入学校显示名' : null,
+    modules: modules.length === 0 ? '至少启用一个业务模块,否则师生进入后没有可用功能' : null,
+  }), [displayName, modules]))
 
   const profileItems = useMemo(
     () => [
@@ -128,14 +137,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (displayName.trim() === '') {
-        setFormError('请输入学校显示名')
-        return
-      }
-      if (modules.length === 0) {
-        setFormError('至少启用一个业务模块,否则师生进入后没有可用功能')
-        return
-      }
+      if (!validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -148,13 +150,14 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
         })
         toast.success('学校配置已保存')
         onSaved()
+        reloadSession()
       } catch (error) {
         setFormError(userFacingErrorMessage(error, '保存没有成功,请稍后重试。'))
       } finally {
         setWorking(false)
       }
     },
-    [authModeValue, displayName, enableActivation, modules, onSaved, tenant.feature_flags]
+    [authModeValue, displayName, enableActivation, modules, onSaved, reloadSession, tenant.feature_flags, validate]
   )
 
   /**
@@ -191,7 +194,8 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
     setEnableActivation(tenant.enable_activation_code)
     setModules(readTenantModules(tenant.feature_flags))
     setFormError(undefined)
-  }, [tenant])
+    resetValidation()
+  }, [resetValidation, tenant])
 
   return (
     <>
@@ -239,11 +243,14 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                   htmlFor="tenant-display-name"
                   required
                   helper="登录页与顶栏显示这个名字"
+                  error={errors.displayName}
                 >
                   <Input
                     id="tenant-display-name"
                     value={displayName}
                     onChange={(event) => setDisplayName(event.target.value)}
+                    onBlur={() => validate(['displayName'])}
+                    invalid={!!errors.displayName}
                   />
                 </FormField>
                 <FormField
@@ -285,8 +292,8 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
               description="关掉的模块对师生不可见。已有数据不会删除,重新开启即恢复。"
             />
             <CardBody>
-              <FormField label="启用的业务模块" required>
-                <div className="flex flex-col gap-3">
+              <FormField label="启用的业务模块" required error={errors.modules}>
+                <div role="group" aria-label="启用的业务模块" className="flex flex-col gap-3">
                   {TENANT_MODULE_OPTIONS.map((option) => (
                     <div key={option.value} className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -296,6 +303,8 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                       <Switch
                         checked={modules.includes(option.value)}
                         aria-label={`启用${option.label}模块`}
+                        aria-invalid={!!errors.modules}
+                        onBlur={() => validate(['modules'])}
                         onCheckedChange={(checked) =>
                           setModules((current) =>
                             checked

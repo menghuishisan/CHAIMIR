@@ -274,6 +274,14 @@ func (t *txStore) RejectTenantApplication(ctx context.Context, id, reviewerID in
 
 // CreateAccount 创建账号、基础角色、可选学校管理员角色和可选档案。
 func (t *txStore) CreateAccount(ctx context.Context, input CreateAccountInput) (Account, error) {
+	if input.Profile != nil {
+		if err := t.lockOrganizationScope(ctx, input.TenantID); err != nil {
+			return Account{}, err
+		}
+		if err := validateAccountOrgForProfile(ctx, t, input.TenantID, input.BaseIdentity, input.Profile.OrgID, input.Profile.EnrollmentYear); err != nil {
+			return Account{}, err
+		}
+	}
 	// 账号主表先落库,后续角色和档案都以同一个 account_id 形成事务内聚合。
 	row, err := t.q.CreateAccount(ctx, sqlcgen.CreateAccountParams{
 		ID:            input.ID,
@@ -339,6 +347,12 @@ func (t *txStore) CreateAccount(ctx context.Context, input CreateAccountInput) (
 		account.Roles = append(account.Roles, role.Role)
 	}
 	return account, nil
+}
+
+// LockAccount 在读取可变状态之前锁定租户账号,供单条和批量状态机共用。
+func (t *txStore) LockAccount(ctx context.Context, tenantID, id int64) error {
+	_, err := t.q.LockAccount(ctx, sqlcgen.LockAccountParams{TenantID: tenantID, ID: id})
+	return err
 }
 
 // GetAccount 读取单个账号聚合快照。
@@ -519,6 +533,16 @@ func (t *txStore) ListClassStudents(ctx context.Context, tenantID, classID int64
 
 // UpdateAccountEditable 更新账号可编辑字段并返回最新账号快照。
 func (t *txStore) UpdateAccountEditable(ctx context.Context, tenantID, accountID int64, req UpdateAccountRequest) (Account, error) {
+	if err := t.lockOrganizationScope(ctx, tenantID); err != nil {
+		return Account{}, err
+	}
+	current, err := t.GetAccount(ctx, accountID)
+	if err != nil {
+		return Account{}, err
+	}
+	if err := validateAccountOrgForProfile(ctx, t, tenantID, current.BaseIdentity, req.OrgID.Int64(), req.EnrollmentYear); err != nil {
+		return Account{}, err
+	}
 	if err := t.q.UpdateAccountBasic(ctx, sqlcgen.UpdateAccountBasicParams{ID: accountID, TenantID: tenantID, Name: req.Name}); err != nil {
 		return Account{}, err
 	}
@@ -881,6 +905,36 @@ func (t *txStore) GetImportPreview(ctx context.Context, tenantID, operatorID, id
 		return ImportPreview{}, err
 	}
 	return ImportPreview{ID: row.ID, TenantID: row.TenantID, OperatorID: row.OperatorID, TargetType: row.TargetType, FileName: row.FileName, Rows: row.Rows, PreviewResult: row.PreviewResult, Status: row.Status, ExpireAt: timex.FromTimestamptz(row.ExpireAt)}, nil
+}
+
+// ListPendingImportPreviews只读本人尚可恢复的预览元信息,原始行留在提交链路内。
+func (t *txStore) ListPendingImportPreviews(ctx context.Context, tenantID, operatorID int64, targetType int16, page, size int) ([]ImportPreview, int64, error) {
+	limit, offset := pagex.LimitOffset(page, size)
+	rows, err := t.q.ListPendingImportPreviews(ctx, sqlcgen.ListPendingImportPreviewsParams{TenantID: tenantID, OperatorID: operatorID, TargetType: targetType, Limit: limit, Offset: offset})
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := t.q.CountPendingImportPreviews(ctx, sqlcgen.CountPendingImportPreviewsParams{TenantID: tenantID, OperatorID: operatorID, TargetType: targetType})
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]ImportPreview, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, ImportPreview{ID: row.ID, TenantID: tenantID, OperatorID: operatorID, TargetType: row.TargetType, FileName: row.FileName, PreviewResult: row.PreviewResult, Status: ImportPreviewPending, ExpireAt: timex.FromTimestamptz(row.ExpireAt)})
+	}
+	return items, total, nil
+}
+
+// DiscardImportPreview只清除本人待提交预览,并让并发提交/放弃由同一行锁排序。
+func (t *txStore) DiscardImportPreview(ctx context.Context, tenantID, operatorID, id int64) error {
+	affected, err := t.q.DiscardImportPreview(ctx, sqlcgen.DiscardImportPreviewParams{ID: id, TenantID: tenantID, OperatorID: operatorID})
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return apperr.ErrIdentityImportPreviewExpired
+	}
+	return nil
 }
 
 // MarkImportPreviewSubmitted 标记当前操作人的导入预览已提交,防止重复提交和横向消费。

@@ -23,7 +23,7 @@ upstream:
       digest: sha256:094f1fffc4a1c42bfa31f8c445ff6cadd320a9f6f611539a91cb2b5d446f1811
       role: result-normalizer
     - image: runtime/evm-hardhat
-      digest: sha256:344843a7c5b7bf2b8496decd4ddd143c0c890aa7649468920dca4bec40e39ad1
+      digest: sha256:7f03b18b11181b077c81d0f31561e3ea965c23841a1c3863436338d0748665c1
       role: hardhat-foundry-solidity-toolchain
   reuse_policy: self-developed-judger
 data_driven: true
@@ -55,11 +55,14 @@ judger:
   command:
     - run-evm-tests
   exec_target: sandbox/testcase-evm
+  sidecar_command:
+    - sleep
+    - "2147483647"
   env:
     - name: CHAIMIR_SUBMISSION_DIR
       value: /judge-private
     - name: HOME
-      value: /judge-private/home
+      value: /judge/home
   suite_archive_name: platform-selftest.tar
   modes:
     - hardhat

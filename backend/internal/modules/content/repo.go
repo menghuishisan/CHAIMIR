@@ -44,7 +44,7 @@ type TxStore interface {
 	ListPapers(ctx context.Context, tenantID int64, page, size int) ([]Paper, int64, error)
 	CountPapersByGenMode(ctx context.Context, tenantID int64) (map[string]int64, error)
 	ListPaperItems(ctx context.Context, tenantID, paperID int64) ([]PaperItem, error)
-	RandomPickItems(ctx context.Context, tenantID int64, criteria PaperCriteria) ([]Item, error)
+	RandomPickItems(ctx context.Context, tenantID, viewerID int64, criteria PaperCriteria) ([]Item, error)
 }
 
 type store struct {
@@ -373,9 +373,9 @@ func (s *txStore) ListPaperItems(ctx context.Context, tenantID, paperID int64) (
 	return out, nil
 }
 
-// RandomPickItems 按条件随机抽取已发布内容。
-func (s *txStore) RandomPickItems(ctx context.Context, tenantID int64, criteria PaperCriteria) ([]Item, error) {
-	rows, err := s.q.RandomPickContentItems(ctx, sqlcgen.RandomPickContentItemsParams{TenantID: tenantID, Column2: criteria.Type, Column3: criteria.Difficulties, Column4: criteria.KnowledgePoints, Limit: criteria.Count})
+// RandomPickItems 在当前教师可见范围内按条件随机抽取已发布内容。
+func (s *txStore) RandomPickItems(ctx context.Context, tenantID, viewerID int64, criteria PaperCriteria) ([]Item, error) {
+	rows, err := s.q.RandomPickContentItems(ctx, sqlcgen.RandomPickContentItemsParams{TenantID: tenantID, Column2: criteria.Type, Column3: criteria.Difficulties, Column4: criteria.KnowledgePoints, ViewerID: viewerID, Limit: criteria.Count})
 	if err != nil {
 		return nil, err
 	}

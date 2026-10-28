@@ -83,6 +83,17 @@ func (a sandboxAPI) getRuntime(c *gin.Context) {
 // 但不该看到平台运维面的适配器清单、镜像地址与命令白名单,故用独立最小字段目录。
 func (a sandboxAPI) registerCatalogRoutes(g gin.IRouter) {
 	g.GET("/catalog", a.orchestrationCatalog)
+	g.POST("/catalog/composition-preview", a.previewComposition)
+}
+
+// previewComposition 读取目录中的连接候选,不发布组合或创建任何执行资源。
+func (a sandboxAPI) previewComposition(c *gin.Context) {
+	var req CompositionPreviewRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrSandboxCreateRequestInvalid) {
+		return
+	}
+	out, err := a.svc.PreviewComposition(c.Request.Context(), req)
+	httpx.Write(c, out, err)
 }
 
 // orchestrationCatalog 返回可编排的运行时(含可用镜像版本)与工具目录。
@@ -483,7 +494,7 @@ func (a sandboxAPI) progress(c *gin.Context) {
 		if err != nil {
 			return err
 		}
-		if err := conn.BindSession(ws.SessionKey{TenantID: current.TenantID, AccountID: current.AccountID, Scope: sandboxProgressSessionScope(id)}); err != nil {
+		if err := conn.BindSession(c.Request.Context(), ws.SessionKey{TenantID: current.TenantID, AccountID: current.AccountID, Scope: sandboxProgressSessionScope(id)}); err != nil {
 			return apperr.ErrSandboxOwnershipInvalid.WithCause(err)
 		}
 		if err := a.svc.wsHub.Subscribe(conn, topic); err != nil {
@@ -516,10 +527,10 @@ func (a sandboxAPI) terminal(c *gin.Context) {
 		return
 	}
 	if err := a.svc.wsHub.ServeInteractive(c.Writer, c.Request, func(conn *ws.Conn) error {
-		if err := conn.BindSession(ws.SessionKey{TenantID: current.TenantID, AccountID: current.AccountID, Scope: sandboxTerminalSessionScope(id)}); err != nil {
+		if err := conn.BindSession(c.Request.Context(), ws.SessionKey{TenantID: current.TenantID, AccountID: current.AccountID, Scope: sandboxTerminalSessionScope(id)}); err != nil {
 			return apperr.ErrSandboxOwnershipInvalid.WithCause(err)
 		}
-		return a.svc.AttachTerminal(c.Request.Context(), target, conn.Reader(), conn.Writer())
+		return a.svc.AttachTerminal(conn.Context(), target, conn.Reader(), conn.Writer())
 	}); err != nil {
 		response.Fail(c, apperr.ErrSandboxToolProxyUnavailable.WithCause(err))
 	}

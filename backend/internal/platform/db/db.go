@@ -97,7 +97,7 @@ func (d *DB) WithTenantTxID(ctx context.Context, tenantID int64, fn TxFunc) erro
 		if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", ids.Format(tenantID)); err != nil {
 			return fmt.Errorf("注入 app.tenant_id 失败: %w", err)
 		}
-		return fn(ctx, tx)
+		return fn(context.WithValue(ctx, tenantReadTxKey{}, tenantReadTx{database: d, tenantID: tenantID, tx: tx}), tx)
 	})
 }
 
@@ -106,7 +106,7 @@ func (d *DB) WithAppTx(ctx context.Context, fn TxFunc) error {
 	if d == nil {
 		return fmt.Errorf("数据库未初始化")
 	}
-	return runTx(ctx, d.app, fn)
+	return runTx(context.WithValue(ctx, tenantReadTxKey{}, false), d.app, fn)
 }
 
 // WithPrivilegedTx 在特权连接池中开启事务,仅用于受控平台路径或预认证定位。
@@ -117,7 +117,7 @@ func (d *DB) WithPrivilegedTx(ctx context.Context, fn TxFunc) error {
 	if d.priv == nil {
 		return fmt.Errorf("未配置特权连接(PG_PRIV_USER),无法执行跨租户查询")
 	}
-	return runTx(ctx, d.priv, fn)
+	return runTx(context.WithValue(ctx, tenantReadTxKey{}, false), d.priv, fn)
 }
 
 // WithPrivilegedModuleTx 以数据库维护角色强制模块表边界后执行跨租户事务。
@@ -132,7 +132,7 @@ func (d *DB) WithPrivilegedModuleTx(ctx context.Context, module string, fn TxFun
 	if d.priv == nil {
 		return fmt.Errorf("未配置特权连接(PG_PRIV_USER),无法执行模块维护任务")
 	}
-	return runTx(ctx, d.priv, func(ctx context.Context, tx pgx.Tx) error {
+	return runTx(context.WithValue(ctx, tenantReadTxKey{}, false), d.priv, func(ctx context.Context, tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SET LOCAL ROLE "+pgx.Identifier{policy.Role}.Sanitize()); err != nil {
 			return fmt.Errorf("切换模块维护角色失败: %w", err)
 		}
@@ -171,7 +171,8 @@ func waitUntilReady(ctx context.Context, retryInterval time.Duration, check func
 	for {
 		if err := check(ctx); err == nil {
 			return nil
-		} else {
+		} else if lastErr == nil || ctx.Err() == nil || !errors.Is(err, ctx.Err()) {
+			// 启动截止触发的取消错误不覆盖此前独立探测错误,便于排查实际连接失败。
 			lastErr = err
 		}
 
@@ -179,7 +180,7 @@ func waitUntilReady(ctx context.Context, retryInterval time.Duration, check func
 		select {
 		case <-ctx.Done():
 			timer.Stop()
-			return fmt.Errorf("等待 PostgreSQL 就绪超时: %w", errors.Join(lastErr, ctx.Err()))
+			return fmt.Errorf("等待 PostgreSQL 就绪失败: %w", errors.Join(lastErr, ctx.Err()))
 		case <-timer.C:
 		}
 	}

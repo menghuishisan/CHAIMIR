@@ -29,7 +29,6 @@ export function gradeAppealStatusTone(status: GradeAppealStatus): StatusTone {
 const WARNING_STATUS_TONES: Record<GradeWarningStatus, StatusTone> = {
   [GradeWarningStatus.PENDING]: 'warning',
   [GradeWarningStatus.ACKNOWLEDGED]: 'success',
-  [GradeWarningStatus.NOTIFY_FAILED]: 'danger',
 }
 
 /** gradeWarningStatusTone 返回学业预警处理状态语义色。 */

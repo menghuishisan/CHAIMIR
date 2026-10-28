@@ -234,20 +234,40 @@ func (s *Service) RunJudgerSelftest(ctx context.Context, id int64) (JudgerDTO, e
 	}
 	status := JudgerSelftestPassed
 	judgerStatus := JudgerStatusAvailable
-	if err := s.executeJudgerSelftest(ctx, j); err != nil {
+	original := j
+	var executionErr error
+	if judgerNeedsSandbox(j.Type, j.RuntimeRequired) {
+		composition, ok := judgerComposition(j)
+		if !ok {
+			executionErr = apperr.ErrJudgerConfigInvalid
+		} else {
+			var snapshot contracts.SandboxCompositionSnapshot
+			snapshot, executionErr = s.compileJudgerSnapshot(ctx, composition, j.ResourceSpec)
+			if executionErr == nil {
+				j.ResourceSpec.CompositionSnapshot = snapshot
+				executionErr = s.sandbox.PrepullPlatformComposition(ctx, snapshot.Digest)
+			}
+		}
+	}
+	if executionErr == nil {
+		executionErr = s.executeJudgerSelftest(ctx, j)
+	}
+	j.ResourceSpec.DisabledReason = ""
+	if executionErr != nil {
+		logging.ErrorContext(ctx, "judger selftest failed", apperr.AsAppError(executionErr).LogString(),
+			slog.Int64("tenant_id", 0), slog.Int64("judger_id", j.ID), slog.String("judger_code", j.Code))
 		status = JudgerSelftestFailed
 		judgerStatus = JudgerStatusDisabled
+		j.ResourceSpec.DisabledReason = "判题器平台自检未通过"
 	}
-	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		var err error
-		j, err = tx.UpdateJudgerSelftest(ctx, id, status, judgerStatus)
-		if err != nil {
-			return apperr.ErrJudgerPersistFailed.WithCause(err)
-		}
-		return nil
-	}); err != nil {
+	out, updated, err := s.persistJudgerExecutionState(ctx, original, j.ResourceSpec, status, judgerStatus)
+	if err != nil {
 		return JudgerDTO{}, err
 	}
+	if !updated {
+		return JudgerDTO{}, apperr.ErrJudgerPersistFailed.WithCause(fmt.Errorf("自检期间判题器配置已变化,拒绝写回旧结果"))
+	}
+	j = out
 	if err := s.writeAuditFromContext(ctx, 0, "judge.judger.selftest", "judger", id, map[string]any{"selftest_status": status, "status": judgerStatus}); err != nil {
 		return JudgerDTO{}, err
 	}
@@ -285,7 +305,11 @@ func (s *Service) prepareSubmittedCode(ctx context.Context, req contracts.JudgeS
 	if err != nil {
 		return "", nil, nil, apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
 	}
-	vector, err := fingerprintVectorFromArchive(codeName, codeData, limits)
+	sanitizedCode, err = workload.SanitizeWorkspaceArchive(sanitizedCode)
+	if err != nil {
+		return "", nil, nil, apperr.ErrJudgeInputArchiveInvalid.WithCause(err)
+	}
+	vector, err := fingerprintVectorFromArchive("submission.tar", sanitizedCode, limits)
 	if err != nil {
 		return "", nil, nil, apperr.ErrFingerprintSimilarityFailed.WithCause(err)
 	}
@@ -451,7 +475,6 @@ func (s *Service) buildInputSnapshot(j Judger, spec contracts.ContentJudgeSpec, 
 func (s *Service) compileJudgerResourceSpec(ctx context.Context, req JudgerRequest, execution JudgerExecutionSpec) (JudgerResourceSpec, error) {
 	spec := JudgerResourceSpec{
 		GenesisRef:        strings.TrimSpace(execution.GenesisRef),
-		Composition:       req.Composition,
 		InitScriptRef:     strings.TrimSpace(execution.InitScriptRef),
 		Command:           append([]string(nil), execution.Command...),
 		ExecTarget:        strings.TrimSpace(execution.ExecTarget),
@@ -461,22 +484,12 @@ func (s *Service) compileJudgerResourceSpec(ctx context.Context, req JudgerReque
 		SuiteArchiveName:  strings.TrimSpace(execution.SuiteArchiveName),
 		Selftest:          maps.Clone(execution.Selftest),
 	}
+	if req.Status == JudgerStatusAvailable {
+		spec.DisabledReason = "判题器等待平台自检"
+	}
 	if judgerNeedsSandbox(req.Type, req.RuntimeRequired) {
-		snapshot, err := s.sandbox.CompilePlatformSandboxComposition(ctx, req.Composition)
+		snapshot, err := s.compileJudgerSnapshot(ctx, req.Composition, spec)
 		if err != nil {
-			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
-		}
-		baseDigest := snapshot.Digest
-		snapshot.PrivateSidecars = privateSidecarsForSandbox(execution.ExecutionSidecars)
-		if err := contracts.AppendPrivateSidecarImageClosure(&snapshot); err != nil {
-			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
-		}
-		digest, digestErr := contracts.CanonicalSnapshotDigest(snapshot)
-		if digestErr != nil {
-			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(digestErr)
-		}
-		snapshot.Digest = digest
-		if err := s.sandbox.ReplacePlatformSandboxCompositionSnapshot(ctx, []string{baseDigest}, snapshot); err != nil {
 			return JudgerResourceSpec{}, apperr.ErrJudgerConfigInvalid.WithCause(err)
 		}
 		spec.CompositionSnapshot = snapshot

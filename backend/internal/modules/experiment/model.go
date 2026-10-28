@@ -229,17 +229,17 @@ type ExperimentStatsSnapshot struct {
 	ActiveInstanceCount int64
 }
 
-// ExperimentScoreOutbox 是实验得分事件的生产者 outbox 记录。
-type ExperimentScoreOutbox struct {
+// ExperimentEventOutbox 是M7绑定与得分共用的持久化事件，不在重投时重新组装载荷。
+type ExperimentEventOutbox struct {
 	ID            int64
 	TenantID      int64
 	ExperimentID  int64
-	InstanceID    int64
-	StudentID     int64
-	Score         float64
-	ScoreRevision int32
+	AggregateID   int64
+	EventRevision int64
+	Subject       string
+	Payload       []byte
 	TraceID       string
-	ScoredAt      time.Time
+	OccurredAt    time.Time
 	Status        int16
 	RetryCount    int32
 	LastError     string

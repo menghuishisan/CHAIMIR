@@ -24,13 +24,15 @@ func (s *Service) GetMe(ctx context.Context) (MeResponse, error) {
 		return s.getPlatformMe(ctx, id.AccountID)
 	}
 	var account Account
+	var current Tenant
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		row, err := tx.GetAccount(ctx, id.AccountID)
 		if err != nil {
 			return err
 		}
 		account = row
-		return nil
+		current, err = tx.GetTenantByID(ctx, id.TenantID)
+		return err
 	}); err != nil {
 		return MeResponse{}, apperr.ErrIdentitySessionInvalid.WithCause(err)
 	}
@@ -38,7 +40,11 @@ func (s *Service) GetMe(ctx context.Context) (MeResponse, error) {
 	if err != nil {
 		return MeResponse{}, apperr.ErrInternal.WithCause(err)
 	}
-	return MeResponse{Account: ToAccountDTO(account, phone)}, nil
+	modules, err := enabledTenantModules(current.FeatureFlags)
+	if err != nil {
+		return MeResponse{}, err
+	}
+	return MeResponse{Account: ToAccountDTO(account, phone), EnabledModules: modules}, nil
 }
 
 // ChangeMyPassword 校验旧密码后更新为新密码,保留当前会话并吊销其他设备会话。
@@ -182,7 +188,7 @@ func (s *Service) getPlatformMe(ctx context.Context, accountID int64) (MeRespons
 	}); err != nil {
 		return MeResponse{}, apperr.ErrIdentitySessionInvalid.WithCause(err)
 	}
-	return MeResponse{Account: AccountDTO{ID: ids.ID(admin.ID), Name: admin.Name, Roles: []int16{contracts.RoleNumPlatformAdmin}, Status: admin.Status}}, nil
+	return MeResponse{Account: AccountDTO{ID: ids.ID(admin.ID), Name: admin.Name, Roles: []int16{contracts.RoleNumPlatformAdmin}, Status: admin.Status}, EnabledModules: []string{}}, nil
 }
 
 // changePlatformPassword 校验平台管理员旧密码并保留当前会话、吊销其他会话。

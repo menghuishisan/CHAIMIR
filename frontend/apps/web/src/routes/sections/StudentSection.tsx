@@ -13,20 +13,31 @@ import { ImmersiveLayout } from '../../layouts/immersive/ImmersiveLayout'
 import { RoleNotFoundPage } from '../../components/StatusPages'
 import { studentNavigation } from './studentNavigation'
 import { STUDENT_IMMERSIVE_ROUTES } from './studentImmersiveRoutes'
+import { useSession } from '../../components/RoleGuard/session'
+import { TenantModuleGuard } from '../../components/RoleGuard/TenantModuleGuard'
+import { availableRoleNavigation } from '../../layouts/main/navigation'
 
 /* 日常页:按侧栏入口与其深页组织,路径只存在于本打包块 */
 const StudentCoursesPage = lazy(() => import('../../features/teaching/pages/student/courses'))
-const StudentCourseDetailPage = lazy(() => import('../../features/teaching/pages/student/course-detail'))
+const StudentCourseDetailPage = lazy(
+  () => import('../../features/teaching/pages/student/course-detail')
+)
 const StudentLessonPage = lazy(() => import('../../features/teaching/pages/student/lesson'))
 const StudentAssignmentPage = lazy(() => import('../../features/teaching/pages/student/assignment'))
-const StudentSubmissionsPage = lazy(() => import('../../features/teaching/pages/student/submissions'))
-const StudentExperimentsPage = lazy(() => import('../../features/experiment/pages/student/experiments'))
+const StudentSubmissionsPage = lazy(
+  () => import('../../features/teaching/pages/student/submissions')
+)
+const StudentExperimentsPage = lazy(
+  () => import('../../features/experiment/pages/student/experiments')
+)
 const StudentExperimentDetailPage = lazy(
-  () => import('../../features/experiment/pages/student/experiment-detail'),
+  () => import('../../features/experiment/pages/student/experiment-detail')
 )
 const StudentSimulationsPage = lazy(() => import('../../features/sim/pages/student/simulations'))
 const StudentContestsPage = lazy(() => import('../../features/contest/pages/student/contests'))
-const StudentContestDetailPage = lazy(() => import('../../features/contest/pages/student/contest-detail'))
+const StudentContestDetailPage = lazy(
+  () => import('../../features/contest/pages/student/contest-detail')
+)
 const StudentRecordsPage = lazy(() => import('../../features/contest/pages/student/records'))
 const StudentGradesPage = lazy(() => import('../../features/grade/pages/student/grades'))
 const StudentAlertsPage = lazy(() => import('../../features/grade/pages/student/alerts'))
@@ -38,11 +49,11 @@ const ProfilePage = lazy(() => import('../../features/identity/pages/profile/pro
 
 /* 沉浸态四条:各自独立成块,只有真的进工作台才下载(Monaco/xterm 都在这些块里) */
 const StudentExperimentWorkspacePage = lazy(
-  () => import('../../features/experiment/pages/student/workspace'),
+  () => import('../../features/experiment/pages/student/workspace')
 )
 const StudentSimWorkspacePage = lazy(() => import('../../features/sim/pages/student/workspace'))
 const StudentContestWorkspacePage = lazy(
-  () => import('../../features/contest/pages/student/workspace'),
+  () => import('../../features/contest/pages/student/workspace')
 )
 const StudentContestReplayPage = lazy(() => import('../../features/contest/pages/student/replay'))
 
@@ -52,55 +63,62 @@ const StudentContestReplayPage = lazy(() => import('../../features/contest/pages
  * 因此这些路径只存在于本块,不会进入入口包。
  */
 export default function StudentSection() {
+  const { me } = useSession()
+  const navigation = availableRoleNavigation(studentNavigation, me.enabled_modules)
   return (
-    <Routes>
-      <Route element={<MainLayout config={studentNavigation} />}>
-        {/* 区根落到侧栏第一个功能页(FE-5:无仪表盘落地页) */}
-        <Route index element={<Navigate to={studentNavigation.homePath} replace />} />
+    <TenantModuleGuard config={studentNavigation}>
+      <Routes>
+        <Route element={<MainLayout config={navigation} />}>
+          {/* 区根落到侧栏第一个功能页(FE-5:无仪表盘落地页) */}
+          <Route index element={<Navigate to={navigation.homePath} replace />} />
 
-        <Route path="courses" element={<StudentCoursesPage />} />
-        <Route path="courses/:courseId" element={<StudentCourseDetailPage />} />
-        <Route path="courses/:courseId/lessons/:lessonId" element={<StudentLessonPage />} />
-        <Route path="courses/:courseId/assignments/:assignmentId" element={<StudentAssignmentPage />} />
-        <Route
-          path="courses/:courseId/assignments/:assignmentId/submissions"
-          element={<StudentSubmissionsPage />}
-        />
+          <Route path="courses" element={<StudentCoursesPage />} />
+          <Route path="courses/:courseId" element={<StudentCourseDetailPage />} />
+          <Route path="courses/:courseId/lessons/:lessonId" element={<StudentLessonPage />} />
+          <Route
+            path="courses/:courseId/assignments/:assignmentId"
+            element={<StudentAssignmentPage />}
+          />
+          <Route
+            path="courses/:courseId/assignments/:assignmentId/submissions"
+            element={<StudentSubmissionsPage />}
+          />
 
-        <Route path="experiments" element={<StudentExperimentsPage />} />
-        <Route path="experiments/:experimentId" element={<StudentExperimentDetailPage />} />
+          <Route path="experiments" element={<StudentExperimentsPage />} />
+          <Route path="experiments/:experimentId" element={<StudentExperimentDetailPage />} />
 
-        <Route path="simulations" element={<StudentSimulationsPage />} />
+          <Route path="simulations" element={<StudentSimulationsPage />} />
 
-        <Route path="contests" element={<StudentContestsPage />} />
-        <Route path="contests/:contestId" element={<StudentContestDetailPage />} />
-        <Route path="records" element={<StudentRecordsPage />} />
+          <Route path="contests" element={<StudentContestsPage />} />
+          <Route path="contests/:contestId" element={<StudentContestDetailPage />} />
+          <Route path="records" element={<StudentRecordsPage />} />
 
-        <Route path="grades" element={<StudentGradesPage />} />
-        <Route path="alerts" element={<StudentAlertsPage />} />
+          <Route path="grades" element={<StudentGradesPage />} />
+          <Route path="alerts" element={<StudentAlertsPage />} />
 
-        {/* 顶栏派生的三条共享路径(壳层按 pathPrefix 推导,必须在此注册) */}
-        <Route path="notifications" element={<NotificationInboxPage />} />
-        <Route path="tasks" element={<TransferTasksPage />} />
-        <Route path="profile" element={<ProfilePage canChangePhone />} />
+          {/* 顶栏派生的三条共享路径(壳层按 pathPrefix 推导,必须在此注册) */}
+          <Route path="notifications" element={<NotificationInboxPage />} />
+          <Route path="tasks" element={<TransferTasksPage />} />
+          <Route path="profile" element={<ProfilePage canChangePhone />} />
 
-        <Route path="*" element={<RoleNotFoundPage homePath={studentNavigation.homePath} />} />
-      </Route>
+          <Route path="*" element={<RoleNotFoundPage homePath={navigation.homePath} />} />
+        </Route>
 
-      {/*
-        沉浸态与上面的 MainLayout 并列:同一个角色区内的第二个壳。
-        路径写全(不含角色前缀,父级已挂 /student/*),与 immersiveRoutes.ts 的登记逐字对应 ——
-        标题与退出目标由那份登记提供,工作台本身不推断自己该退到哪。
-      */}
-      <Route element={<ImmersiveLayout routes={STUDENT_IMMERSIVE_ROUTES} />}>
-        <Route
-          path="experiments/:experimentId/workspace"
-          element={<StudentExperimentWorkspacePage />}
-        />
-        <Route path="simulations/:packageCode/workspace" element={<StudentSimWorkspacePage />} />
-        <Route path="contests/:contestId/workspace" element={<StudentContestWorkspacePage />} />
-        <Route path="contests/:contestId/replay" element={<StudentContestReplayPage />} />
-      </Route>
-    </Routes>
+        {/*
+          沉浸态与上面的 MainLayout 并列:同一个角色区内的第二个壳。
+          路径写全(不含角色前缀,父级已挂 /student/*),与 immersiveRoutes.ts 的登记逐字对应 ——
+          标题与退出目标由那份登记提供,工作台本身不推断自己该退到哪。
+        */}
+        <Route element={<ImmersiveLayout routes={STUDENT_IMMERSIVE_ROUTES} />}>
+          <Route
+            path="experiments/:experimentId/workspace"
+            element={<StudentExperimentWorkspacePage />}
+          />
+          <Route path="simulations/:packageCode/workspace" element={<StudentSimWorkspacePage />} />
+          <Route path="contests/:contestId/workspace" element={<StudentContestWorkspacePage />} />
+          <Route path="contests/:contestId/replay" element={<StudentContestReplayPage />} />
+        </Route>
+      </Routes>
+    </TenantModuleGuard>
   )
 }

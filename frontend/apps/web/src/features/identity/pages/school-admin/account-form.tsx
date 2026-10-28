@@ -29,6 +29,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { baseIdentityLabel } from '../../../../utils/labels/identity'
@@ -56,13 +57,14 @@ export function AccountFormModal({ account, onClose, onSaved }: AccountFormModal
   const [phone, setPhone] = useState('')
   const [no, setNo] = useState(account?.no ?? '')
   const [baseIdentity, setBaseIdentity] = useState(String(account?.base_identity ?? BaseIdentity.STUDENT))
-  const [orgId, setOrgId] = useState('')
-  const [enrollmentYear, setEnrollmentYear] = useState(String(new Date().getFullYear()))
+  const [orgId, setOrgId] = useState(account?.org_id ?? '')
+  const [enrollmentYear, setEnrollmentYear] = useState(
+    account ? String(account.enrollment_year ?? '') : String(new Date().getFullYear()),
+  )
   const [title, setTitle] = useState(account?.title ?? '')
   const [useActivation, setUseActivation] = useState(true)
   const [initialPassword, setInitialPassword] = useState('')
 
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
   const [activationCode, setActivationCode] = useState<string>()
@@ -87,7 +89,7 @@ export function AccountFormModal({ account, onClose, onSaved }: AccountFormModal
   }, [isTeacher, org.data])
 
   /** validate 按后端 CreateAccountByAdmin 的要求校验必填项。 */
-  const validate = useCallback((): boolean => {
+  const { errors, validate } = useFormValidation(useCallback(() => {
     const year = Number(enrollmentYear)
     const next: Record<string, string | null> = {
       name: name.trim() === '' ? '请输入姓名' : null,
@@ -111,9 +113,8 @@ export function AccountFormModal({ account, onClose, onSaved }: AccountFormModal
           : null
     }
 
-    setErrors(next)
-    return Object.values(next).every((value) => value === null)
-  }, [editing, enrollmentYear, initialPassword, isTeacher, name, no, orgId, phone, useActivation])
+    return next
+  }, [editing, enrollmentYear, initialPassword, isTeacher, name, no, orgId, phone, useActivation]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {

@@ -54,6 +54,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDate, formatGpa } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
@@ -223,6 +224,13 @@ interface LevelConfigFormModalProps {
   onSaved: () => void
 }
 
+/** LevelRuleDraft 保留数字字段的原始编辑文本,空白不能当作零分档位或零绩点。 */
+interface LevelRuleDraft {
+  min: string
+  grade: string
+  gpa: string
+}
+
 /**
  * LevelConfigFormModal 维护一套等级映射。
  * 校验按后端匹配逻辑要求:至少一档、分数区间不重复、最低一档要覆盖到 0 分。
@@ -231,53 +239,52 @@ function LevelConfigFormModal({ config, onClose, onSaved }: LevelConfigFormModal
   const editing = config !== undefined
   const [name, setName] = useState(config?.name ?? '')
   const [isDefault, setIsDefault] = useState(config?.is_default ?? false)
-  const [rules, setRules] = useState<LevelRule[]>(
-    config ? [...config.mapping].sort((a, b) => b.min - a.min) : defaultRules(),
+  const [rules, setRules] = useState<LevelRuleDraft[]>(
+    (config ? [...config.mapping].sort((a, b) => b.min - a.min) : defaultRules())
+      .map((rule) => ({ ...rule, min: String(rule.min), gpa: String(rule.gpa) })),
   )
   const [failCount, setFailCount] = useState(String(config?.warning_rules.fail_count ?? 2))
   const [minGpa, setMinGpa] = useState(String(config?.warning_rules.min_gpa ?? 2))
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
+  const { errors, validate } = useFormValidation(() => {
+    const next: Record<string, string | null> = {
+      name: name.trim() ? null : '请输入规则名称',
+      failCount: failCount.trim() === '' || !Number.isInteger(Number(failCount)) || Number(failCount) < 0
+        ? '不及格门数上限要填写 0 或更大的整数' : null,
+      minGpa: minGpa.trim() === '' || !Number.isFinite(Number(minGpa)) || Number(minGpa) < 0 || Number(minGpa) > 4
+        ? '绩点下限要填写 0 到 4 之间的数字' : null,
+    }
+    const mins = rules.map((rule) => Number(rule.min))
+    next.mapping = rules.length === 0 ? '至少要有一档等级'
+      : !rules.some((rule) => rule.min.trim() !== '' && Number(rule.min) === 0)
+        ? '最低一档的分数下限要是 0,否则低分成绩无法换算' : null
+    rules.forEach((rule, index) => {
+      const min = Number(rule.min), gpa = Number(rule.gpa)
+      next[`min-${index}`] = rule.min.trim() === '' || !Number.isFinite(min) || min < 0 || min > 100
+        ? '分数下限要填写 0 到 100 之间的数字'
+        : mins.some((value, i) => i !== index && value === min) ? '有两档的分数下限相同,请调整' : null
+      next[`grade-${index}`] = rule.grade.trim() ? null : '请输入等级名称'
+      next[`gpa-${index}`] = rule.gpa.trim() === '' || !Number.isFinite(gpa) || gpa < 0 || gpa > 4
+        ? '绩点要填写 0 到 4 之间的数字'
+        : min > 0 && gpa === 0 ? '非最低档的绩点需要大于 0' : null
+    })
+    return next
+  })
+
   const submit = useCallback(async () => {
-    if (name.trim() === '') {
-      setFormError('请输入规则名称')
-      return
-    }
-    if (rules.length === 0) {
-      setFormError('至少要有一档等级')
-      return
-    }
-    if (rules.some((rule) => rule.grade.trim() === '')) {
-      setFormError('每一档都要填等级名称')
-      return
-    }
-    const mins = rules.map((rule) => rule.min)
-    if (new Set(mins).size !== mins.length) {
-      setFormError('有两档的分数下限相同,请调整')
-      return
-    }
-    if (Math.min(...mins) !== 0) {
-      setFormError('最低一档的分数下限要是 0,否则低分成绩无法换算')
-      return
-    }
+    if (working || !validate()) return
     const fail = Number(failCount)
     const gpa = Number(minGpa)
-    if (!Number.isInteger(fail) || fail < 0) {
-      setFormError('不及格门数上限要是 0 或更大的整数')
-      return
-    }
-    if (!Number.isFinite(gpa) || gpa < 0) {
-      setFormError('绩点下限要是 0 或更大的数字')
-      return
-    }
 
     setFormError(undefined)
     setWorking(true)
     try {
       const payload = {
         name: name.trim(),
-        mapping: [...rules].sort((a, b) => b.min - a.min),
+        mapping: rules.map((rule) => ({ ...rule, min: Number(rule.min), gpa: Number(rule.gpa) }))
+          .sort((a, b) => b.min - a.min),
         warning_rules: { fail_count: fail, min_gpa: gpa },
         is_default: isDefault,
       }
@@ -290,7 +297,7 @@ function LevelConfigFormModal({ config, onClose, onSaved }: LevelConfigFormModal
     } finally {
       setWorking(false)
     }
-  }, [config?.id, editing, failCount, isDefault, minGpa, name, onSaved, rules])
+  }, [config?.id, editing, failCount, isDefault, minGpa, name, onSaved, rules, validate, working])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -303,8 +310,8 @@ function LevelConfigFormModal({ config, onClose, onSaved }: LevelConfigFormModal
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <FormField label="规则名称" htmlFor="level-name" required>
-              <Input id="level-name" value={name} onChange={(event) => setName(event.target.value)} />
+            <FormField label="规则名称" htmlFor="level-name" required error={errors.name}>
+              <Input id="level-name" value={name} invalid={Boolean(errors.name)} onBlur={() => validate(['name'])} onChange={(event) => setName(event.target.value)} />
             </FormField>
             <FormField label="是否默认" helper="默认规则用于新课程的成绩换算">
               <Checkbox
@@ -322,7 +329,7 @@ function LevelConfigFormModal({ config, onClose, onSaved }: LevelConfigFormModal
                 variant="outline"
                 size="sm"
                 leftIcon={Plus}
-                onClick={() => setRules((current) => [...current, { min: 0, grade: '', gpa: 0 }])}
+                onClick={() => setRules((current) => [...current, { min: '0', grade: '', gpa: '0' }])}
               >
                 添加档位
               </Button>
@@ -335,35 +342,42 @@ function LevelConfigFormModal({ config, onClose, onSaved }: LevelConfigFormModal
               <div className="flex flex-col divide-y divide-line">
                 {rules.map((rule, index) => (
                   <div key={index} className="flex flex-wrap items-end gap-2 py-3 first:pt-0 last:pb-0">
-                    <FormField label="不低于" htmlFor={`rule-min-${index}`} className="mb-0 w-24">
+                    <FormField label="不低于" htmlFor={`rule-min-${index}`} className="mb-0 w-24" error={errors[`min-${index}`]}>
                       <Input
                         id={`rule-min-${index}`}
                         type="number"
                         min="0"
                         max="100"
-                        value={String(rule.min)}
+                        value={rule.min}
+                        invalid={Boolean(errors[`min-${index}`])}
+                        onBlur={() => validate([`min-${index}`])}
                         onChange={(event) =>
-                          patchRule(setRules, index, { min: Number(event.target.value) || 0 })
+                          patchRule(setRules, index, { min: event.target.value })
                         }
                       />
                     </FormField>
-                    <FormField label="等级" htmlFor={`rule-grade-${index}`} className="mb-0 w-28">
+                    <FormField label="等级" htmlFor={`rule-grade-${index}`} className="mb-0 w-28" error={errors[`grade-${index}`]}>
                       <Input
                         id={`rule-grade-${index}`}
                         value={rule.grade}
+                        invalid={Boolean(errors[`grade-${index}`])}
+                        onBlur={() => validate([`grade-${index}`])}
                         placeholder="优"
                         onChange={(event) => patchRule(setRules, index, { grade: event.target.value })}
                       />
                     </FormField>
-                    <FormField label="绩点" htmlFor={`rule-gpa-${index}`} className="mb-0 w-24">
+                    <FormField label="绩点" htmlFor={`rule-gpa-${index}`} className="mb-0 w-24" error={errors[`gpa-${index}`]}>
                       <Input
                         id={`rule-gpa-${index}`}
                         type="number"
                         min="0"
+                        max="4"
                         step="0.1"
-                        value={String(rule.gpa)}
+                        value={rule.gpa}
+                        invalid={Boolean(errors[`gpa-${index}`])}
+                        onBlur={() => validate([`gpa-${index}`])}
                         onChange={(event) =>
-                          patchRule(setRules, index, { gpa: Number(event.target.value) || 0 })
+                          patchRule(setRules, index, { gpa: event.target.value })
                         }
                       />
                     </FormField>
@@ -380,18 +394,22 @@ function LevelConfigFormModal({ config, onClose, onSaved }: LevelConfigFormModal
             )}
           </div>
 
+          {errors.mapping ? <Callout tone="danger">{errors.mapping}</Callout> : null}
           <div className="grid gap-4 well p-4 sm:grid-cols-2">
             <FormField
               label="不及格门数上限"
               htmlFor="level-fail"
               required
               helper="超过这个门数触发学业预警"
+              error={errors.failCount}
             >
               <Input
                 id="level-fail"
                 type="number"
                 min="0"
                 value={failCount}
+                invalid={Boolean(errors.failCount)}
+                onBlur={() => validate(['failCount'])}
                 onChange={(event) => setFailCount(event.target.value)}
               />
             </FormField>
@@ -400,13 +418,17 @@ function LevelConfigFormModal({ config, onClose, onSaved }: LevelConfigFormModal
               htmlFor="level-gpa"
               required
               helper="平均学分绩点低于这个值触发学业预警"
+              error={errors.minGpa}
             >
               <Input
                 id="level-gpa"
                 type="number"
                 min="0"
+                max="4"
                 step="0.1"
                 value={minGpa}
+                invalid={Boolean(errors.minGpa)}
+                onBlur={() => validate(['minGpa'])}
                 onChange={(event) => setMinGpa(event.target.value)}
               />
             </FormField>
@@ -440,9 +462,9 @@ function defaultRules(): LevelRule[] {
 
 /** patchRule 局部更新第 index 档。 */
 function patchRule(
-  setRules: React.Dispatch<React.SetStateAction<LevelRule[]>>,
+  setRules: React.Dispatch<React.SetStateAction<LevelRuleDraft[]>>,
   index: number,
-  patch: Partial<LevelRule>,
+  patch: Partial<LevelRuleDraft>,
 ): void {
   setRules((current) => current.map((rule, i) => (i === index ? { ...rule, ...patch } : rule)))
 }
@@ -694,24 +716,19 @@ function WarningRulesForm({ rules, onSaved }: WarningRulesFormProps) {
   const [minGpa, setMinGpa] = useState(String(rules.min_gpa))
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(() => ({
+    failCount: failCount.trim() === '' || !Number.isInteger(Number(failCount)) || Number(failCount) < 0
+      ? '不及格门数上限要填写 0 或更大的整数' : null,
+    minGpa: minGpa.trim() === '' || !Number.isFinite(Number(minGpa)) || Number(minGpa) < 0 || Number(minGpa) > 4
+      ? '绩点下限要填写 0 到 4 之间的数字' : null,
+  }))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (failCount.trim() === '' || minGpa.trim() === '') {
-        setFormError('请填写不及格门数上限和绩点下限')
-        return
-      }
+      if (working || !validate()) return
       const fail = Number(failCount)
       const gpa = Number(minGpa)
-      if (!Number.isInteger(fail) || fail < 0) {
-        setFormError('不及格门数上限要是 0 或更大的整数')
-        return
-      }
-      if (!Number.isFinite(gpa) || gpa < 0) {
-        setFormError('绩点下限要是 0 或更大的数字')
-        return
-      }
       setFormError(undefined)
       setWorking(true)
       try {
@@ -724,7 +741,7 @@ function WarningRulesForm({ rules, onSaved }: WarningRulesFormProps) {
         setWorking(false)
       }
     },
-    [failCount, minGpa, onSaved],
+    [failCount, minGpa, onSaved, validate, working],
   )
 
   return (
@@ -738,12 +755,15 @@ function WarningRulesForm({ rules, onSaved }: WarningRulesFormProps) {
               htmlFor="warning-fail"
               required
               helper="学生不及格课程超过这个门数即触发预警"
+              error={errors.failCount}
             >
               <Input
                 id="warning-fail"
                 type="number"
                 min="0"
                 value={failCount}
+                invalid={Boolean(errors.failCount)}
+                onBlur={() => validate(['failCount'])}
                 onChange={(event) => setFailCount(event.target.value)}
               />
             </FormField>
@@ -752,13 +772,17 @@ function WarningRulesForm({ rules, onSaved }: WarningRulesFormProps) {
               htmlFor="warning-gpa"
               required
               helper="平均学分绩点低于这个值即触发预警"
+              error={errors.minGpa}
             >
               <Input
                 id="warning-gpa"
                 type="number"
                 min="0"
+                max="4"
                 step="0.1"
                 value={minGpa}
+                invalid={Boolean(errors.minGpa)}
+                onBlur={() => validate(['minGpa'])}
                 onChange={(event) => setMinGpa(event.target.value)}
               />
             </FormField>

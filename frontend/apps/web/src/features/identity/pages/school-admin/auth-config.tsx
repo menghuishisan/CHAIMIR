@@ -36,6 +36,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
 /** CAS 配置里的键(后端 validateSSOConfig 读 server_url)。 */
@@ -62,6 +63,7 @@ const MATCH_FIELD_LABELS: Record<SsoMatchField, string> = {
  */
 export default function SchoolAdminAuthConfigPage() {
   const configs = useAsyncResource(() => api.identity.listSSOConfigs(), [], () => false)
+  const [activeTab, setActiveTab] = useState('cas')
 
   const byType = useMemo(() => {
     const map = new Map<SsoType, SSOConfig>()
@@ -85,61 +87,64 @@ export default function SchoolAdminAuthConfigPage() {
         emptyDescription="下面两种方式各配一套即可。只用平台账号密码登录的学校不需要配置。"
         skeleton={<Skeleton variant="line" lines={5} />}
       >
-        {() => null}
-      </ResourceState>
-
-      <div className="mb-6 grid gap-4 sm:grid-cols-2">
-        {([SsoType.CAS, SsoType.LDAP] as const).map((type) => {
-          const config = byType.get(type)
-          const label = type === SsoType.CAS ? '学校统一认证(CAS)' : '目录服务(LDAP)'
-          return (
-            <div key={type} className="rounded-lg border border-border bg-surface p-4 shadow-xs">
-              <div className="flex items-center justify-between gap-3">
-                <p className="font-medium text-ink">{label}</p>
-                <Badge tone={config?.enabled ? 'success' : 'neutral'}>
-                  {config?.enabled ? '已启用' : config ? '已配置未启用' : '未配置'}
-                </Badge>
-              </div>
-              <p className="mt-2 text-sm leading-relaxed text-ink-sub">
-                {config
-                  ? '参数已保存；是否实际生效由租户配置页的登录方式决定。'
-                  : '先在下方填写参数并保存，再到租户配置页切换登录方式。'}
-              </p>
+        {/* 表单只在权威快照就绪后挂载；重新读取时卸载，避免空初值或旧编辑态覆盖已保存配置。 */}
+        {() => (
+          <>
+            <div className="mb-6 grid gap-4 sm:grid-cols-2">
+              {([SsoType.CAS, SsoType.LDAP] as const).map((type) => {
+                const config = byType.get(type)
+                const label = type === SsoType.CAS ? '学校统一认证(CAS)' : '目录服务(LDAP)'
+                return (
+                  <div key={type} className="rounded-lg border border-border bg-surface p-4 shadow-xs">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="font-medium text-ink">{label}</p>
+                      <Badge tone={config?.enabled ? 'success' : 'neutral'}>
+                        {config?.enabled ? '已启用' : config ? '已配置未启用' : '未配置'}
+                      </Badge>
+                    </div>
+                    <p className="mt-2 text-sm leading-relaxed text-ink-sub">
+                      {config
+                        ? '参数已保存；是否实际生效由租户配置页的登录方式决定。'
+                        : '先在下方填写参数并保存，再到租户配置页切换登录方式。'}
+                    </p>
+                  </div>
+                )
+              })}
             </div>
-          )
-        })}
-      </div>
 
-      {/*
-        归族:配置表单族(§6.5.3 第 ③)。两种认证方式是两套互不相干的参数、两次独立提交,
-        故用 Tabs 让一次只出现一套表单 —— 这样底部粘性保存条也只服务当前那一套。
-        并排两张卡各带一个保存按钮时,「我改的是哪一套、存的是哪一套」要靠位置去猜。
-        学校在租户配置页选定的登录方式只有一种,故一次只配一套是常态。
-      */}
-      <Tabs defaultValue="cas">
-        <TabsList aria-label="认证方式">
-          <TabsTrigger value="cas">学校统一认证(CAS)</TabsTrigger>
-          <TabsTrigger value="ldap">目录服务(LDAP)</TabsTrigger>
-        </TabsList>
+            {/*
+              归族:配置表单族(§6.5.3 第 ③)。两种认证方式是两套互不相干的参数、两次独立提交,
+              故用 Tabs 让一次只出现一套表单 —— 这样底部粘性保存条也只服务当前那一套。
+              并排两张卡各带一个保存按钮时,「我改的是哪一套、存的是哪一套」要靠位置去猜。
+              学校在租户配置页选定的登录方式只有一种,故一次只配一套是常态。
+            */}
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList aria-label="认证方式">
+                <TabsTrigger value="cas">学校统一认证(CAS)</TabsTrigger>
+                <TabsTrigger value="ldap">目录服务(LDAP)</TabsTrigger>
+              </TabsList>
 
-        <TabsContent value="cas">
-          <p className="mb-4 text-sm text-ink-sub">
-            师生跳转到学校的统一认证页登录,回跳后按名单匹配到平台账号。
-          </p>
-          <CasConfigCard config={byType.get(SsoType.CAS)} onSaved={configs.reload} />
-        </TabsContent>
+              <TabsContent value="cas">
+                <p className="mb-4 text-sm text-ink-sub">
+                  师生跳转到学校的统一认证页登录,回跳后按名单匹配到平台账号。
+                </p>
+                <CasConfigCard config={byType.get(SsoType.CAS)} onSaved={configs.reload} />
+              </TabsContent>
 
-        <TabsContent value="ldap">
-          <p className="mb-4 text-sm text-ink-sub">
-            在平台登录页输入校内账号密码,由平台向目录服务校验。
-          </p>
-          <LdapConfigCard config={byType.get(SsoType.LDAP)} onSaved={configs.reload} />
-        </TabsContent>
-      </Tabs>
+              <TabsContent value="ldap">
+                <p className="mb-4 text-sm text-ink-sub">
+                  在平台登录页输入校内账号密码,由平台向目录服务校验。
+                </p>
+                <LdapConfigCard config={byType.get(SsoType.LDAP)} onSaved={configs.reload} />
+              </TabsContent>
+            </Tabs>
 
-      <Callout tone="info" className="mt-4">
-        配置只是接入参数。要让师生真正用这种方式登录,还要在租户配置页把登录方式切换过来。
-      </Callout>
+            <Callout tone="info" className="mt-4">
+              配置只是接入参数。要让师生真正用这种方式登录,还要在租户配置页把登录方式切换过来。
+            </Callout>
+          </>
+        )}
+      </ResourceState>
     </PageScaffold>
   )
 }
@@ -160,13 +165,16 @@ function CasConfigCard({ config, onSaved }: ConfigCardProps) {
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    serverUrl: isHttpsUrl(serverUrl)
+      ? null
+      : '统一认证服务器地址要以 https:// 开头,且必须是公网可访问的地址',
+  }), [serverUrl]))
+
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (!isHttpsUrl(serverUrl)) {
-        setFormError('统一认证服务器地址要以 https:// 开头,且必须是公网可访问的地址')
-        return
-      }
+      if (!validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -184,7 +192,7 @@ function CasConfigCard({ config, onSaved }: ConfigCardProps) {
         setWorking(false)
       }
     },
-    [enabled, matchField, onSaved, serverUrl],
+    [enabled, matchField, onSaved, serverUrl, validate],
   )
 
   /** 未保存改动数:逐项与服务端配置比对(§6.5.3 第 ③ 族的保存态要「改了几处」) */
@@ -210,12 +218,15 @@ function CasConfigCard({ config, onSaved }: ConfigCardProps) {
             htmlFor="cas-server"
             required
             helper="必须是 https 且公网可访问;内网地址会被拒绝"
+            error={errors.serverUrl}
           >
             <Input
               id="cas-server"
               value={serverUrl}
               placeholder="https://sso.example.edu/cas"
               onChange={(event) => setServerUrl(event.target.value)}
+              onBlur={() => validate(['serverUrl'])}
+              invalid={!!errors.serverUrl}
             />
           </FormField>
 
@@ -279,24 +290,25 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
+  const { errors, validate, reset: resetValidation } = useFormValidation(useCallback(() => ({
+    url: url.trim().startsWith('ldaps://')
+      ? null
+      : '目录服务地址要以 ldaps:// 开头 —— 明文 LDAP 不被接受',
+    bindDn: bindDn.trim() === '' ? '请填写绑定账号' : null,
+    bindPassword: bindPassword === '' ? '请填写绑定密码' : null,
+    baseDn: baseDn.trim() === '' ? '请填写搜索基准' : null,
+    userFilter: userFilter.trim() === ''
+      ? '请填写用户过滤式'
+      : !userFilter.includes('{username}')
+        ? '请在用户过滤式中用 {username} 代表登录名'
+        : null,
+    matchAttribute: matchAttribute.trim() === '' ? '请填写匹配属性' : null,
+  }), [baseDn, bindDn, bindPassword, matchAttribute, url, userFilter]))
+
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (!url.trim().startsWith('ldaps://')) {
-        setFormError('目录服务地址要以 ldaps:// 开头 —— 明文 LDAP 不被接受')
-        return
-      }
-      const missing = [
-        bindDn.trim() === '' ? '绑定账号' : '',
-        bindPassword === '' ? '绑定密码' : '',
-        baseDn.trim() === '' ? '搜索基准' : '',
-        userFilter.trim() === '' ? '用户过滤式' : '',
-        matchAttribute.trim() === '' ? '匹配属性' : '',
-      ].filter(Boolean)
-      if (missing.length > 0) {
-        setFormError(`还需要填写:${missing.join('、')}`)
-        return
-      }
+      if (!validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -315,6 +327,7 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
         })
         toast.success('目录服务配置已保存')
         setBindPassword('')
+        resetValidation()
         onSaved()
       } catch (error) {
         setFormError(userFacingErrorMessage(error, '保存没有成功,请检查服务器参数后重试。'))
@@ -322,7 +335,7 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
         setWorking(false)
       }
     },
-    [baseDn, bindDn, bindPassword, enabled, matchAttribute, matchField, onSaved, url, userFilter],
+    [baseDn, bindDn, bindPassword, enabled, matchAttribute, matchField, onSaved, resetValidation, url, userFilter, validate],
   )
 
   /**
@@ -356,12 +369,15 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
             htmlFor="ldap-url"
             required
             helper="必须是 ldaps://(加密连接),明文 LDAP 不被接受"
+            error={errors.url}
           >
             <Input
               id="ldap-url"
               value={url}
               placeholder="ldaps://ldap.example.edu:636"
               onChange={(event) => setUrl(event.target.value)}
+              onBlur={() => validate(['url'])}
+              invalid={!!errors.url}
             />
           </FormField>
 
@@ -371,18 +387,22 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
               htmlFor="ldap-bind-dn"
               required
               helper="用于查询用户的服务账号"
+              error={errors.bindDn}
             >
               <Input
                 id="ldap-bind-dn"
                 value={bindDn}
                 placeholder="cn=svc,dc=example,dc=edu"
                 onChange={(event) => setBindDn(event.target.value)}
+                onBlur={() => validate(['bindDn'])}
+                invalid={!!errors.bindDn}
               />
             </FormField>
             <FormField
               label="绑定密码"
               htmlFor="ldap-bind-password"
               required
+              error={errors.bindPassword}
               helper={
                 configured
                   ? '已保存的密码不会回显,每次保存都需要重新填写'
@@ -395,6 +415,8 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
                 value={bindPassword}
                 autoComplete="new-password"
                 onChange={(event) => setBindPassword(event.target.value)}
+                onBlur={() => validate(['bindPassword'])}
+                invalid={!!errors.bindPassword}
               />
             </FormField>
           </div>
@@ -405,25 +427,31 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
               htmlFor="ldap-base-dn"
               required
               helper="从哪个节点开始搜索用户"
+              error={errors.baseDn}
             >
               <Input
                 id="ldap-base-dn"
                 value={baseDn}
                 placeholder="ou=people,dc=example,dc=edu"
                 onChange={(event) => setBaseDn(event.target.value)}
+                onBlur={() => validate(['baseDn'])}
+                invalid={!!errors.baseDn}
               />
             </FormField>
             <FormField
               label="用户过滤式"
               htmlFor="ldap-filter"
               required
-              helper="按什么条件定位用户,用 %s 代表登录名"
+              helper="按什么条件定位用户,用 {username} 代表登录名"
+              error={errors.userFilter}
             >
               <Input
                 id="ldap-filter"
                 value={userFilter}
-                placeholder="(uid=%s)"
+                placeholder="(uid={username})"
                 onChange={(event) => setUserFilter(event.target.value)}
+                onBlur={() => validate(['userFilter'])}
+                invalid={!!errors.userFilter}
               />
             </FormField>
           </div>
@@ -434,12 +462,15 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
               htmlFor="ldap-attribute"
               required
               helper="从目录里读哪个属性用于对应平台账号"
+              error={errors.matchAttribute}
             >
               <Input
                 id="ldap-attribute"
                 value={matchAttribute}
                 placeholder="employeeNumber"
                 onChange={(event) => setMatchAttribute(event.target.value)}
+                onBlur={() => validate(['matchAttribute'])}
+                invalid={!!errors.matchAttribute}
               />
             </FormField>
             <FormField label="名单匹配方式" required helper="匹配属性的值按这个字段对应到平台账号">

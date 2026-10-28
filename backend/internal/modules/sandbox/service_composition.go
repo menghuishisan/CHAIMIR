@@ -6,15 +6,21 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"sort"
-	"strconv"
 	"strings"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
+)
+
+// 连接匹配错误供预览排除不适用的目标;最终编译仍将其作为明确错误返回。
+var (
+	errCompositionEndpointNotFound = errors.New("组合连接端点不存在")
+	errCompositionProtocolMismatch = errors.New("组合连接协议不匹配")
 )
 
 // CompileSandboxComposition 校验声明并锁定全部 runtime 实例、工具和基础设施的镜像闭包。
@@ -81,117 +87,20 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 	}
 	var snapshot contracts.SandboxCompositionSnapshot
 	err := store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
-		runtimePlans := make([]RuntimePlan, 0, len(spec.Runtimes))
-		runtimeAdapters := make(map[string]AdapterSpec, len(spec.Runtimes))
-		runtimeCapabilities := make([]CapabilityConstraints, 0, len(spec.Runtimes))
-		for _, ref := range spec.Runtimes {
-			instance := strings.TrimSpace(ref.InstanceCode)
-			runtime, err := tx.GetRuntimeByCode(ctx, strings.TrimSpace(ref.Code))
-			if err != nil {
-				return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
-			}
-			if runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
-				return fmt.Errorf("运行时 %s 尚未通过平台自检", runtime.Code)
-			}
-			if err := validateComponentParams(ref.Params, runtime.AdapterSpec.Capabilities.ConfigSchema); err != nil {
-				return fmt.Errorf("运行时 %s 参数无效: %w", runtime.Code, err)
-			}
-			image, err := tx.GetRuntimeImageByVersionForShare(ctx, runtime.ID, strings.TrimSpace(ref.ImageVersion))
-			if err != nil {
-				return apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
-			}
-			runtimePlans = append(runtimePlans, RuntimePlan{InstanceCode: instance, Runtime: runtime, Image: image})
-			runtimeAdapters[instance] = runtime.AdapterSpec
-			runtimeCapabilities = append(runtimeCapabilities, runtime.AdapterSpec.Capabilities)
-		}
-		if len(runtimePlans) == 0 {
-			return fmt.Errorf("组合至少声明一个 runtime 实例")
-		}
-		if err := validateRuntimeVolumeDomains(runtimePlans); err != nil {
-			return err
-		}
-		aggregatedCapabilities := aggregateRuntimeCapabilities(runtimeCapabilities)
-		tools, err := tx.ListTools(ctx)
+		catalog, err := loadCompositionCatalog(ctx, tx, spec)
 		if err != nil {
 			return err
 		}
-		toolByCode := make(map[string]Tool, len(tools))
-		for _, item := range tools {
-			toolByCode[item.Code] = item
-		}
-		var selected []contracts.CompositionComponentRef
-		selected = append(selected, spec.Infra...)
-		selected = append(selected, spec.Tools...)
-		explicitInfraCount := len(spec.Infra)
-		selectedCodes := map[string]struct{}{}
+		spec = catalog.spec
+		runtimePlans, runtimeAdapters := catalog.runtimePlans, catalog.runtimeAdapters
+		selected, toolByCode := catalog.selected, catalog.tools
+		aggregatedCapabilities := aggregateRuntimeCapabilities(catalog.runtimeCapabilities)
 		for _, ref := range selected {
-			code := strings.TrimSpace(ref.Code)
-			if code == "" {
-				return fmt.Errorf("组合包含空组件编码")
-			}
-			if _, exists := selectedCodes[code]; exists {
-				return fmt.Errorf("组件 %s 重复选择", code)
-			}
-			selectedCodes[code] = struct{}{}
-		}
-		for idx := 0; idx < len(selected); idx++ {
-			ref := selected[idx]
-			code := strings.TrimSpace(ref.Code)
-			selection := strings.TrimSpace(ref.Selection)
-			if selection != "explicit" && selection != "auto" {
-				return fmt.Errorf("组件 %s 的选择来源无效", code)
-			}
-			if idx < explicitInfraCount+len(spec.Tools) && selection != "explicit" {
-				return fmt.Errorf("教师声明的组件 %s 必须标记为 explicit", code)
-			}
-			tool, ok := toolByCode[code]
-			if !ok || tool.Status != ToolStatusAvailable {
-				return fmt.Errorf("组件 %s 不可用", code)
-			}
-			expectedCategory := "infra"
-			if idx >= explicitInfraCount && idx < explicitInfraCount+len(spec.Tools) {
-				expectedCategory = "tool"
-			}
-			if tool.Category != expectedCategory {
-				return fmt.Errorf("组件 %s 的目录类别与声明位置不一致", code)
-			}
-			if strings.TrimSpace(tool.ResourceSpec.Capabilities.Placement) != "sandbox" {
-				return fmt.Errorf("组件 %s 不能部署到沙箱", code)
-			}
-			if err := validateToolForRuntime(tool, runtimePlans); err != nil {
-				return fmt.Errorf("组件 %s 与运行时不兼容: %w", code, err)
-			}
+			tool := toolByCode[ref.Code]
 			if err := validateCompositionAccess(spec.AccessProfile, tool.Category, tool.ResourceSpec.Capabilities.StudentAccess); err != nil {
-				return fmt.Errorf("组件 %s: %w", code, err)
-			}
-			if err := validateComponentParams(ref.Params, tool.ResourceSpec.Capabilities.ConfigSchema); err != nil {
-				return fmt.Errorf("组件 %s 参数无效: %w", code, err)
-			}
-			for _, required := range tool.ResourceSpec.Capabilities.Requires {
-				if capabilityProvided(aggregatedCapabilities, selected, toolByCode, required, code) {
-					continue
-				}
-				provider, providerErr := findCapabilityProvider(toolByCode, required, "infra")
-				if providerErr != nil {
-					return providerErr
-				}
-				if provider == "" {
-					return fmt.Errorf("组件 %s 缺少必需能力 %s", code, required)
-				}
-				if _, exists := selectedCodes[provider]; exists {
-					continue
-				}
-				providerTool := toolByCode[provider]
-				if requiresExplicitCompositionParams(providerTool.ResourceSpec.Capabilities.ConfigSchema) {
-					return fmt.Errorf("组件 %s 自动依赖组件 %s,但该组件声明了必填参数;必须显式选择并提供参数", code, provider)
-				}
-				selectedCodes[provider] = struct{}{}
-				selected = append(selected, contracts.CompositionComponentRef{Code: provider, Selection: "auto"})
+				return fmt.Errorf("组件 %s: %w", ref.Code, err)
 			}
 		}
-		autoInfra := append([]contracts.CompositionComponentRef(nil), selected[explicitInfraCount+len(spec.Tools):]...)
-		spec.Infra = append(append([]contracts.CompositionComponentRef(nil), spec.Infra...), autoInfra...)
-		spec.Tools = append([]contracts.CompositionComponentRef(nil), spec.Tools...)
 		if err := validateCompositionLinks(spec, selected, toolByCode); err != nil {
 			return err
 		}
@@ -302,7 +211,7 @@ func CompilePlatformSandboxComposition(ctx context.Context, store Store, spec co
 			if err != nil {
 				return fmt.Errorf("编码运行时 %s 适配器失败: %w", runtimePlan.Runtime.Code, err)
 			}
-			compiledSnapshots = append(compiledSnapshots, contracts.CompiledRuntimeSnapshot{InstanceCode: runtimePlan.InstanceCode, RuntimeID: runtimePlan.Runtime.ID, ImageID: runtimePlan.Image.ID, Code: runtimePlan.Runtime.Code, Eco: runtimePlan.Runtime.Eco, AdapterLevel: runtimePlan.Runtime.AdapterLevel, CapabilityImpl: runtimePlan.Runtime.CapabilityImpl, AdapterSpec: adapterSpec, ImageURL: runtimePlan.Image.ImageURL, ImageVersion: runtimePlan.Image.Version})
+			compiledSnapshots = append(compiledSnapshots, contracts.CompiledRuntimeSnapshot{InstanceCode: runtimePlan.InstanceCode, RuntimeID: runtimePlan.Runtime.ID, ImageID: runtimePlan.Image.ID, Code: runtimePlan.Runtime.Code, Eco: runtimePlan.Runtime.Eco, AdapterLevel: runtimePlan.Runtime.AdapterLevel, CapabilityImpl: runtimePlan.Runtime.CapabilityImpl, PluginRef: runtimePlan.Runtime.PluginRef, AdapterSpec: adapterSpec, ImageURL: runtimePlan.Image.ImageURL, ImageVersion: runtimePlan.Image.Version})
 		}
 		snapshot = contracts.SandboxCompositionSnapshot{
 			Spec:         spec,
@@ -695,49 +604,6 @@ func compositionTargetProvides(target, capability string, runtimes map[string]Ca
 	return false
 }
 
-// validateComponentParams 按 manifest 声明的最小 JSON Schema 子集校验组件参数。
-func validateComponentParams(params map[string]any, schema map[string]any) error {
-	if len(schema) == 0 {
-		if len(params) > 0 {
-			return fmt.Errorf("组件未声明可配置参数")
-		}
-		return nil
-	}
-	typ, _ := schema["type"].(string)
-	if typ != "" && typ != "object" {
-		return fmt.Errorf("参数 schema 必须是 object")
-	}
-	properties, _ := schema["properties"].(map[string]any)
-	additional, declared := schema["additionalProperties"]
-	for key, value := range params {
-		property, ok := properties[key].(map[string]any)
-		if !ok {
-			if !declared {
-				return fmt.Errorf("包含未声明参数 %s", key)
-			}
-			allowed, isBool := additional.(bool)
-			if isBool && !allowed {
-				return fmt.Errorf("包含未声明参数 %s", key)
-			}
-			continue
-		}
-		if err := validateSchemaValue(key, value, property); err != nil {
-			return err
-		}
-	}
-	if required, ok := schema["required"].([]any); ok {
-		for _, item := range required {
-			name, _ := item.(string)
-			if name != "" {
-				if _, exists := params[name]; !exists {
-					return fmt.Errorf("缺少必填参数 %s", name)
-				}
-			}
-		}
-	}
-	return nil
-}
-
 // requiresExplicitCompositionParams 判断自动展开的组件是否需要教师或平台快照提供初始化参数。
 // 自动依赖没有可推断的安全材料时必须在编译期拒绝,不能把空值或默认值带入启动期。
 func requiresExplicitCompositionParams(schema map[string]any) bool {
@@ -829,59 +695,6 @@ func compositionParamString(value any) (string, error) {
 		}
 		return string(encoded), nil
 	}
-}
-
-// validateSchemaValue 校验组件配置的基本 JSON Schema 类型、枚举和边界。
-func validateSchemaValue(name string, value any, schema map[string]any) error {
-	typ, _ := schema["type"].(string)
-	valid := true
-	switch typ {
-	case "string":
-		_, valid = value.(string)
-	case "boolean":
-		_, valid = value.(bool)
-	case "number":
-		switch value.(type) {
-		case int, int32, int64, float32, float64, json.Number:
-		default:
-			valid = false
-		}
-	case "integer":
-		switch number := value.(type) {
-		case int, int32, int64:
-			_ = number
-		case float64:
-			valid = number == float64(int64(number))
-		case json.Number:
-			_, err := strconv.ParseInt(string(number), 10, 64)
-			valid = err == nil
-		default:
-			valid = false
-		}
-	case "array":
-		_, valid = value.([]any)
-	case "object":
-		_, valid = value.(map[string]any)
-	case "":
-	default:
-		return fmt.Errorf("参数 %s 的 schema 类型不支持", name)
-	}
-	if !valid {
-		return fmt.Errorf("参数 %s 的类型不正确", name)
-	}
-	if enum, ok := schema["enum"].([]any); ok && !containsSchemaValue(enum, value) {
-		return fmt.Errorf("参数 %s 的取值不在允许范围内", name)
-	}
-	return nil
-}
-
-func containsSchemaValue(values []any, target any) bool {
-	for _, value := range values {
-		if fmt.Sprint(value) == fmt.Sprint(target) {
-			return true
-		}
-	}
-	return false
 }
 
 func validateCapabilityCardinality(runtime CapabilityConstraints, refs []contracts.CompositionComponentRef, tools map[string]Tool) error {
@@ -1393,7 +1206,7 @@ func resolveCompositionEndpoint(componentCode, endpoint string, source bool, sou
 		if resolved != nil {
 			return *resolved, nil
 		}
-		return compositionEndpoint{}, fmt.Errorf("运行时端点 %s 不存在", endpoint)
+		return compositionEndpoint{}, fmt.Errorf("%w: 运行时 %s 的端点 %s", errCompositionEndpointNotFound, componentCode, endpoint)
 	}
 	tool, ok := tools[componentCode]
 	if !ok {
@@ -1462,7 +1275,7 @@ func resolveCompositionEndpoint(componentCode, endpoint string, source bool, sou
 			}
 		}
 	}
-	return compositionEndpoint{}, fmt.Errorf("组件 %s 端点 %s 不存在可发现 Service", componentCode, endpoint)
+	return compositionEndpoint{}, fmt.Errorf("%w: 组件 %s 的端点 %s 没有可发现 Service", errCompositionEndpointNotFound, componentCode, endpoint)
 }
 
 // compositionBindingForLink 返回连接环境变量对应的 manifest 绑定,不允许按组件顺序推断目标。
@@ -1526,7 +1339,7 @@ func validateCompositionProtocol(declared, target string) error {
 	if declared == target || (target == "TCP" && (declared == "HTTP" || declared == "HTTPS" || declared == "WS" || declared == "WSS" || declared == "GRPC")) {
 		return nil
 	}
-	return fmt.Errorf("连接协议 %s 与目标端口协议 %s 不匹配", declared, target)
+	return fmt.Errorf("%w: 连接协议 %s 与目标端口协议 %s", errCompositionProtocolMismatch, declared, target)
 }
 
 // setComponentEnv 把编译后的地址写入源组件,拒绝覆盖 manifest 中不同的固定值。
@@ -1658,6 +1471,7 @@ func MaterializeRuntimeTopology(instance string, adapter AdapterSpec) AdapterSpe
 		}
 	}
 	adapter.WorkspaceOps.ExecTarget = rewriteRuntimeExecTarget(adapter.WorkspaceOps.ExecTarget, podNames)
+	adapter.WorkspaceOps.ScriptExecTarget = rewriteRuntimeExecTarget(adapter.WorkspaceOps.ScriptExecTarget, podNames)
 	adapter.PrivateArchiveOps.ExecTarget = rewriteRuntimeExecTarget(adapter.PrivateArchiveOps.ExecTarget, podNames)
 	adapter.InitAssetOps.ExecTarget = rewriteRuntimeExecTarget(adapter.InitAssetOps.ExecTarget, podNames)
 	adapter.CapabilityCommands.Deploy.ExecTarget = rewriteRuntimeExecTarget(adapter.CapabilityCommands.Deploy.ExecTarget, podNames)

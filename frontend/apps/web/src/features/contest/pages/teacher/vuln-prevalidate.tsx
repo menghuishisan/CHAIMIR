@@ -38,7 +38,6 @@ import {
   compositionDeclarationError,
   compositionSpecFromDeclaration,
   declarationFromSpec,
-  derivedInfraFromSpec,
   emptyCompositionDeclaration,
   readScenarioNeutralSpec,
 } from '../../../sandbox/composition'
@@ -112,8 +111,7 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
           id: `vuln-${problem.id}`,
           declaration,
           accessProfile: SANDBOX_ACCESS_PROFILE.VULNERABILITY_PREVALIDATE,
-          derivedInfra: derivedInfraFromSpec(savedComposition),
-          links: savedComposition?.links ?? [],
+          base: savedComposition,
           initCodeRef: savedInitCodeRef,
           initScriptRef: savedInitScriptRef,
         }),
@@ -135,6 +133,7 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
   const positive = readSection(result.prevalidate_detail, DETAIL_POSITIVE)
   const negative = readSection(result.prevalidate_detail, DETAIL_NEGATIVE)
   const detailError = readString(result.prevalidate_detail, 'error')
+  const detailTraceId = readString(result.prevalidate_detail, 'trace_id')
   const detailConsistent = isVulnPrevalidateDetailConsistent(result)
   const canRun = result.status === VulnProblemStatus.DRAFT
   const displayStatus =
@@ -195,7 +194,10 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
 
               {detailError ? (
                 <Callout tone="danger" title="验证过程没有跑完">
-                  {detailError}
+                  <p>{detailError}</p>
+                  {detailTraceId ? (
+                    <p className="mt-1 text-xs">如需帮助,请提供编号 {detailTraceId}</p>
+                  ) : null}
                 </Callout>
               ) : null}
 
@@ -223,6 +225,7 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
               variant="primary"
               leftIcon={FlaskConical}
               loading={running}
+              disabled={compositionDeclarationError(declaration) !== undefined}
               onClick={() => void run()}
             >
               {Object.keys(result.prevalidate_detail).length === 0 ? '开始验证' : '重新验证'}

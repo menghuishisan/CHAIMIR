@@ -9,7 +9,7 @@ import (
 )
 
 type Querier interface {
-	ClaimPendingExperimentScoreOutbox(ctx context.Context, arg ClaimPendingExperimentScoreOutboxParams) ([]ExperimentScoreOutbox, error)
+	ClaimPendingExperimentEventOutbox(ctx context.Context, arg ClaimPendingExperimentEventOutboxParams) ([]ExperimentEventOutbox, error)
 	ClaimRecyclableInstancesAcrossTenants(ctx context.Context, arg ClaimRecyclableInstancesAcrossTenantsParams) ([]ClaimRecyclableInstancesAcrossTenantsRow, error)
 	CountExperimentReports(ctx context.Context, arg CountExperimentReportsParams) (int64, error)
 	CountExperiments(ctx context.Context, arg CountExperimentsParams) (int64, error)
@@ -17,9 +17,10 @@ type Querier interface {
 	CountTeacherInstances(ctx context.Context, arg CountTeacherInstancesParams) (int64, error)
 	// experiment.sql 定义 M7 实验模块的 sqlc 查询,仅访问实验模块自有表。
 	CreateExperiment(ctx context.Context, arg CreateExperimentParams) (Experiment, error)
+	// 实例行锁内生成得分修订，绑定使用定义的单调修订；载荷与修订同次提交。
+	CreateExperimentEventOutbox(ctx context.Context, arg CreateExperimentEventOutboxParams) (ExperimentEventOutbox, error)
 	CreateExperimentGroup(ctx context.Context, arg CreateExperimentGroupParams) (ExperimentGroup, error)
 	CreateExperimentInstance(ctx context.Context, arg CreateExperimentInstanceParams) (CreateExperimentInstanceRow, error)
-	CreateExperimentScoreOutbox(ctx context.Context, arg CreateExperimentScoreOutboxParams) (ExperimentScoreOutbox, error)
 	DeleteGroupMember(ctx context.Context, arg DeleteGroupMemberParams) error
 	ExperimentStats(ctx context.Context, arg ExperimentStatsParams) (ExperimentStatsRow, error)
 	FinishExperimentInstance(ctx context.Context, arg FinishExperimentInstanceParams) (FinishExperimentInstanceRow, error)
@@ -37,6 +38,7 @@ type Querier interface {
 	GetExperimentReportByInstanceStudent(ctx context.Context, arg GetExperimentReportByInstanceStudentParams) (GetExperimentReportByInstanceStudentRow, error)
 	GetGroupMember(ctx context.Context, arg GetGroupMemberParams) (GroupMember, error)
 	GradeExperimentReport(ctx context.Context, arg GradeExperimentReportParams) (GradeExperimentReportRow, error)
+	HasPendingInstanceReports(ctx context.Context, arg HasPendingInstanceReportsParams) (bool, error)
 	ListCheckpointResults(ctx context.Context, arg ListCheckpointResultsParams) ([]ListCheckpointResultsRow, error)
 	// 按实验列出全部分组,供教师编组视角一次取齐(小组编号只在创建响应出现过一次,无列表则无法再定位)。
 	ListExperimentGroups(ctx context.Context, arg ListExperimentGroupsParams) ([]ExperimentGroup, error)
@@ -54,8 +56,8 @@ type Querier interface {
 	// 教师只看本人实验实例,学校管理员由服务层传 teacher_id=0 查看本租户全部活跃实例。
 	ListTeacherInstances(ctx context.Context, arg ListTeacherInstancesParams) ([]ListTeacherInstancesRow, error)
 	LockInstanceCreation(ctx context.Context, lockKey int64) error
-	MarkExperimentScoreOutboxFailed(ctx context.Context, arg MarkExperimentScoreOutboxFailedParams) (ExperimentScoreOutbox, error)
-	MarkExperimentScoreOutboxPublished(ctx context.Context, arg MarkExperimentScoreOutboxPublishedParams) (ExperimentScoreOutbox, error)
+	MarkExperimentEventOutboxFailed(ctx context.Context, arg MarkExperimentEventOutboxFailedParams) (ExperimentEventOutbox, error)
+	MarkExperimentEventOutboxPublished(ctx context.Context, arg MarkExperimentEventOutboxPublishedParams) (ExperimentEventOutbox, error)
 	SetExperimentStatus(ctx context.Context, arg SetExperimentStatusParams) (Experiment, error)
 	SetInstanceStatus(ctx context.Context, arg SetInstanceStatusParams) (SetInstanceStatusRow, error)
 	SumCheckpointScores(ctx context.Context, arg SumCheckpointScoresParams) (float64, error)

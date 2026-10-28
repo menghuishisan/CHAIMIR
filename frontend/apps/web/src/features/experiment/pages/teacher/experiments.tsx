@@ -149,18 +149,21 @@ export default function TeacherExperimentsPage() {
   // 指标带取服务端全量口径,不随下方状态筛选变化。
   // 「检查点合计」需要跨全部实验累加,服务端没有这个聚合,故不做这张卡:
   // 每个实验各有多少检查点在列表行里可见(规范 §6.5 指标带口径)。
-  const totalCount = useResourceTotal((params) => api.experiment.getExperiments(params), [])
+  const totalCount = useResourceTotal((params) => api.experiment.getExperiments(params), [], experiments.refreshVersion)
   const publishedCount = useResourceTotal(
     (params) => api.experiment.getExperiments({ status: ExperimentStatus.PUBLISHED, ...params }),
-    []
+    [],
+    experiments.refreshVersion
   )
   const draftCount = useResourceTotal(
     (params) => api.experiment.getExperiments({ status: ExperimentStatus.DRAFT, ...params }),
-    []
+    [],
+    experiments.refreshVersion
   )
   const unpublishedCount = useResourceTotal(
     (params) => api.experiment.getExperiments({ status: ExperimentStatus.UNPUBLISHED, ...params }),
-    []
+    [],
+    experiments.refreshVersion
   )
 
   const columns: TableColumn<Experiment>[] = [

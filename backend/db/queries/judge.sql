@@ -35,10 +35,11 @@ SET name = EXCLUDED.name,
     updated_at = now()
 RETURNING id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status, created_at, updated_at;
 
--- name: UpdateJudgerSelftest :one
+-- name: UpdateJudgerExecutionState :one
 UPDATE judger
-SET selftest_status = $2, status = $3, updated_at = now()
-WHERE id = $1
+SET resource_spec = sqlc.arg(resource_spec),
+    selftest_status = sqlc.arg(selftest_status), status = sqlc.arg(status), updated_at = clock_timestamp()
+WHERE id = sqlc.arg(id) AND updated_at = sqlc.arg(expected_updated_at)::timestamptz
 RETURNING id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status, created_at, updated_at;
 
 -- name: CreateJudgeTask :one
@@ -133,6 +134,7 @@ LEFT JOIN LATERAL (
 ) r ON true
 JOIN judger j ON j.id = t.judger_id
 WHERE t.tenant_id = $1
+  AND split_part(t.source_ref, ':', 1) = ANY(sqlc.arg(enabled_modules)::text[])
   AND ($2::text = '' OR t.source_ref = $2)
   AND ($3::boolean = false OR (t.status = 2 AND j.type = 6))
   AND ($4::bigint = 0 OR t.source_owner_id = $4 OR t.submitter_id = $4)
@@ -148,6 +150,7 @@ SELECT COUNT(*)::bigint
 FROM judge_task
 JOIN judger ON judger.id = judge_task.judger_id
 WHERE judge_task.tenant_id = $1
+  AND split_part(judge_task.source_ref, ':', 1) = ANY(sqlc.arg(enabled_modules)::text[])
   AND ($2::text = '' OR judge_task.source_ref = $2)
   AND ($3::boolean = false OR (judge_task.status = 2 AND judger.type = 6))
   AND ($4::bigint = 0 OR judge_task.source_owner_id = $4 OR judge_task.submitter_id = $4)

@@ -120,22 +120,22 @@ func (s Service) PlanUpload(ctx context.Context, req PlanUploadRequest) (UploadP
 	}
 	fileName, err := validateUploadFileName(req.FileName, req.AllowedFileName)
 	if err != nil {
-		return UploadPlan{}, err
+		return UploadPlan{}, fmt.Errorf("%w: %w", upload.ErrInvalidFile, err)
 	}
 	switch upload.CheckSize(req.Size, req.MaxBytes) {
 	case upload.SizeEmpty:
-		return UploadPlan{}, fmt.Errorf("上传文件不能为空")
+		return UploadPlan{}, fmt.Errorf("%w: 上传文件不能为空", upload.ErrInvalidFile)
 	case upload.SizeTooLarge:
-		return UploadPlan{}, fmt.Errorf("上传文件超出大小限制")
+		return UploadPlan{}, fmt.Errorf("%w: 上传文件超出大小限制", upload.ErrInvalidFile)
 	}
 	if req.KindValidator != nil && !req.KindValidator(fileName, req.ContentType, req.Content) {
-		return UploadPlan{}, fmt.Errorf("上传文件类型不符合统一校验规则")
+		return UploadPlan{}, fmt.Errorf("%w: 上传文件类型不符合统一校验规则", upload.ErrInvalidFile)
 	}
 	if req.ScanPolicy.Required && s.VirusScanMaxBytes <= 0 {
 		return UploadPlan{}, fmt.Errorf("上传安全策略要求病毒扫描,但未配置扫描大小上限")
 	}
 	if req.ScanPolicy.Required && int64(len(req.Content)) > s.VirusScanMaxBytes {
-		return UploadPlan{}, fmt.Errorf("上传文件超出病毒扫描大小限制")
+		return UploadPlan{}, fmt.Errorf("%w: 上传文件超出病毒扫描大小限制", upload.ErrInvalidFile)
 	}
 	if err := upload.VerifyScan(ctx, s.Scanner, req.ScanPolicy, upload.ScanRequest{
 		FileName: fileName,

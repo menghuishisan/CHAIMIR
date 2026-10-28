@@ -241,17 +241,19 @@ type InitAssetSpec struct {
 	ApplyPhase     string `json:"apply_phase"`
 }
 
-// WorkspaceOps 描述运行时镜像内已审核的工作区操作命令模板。
+// WorkspaceOps 声明受控工作区命令,学生文件/终端与私有脚本/清理分别使用独立执行目标。
 type WorkspaceOps struct {
-	ExecTarget string   `json:"exec_target"`
-	ReadFile   []string `json:"read_file"`
-	WriteFile  []string `json:"write_file"`
-	ListFiles  []string `json:"list_files"`
-	PackTar    []string `json:"pack_tar"`
-	UnpackTar  []string `json:"unpack_tar"`
-	RunScript  []string `json:"run_script"`
-	Terminal   []string `json:"terminal"`
-	Selftest   []string `json:"selftest"`
+	ExecTarget       string   `json:"exec_target"`
+	ScriptExecTarget string   `json:"script_exec_target"`
+	CleanWorkspace   []string `json:"clean_workspace"`
+	ReadFile         []string `json:"read_file"`
+	WriteFile        []string `json:"write_file"`
+	ListFiles        []string `json:"list_files"`
+	PackTar          []string `json:"pack_tar"`
+	UnpackTar        []string `json:"unpack_tar"`
+	RunScript        []string `json:"run_script"`
+	Terminal         []string `json:"terminal"`
+	Selftest         []string `json:"selftest"`
 }
 
 // PrivateArchiveOps 描述隐藏评测归档只能使用的非学生执行目标和解包命令。

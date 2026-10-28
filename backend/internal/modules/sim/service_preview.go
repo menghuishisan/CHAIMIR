@@ -12,6 +12,7 @@ package sim
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -84,9 +85,9 @@ func (s *Service) previewPackageOnce(ctx context.Context, pkg Package) error {
 	if previewErr != nil {
 		return s.handlePreviewInfrastructureFailure(ctx, pkg, previewErr)
 	}
-	report, err := previewReport(result, previewErr)
+	report, err := previewReport(result, pkg.ScaleLimit)
 	if err != nil {
-		return err
+		return s.handlePreviewInfrastructureFailure(ctx, pkg, err)
 	}
 	return s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		if _, err := tx.MergeValidationReport(ctx, pkg.PreviewReviewID, pkg.ID, pkg.PreviewLeaseToken, report); err != nil {
@@ -98,12 +99,13 @@ func (s *Service) previewPackageOnce(ctx context.Context, pkg Package) error {
 
 // handlePreviewInfrastructureFailure 保留动态预览可重试语义;只有已用尽预算时才写受控的终态报告。
 func (s *Service) handlePreviewInfrastructureFailure(ctx context.Context, pkg Package, previewErr error) error {
-	return s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+	// 恢复状态必须提交成功;执行错误在事务外返回,防止释放租约或耗尽结论随回调错误回滚。
+	err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		if int(pkg.PreviewAttemptCount) >= s.previewMaxAttempts {
 			if _, err := tx.MergeValidationReport(ctx, pkg.PreviewReviewID, pkg.ID, pkg.PreviewLeaseToken, previewAttemptsExhaustedReport()); err != nil {
 				return apperr.ErrSimReviewStateInvalid.WithCause(err)
 			}
-			return previewErr
+			return nil
 		}
 		affected, err := tx.ReleasePreviewLease(ctx, pkg.PreviewReviewID, pkg.ID, pkg.PreviewLeaseToken)
 		if err != nil {
@@ -112,17 +114,18 @@ func (s *Service) handlePreviewInfrastructureFailure(ctx context.Context, pkg Pa
 		if affected != 1 {
 			return apperr.ErrSimReviewStateInvalid
 		}
-		return previewErr
+		return nil
 	})
+	return errors.Join(previewErr, err)
 }
 
 // previewReport 把预览产出转成审核报告的动态字段。
 //
 // 样例帧序列化失败必须显式失败而不是静默丢帧:帧是审核人判断"算法实现对不对"的唯一依据,
 // 少了它审核只剩两个徽章,而报告本身看不出帧曾经存在过。
-func previewReport(result PreviewResult, previewErr error) (ValidationReport, error) {
-	if previewErr != nil {
-		return ValidationReport{}, previewErr
+func previewReport(result PreviewResult, scaleLimit map[string]any) (ValidationReport, error) {
+	if err := validatePreviewFrames(result.Frames, scaleLimit); err != nil {
+		return ValidationReport{}, err
 	}
 	report := ValidationReport{
 		WorkerPreview: ValidationStatus{Status: validationPassed},
@@ -132,13 +135,11 @@ func previewReport(result PreviewResult, previewErr error) (ValidationReport, er
 	} else {
 		report.DeterminismCheck = ValidationStatus{Status: validationFailed, Message: boundedValidationMessage(result.Detail)}
 	}
-	if len(result.Frames) > 0 {
-		raw, err := jsonx.AnyBytes(result.Frames, apperr.ErrSimPackageValidationFailed)
-		if err != nil {
-			return ValidationReport{}, err
-		}
-		report.PreviewFrames = raw
+	raw, err := jsonx.AnyBytes(result.Frames, apperr.ErrSimPackageValidationFailed)
+	if err != nil {
+		return ValidationReport{}, err
 	}
+	report.PreviewFrames = raw
 	return report, nil
 }
 

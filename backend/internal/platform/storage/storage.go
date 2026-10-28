@@ -157,7 +157,7 @@ func (s *Storage) OpenDownload(ctx context.Context, bucket, key string) (ReadSee
 	info, err := obj.Stat()
 	if err != nil {
 		if closeErr := obj.Close(); closeErr != nil {
-			return nil, 0, "", fmt.Errorf("读取下载对象 %s/%s 信息失败: %w; 关闭对象失败: %v", bucket, key, err, closeErr)
+			return nil, 0, "", fmt.Errorf("读取下载对象 %s/%s 信息失败: %w; 关闭对象失败: %w", bucket, key, err, closeErr)
 		}
 		return nil, 0, "", fmt.Errorf("读取下载对象 %s/%s 信息失败: %w", bucket, key, err)
 	}

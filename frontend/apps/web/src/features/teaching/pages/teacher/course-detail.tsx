@@ -13,7 +13,7 @@ import {
   Users,
 } from 'lucide-react'
 import { useState } from 'react'
-import type { CourseOutline } from '@chaimir/api-client'
+import { TENANT_MODULE, type CourseOutline } from '@chaimir/api-client'
 import {
   Breadcrumb,
   Button,
@@ -44,6 +44,7 @@ import { CourseMembers } from './course-members'
 import { CourseAssignments } from './course-assignments'
 import { CourseBoard } from './course-board'
 import { CourseGrades } from '../../components/CourseGrades'
+import { useSession } from '../../../../components/RoleGuard/session'
 
 /**
  * TeacherCourseDetailPage 读取课程大纲并按任务分区呈现管理能力。
@@ -82,6 +83,8 @@ interface CourseDetailContentProps {
  */
 function CourseDetailContent({ courseId, outline, onRefresh }: CourseDetailContentProps) {
   const navigate = useNavigate()
+  const { me } = useSession()
+  const gradesEnabled = me.enabled_modules.includes(TENANT_MODULE.GRADE)
   const [editOpen, setEditOpen] = useState(false)
   const course = outline.course
 
@@ -91,6 +94,7 @@ function CourseDetailContent({ courseId, outline, onRefresh }: CourseDetailConte
     [courseId],
     () => false,
   )
+  const progressStats = stats.status === 'success' ? stats.data : null
 
   return (
     <>
@@ -156,15 +160,15 @@ function CourseDetailContent({ courseId, outline, onRefresh }: CourseDetailConte
         label="全班进度摘要"
         className="mt-4 mb-5"
         items={[
-          { label: '选课人数', value: stats.data ? stats.data.member_count : '—', hint: '在读成员' },
+          { label: '选课人数', value: progressStats?.member_count, hint: '在读成员' },
           {
             label: '课时数',
-            value: stats.data ? stats.data.lesson_count : outline.lessons.length,
+            value: progressStats?.lesson_count,
             hint: '已编排的课时',
           },
           {
             label: '累计完成课时',
-            value: stats.data ? stats.data.completed_count : '—',
+            value: progressStats?.completed_count,
             hint: '全班累计的课时完成次数',
           },
         ]}
@@ -184,9 +188,7 @@ function CourseDetailContent({ courseId, outline, onRefresh }: CourseDetailConte
           <TabsTrigger value="board" icon={MessageSquare}>
             讨论与公告
           </TabsTrigger>
-          <TabsTrigger value="grades" icon={Send}>
-            课程成绩
-          </TabsTrigger>
+          {gradesEnabled ? <TabsTrigger value="grades" icon={Send}>课程成绩</TabsTrigger> : null}
         </TabsList>
 
         <TabsContent value="chapters">
@@ -205,9 +207,7 @@ function CourseDetailContent({ courseId, outline, onRefresh }: CourseDetailConte
         <TabsContent value="board">
           <CourseBoard courseId={courseId} />
         </TabsContent>
-        <TabsContent value="grades">
-          <CourseGrades courseId={courseId} />
-        </TabsContent>
+        {gradesEnabled ? <TabsContent value="grades"><CourseGrades courseId={courseId} /></TabsContent> : null}
       </Tabs>
 
       {editOpen ? (

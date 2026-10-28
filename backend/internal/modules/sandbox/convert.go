@@ -123,6 +123,7 @@ func sandboxCapabilitiesFromSnapshot(sb Sandbox, fallback Runtime, tools []Sandb
 		runtime.Code = frozen.Code
 		runtime.AdapterLevel = frozen.AdapterLevel
 		runtime.CapabilityImpl = frozen.CapabilityImpl
+		runtime.PluginRef = frozen.PluginRef
 		if len(frozen.AdapterSpec) > 0 {
 			if err := json.Unmarshal(frozen.AdapterSpec, &runtime.AdapterSpec); err != nil {
 				return sandboxCapabilitiesFromModel(fallback, tools, registered)
@@ -243,10 +244,11 @@ func orchestrationCatalogResponse(runtimes []CatalogRuntime, tools []CatalogTool
 			images = append(images, CatalogRuntimeImageResponse{Version: image.Version})
 		}
 		out.Runtimes = append(out.Runtimes, CatalogRuntimeResponse{
-			Code:   runtime.Code,
-			Name:   runtime.Name,
-			Eco:    runtime.Eco,
-			Images: images,
+			Code:         runtime.Code,
+			Name:         runtime.Name,
+			Eco:          runtime.Eco,
+			Images:       images,
+			Capabilities: runtime.Capabilities,
 		})
 	}
 	for _, tool := range tools {

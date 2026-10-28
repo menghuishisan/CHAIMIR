@@ -28,7 +28,7 @@ export interface SandboxInstance {
   status: SandboxStatus
   tool_access: SandboxToolAccess[]
   capabilities: SandboxCapabilities
-  resource_usage: SandboxResourceUsage
+  resource_usage: SandboxResourceUsage | null
   workspace_revision: number
 }
 
@@ -90,6 +90,7 @@ export interface SandboxFileListResponse {
 
 export interface SandboxFileWriteRequest {
   relative_path: string
+  /** 必须提供;空字符串表示写入零字节文件。 */
   content_base64: string
   expected_revision: number
 }

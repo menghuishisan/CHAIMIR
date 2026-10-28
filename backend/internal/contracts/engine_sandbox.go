@@ -143,22 +143,22 @@ type SandboxResourceUsage struct {
 // SandboxInfo 是跨模块传递给服务端调用方的沙箱摘要。
 // Namespace 仅允许调用方用于服务端内部资源归属校验和补偿排障,不得透传给前端工作台响应。
 type SandboxInfo struct {
-	SandboxID           int64                `json:"sandbox_id"`
-	TenantID            int64                `json:"tenant_id"`
-	Namespace           string               `json:"namespace"`
-	SourceRef           string               `json:"source_ref"`
-	ScopeRef            string               `json:"scope_ref"`
-	CompositionDigest   string               `json:"composition_digest"`
-	OwnerAccountID      int64                `json:"owner_account_id"`
-	RuntimeCode         string               `json:"runtime_code"`
-	RuntimeImageVersion string               `json:"runtime_image_version"`
-	RuntimeInstances    []string             `json:"runtime_instances"`
-	Phase               int16                `json:"phase"`
-	Status              int16                `json:"status"`
-	ToolAccess          []SandboxToolAccess  `json:"tool_access"`
-	Capabilities        SandboxCapabilities  `json:"capabilities"`
-	ResourceUsage       SandboxResourceUsage `json:"resource_usage"`
-	WorkspaceRevision   int64                `json:"workspace_revision"`
+	SandboxID           int64                 `json:"sandbox_id"`
+	TenantID            int64                 `json:"tenant_id"`
+	Namespace           string                `json:"namespace"`
+	SourceRef           string                `json:"source_ref"`
+	ScopeRef            string                `json:"scope_ref"`
+	CompositionDigest   string                `json:"composition_digest"`
+	OwnerAccountID      int64                 `json:"owner_account_id"`
+	RuntimeCode         string                `json:"runtime_code"`
+	RuntimeImageVersion string                `json:"runtime_image_version"`
+	RuntimeInstances    []string              `json:"runtime_instances"`
+	Phase               int16                 `json:"phase"`
+	Status              int16                 `json:"status"`
+	ToolAccess          []SandboxToolAccess   `json:"tool_access"`
+	Capabilities        SandboxCapabilities   `json:"capabilities"`
+	ResourceUsage       *SandboxResourceUsage `json:"resource_usage"`
+	WorkspaceRevision   int64                 `json:"workspace_revision"`
 }
 
 // SandboxAccessPrincipal 是 M8 等业务网关经自身授权表核验后传给 M2 的受控访问主体。
@@ -203,6 +203,7 @@ type SandboxWorkspaceFileList struct {
 }
 
 // SandboxWorkspaceFileWrite 是经 M8 授权后写入一个公开工作区文件的请求。
+// ContentBase64允许空字符串表示零字节,HTTP字段是否提供由业务网关在边界校验。
 type SandboxWorkspaceFileWrite struct {
 	Access           SandboxPrincipalRequest `json:"access"`
 	RelativePath     string                  `json:"relative_path"`
@@ -257,6 +258,7 @@ type SandboxToolProxyTarget struct {
 }
 
 // SandboxFileWriteRequest 是内部服务写入沙箱工作区文件的请求。
+// ContentBase64允许零字节文件的空编码,路径和修订号仍须完整有效。
 type SandboxFileWriteRequest struct {
 	TenantID         int64  `json:"tenant_id"`
 	SandboxID        int64  `json:"sandbox_id"`
@@ -435,6 +437,8 @@ type SandboxService interface {
 	UpdateSandboxAuthorizedAccounts(ctx context.Context, req SandboxAuthorizedAccountsRequest) error
 	// GetSandboxWorkspaceArchive 查询已保存工作区的服务端对象引用,供实例重建时恢复。
 	GetSandboxWorkspaceArchive(ctx context.Context, tenantID, sandboxID int64) (string, error)
+	// FindSavedSandboxWorkspaceArchiveBySourceRef 查询稳定来源最近已保存的公开归档，包括已回收记录。
+	FindSavedSandboxWorkspaceArchiveBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (string, error)
 	// PauseSandbox 暂停单个沙箱,供实验实例进入已暂停状态时调用。
 	PauseSandbox(ctx context.Context, req SandboxControlRequest) error
 	// ResumeSandbox 恢复单个沙箱,供实验实例从已暂停状态继续运行。

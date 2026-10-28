@@ -102,6 +102,8 @@ selftest:
       command:
         - /usr/local/bin/gaiad
         - version
+        - --home
+        - /tmp/chaimir-cosmos-selftest
 supply_chain:
   sbom: true
   trivy_required: true

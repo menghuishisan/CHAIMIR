@@ -9,10 +9,6 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-# Docker 的“目标不存在”通过退出码表达；不能让 PowerShell 将原生 stderr 提前升级为脚本异常。
-if ($null -ne (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue)) {
-    $PSNativeCommandUseErrorActionPreference = $false
-}
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 }
@@ -23,6 +19,14 @@ if ([string]::IsNullOrWhiteSpace($DigestLockPath)) {
     $DigestLockPath = Join-Path $RepoRoot "images\image-digests.lock"
 }
 Import-Module (Join-Path $PSScriptRoot "lib\ImageMetadata.psm1") -Force
+$cleanupMutex = New-Object Threading.Mutex($false, 'Global\Chaimir.ImageCleanup')
+$cleanupLocked = $false
+try { $cleanupLocked = $cleanupMutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $cleanupLocked = $true }
+if (-not $cleanupLocked) {
+    $cleanupMutex.Dispose()
+    throw '已有项目镜像清理运行,拒绝并发修改引用'
+}
+try {
 
 $registryHost = ($Registry -replace "^https?://", "").TrimEnd('/')
 $catalog = Get-ChaimirImageCatalog -ImagesRoot (Join-Path $RepoRoot "images")
@@ -53,24 +57,31 @@ foreach ($candidateRef in $candidateRefs) {
     [void]$protectedRefs.Add($candidateRef)
 }
 
-function Test-ChaimirDockerImageReference([string]$Reference) {
-    $previousErrorActionPreference = $ErrorActionPreference
-    try {
-        # Docker 将“本机未缓存摘要”写到 stderr;这只是清理筛选结果,不是脚本异常。
-        $ErrorActionPreference = "Continue"
-        docker image inspect $Reference 2>$null | Out-Null
-        return $LASTEXITCODE -eq 0
-    } finally {
-        $ErrorActionPreference = $previousErrorActionPreference
+# Get-CleanupDockerObject 只接受确切目标不存在为幂等结果,其它错误保留并阻断清理。
+function Get-CleanupDockerObject {
+    param([ValidateSet('image', 'container')][string]$Kind, [string]$Reference)
+    $result = Invoke-ChaimirDocker -Arguments @('inspect', '--type', $Kind, $Reference)
+    if ($result.Code -ne 0) {
+        $missing = '(?im)^(?:Error response from daemon:|Error:) No such (?:image|object|container): ' + [regex]::Escape($Reference) + '\s*$'
+        if ($result.Code -eq 1 -and $result.Text -match $missing) { return }
+        throw "读取Docker对象失败($($result.Code)): $Kind $Reference; $($result.Text)"
     }
+    return ($result.Text | ConvertFrom-Json)
+}
+
+# Test-ChaimirDockerImageReference 复用同一退出码判定,不吞掉API失联或权限错误。
+function Test-ChaimirDockerImageReference([string]$Reference) {
+    return @(Get-CleanupDockerObject -Kind image -Reference $Reference).Count -gt 0
 }
 
 # 运行中或已停止但仍保留的容器都可能是验收证据,其镜像不得由本机清理删除。
 $protectedIds = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
-$containerIds = @(docker ps -aq)
+$containersResult = Invoke-ChaimirDocker -Arguments @('ps', '-aq')
+if ($containersResult.Code -ne 0) { throw "读取容器清单失败: $($containersResult.Text)" }
+$containerIds = @($containersResult.Text -split '\r?\n')
 foreach ($containerId in $containerIds) {
     if ([string]::IsNullOrWhiteSpace($containerId)) { continue }
-    $inspect = docker inspect $containerId | ConvertFrom-Json
+    $inspect = @(Get-CleanupDockerObject -Kind container -Reference $containerId)
     if ($inspect.Count -gt 0) {
         [void]$protectedIds.Add([string]$inspect[0].Image)
     }
@@ -79,7 +90,9 @@ foreach ($containerId in $containerIds) {
 # 这些标签只代表本地构建/回归过程中的临时引用,不属于发布契约。
 # refactor/prepull 也必须纳入清理,否则旧重构产物会长期占用本机空间。
 $temporaryTagPattern = '^(e2e|candidate|refresh|local|refactor|prepull|[0-9]{8}-(regression-fix|private-))'
-$images = @(docker image ls --format '{{json .}}' | ForEach-Object {
+$imagesResult = Invoke-ChaimirDocker -Arguments @('image', 'ls', '--no-trunc', '--format', '{{json .}}')
+if ($imagesResult.Code -ne 0) { throw "读取镜像清单失败: $($imagesResult.Text)" }
+$images = @($imagesResult.Text -split '\r?\n' | ForEach-Object {
     if (-not [string]::IsNullOrWhiteSpace($_)) { $_ | ConvertFrom-Json }
 })
 $removed = [System.Collections.Generic.List[string]]::new()
@@ -123,8 +136,11 @@ foreach ($image in $images) {
         continue
     }
 
-    $inspect = @(docker image inspect $ref | ConvertFrom-Json)
-    if ($inspect.Count -eq 0) { continue }
+    $inspect = @(Get-CleanupDockerObject -Kind image -Reference $ref)
+    if ($inspect.Count -eq 0) {
+        $skipped.Add("$ref (already absent)")
+        continue
+    }
     $imageId = [string]$inspect[0].Id
     if ($protectedIds.Contains($imageId)) {
         $skipped.Add("$ref (referenced by container)")
@@ -169,13 +185,13 @@ foreach ($image in $images) {
                 $skipped.Add("$removableRef (already absent)")
                 continue
             }
-            docker image rm $removableRef | Out-Null
-            if ($LASTEXITCODE -ne 0) {
+            $removeResult = Invoke-ChaimirDocker -Arguments @('image', 'rm', $removableRef)
+            if ($removeResult.Code -ne 0) {
                 if (-not (Test-ChaimirDockerImageReference $removableRef)) {
                     $skipped.Add("$removableRef (removed concurrently)")
                     continue
                 }
-                throw "删除临时镜像失败: $removableRef"
+                throw "删除临时镜像失败: $removableRef; $($removeResult.Text)"
             }
             $removed.Add([string]$removableRef)
         }
@@ -194,3 +210,7 @@ foreach ($immutableRef in $protectedRefSnapshot) {
 Write-Host ("Image cleanup {0}. removed={1} skipped={2} unavailable_protected={3}" -f ($(if ($Apply) { 'applied' } else { 'dry-run' }), $removed.Count, $skipped.Count, $unavailableProtectedCount))
 foreach ($entry in $removed) { Write-Host "  removed: $entry" }
 foreach ($entry in $skipped) { Write-Host "  kept: $entry" }
+} finally {
+    $cleanupMutex.ReleaseMutex()
+    $cleanupMutex.Dispose()
+}

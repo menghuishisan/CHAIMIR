@@ -72,27 +72,35 @@ capabilities:
     required: [rollup_config, l1_chain_config]
     properties:
       rollup_config:
+        title: Rollup 配置文件路径
         type: string
         x-chaimir-env: infra/OP_NODE_ROLLUP_CONFIG
       l1_chain_config:
+        title: 主链配置文件路径
         type: string
         x-chaimir-env: infra/OP_NODE_ROLLUP_L1_CHAIN_CONFIG
       l1_beacon:
+        title: 主链信标服务地址
         type: string
         x-chaimir-env: infra/OP_NODE_L1_BEACON
       rpc_addr:
+        title: 服务监听地址
         type: string
         x-chaimir-env: infra/OP_NODE_RPC_ADDR
       rpc_port:
+        title: 服务端口
         type: integer
         x-chaimir-env: infra/OP_NODE_RPC_PORT
       p2p_disable:
+        title: 禁用节点互联
         type: boolean
         x-chaimir-env: infra/OP_NODE_P2P_DISABLE
       sequencer_enabled:
+        title: 启用排序器
         type: boolean
         x-chaimir-env: infra/OP_NODE_SEQUENCER_ENABLED
       sequencer_l1_confs:
+        title: 等待的主链确认数
         type: integer
         minimum: 0
         x-chaimir-env: infra/OP_NODE_SEQUENCER_L1_CONFS

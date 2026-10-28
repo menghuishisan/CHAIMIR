@@ -61,7 +61,7 @@ docker-runtime-recover: ## 显式重启 Docker Desktop/WSL 并等待 Docker API 
 	powershell -NoProfile -ExecutionPolicy Bypass -File $(DOCKER_RUNTIME_SCRIPT) -Action Recover
 
 .PHONY: docker-runtime-watcher-install
-docker-runtime-watcher-install: ## 安装 Docker 恢复后自动启动 Cilium 的用户级 watcher
+docker-runtime-watcher-install: ## 提权安装登录后自动恢复 Docker/WSL、Cilium 与 HTTPS 的同一监护任务
 	powershell -NoProfile -ExecutionPolicy Bypass -File $(DOCKER_RUNTIME_WATCHER_SCRIPT) -Action Install
 
 .PHONY: docker-runtime-watcher-uninstall
@@ -105,7 +105,7 @@ dev-start: cilium-cluster-start context-check existing-workloads-wait ## 快速�
 	@echo "环境已启动。前端: https://www.chaimir.io"
 
 .PHONY: dev-refresh
-dev-refresh: cilium-cluster-start context-check external-secrets-check tls secret-source-up apply-acceptance middleware-wait acceptance-seed application-wait generated-config-gc ## 在现有生产安全基线上刷新应用、迁移和验收夹具
+dev-refresh: cilium-cluster-start context-check external-secrets-check tls secret-source-up apply-acceptance middleware-wait migration-wait application-wait generated-config-gc ## 刷新应用与迁移,保留已有业务数据和验收进度
 	@echo "环境已刷新。前端: https://www.chaimir.io"
 
 .PHONY: dev-stop
@@ -122,10 +122,8 @@ context-check: ## 显示并校验当前 Kubernetes context
 	kubectl get nodes
 
 .PHONY: existing-workloads-wait
-existing-workloads-wait: ## 等待已部署的生产安全组件与平台工作负载恢复,不修改资源
+existing-workloads-wait: policy-controller-check ## 等待已部署的生产安全组件与平台工作负载恢复,不修改资源
 	@kubectl -n chaimir-system get deployment/chaimir-backend deployment/chaimir-frontend deployment/chaimir-sandbox-rbac-provisioner >/dev/null 2>&1 || { echo "平台工作负载尚未完成首次部署;请执行 make dev-up"; exit 1; }
-	kubectl -n cosign-system rollout status deployment/policy-controller-webhook --timeout=180s
-	kubectl wait --for=condition=Ready clusterimagepolicy/chaimir-require-signed-images --timeout=120s
 	$(MAKE) external-secrets-check
 	kubectl -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
 	kubectl -n kube-system rollout status deployment/metrics-server --timeout=180s
@@ -358,11 +356,12 @@ policy-controller-up: supply-chain-tools-pull tls ## 安装 Sigstore policy-cont
 	kubectl -n cosign-system create secret generic cosign-public-key --from-file=cosign.pub=config/cosign/cosign.pub --dry-run=client -o yaml | kubectl apply -f -
 	kubectl -n cosign-system create configmap chaimir-registry-ca --from-file=ca-bundle.crt=$(TLS_DIR)/tls.crt --dry-run=client -o yaml | kubectl apply -f -
 	# webhook 控制器会维护 CA 与 namespaceSelector;Helm 4 必须使用客户端三方补丁,避免 SSA 字段所有权冲突。
+	# 平台仅用配置公钥验签,通过官方参数去除公共 keyless TUF 启动依赖。
 	docker compose --project-name $(SUPPLY_CHAIN_PROJECT) --env-file $(SUPPLY_CHAIN_CONFIG) -f $(SUPPLY_CHAIN_COMPOSE) run --rm --entrypoint sh helm -lc 'set -u; \
 		for attempt in 1 2 3; do \
 			if helm repo add sigstore https://sigstore.github.io/helm-charts --force-update \
 				&& helm repo update \
-				&& helm upgrade --install policy-controller sigstore/policy-controller --version "$(POLICY_CONTROLLER_VERSION)" --namespace cosign-system --create-namespace --server-side=false --rollback-on-failure --timeout 10m --set webhook.registryCaBundle.name=chaimir-registry-ca --set webhook.registryCaBundle.key=ca-bundle.crt --set cosign.webhookTimeoutSeconds.mutating=$(POLICY_CONTROLLER_WEBHOOK_TIMEOUT_SECONDS) --set cosign.webhookTimeoutSeconds.validating=$(POLICY_CONTROLLER_WEBHOOK_TIMEOUT_SECONDS) --set webhook.webhookTimeoutSeconds.defaulting=$(POLICY_CONTROLLER_WEBHOOK_TIMEOUT_SECONDS) --set webhook.webhookTimeoutSeconds.validating=$(POLICY_CONTROLLER_WEBHOOK_TIMEOUT_SECONDS) --set webhook.replicaCount=$(POLICY_CONTROLLER_WEBHOOK_REPLICAS) --set-string webhook.resources.requests.cpu=$(POLICY_CONTROLLER_WEBHOOK_CPU_REQUEST) --set-string webhook.resources.limits.cpu=$(POLICY_CONTROLLER_WEBHOOK_CPU_LIMIT) --set webhook.failurePolicy=Fail --wait; then \
+				&& helm upgrade --install policy-controller sigstore/policy-controller --version "$(POLICY_CONTROLLER_VERSION)" --namespace cosign-system --create-namespace --server-side=false --rollback-on-failure --timeout 10m --set webhook.extraArgs.disable-tuf=true --set webhook.registryCaBundle.name=chaimir-registry-ca --set webhook.registryCaBundle.key=ca-bundle.crt --set cosign.webhookTimeoutSeconds.mutating=$(POLICY_CONTROLLER_WEBHOOK_TIMEOUT_SECONDS) --set cosign.webhookTimeoutSeconds.validating=$(POLICY_CONTROLLER_WEBHOOK_TIMEOUT_SECONDS) --set webhook.webhookTimeoutSeconds.defaulting=$(POLICY_CONTROLLER_WEBHOOK_TIMEOUT_SECONDS) --set webhook.webhookTimeoutSeconds.validating=$(POLICY_CONTROLLER_WEBHOOK_TIMEOUT_SECONDS) --set webhook.replicaCount=$(POLICY_CONTROLLER_WEBHOOK_REPLICAS) --set-string webhook.resources.requests.cpu=$(POLICY_CONTROLLER_WEBHOOK_CPU_REQUEST) --set-string webhook.resources.limits.cpu=$(POLICY_CONTROLLER_WEBHOOK_CPU_LIMIT) --set webhook.failurePolicy=Fail --wait; then \
 				exit 0; \
 			fi; \
 			if [ $$attempt -eq 3 ]; then echo "固定 policy-controller Chart 安装失败,已完成 3 次尝试。"; exit 1; fi; \
@@ -370,7 +369,21 @@ policy-controller-up: supply-chain-tools-pull tls ## 安装 Sigstore policy-cont
 			sleep 5; \
 		done'
 	kubectl wait --for=condition=Established crd/clusterimagepolicies.policy.sigstore.dev --timeout=120s
+	$(MAKE) policy-controller-webhook-check
 	kubectl apply -f base/admission/image-signature-policy.yaml
+	$(MAKE) policy-controller-check
+
+.PHONY: policy-controller-webhook-check
+policy-controller-webhook-check: ## 等待控制器滚动、自动证书轮换及策略创建/更新准入可用
+	kubectl -n cosign-system rollout status deployment/policy-controller-webhook --timeout=180s
+	@for attempt in $$(seq 1 24); do \
+		if kubectl --request-timeout=5s apply --dry-run=server -f base/admission/image-signature-policy.yaml >/dev/null; then exit 0; fi; \
+		if [ $$attempt -eq 24 ]; then echo "签名准入策略 API 尚未就绪,请检查控制器证书与转换日志。"; exit 1; fi; \
+		sleep 5; \
+	done
+
+.PHONY: policy-controller-check
+policy-controller-check: policy-controller-webhook-check ## 在修改应用资源前确认公钥签名准入控制器与策略均已就绪
 	kubectl wait --for=condition=Ready clusterimagepolicy/chaimir-require-signed-images --timeout=120s
 
 .PHONY: supply-chain-secret-check
@@ -382,7 +395,7 @@ supply-chain-secret-check: ## 校验供应链专用密钥文件存在,不注入�
 
 # ---- 应用部署 ----
 .PHONY: apply-acceptance
-apply-acceptance: registry-pull-secret-bootstrap capacity-check ## 应用 acceptance overlay(命名空间/中间件/应用)
+apply-acceptance: policy-controller-check registry-pull-secret-bootstrap capacity-check ## 应用 acceptance overlay(命名空间/中间件/应用)
 	kubectl -n chaimir-system delete job chaimir-migrate --ignore-not-found
 	kubectl kustomize $(OVERLAY) | kubectl apply -f -
 
@@ -422,9 +435,13 @@ migrate: ## 确认迁移 + RLS 初始化 +基础 seed Job 已提交
 	@kubectl -n chaimir-system get job chaimir-migrate >/dev/null
 	@echo "migrate Job 已提交(镜像就绪后执行;目录2/3 产出 service/migrate 镜像后生效)"
 
-.PHONY: acceptance-seed
-acceptance-seed: migrate ## 等待基础迁移完成并执行 canonical 验收夹具 seed
+.PHONY: migration-wait
+migration-wait: migrate ## 等待迁移、应用角色授权与平台内置目录初始化完成
 	kubectl -n chaimir-system wait --for=condition=complete job/chaimir-migrate --timeout=180s
+
+# 业务验收种子只由首次dev-up调用,普通镜像刷新不得覆盖已成功资源。
+.PHONY: acceptance-seed
+acceptance-seed: migration-wait ## 首次引导时执行 canonical 验收业务夹具 seed
 	powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/db/run-acceptance-seed-job.ps1 -Namespace chaimir-system -MigrationJob chaimir-migrate -SeedJob chaimir-seed-acceptance
 
 .PHONY: application-wait

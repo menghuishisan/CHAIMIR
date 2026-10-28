@@ -28,11 +28,11 @@ var maintenancePolicies = []MaintenancePolicy{
 	{Module: "teaching", Role: "chaimir_maintenance_teaching", Tables: []string{
 		"course", "chapter", "lesson", "course_member", "assignment", "assignment_item", "submission",
 		"submission_judge_outbox", "submission_draft", "lesson_progress", "discussion_post", "announcement",
-		"course_review", "grade_weight", "course_grade", "course_grade_export_request", "teaching_grade_event_outbox",
+		"course_review", "grade_weight", "course_grade", "course_grade_export_request", "teaching_grade_event_outbox", "course_experiment_source", "course_experiment_score",
 	}},
 	{Module: "experiment", Role: "chaimir_maintenance_experiment", Tables: []string{
 		"experiment", "experiment_group", "group_member", "experiment_instance", "checkpoint_result",
-		"experiment_report", "experiment_score_outbox",
+		"experiment_report", "experiment_event_outbox",
 	}},
 	{Module: "contest", Role: "chaimir_maintenance_contest", Tables: []string{
 		"contest", "contest_problem", "team", "team_member", "solve_submission", "battle_entry", "battle_match",
@@ -43,7 +43,7 @@ var maintenancePolicies = []MaintenancePolicy{
 	}},
 	{Module: "grade", Role: "chaimir_maintenance_grade", Tables: []string{
 		"grade_level_config", "semester", "grade_review", "grade_lock_outbox", "student_semester_grade",
-		"grade_appeal", "academic_warning", "transcript_record",
+		"grade_appeal", "grade_update_cursor", "academic_warning", "transcript_record",
 	}},
 	{Module: "admin", Role: "chaimir_maintenance_admin", Tables: []string{
 		"audit_export_request",

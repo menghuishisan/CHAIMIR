@@ -45,6 +45,7 @@ import type {
   AdminResetPasswordRequest,
   BatchAccountIDsRequest,
   ImportPreviewResponse,
+  ImportPreviewSummary,
   ImportCommitRequest,
   PromoteClassesRequest,
   AccountImportCommitResponse,
@@ -301,6 +302,21 @@ export class IdentityApi {
     formData.append('type', targetType)
     formData.append('file', file)
     return this.client.postFormData('/accounts/import/preview', formData, onProgress)
+  }
+
+  /** 发现当前租户本人未完成的账号或组织导入预览。 */
+  async listImportPreviews(params: { type: 'teacher' | 'student' | 'org'; page?: number; size?: number }): Promise<PaginatedResponse<ImportPreviewSummary>> {
+    return this.client.get('/import-previews', params)
+  }
+
+  /** 恢复服务端校验结果,不返回原始导入行或初始密码。 */
+  async getImportPreview(previewId: string): Promise<ImportPreviewResponse> {
+    return this.client.get(`/import-previews/${encodePathSegment(previewId)}`)
+  }
+
+  /** 明确放弃本人尚未提交的预览。 */
+  async discardImportPreview(previewId: string): Promise<void> {
+    return this.client.delete(`/import-previews/${encodePathSegment(previewId)}`)
   }
 
   /**

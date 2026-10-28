@@ -61,8 +61,10 @@ type TxStore interface {
 	CreateSandbox(ctx context.Context, input CreateSandboxInput) (Sandbox, error)
 	GetSandbox(ctx context.Context, tenantID, sandboxID int64) (Sandbox, error)
 	ClaimSandboxWorkspaceRevision(ctx context.Context, tenantID, sandboxID, expectedRevision int64) (int64, error)
+	GetSandboxForUpdate(ctx context.Context, tenantID, sandboxID int64) (Sandbox, error)
 	LockSandboxChain(ctx context.Context, tenantID, sandboxID int64) error
 	ListSandboxesBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]Sandbox, error)
+	GetSavedSandboxBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (Sandbox, error)
 	ListSandboxesByScopeRef(ctx context.Context, tenantID int64, scopeRef string) ([]Sandbox, error)
 	ListRecycleCandidates(ctx context.Context, readyDeadline time.Time, limit int32) ([]Sandbox, error)
 	MarkIdleSandboxes(ctx context.Context) ([]Sandbox, error)
@@ -610,9 +612,30 @@ func (s *txStore) ClaimSandboxWorkspaceRevision(ctx context.Context, tenantID, s
 	return row, nil
 }
 
+// GetSandboxForUpdate 持有沙箱权威行锁，串行化生命周期、文件写入与归档保存。
+func (s *txStore) GetSandboxForUpdate(ctx context.Context, tenantID, sandboxID int64) (Sandbox, error) {
+	row, err := s.q.GetSandboxForUpdate(ctx, sqlcgen.GetSandboxForUpdateParams{TenantID: tenantID, ID: sandboxID})
+	if err != nil {
+		return Sandbox{}, err
+	}
+	return sandboxFromRow(row)
+}
+
 // LockSandboxChain 在当前事务内持有单沙箱链操作锁,直到真实能力调用完成后事务提交。
 func (s *txStore) LockSandboxChain(ctx context.Context, tenantID, sandboxID int64) error {
 	return s.q.LockSandboxChain(ctx, sandboxID)
+}
+
+// GetSavedSandboxBySourceRef 查询稳定来源最近保存的归档，不排除已销毁历史记录。
+func (s *txStore) GetSavedSandboxBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (Sandbox, error) {
+	row, err := s.q.GetSavedSandboxBySourceRef(ctx, sqlcgen.GetSavedSandboxBySourceRefParams{TenantID: tenantID, SourceRef: sourceRef})
+	if db.IsNoRows(err) {
+		return Sandbox{}, apperr.ErrSandboxNotFound.WithCause(err)
+	}
+	if err != nil {
+		return Sandbox{}, err
+	}
+	return sandboxFromRow(row)
 }
 
 // ListSandboxesBySourceRef 查询来源下未销毁沙箱。

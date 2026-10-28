@@ -82,9 +82,9 @@ func (s *Service) CreateDepartmentByAdmin(ctx context.Context, req DepartmentReq
 			return err
 		}
 		row = item
-		return s.writeOrgAuditInTx(ctx, tx, id, "org.department.create", "identity.department", row.ID, map[string]any{"code": row.Code})
+		return s.writeTenantAuditInTx(ctx, tx, id, "org.department.create", "identity.department", row.ID, map[string]any{"code": row.Code})
 	}); err != nil {
-		return DepartmentDTO{}, apperr.ErrInternal.WithCause(err)
+		return DepartmentDTO{}, apperr.AsAppError(err)
 	}
 	return ToDepartmentDTO(row), nil
 }
@@ -105,14 +105,14 @@ func (s *Service) UpdateDepartmentByAdmin(ctx context.Context, departmentID int6
 			return err
 		}
 		row = item
-		return s.writeOrgAuditInTx(ctx, tx, id, "org.department.update", "identity.department", departmentID, map[string]any{"code": row.Code})
+		return s.writeTenantAuditInTx(ctx, tx, id, "org.department.update", "identity.department", departmentID, map[string]any{"code": row.Code})
 	}); err != nil {
-		return DepartmentDTO{}, apperr.ErrInternal.WithCause(err)
+		return DepartmentDTO{}, apperr.AsAppError(err)
 	}
 	return ToDepartmentDTO(row), nil
 }
 
-// DeleteDepartmentByAdmin 软删除院系,数据库外键负责阻止仍被引用的非法删除。
+// DeleteDepartmentByAdmin 软删除无引用院系,引用门禁由仓储在组织锁内校验。
 func (s *Service) DeleteDepartmentByAdmin(ctx context.Context, departmentID int64) error {
 	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
 	if err != nil {
@@ -122,9 +122,9 @@ func (s *Service) DeleteDepartmentByAdmin(ctx context.Context, departmentID int6
 		if err := tx.DeleteDepartment(ctx, id.TenantID, departmentID); err != nil {
 			return err
 		}
-		return s.writeOrgAuditInTx(ctx, tx, id, "org.department.delete", "identity.department", departmentID, map[string]any{})
+		return s.writeTenantAuditInTx(ctx, tx, id, "org.department.delete", "identity.department", departmentID, map[string]any{})
 	}); err != nil {
-		return apperr.ErrInternal.WithCause(err)
+		return apperr.AsAppError(err)
 	}
 	return nil
 }
@@ -183,7 +183,7 @@ func (s *Service) CreateMajorByAdmin(ctx context.Context, req MajorRequest) (Maj
 			return err
 		}
 		row = item
-		return s.writeOrgAuditInTx(ctx, tx, id, "org.major.create", "identity.major", row.ID, map[string]any{"department_id": req.DepartmentID})
+		return s.writeTenantAuditInTx(ctx, tx, id, "org.major.create", "identity.major", row.ID, map[string]any{"department_id": req.DepartmentID})
 	}); err != nil {
 		return MajorDTO{}, apperr.AsAppError(err)
 	}
@@ -209,7 +209,7 @@ func (s *Service) UpdateMajorByAdmin(ctx context.Context, majorID int64, req Maj
 			return err
 		}
 		row = item
-		return s.writeOrgAuditInTx(ctx, tx, id, "org.major.update", "identity.major", majorID, map[string]any{"department_id": req.DepartmentID})
+		return s.writeTenantAuditInTx(ctx, tx, id, "org.major.update", "identity.major", majorID, map[string]any{"department_id": req.DepartmentID})
 	}); err != nil {
 		return MajorDTO{}, apperr.AsAppError(err)
 	}
@@ -226,9 +226,9 @@ func (s *Service) DeleteMajorByAdmin(ctx context.Context, majorID int64) error {
 		if err := tx.DeleteMajor(ctx, id.TenantID, majorID); err != nil {
 			return err
 		}
-		return s.writeOrgAuditInTx(ctx, tx, id, "org.major.delete", "identity.major", majorID, map[string]any{})
+		return s.writeTenantAuditInTx(ctx, tx, id, "org.major.delete", "identity.major", majorID, map[string]any{})
 	}); err != nil {
-		return apperr.ErrInternal.WithCause(err)
+		return apperr.AsAppError(err)
 	}
 	return nil
 }
@@ -310,7 +310,7 @@ func (s *Service) CreateClassByAdmin(ctx context.Context, req ClassRequest) (Cla
 			return err
 		}
 		row = item
-		return s.writeOrgAuditInTx(ctx, tx, id, "org.class.create", "identity.class", row.ID, map[string]any{"major_id": req.MajorID, "enrollment_year": req.EnrollmentYear})
+		return s.writeTenantAuditInTx(ctx, tx, id, "org.class.create", "identity.class", row.ID, map[string]any{"major_id": req.MajorID, "enrollment_year": req.EnrollmentYear})
 	}); err != nil {
 		return ClassDTO{}, apperr.AsAppError(err)
 	}
@@ -336,7 +336,7 @@ func (s *Service) UpdateClassByAdmin(ctx context.Context, classID int64, req Cla
 			return err
 		}
 		row = item
-		return s.writeOrgAuditInTx(ctx, tx, id, "org.class.update", "identity.class", classID, map[string]any{"major_id": req.MajorID, "enrollment_year": req.EnrollmentYear})
+		return s.writeTenantAuditInTx(ctx, tx, id, "org.class.update", "identity.class", classID, map[string]any{"major_id": req.MajorID, "enrollment_year": req.EnrollmentYear})
 	}); err != nil {
 		return ClassDTO{}, apperr.AsAppError(err)
 	}
@@ -353,9 +353,9 @@ func (s *Service) DeleteClassByAdmin(ctx context.Context, classID int64) error {
 		if err := tx.DeleteClass(ctx, id.TenantID, classID); err != nil {
 			return err
 		}
-		return s.writeOrgAuditInTx(ctx, tx, id, "org.class.delete", "identity.class", classID, map[string]any{})
+		return s.writeTenantAuditInTx(ctx, tx, id, "org.class.delete", "identity.class", classID, map[string]any{})
 	}); err != nil {
-		return apperr.ErrInternal.WithCause(err)
+		return apperr.AsAppError(err)
 	}
 	return nil
 }
@@ -401,6 +401,7 @@ func (s *Service) PreviewOrgImportByAdmin(ctx context.Context, req ImportPreview
 		return ImportPreviewResponse{}, err
 	}
 	previewID := s.ids.Generate()
+	var saved ImportPreview
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		// 预览阶段必须给出逐行错误,因此先校验数据库中已存在的上级组织,不能留到提交阶段静默失败。
 		if err := s.validateOrgImportParents(ctx, tx, id.TenantID, rows, results); err != nil {
@@ -415,7 +416,7 @@ func (s *Service) PreviewOrgImportByAdmin(ctx context.Context, req ImportPreview
 		if err != nil {
 			return err
 		}
-		_, err = tx.CreateImportPreview(ctx, CreateImportPreviewInput{
+		saved, err = tx.CreateImportPreview(ctx, CreateImportPreviewInput{
 			ID:            previewID,
 			TenantID:      id.TenantID,
 			OperatorID:    id.AccountID,
@@ -429,13 +430,7 @@ func (s *Service) PreviewOrgImportByAdmin(ctx context.Context, req ImportPreview
 	}); err != nil {
 		return ImportPreviewResponse{}, apperr.ErrInternal.WithCause(err)
 	}
-	valid := 0
-	for _, row := range rows {
-		if row.Error == "" {
-			valid++
-		}
-	}
-	return ImportPreviewResponse{PreviewID: ids.ID(previewID), Total: len(rows), Valid: valid, Invalid: len(rows) - valid, Rows: results}, nil
+	return importPreviewResponse(saved)
 }
 
 // CommitOrgImportByAdmin 读取服务端预览并仅提交校验通过的组织结构行。
@@ -450,7 +445,7 @@ func (s *Service) CommitOrgImportByAdmin(ctx context.Context, req ImportCommitRe
 		if err != nil {
 			return err
 		}
-		if preview.TargetType != ImportTargetOrg || preview.Status != ImportPreviewPending || timex.Now().After(preview.ExpireAt) {
+		if preview.TargetType != ImportTargetOrg || preview.Status != ImportPreviewPending || !timex.Now().Before(preview.ExpireAt) {
 			return apperr.ErrIdentityImportPreviewExpired
 		}
 		var rows []orgImportRow
@@ -826,7 +821,7 @@ func (s *Service) PromoteClassesByAdmin(ctx context.Context, req PromoteClassesR
 			return err
 		}
 		// 班级升级会批量改变组织口径,必须与变更一起写审计,避免后续无法追踪批量来源。
-		return s.writeOrgAuditInTx(ctx, tx, id, "org.class.promote", "identity.class", 0, map[string]any{"class_ids": classIDs, "target_year": req.TargetYear})
+		return s.writeTenantAuditInTx(ctx, tx, id, "org.class.promote", "identity.class", 0, map[string]any{"class_ids": classIDs, "target_year": req.TargetYear})
 	}); err != nil {
 		return mapPromoteClassesError(err)
 	}
@@ -863,8 +858,8 @@ func (s *Service) validateOrgImportParents(ctx context.Context, tx TxStore, tena
 	return nil
 }
 
-// writeOrgAuditInTx 在组织架构事务内写审计,确保敏感变更与审计记录同成同败。
-func (s *Service) writeOrgAuditInTx(ctx context.Context, tx TxStore, id tenant.Identity, action, targetType string, targetID int64, detail map[string]any) error {
+// writeTenantAuditInTx 在租户事务内写审计,确保敏感变更与审计记录同成同败。
+func (s *Service) writeTenantAuditInTx(ctx context.Context, tx TxStore, id tenant.Identity, action, targetType string, targetID int64, detail map[string]any) error {
 	entry, err := audit.BuildEntry(ctx, id.TenantID, id.AccountID, contracts.RoleNumSchoolAdmin, action, targetType, targetID, detail)
 	if err != nil {
 		return err

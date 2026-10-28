@@ -100,6 +100,10 @@ SaaS 生产的 `chaimir-staging-secret-store`、`chaimir-prod-secret-store` 由�
 
 Sigstore policy-controller 的 webhook 控制器会在运行期维护 CA 与 `namespaceSelector` 排除条件。容器化 Helm 4 安装该 chart 时固定使用客户端三方补丁模式,避免 Server-Side Apply 与控制器对同一 webhook 字段争夺所有权;这不改变 chart 声明的 `policy.sigstore.dev/include=true`、`failurePolicy=Fail` 或超时配置。canonical Harbor 使用受控 CA 时,部署入口把同一 CA 写入 `cosign-system/chaimir-registry-ca` ConfigMap,并通过 chart 原生 `webhook.registryCaBundle` 只读挂载;不得使用跳过 TLS 校验参数。
 
+平台签名只使用 `cosign-system/cosign-public-key` 中的平台 Cosign 公钥,不依赖公共 keyless 身份或透明日志。固定官方 Chart 通过 `webhook.extraArgs.disable-tuf=true` 设置控制器的原生 `disable-tuf` 参数,使启动无需下载公共 TUF 元数据;Harbor CA 和全部公钥验签继续生效。`policy-controller-webhook-check` 等待控制器滚动完成并有界执行正式策略的服务端 dry-run,确认 TLS、资源转换与创建/更新准入可用后才应用策略,防止 Pod 已就绪而自动证书轮换尚未完成。首次安装、`dev-start` 与 `dev-refresh` 共用 `policy-controller-check`,复用上述检查并确认 `ClusterImagePolicy` 就绪后才继续应用工作负载;失败时不删除迁移 Job。
+
+节点重启改变地址时,组件等待流程先按当前 Node 地址修复派生 CiliumEndpoint,再等待 Cilium 组件与节点就绪。签名控制器的旧端点会使受保护 Pod 状态更新超时并阻塞 kubelet 状态队列,因此不能把端点修复安排在组件等待之后。完整安装与日常恢复复用这一顺序。
+
 签名准入启用后,部署入口先应用静态 namespace,再把唯一 Harbor robot `dockerconfigjson` 以固定名称 `chaimir-harbor-pull` 同步到 `chaimir-system`、`chaimir-data` 与 `chaimir-prepull`,最后才提交受保护工作负载。policy-controller 的 `signaturePullSecrets` 从工作负载所在 namespace 读取该 Secret;不得把凭据同步放到工作负载创建之后。
 
 所有运行位置执行同一套生产 Cilium 安全基线。`kind-chaimir-cilium` 从无默认 CNI 状态创建并运行完整平台、数据中间件、gVisor 和动态沙箱;不得让 `docker-desktop` 的 Kindnet 集群继续运行 Chaimir 业务。迁移期间该旧集群只提供外部 Harbor,项目脚本会删除其中的旧 Chaimir 测试命名空间。工作区直跑后端或前端不作为平台启动方式。若 Kind 节点继承的宿主代理指向回环地址,集群引导只在节点 containerd 服务层把代理主机改写为 `host.docker.internal`,避免把节点自身误当成宿主;同时由 CoreDNS 将 canonical Harbor 域名解析到同一宿主网关并通过临时 Pod 实测。Kubernetes 业务清单、镜像 digest 和安全策略不因此改变。
@@ -122,11 +126,23 @@ make dev-up
 
 该目标会验证外部 Harbor、创建或校验无默认 CNI 的 `kind-chaimir-cilium`、安装正式 digest 的 Cilium 并通过 NetworkPolicy 数据面测试,再安装 gVisor 并实际运行隔离 Pod 验证用户态内核、安装 ingress、metrics-server、policy-controller,部署完整 overlay 并运行迁移任务。启动完成后将 `www.chaimir.io` 解析到 `127.0.0.1`,信任 `config/chaimir-tls/tls.crt`,通过 `https://www.chaimir.io` 访问。验收 seed 只由明确的 seed Job 生成,不会进入 SaaS/学校交付 overlay;CNI、证书、签名、隔离运行时、日志级别和网络策略全部执行生产标准。
 
-`make dev-up` 是完整环境的唯一首次入口,不会接受 Kindnet 集群作为运行目标。已有环境的日常生命周期分为三个明确入口:`make dev-start` 只恢复现有 Kind 节点、动态地址、Cilium 健康状态与 HTTPS 入口,不执行 Helm upgrade、NetworkPolicy smoke、gVisor smoke、迁移或验收 seed;`make dev-refresh` 只在镜像、配置或数据库源码变化后恢复现有集群并重新应用唯一 overlay、迁移和验收 seed,不重新安装 Cilium;`make dev-stop` 通过 Docker pause 暂停项目 Kind 节点的 CPU 执行并保留内存、volume、数据库进程与节点镜像缓存,避免用强制退出中断数据库。完整 Cilium 数据面与 gVisor 验收保留在首次 `dev-up` 和显式检查目标中,不会降级或形成第二套配置。所有环境只使用 `make metrics-up`;Kind 节点由集群入口为 kubelet 启用服务证书轮换,并只批准节点身份、主体和 SAN 均匹配的请求,不提供 `--kubelet-insecure-tls` 入口。
+`make dev-up` 是完整环境的唯一首次入口,不会接受 Kindnet 集群作为运行目标。已有环境的日常生命周期分为三个明确入口:`make dev-start` 只恢复现有 Kind 节点、动态地址、Cilium 健康状态与 HTTPS 入口,不执行 Helm upgrade、NetworkPolicy smoke、gVisor smoke、迁移或验收 seed;`make dev-refresh` 只在镜像、配置或数据库源码变化后恢复现有集群并重新应用唯一 overlay,等待迁移、角色授权及平台内置目录初始化完成,不重新安装 Cilium、不重跑验收业务 seed;`make dev-stop` 通过 Docker pause 暂停项目 Kind 节点的 CPU 执行并保留内存、volume、数据库进程与节点镜像缓存,避免用强制退出中断数据库。验收业务 seed 只在首次 `dev-up` 调度,更新镜像保留已有账号、课程、提交、成绩和测试进度。完整 Cilium 数据面与 gVisor 验收保留在首次 `dev-up` 和显式检查目标中,不会降级或形成第二套配置。所有环境只使用 `make metrics-up`;Kind 节点由集群入口为 kubelet 启用服务证书轮换,并只批准节点身份、主体和 SAN 均匹配的请求,不提供 `--kubelet-insecure-tls` 入口。
 
-Docker Desktop 重启不会删除 Kind 节点 `/var` Docker volume 或 Harbor PVC,因此同一 digest 的 Harbor 数据和节点 containerd 缓存会保留。集群入口把项目 Kind 节点的 Docker restart policy 固定为 `unless-stopped`,并会主动启动仍存在但已停止的节点;若节点容器地址在重启后变化,入口只删除节点归属失效的派生 `CiliumEndpoint`,等待当前 Agent 以新地址重新发布,不重建业务 Pod 或清空镜像缓存。恢复验收从当前 `CiliumNode` 读取全部主机地址与健康端点地址,由每个 Kind 节点主动探测完整地址矩阵,不等待仍可能保留重启前结果的 Cilium 后台健康缓存。Docker 恢复后执行 `make dev-start` 即可恢复网站;只有镜像、配置或数据库源码变化时才执行 `make dev-refresh`。应用滚动完成后,刷新入口会按当前控制器和 Pod 引用精确清理未使用的 Kustomize 哈希 ConfigMap/Secret,不保留旧配置副本。不得执行 `make cilium-cluster-down`、删除 Harbor PVC、删除 Kind 节点 volume 或带 volume 的全局 Docker prune,否则相应集群数据或镜像缓存会被明确删除并需要重新拉取。
+Windows验收宿主在用户级`.wslconfig`的`[wsl2]`固定`localhostForwarding=false`,由Docker Desktop唯一发布80/443,消除重启后WSL回环转发与Docker正式监听重复。该设置影响用户全部WSL2发行版,本机不再依赖直接WSL服务的自动回环映射,不保留替代转发。修改后完整停止Desktop/WSL并由原监护恢复,使用`Get-NetTCPConnection -State Listen -LocalPort 80,443`确认唯一Docker监听,再沿原域名和原解析验证正常TLS/HTTPS与两层Ingress。诊断地址不作为正式入口,启动脚本不自动终止全局WSL进程；业务功能仍由正式页面回归验证。
 
-若 Docker Desktop 长时间保持 `starting`,且项目恢复入口记录 `wsl.exe` 枚举或关闭超时,根因在宿主机 WSL 服务未响应,不是项目镜像或 Kind 配置。此时 `docker-runtime.ps1` 会有界探测、终止本次探测的完整进程树并防止并发恢复,但不会删除 WSL 发行版、卷或镜像数据;如果非管理员会话仍无法执行 `wsl --shutdown`,必须由管理员重启 `WSLService` 或重启 Windows。WSL 恢复后只需重新执行 `make dev-start`;健康路径不会重复重启 Docker。
+Docker Desktop 重启不会删除 Kind 节点 `/var` Docker volume 或 Harbor PVC,因此同一 digest 的 Harbor 数据和节点 containerd 缓存会保留。集群入口把项目 Kind 节点的 Docker restart policy 固定为 `unless-stopped`,并会主动启动仍存在但已停止的节点;若节点容器地址在重启后变化,入口按 Pod 的 `spec.nodeName` 关联当前 Node 的唯一 `InternalIP`,只删除节点归属失效的派生 `CiliumEndpoint`,等待当前 Agent 以新地址重新发布,不重建业务 Pod 或清空镜像缓存。Pod 的 `status.hostIP` 可能滞留旧地址,端点识别与恢复等待均不以它作为地址权威。恢复验收从当前 `CiliumNode` 读取全部主机地址与健康端点地址,由每个 Kind 节点主动探测完整地址矩阵,不等待仍可能保留重启前结果的 Cilium 后台健康缓存。Docker 恢复后执行 `make dev-start` 即可恢复网站;只有镜像、配置或数据库源码变化时才执行 `make dev-refresh`。应用滚动完成后,刷新入口会按当前控制器和 Pod 引用精确清理未使用的 Kustomize 哈希 ConfigMap/Secret,不保留旧配置副本。不得执行 `make cilium-cluster-down`、删除 Harbor PVC、删除 Kind 节点 volume 或带 volume 的全局 Docker prune,否则相应集群数据或镜像缓存会被明确删除并需要重新拉取。
+
+Windows 重启并登录后，由 `Chaimir.DockerRuntimeWatcher` 自动恢复 Docker Desktop/WSL、现有 Kind 节点、Cilium 派生端点和外层 HTTPS 的当前上游。任务用当前用户的交互会话和最高可用权限运行，登录与周期触发、失败重启、IgnoreNew 及恢复互斥保证持续运行。安装需要一次 UAC 授权；后续恢复不再弹出提权窗口。Docker Desktop 是当前用户的应用，因此无人登录的系统启动不声明可用。
+
+Windows 宿主资源预算应固定为可同时承载依赖集群、业务集群和顺序镜像构建的值，不能依赖每次启动手工调整。当前16物理核/32线程、约16GB内存的验收机采用WSL 8处理器/8GB内存/4GB swap及gradual页缓存回收；原4处理器/6GB实测持续内存stall，不把资源压力本身断言为此前WSLService挂死的唯一原因。修改后须重新启动WSL，并复核实际CPU/内存、压力指标、控制面、Cilium、准入和业务入口。
+
+唯一 `docker-runtime.ps1` 先等待正常启动并核对真实Linux engine API；不进入Docker内部WSL发行版执行额外健康探测。确认引擎不可用或监护持续确认节点网络控制阻塞后进入有界恢复：官方 `docker desktop stop --force`，等待停止收敛，再执行 `wsl --shutdown`。若Desktop持续stopping，仅结束当前用户且安装路径已核对的Desktop进程；WSL关闭无响应时重启 `WSLService`，服务停止超时仅结束身份核对过的当前 `wslservice.exe`。随后启动Desktop并重读真实API。不删除发行版、VHD、卷或镜像；健康路径不重启Docker，正常启动不迁移或seed。
+
+`make docker-runtime-watcher-install` 通过 UAC 安装并立即启动同一任务。配置统一读取 `config/chaimir.env` 的 `DOCKER_RUNTIME_*` 键，示例同步 `backend/.env.example`。监护对 Docker 不可用和集群异常均记录持续时间并按配置恢复，CEP 明确陈旧立即恢复；恢复冷却后重新核对 Node、关键系统 Pod、CEP 与当前 edge EndpointSlice。CEP 检查复用共享实现，关联 Pod.spec.nodeName 与当前 Node InternalIP。
+
+每轮在Node Ready判断前有界读取当前Kind节点的进程状态/等待点，识别核心守护进程D状态等待RTNL及节点执行失败/超时。此时不能报告集群健康；持续RTNL阻塞或节点执行超时复用原运行时Recover与集群Start，普通执行拒绝/缺进程/未就绪仍走原Ensure及Start，不创建第二套恢复入口、不循环删Pod或清数据。探测只读`ps`元数据，不创建网络命名空间或发netlink查询。门禁通过仍不等于备份、动态沙箱或整机重启已通过，详细判定与恢复规则见`docs/总-部署架构设计.md`。
+
+`dev-stop` 暂停自动恢复后停止节点，`dev-start` 恢复自动恢复；部署维护可使用 watcher 的 Suspend/Resume，避免维护时被自动启动。安装不打断正在进行的恢复。状态与日志位于 `.tmp/docker-runtime/watcher.state.json` 和 `watcher.log`，分别记录权限、暂停状态、Docker/集群/入口、CEP 计数和最后恢复结果；任务 Running 和恢复退出0均不代替当前健康与真实 HTTPS 功能验收。
 
 上述目标都是前台一次性运维命令,完成后会返回 PowerShell 提示符,网站继续由 Docker/Kubernetes 托管,不需要保持终端命令运行。执行中可用 `Ctrl+C` 停止等待;已经提交给 Kubernetes 的幂等变更不会自动回滚,重新执行同一目标即可继续收敛。需要停止网站时使用 `make dev-stop`,不要用全局 Docker 清理命令。
 

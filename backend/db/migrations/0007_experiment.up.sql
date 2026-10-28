@@ -99,28 +99,27 @@ CREATE TABLE IF NOT EXISTS experiment_report (
     FOREIGN KEY (tenant_id, student_id) REFERENCES account(tenant_id, id)
 );
 
-CREATE TABLE IF NOT EXISTS experiment_score_outbox (
+CREATE TABLE IF NOT EXISTS experiment_event_outbox (
     id BIGINT PRIMARY KEY,
     tenant_id BIGINT NOT NULL,
     experiment_id BIGINT NOT NULL,
-    instance_id BIGINT NOT NULL,
-    student_id BIGINT NOT NULL,
-    score NUMERIC(5,2) NOT NULL,
-    score_revision INT NOT NULL CHECK (score_revision > 0),
+    aggregate_id BIGINT NOT NULL,
+    event_revision BIGINT NOT NULL CHECK (event_revision > 0),
+    subject VARCHAR(64) NOT NULL CHECK (subject IN ('experiment.scored', 'experiment.course-source.changed')),
+    payload JSONB NOT NULL,
     trace_id VARCHAR(128) NOT NULL,
-    scored_at TIMESTAMPTZ NOT NULL,
-    status SMALLINT NOT NULL DEFAULT 1,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    status SMALLINT NOT NULL DEFAULT 1 CHECK (status IN (1, 2, 3, 4)),
     retry_count INT NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
     last_error VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     lease_token VARCHAR(64) NOT NULL DEFAULT '',
     lease_until TIMESTAMPTZ,
-    CONSTRAINT chk_experiment_score_outbox_status CHECK (status IN (1,2,3,4)),
-    UNIQUE (tenant_id, instance_id, score_revision),
-    FOREIGN KEY (tenant_id, instance_id) REFERENCES experiment_instance(tenant_id, id)
+    UNIQUE (tenant_id, subject, aggregate_id, event_revision),
+    FOREIGN KEY (tenant_id, experiment_id) REFERENCES experiment(tenant_id, id)
 );
-CREATE INDEX IF NOT EXISTS idx_experiment_score_outbox_lease ON experiment_score_outbox(status, lease_until) WHERE status = 2;
+CREATE INDEX IF NOT EXISTS idx_experiment_event_outbox_lease ON experiment_event_outbox(status, lease_until) WHERE status = 2;
 
 CREATE INDEX IF NOT EXISTS idx_experiment_course_status ON experiment(tenant_id, course_id, status) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_experiment_author ON experiment(tenant_id, author_id) WHERE deleted_at IS NULL;
@@ -131,8 +130,8 @@ CREATE INDEX IF NOT EXISTS idx_group_member_student ON group_member(tenant_id, s
 CREATE INDEX IF NOT EXISTS idx_checkpoint_result_instance ON checkpoint_result(tenant_id, instance_id);
 CREATE INDEX IF NOT EXISTS idx_checkpoint_result_judge ON checkpoint_result(tenant_id, judge_task_ref);
 CREATE INDEX IF NOT EXISTS idx_experiment_report_instance_student ON experiment_report(tenant_id, instance_id, student_id);
-CREATE INDEX IF NOT EXISTS idx_experiment_score_outbox_status ON experiment_score_outbox(status, created_at ASC);
-CREATE INDEX IF NOT EXISTS idx_experiment_score_outbox_instance_student ON experiment_score_outbox(tenant_id, instance_id, student_id);
+CREATE INDEX IF NOT EXISTS idx_experiment_event_outbox_status ON experiment_event_outbox(status, created_at ASC);
+
 
 ALTER TABLE experiment ENABLE ROW LEVEL SECURITY;
 ALTER TABLE experiment_instance ENABLE ROW LEVEL SECURITY;
@@ -140,7 +139,7 @@ ALTER TABLE experiment_group ENABLE ROW LEVEL SECURITY;
 ALTER TABLE group_member ENABLE ROW LEVEL SECURITY;
 ALTER TABLE checkpoint_result ENABLE ROW LEVEL SECURITY;
 ALTER TABLE experiment_report ENABLE ROW LEVEL SECURITY;
-ALTER TABLE experiment_score_outbox ENABLE ROW LEVEL SECURITY;
+ALTER TABLE experiment_event_outbox ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY experiment_tenant_rls ON experiment USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY experiment_instance_tenant_rls ON experiment_instance USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
@@ -148,4 +147,4 @@ CREATE POLICY experiment_group_tenant_rls ON experiment_group USING (tenant_id =
 CREATE POLICY group_member_tenant_rls ON group_member USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY checkpoint_result_tenant_rls ON checkpoint_result USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY experiment_report_tenant_rls ON experiment_report USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
-CREATE POLICY experiment_score_outbox_tenant_rls ON experiment_score_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY experiment_event_outbox_tenant_rls ON experiment_event_outbox USING (tenant_id = current_setting('app.tenant_id')::BIGINT) WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);

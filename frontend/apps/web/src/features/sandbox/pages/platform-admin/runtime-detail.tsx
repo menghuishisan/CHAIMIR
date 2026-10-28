@@ -1,15 +1,15 @@
 // 运行时详情页(平台深页,/platform-admin/runtimes/:runtimeId)。
 //
 // 这里做完运行时从登记到可用的后三步:登记镜像版本 → 为已发布组合预拉取 → 平台自检。
-// 五件事分开呈现,任一未过运行时就不该出现在教师的可选项里(对齐清单 §6.3 / §8.3):
-// 镜像证明、内置创世、组合预拉取、平台自检、调度状态 —— 镜像拉到节点或容器起得来都不算通过。
+// 镜像证明、组合预拉取、平台自检和调度状态分别核对;创世初始化由运行时自己的声明处理。
+// 镜像拉到节点或容器起得来都不算通过,不能把内置创世当成所有链的自检门禁。
 // 预拉取属于组合闭包,必须显式输入 composition_digest;运行时镜像本身不保存默认或单布尔状态。
 //
 // 镜像摘要不让人手填:后端要求 digest 与镜像地址里的 @sha256: 部分完全一致,
 // 手抄两遍必然出错 —— 这里从地址里解析出来只读展示。
 //
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import {
   CircleSlash,
@@ -30,7 +30,6 @@ import {
   type SandboxRuntimeImage,
   type SandboxRuntimeSelftestStatus,
   type SandboxPrepullStatus,
-  type SandboxRuntimeSelftestDetail,
 } from '@chaimir/api-client'
 import {
   Badge,
@@ -60,6 +59,7 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { appConfig } from '../../../../app/config'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
@@ -89,6 +89,8 @@ import { selftestReasonText, selftestResultText, selftestStageText } from '../..
 export default function PlatformRuntimeDetailPage() {
   const { runtimeId = '' } = useParams<{ runtimeId: string }>()
   const navigate = useNavigate()
+  // 目录刷新会卸载内容区,公开自检结果由页面持有,避免刚读取的失败详情随之消失。
+  const [selftestResult, setSelftestResult] = useState<SandboxRuntimeSelftestStatus>()
 
   // 单读走 getRuntime:深链首屏不再拉全量列表在浏览器里筛这一条
   const runtime = useAsyncResource(
@@ -115,7 +117,12 @@ export default function PlatformRuntimeDetailPage() {
           />
         }
         actions={
-          <Button variant="outline" size="sm" leftIcon={ArrowLeft} onClick={() => navigate('/platform-admin/runtimes')}>
+          <Button
+            variant="outline"
+            size="sm"
+            leftIcon={ArrowLeft}
+            onClick={() => navigate('/platform-admin/runtimes')}
+          >
             返回列表
           </Button>
         }
@@ -142,6 +149,7 @@ export default function PlatformRuntimeDetailPage() {
             />
 
             <ImagesSection
+              key={runtimeId}
               runtimeId={runtimeId}
               images={images}
               onChanged={() => {
@@ -151,8 +159,11 @@ export default function PlatformRuntimeDetailPage() {
             />
 
             <SelftestSection
+              key={runtimeId}
               runtime={data}
               images={images.data ?? []}
+              result={selftestResult?.runtime_id === data.id ? selftestResult : undefined}
+              onResult={setSelftestResult}
               onDone={() => {
                 runtime.reload()
                 images.reload()
@@ -185,6 +196,7 @@ function RuntimeOverview({
   const genesisImages = images.filter(
     (item) => item.genesis_baked && item.status === RuntimeImageStatus.AVAILABLE
   )
+  const selftestImages = images.filter((item) => item.status === RuntimeImageStatus.AVAILABLE)
 
   return (
     <>
@@ -217,7 +229,7 @@ function RuntimeOverview({
         properties={[
           { label: '教师可否选用', value: selectable ? '可以选用' : '暂不可选' },
           { label: '镜像版本数', value: `${images.length} 个` },
-          { label: '可自检版本', value: `${genesisImages.length} 个` },
+          { label: '可自检版本', value: `${selftestImages.length} 个` },
           { label: '对外端口', value: `${runtimeContainerPortCount(runtime.adapter_spec)} 个` },
           {
             label: '主环境',
@@ -237,7 +249,7 @@ function RuntimeOverview({
 
       <PageSection
         title="接入链路"
-        description="镜像证明、内置创世、组合预拉取、平台自检、调度状态是五件独立的事,任一未过都不算可用 —— 镜像拉到节点或容器起得来都不代表通过。"
+        description="镜像证明、组合分发、平台自检和调度状态分别核对。初始链状态按运行时声明准备,环境启动后仍须完成真实操作验证。"
         className="mt-6"
       >
         <div className="rounded-lg bg-surface p-5 shadow-xs">
@@ -256,7 +268,7 @@ function RuntimeOverview({
                 description:
                   genesisImages.length > 0
                     ? `${genesisImages.map((item) => item.version).join('、')} 已内置创世状态`
-                    : '还没有「已启用且内置创世」的版本,自检起不来',
+                    : '没有内置创世的版本,按运行时声明初始化',
               },
               {
                 term: '组合预拉取',
@@ -307,16 +319,28 @@ interface ImagesSectionProps {
  */
 function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
   const [createOpen, setCreateOpen] = useState(false)
-  const [busyId, setBusyId] = useState<string>()
+  const [busyKey, setBusyKey] = useState<string>()
   const [compositionDigest, setCompositionDigest] = useState('')
   const [prepullStates, setPrepullStates] = useState<Record<string, SandboxPrepullStatus>>({})
   const [disableTarget, setDisableTarget] = useState<SandboxRuntimeImage>()
   const [actionError, setActionError] = useState<string>()
+  const actionInFlightRef = useRef(false)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      // 离页只结束页面观察,服务端已经接受的预拉取继续按原生命周期执行。
+      mountedRef.current = false
+    }
+  }, [])
 
   /** prepull 触发预拉取并轮询真实节点状态,避免长请求被入口层中止后误报失败。 */
   const prepull = useCallback(
     async (image: SandboxRuntimeImage) => {
-      setBusyId(image.id)
+      if (actionInFlightRef.current) return
+      actionInFlightRef.current = true
+      setBusyKey(`prepull/${image.id}`)
       setActionError(undefined)
       try {
         const digest = compositionDigest.trim()
@@ -324,32 +348,56 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
           setActionError('请先填写已发布组合摘要,再执行预拉取。')
           return
         }
-        const triggerPromise = api.sandbox.prepullRuntimeImage(runtimeId, image.id, digest)
+        let triggeredStatus: SandboxPrepullStatus | undefined
+        let started = false
+        const triggerPromise = api.sandbox
+          .prepullRuntimeImage(runtimeId, image.id, digest)
+          .then((status) => {
+            triggeredStatus = status
+            return status
+          })
         let triggerError: unknown
+        let queryError: unknown
         const quickStatus = await Promise.race<SandboxPrepullStatus | undefined>([
           triggerPromise,
           wait(500).then(() => undefined),
         ])
+        // 立即接住长请求失败;状态轮询负责展示任务结果,离页后不再写回旧界面。
+        triggerPromise.catch((error) => {
+          triggerError = error
+        })
+        if (!mountedRef.current) return
         if (quickStatus) {
           setPrepullStates((current) => ({ ...current, [image.id]: quickStatus }))
-        } else {
-          triggerPromise.catch((error) => {
-            triggerError = error
-          })
         }
 
         const deadline = Date.now() + appConfig.runtimeSelftestPollTimeoutMs
         let lastStatus: SandboxPrepullStatus | undefined = quickStatus
-        while (Date.now() < deadline) {
+        while (mountedRef.current && Date.now() < deadline) {
           try {
-            lastStatus = await api.sandbox.getRuntimeImagePrepull(runtimeId, image.id, digest)
-            setPrepullStates((current) => ({ ...current, [image.id]: lastStatus! }))
+            const queriedStatus =
+              triggeredStatus ??
+              (await api.sandbox.getRuntimeImagePrepull(runtimeId, image.id, digest))
+            if (!mountedRef.current) return
+            lastStatus = triggeredStatus ?? queriedStatus
+            queryError = undefined
           } catch (error) {
-            if (triggerError) throw triggerError
-            triggerError = error
+            if (!mountedRef.current) return
+            if (triggerError && !started) throw triggerError
+            if (queryError) throw error
+            queryError = error
             await wait(appConfig.runtimeSelftestPollIntervalMs)
             continue
           }
+
+          if (lastStatus.prepull_status === ImagePrepullStatus.RUNNING) started = true
+          // 触发尚未落库时GET可能先读到上次终态,不能把它当作本次任务结果。
+          if (!started && !triggeredStatus) {
+            if (triggerError) throw triggerError
+            await wait(appConfig.runtimeSelftestPollIntervalMs)
+            continue
+          }
+          setPrepullStates((current) => ({ ...current, [image.id]: lastStatus! }))
 
           if (lastStatus.prepull_status === ImagePrepullStatus.SUCCEEDED) {
             toast.success(`预拉取完成,${lastStatus.ready_nodes} 个节点已就绪`)
@@ -362,25 +410,32 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
           await wait(appConfig.runtimeSelftestPollIntervalMs)
         }
 
+        if (!mountedRef.current) return
+        if (queryError) throw queryError
         if (lastStatus?.prepull_status === ImagePrepullStatus.RUNNING) {
-          toast.success(`预拉取已开始,当前 ${lastStatus.ready_nodes}/${lastStatus.desired_nodes} 个节点就绪`)
+          toast.info('预拉取仍在进行,请稍后查看进度。')
           return
         }
         if (triggerError) throw triggerError
         throw new Error('预拉取仍在进行,请稍后刷新进度。')
       } catch (error) {
-        setActionError(userFacingErrorMessage(error, '预拉取没有启动成功,请稍后重试。'))
+        if (mountedRef.current) {
+          setActionError(userFacingErrorMessage(error, '预拉取没有完成,请稍后查看进度。'))
+        }
       } finally {
-        setBusyId(undefined)
+        actionInFlightRef.current = false
+        if (mountedRef.current) setBusyKey(undefined)
       }
     },
     [compositionDigest, runtimeId]
   )
 
-  /** refreshPrepull 重新读取预拉取进度:拉取在后台进行,页面不轮询,由管理员按需刷新。 */
+  /** refreshPrepull 只查询当前组合进度,不能重新触发或覆盖正在进行的尝试。 */
   const refreshPrepull = useCallback(
     async (image: SandboxRuntimeImage) => {
-      setBusyId(image.id)
+      if (actionInFlightRef.current) return
+      actionInFlightRef.current = true
+      setBusyKey(`query/${image.id}`)
       setActionError(undefined)
       try {
         const digest = compositionDigest.trim()
@@ -389,12 +444,26 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
           return
         }
         const status = await api.sandbox.getRuntimeImagePrepull(runtimeId, image.id, digest)
+        if (!mountedRef.current) return
         setPrepullStates((current) => ({ ...current, [image.id]: status }))
-        toast.success(`${status.ready_nodes}/${status.desired_nodes} 个节点已就绪`)
+        if (status.prepull_status === ImagePrepullStatus.SUCCEEDED) {
+          toast.success(`预拉取完成,${status.ready_nodes} 个节点已就绪`)
+        } else if (status.prepull_status === ImagePrepullStatus.FAILED) {
+          setActionError('预拉取没有完成,请重新发起预拉取。')
+        } else {
+          toast.info(
+            status.prepull_status === ImagePrepullStatus.RUNNING
+              ? '预拉取仍在进行,请稍后查看进度。'
+              : '这份组合还未预拉取,请先发起预拉取。'
+          )
+        }
       } catch (error) {
-        setActionError(userFacingErrorMessage(error, '没能读到预拉取进度,请稍后重试。'))
+        if (mountedRef.current) {
+          setActionError(userFacingErrorMessage(error, '没能读到预拉取进度,请稍后重试。'))
+        }
       } finally {
-        setBusyId(undefined)
+        actionInFlightRef.current = false
+        if (mountedRef.current) setBusyKey(undefined)
       }
     },
     [compositionDigest, runtimeId]
@@ -444,34 +513,37 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
       align: 'right',
       render: (image) => (
         <div className="flex items-center justify-end gap-1">
-          {prepullStates[image.id]?.prepull_status === ImagePrepullStatus.SUCCEEDED ? (
-            <Button
-              variant="ghost"
-              size="sm"
-              leftIcon={RefreshCw}
-              loading={busyId === image.id}
-              onClick={() => void refreshPrepull(image)}
-            >
-              刷新进度
-            </Button>
-          ) : (
+          {prepullStates[image.id]?.prepull_status !== ImagePrepullStatus.SUCCEEDED &&
+          prepullStates[image.id]?.prepull_status !== ImagePrepullStatus.RUNNING ? (
             <Button
               variant="ghost"
               size="sm"
               leftIcon={CloudDownload}
-              loading={busyId === image.id}
+              loading={busyKey === `prepull/${image.id}`}
+              disabled={busyKey !== undefined}
               onClick={() => void prepull(image)}
             >
-              {prepullStates[image.id]?.prepull_status === ImagePrepullStatus.RUNNING
-                ? '查看进度'
-                : '预拉取'}
+              预拉取
             </Button>
-          )}
+          ) : null}
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={RefreshCw}
+            loading={busyKey === `query/${image.id}`}
+            disabled={busyKey !== undefined}
+            onClick={() => void refreshPrepull(image)}
+          >
+            {prepullStates[image.id]?.prepull_status === ImagePrepullStatus.SUCCEEDED
+              ? '刷新进度'
+              : '查看进度'}
+          </Button>
           {image.status === RuntimeImageStatus.AVAILABLE ? (
             <Button
               variant="ghost"
               size="sm"
               leftIcon={CircleSlash}
+              disabled={busyKey !== undefined}
               onClick={() => setDisableTarget(image)}
             >
               停用
@@ -498,9 +570,18 @@ function ImagesSection({ runtimeId, images, onChanged }: ImagesSectionProps) {
         <FormField label="已发布组合摘要" helper="预拉取只针对该摘要锁定的完整镜像闭包">
           <Input
             value={compositionDigest}
+            disabled={busyKey !== undefined}
             placeholder="sha256:..."
             className="font-mono text-sm"
-            onChange={(event) => setCompositionDigest(event.target.value)}
+            onChange={(event) => {
+              const digest = event.target.value
+              if (digest.trim() !== compositionDigest.trim()) {
+                // 进度只属于当前摘要,不能让上一次组合的成功或进行中状态冒用到新输入。
+                setPrepullStates({})
+                setActionError(undefined)
+              }
+              setCompositionDigest(digest)
+            }}
           />
         </FormField>
 
@@ -586,24 +667,28 @@ function ImageFormModal({ runtimeId, onClose, onSaved }: ImageFormModalProps) {
   const [imageUrl, setImageUrl] = useState('')
   const [version, setVersion] = useState('')
   const [genesisBaked, setGenesisBaked] = useState(true)
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
   const digest = useMemo(() => digestFromImageUrl(imageUrl), [imageUrl])
 
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      const next: Record<string, string | null> = {
+  const { errors, validate } = useFormValidation(
+    useCallback(
+      () => ({
         imageUrl:
           digest === ''
             ? '镜像地址要带内容摘要,形如 harbor.example.com/chain/geth@sha256:...'
             : null,
         version: version.trim() === '' ? '请填写版本号' : null,
-      }
-      setErrors(next)
-      if (Object.values(next).some((value) => value !== null)) return
+      }),
+      [digest, version]
+    )
+  )
+
+  const submit = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      if (!validate()) return
 
       setFormError(undefined)
       setWorking(true)
@@ -627,7 +712,7 @@ function ImageFormModal({ runtimeId, onClose, onSaved }: ImageFormModalProps) {
         setWorking(false)
       }
     },
-    [digest, genesisBaked, imageUrl, onSaved, runtimeId, version]
+    [digest, genesisBaked, imageUrl, onSaved, runtimeId, validate, version]
   )
 
   return (
@@ -687,7 +772,7 @@ function ImageFormModal({ runtimeId, onClose, onSaved }: ImageFormModalProps) {
             </div>
 
             <Callout tone="info">
-              自检要求至少有一个可用且内置创世的镜像版本。不内置创世的版本可以登记,但不能用来自检。
+              自检需要至少一个可用镜像版本。初始链状态按运行时声明准备,不要求所有版本都内置创世状态。
             </Callout>
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
@@ -769,6 +854,8 @@ function DisableImageModal({ runtimeId, image, onClose, onDone }: DisableImageMo
 interface SelftestSectionProps {
   runtime: SandboxRuntime
   images: SandboxRuntimeImage[]
+  result?: SandboxRuntimeSelftestStatus
+  onResult: (result: SandboxRuntimeSelftestStatus) => void
   onDone: () => void
 }
 
@@ -777,109 +864,159 @@ interface SelftestSectionProps {
  * 自检会真起一个一次性沙箱跑通工作区与链能力,通过后运行时转为可用;
  * 前置不满足时按后端条件说明缺什么,不让人点了才看到失败。
  */
-function SelftestSection({ runtime, images, onDone }: SelftestSectionProps) {
-  const [detail, setDetail] = useState<SandboxRuntimeSelftestDetail>()
+function SelftestSection({ runtime, images, result, onResult, onDone }: SelftestSectionProps) {
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
+  const actionInFlightRef = useRef(false)
+  const mountedRef = useRef(true)
 
-  const selftestImage = images.find(
-    (item) => item.status === RuntimeImageStatus.AVAILABLE && item.genesis_baked
-  )
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  const selftestImage = images.find((item) => item.status === RuntimeImageStatus.AVAILABLE)
   const blockers = useMemo(() => {
     const out: string[] = []
-    if (!selftestImage) out.push('还没有可用且内置创世的镜像版本')
+    if (!selftestImage) out.push('还没有可用的镜像版本')
     // 服务端已经写明不可部署原因时原样带出:自检点下去也只会按同一原因失败
     const reason = runtimeDisabledReason(runtime.adapter_spec)
     if (reason) out.push(reason)
     return out
   }, [runtime.adapter_spec, selftestImage])
 
-  const showSelftestResult = useCallback((status: RuntimeSelftestStatus) => {
-    toast.success(status === RuntimeSelftestStatus.PASSED ? '自检通过,运行时已开放给学校' : '自检没有通过,详情见下方')
-    onDone()
-  }, [onDone])
+  const showSelftestResult = useCallback(
+    (status: RuntimeSelftestStatus) => {
+      if (status === RuntimeSelftestStatus.PASSED) {
+        toast.success('自检通过,运行时已开放给学校')
+      } else {
+        toast.error('自检没有通过,请查看下方原因。')
+      }
+      onDone()
+    },
+    [onDone]
+  )
 
   const runSelftest = useCallback(async () => {
+    if (actionInFlightRef.current) return
+    actionInFlightRef.current = true
     setWorking(true)
     setActionError(undefined)
     let started = false
     let triggerError: unknown
+    let queryError: unknown
     try {
-      const triggerPromise = api.sandbox.runRuntimeSelftest(runtime.id)
-      const quickResult = await Promise.race([
-        triggerPromise.then((result) => ({ result })),
-        new Promise<{ result?: undefined }>((resolve) => window.setTimeout(() => resolve({}), 500)),
+      let triggeredResult: SandboxRuntimeSelftestStatus | undefined
+      const triggerPromise = api.sandbox.runRuntimeSelftest(runtime.id).then((status) => {
+        triggeredResult = status
+        return status
+      })
+      const quickResult = await Promise.race<SandboxRuntimeSelftestStatus | undefined>([
+        triggerPromise,
+        wait(500).then(() => undefined),
       ])
-      if (quickResult.result) {
-        started = true
-        setDetail(quickResult.result.detail)
-        if (quickResult.result.selftest_status !== RuntimeSelftestStatus.PENDING) {
-          showSelftestResult(quickResult.result.selftest_status)
-          return
-        }
-      }
-      if (!quickResult.result) {
-        triggerPromise.catch((error) => {
-          triggerError = error
-        })
-      }
+      triggerPromise.catch((error) => {
+        triggerError = error
+      })
+      if (!mountedRef.current) return
 
       const deadline = Date.now() + appConfig.runtimeSelftestPollTimeoutMs
-      while (Date.now() < deadline) {
-        let result: SandboxRuntimeSelftestStatus
+      let lastResult = quickResult
+      while (mountedRef.current && Date.now() < deadline) {
         try {
-          result = await api.sandbox.getRuntimeSelftest(runtime.id)
+          const queriedResult =
+            triggeredResult ?? (await api.sandbox.getRuntimeSelftest(runtime.id))
+          if (!mountedRef.current) return
+          lastResult = triggeredResult ?? queriedResult
+          queryError = undefined
         } catch (error) {
-          if (triggerError) throw triggerError
-          triggerError = error
+          if (!mountedRef.current) return
+          if (triggerError && !started) throw triggerError
+          if (queryError) throw error
+          queryError = error
           await wait(appConfig.runtimeSelftestPollIntervalMs)
           continue
         }
-        setDetail(result.detail)
-        if (result.selftest_status === RuntimeSelftestStatus.PENDING) {
-          started = true
-        } else if (started) {
-          showSelftestResult(result.selftest_status)
+
+        if (lastResult.detail.result === 'running') started = true
+        // POST的迟到完成结果属于本次自检;触发尚未确认时不能采纳GET读到的上次终态。
+        if (!started && !triggeredResult) {
+          if (triggerError) throw triggerError
+          await wait(appConfig.runtimeSelftestPollIntervalMs)
+          continue
+        }
+        onResult(lastResult)
+        if (lastResult.selftest_status !== RuntimeSelftestStatus.PENDING) {
+          showSelftestResult(lastResult.selftest_status)
           return
-        } else if (triggerError) {
-          throw triggerError
         }
         await wait(appConfig.runtimeSelftestPollIntervalMs)
       }
-      throw new Error('自检仍在进行,请稍后读取结果')
+
+      if (!mountedRef.current) return
+      if (queryError) throw queryError
+      if (started) {
+        toast.info('自检仍在进行,请稍后读取结果。')
+        return
+      }
+      if (triggerError) throw triggerError
+      toast.info('暂未读到本次自检结果,请稍后读取结果。')
     } catch (error) {
-      setActionError(userFacingErrorMessage(error, '自检没有跑完,请稍后重试。'))
+      if (mountedRef.current) {
+        setActionError(userFacingErrorMessage(error, '暂时无法确认自检结果,请稍后读取结果。'))
+      }
     } finally {
-      setWorking(false)
+      actionInFlightRef.current = false
+      if (mountedRef.current) setWorking(false)
     }
-  }, [runtime.id, showSelftestResult])
+  }, [onResult, runtime.id, showSelftestResult])
 
   const loadSelftest = useCallback(async () => {
+    if (actionInFlightRef.current) return
+    actionInFlightRef.current = true
     setWorking(true)
     setActionError(undefined)
     try {
-      const result = await api.sandbox.getRuntimeSelftest(runtime.id)
-      setDetail(result.detail)
-      toast.success(`上次自检:${runtimeSelftestStatusLabel(result.selftest_status)}`)
+      const status = await api.sandbox.getRuntimeSelftest(runtime.id)
+      if (!mountedRef.current) return
+      onResult(status)
+      if (status.selftest_status === RuntimeSelftestStatus.PENDING) {
+        toast.info(
+          status.detail.result === 'running'
+            ? '自检仍在进行,请稍后读取结果。'
+            : '这条运行时尚未自检,请点击开始自检。'
+        )
+      } else {
+        showSelftestResult(status.selftest_status)
+      }
     } catch (error) {
-      setActionError(userFacingErrorMessage(error, '没能读到自检结果,请稍后重试。'))
+      if (mountedRef.current) {
+        setActionError(userFacingErrorMessage(error, '没能读到自检结果,请稍后重试。'))
+      }
     } finally {
-      setWorking(false)
+      actionInFlightRef.current = false
+      if (mountedRef.current) setWorking(false)
     }
-  }, [runtime.id])
+  }, [onResult, runtime.id, showSelftestResult])
 
   // 自检明细只有四个稳定字段,逐个转成用户向文案:原因码不直接抛到界面上(§8 文案规范)
   const detailItems = useMemo(() => {
+    const detail = result?.detail
     if (!detail) return []
     const out: { term: string; description: string; mono?: boolean }[] = []
-    if (detail.result) out.push({ term: '自检结果', description: selftestResultText(detail.result) })
+    if (detail.result)
+      out.push({ term: '自检结果', description: selftestResultText(detail.result) })
     if (detail.stage) out.push({ term: '停在哪一步', description: selftestStageText(detail.stage) })
     if (detail.reason) out.push({ term: '原因', description: selftestReasonText(detail.reason) })
     if (detail.trace_id) out.push({ term: '报障编号', description: detail.trace_id, mono: true })
     return out
-  }, [detail])
+  }, [result])
 
-  const failed = runtime.selftest_status === RuntimeSelftestStatus.FAILED
+  const selftestStatus = result?.selftest_status ?? runtime.selftest_status
+  const running = result?.detail.result === 'running'
+  const failed = selftestStatus === RuntimeSelftestStatus.FAILED
 
   return (
     <PageSection
@@ -887,14 +1024,20 @@ function SelftestSection({ runtime, images, onDone }: SelftestSectionProps) {
       description="自检会真起一个一次性环境,跑通工作区读写与链能力后立即销毁。通过后运行时才对学校开放。"
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="sm" loading={working} onClick={() => void loadSelftest()}>
+          <Button
+            variant="ghost"
+            size="sm"
+            loading={working}
+            disabled={working}
+            onClick={() => void loadSelftest()}
+          >
             读取上次结果
           </Button>
           <Button
             variant="primary"
             leftIcon={ShieldCheck}
             loading={working}
-            disabled={blockers.length > 0}
+            disabled={working || blockers.length > 0}
             onClick={() => void runSelftest()}
           >
             {failed ? '重新自检' : '开始自检'}
@@ -916,14 +1059,16 @@ function SelftestSection({ runtime, images, onDone }: SelftestSectionProps) {
             <div className="min-w-0">
               <h3 className="text-base font-semibold text-ink">自检状态</h3>
               <p className="mt-0.5 text-sm text-ink-sub">
-                {runtime.selftest_status === RuntimeSelftestStatus.PASSED
-                  ? '这条运行时已经通过自检。改了声明或镜像版本后建议重新自检。'
-                  : '自检通过后运行时才会转为可用。镜像已拉到节点、容器能起来都不算通过。'}
+                {running
+                  ? '自检正在进行,可以稍后读取结果。'
+                  : selftestStatus === RuntimeSelftestStatus.PASSED
+                    ? '这条运行时已经通过自检。改了声明或镜像版本后建议重新自检。'
+                    : '自检通过后运行时才会转为可用。镜像已拉到节点、容器能起来都不算通过。'}
               </p>
             </div>
             <StatusIndicator
-              tone={runtimeSelftestStatusTone(runtime.selftest_status)}
-              label={runtimeSelftestStatusLabel(runtime.selftest_status)}
+              tone={runtimeSelftestStatusTone(selftestStatus)}
+              label={running ? '正在自检' : runtimeSelftestStatusLabel(selftestStatus)}
             />
           </div>
 

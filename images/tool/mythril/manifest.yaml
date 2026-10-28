@@ -61,6 +61,7 @@ capabilities:
     additionalProperties: false
     properties:
       solidity_version:
+        title: Solidity 编译版本
         type: string
         enum:
           - 0.8.20

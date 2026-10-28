@@ -11,12 +11,33 @@ WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 -- name: GetCloneableCourseByID :one
 SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
-WHERE id = $1 AND deleted_at IS NULL AND (tenant_id = $2 OR visibility = 2);
+WHERE id = $1 AND deleted_at IS NULL AND (tenant_id = $2 OR visibility = 2)
+FOR SHARE;
 
 -- name: GetCourseByInviteCode :one
 SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
 WHERE invite_code = $1 AND deleted_at IS NULL;
+
+-- name: ListTeacherCourseIDs :many
+SELECT id
+FROM course
+WHERE tenant_id = $1 AND teacher_id = $2 AND deleted_at IS NULL
+ORDER BY id;
+
+-- name: ListSharedCourses :many
+SELECT id, name, description, type, difficulty, semester, credits::float8 AS credits, updated_at
+FROM course
+WHERE tenant_id <> sqlc.arg(exclude_tenant_id)::bigint AND visibility = 2 AND status <> 1 AND deleted_at IS NULL
+  AND (sqlc.arg(keyword)::text = '' OR strpos(lower(name), lower(sqlc.arg(keyword))) > 0 OR strpos(lower(description), lower(sqlc.arg(keyword))) > 0)
+ORDER BY updated_at DESC, id DESC
+LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+
+-- name: CountSharedCourses :one
+SELECT COUNT(*)
+FROM course
+WHERE tenant_id <> sqlc.arg(exclude_tenant_id)::bigint AND visibility = 2 AND status <> 1 AND deleted_at IS NULL
+  AND (sqlc.arg(keyword)::text = '' OR strpos(lower(name), lower(sqlc.arg(keyword))) > 0 OR strpos(lower(description), lower(sqlc.arg(keyword))) > 0);
 
 -- name: ListTeacherCourses :many
 SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
@@ -472,10 +493,15 @@ VALUES ($1, $2, $3, $4, $5, $6, false, 0, now(), NULL)
 RETURNING id, tenant_id, course_id, parent_id, author_id, content, is_pinned, like_count, created_at, deleted_at;
 
 -- name: ListDiscussionPosts :many
-SELECT id, tenant_id, course_id, parent_id, author_id, content, is_pinned, like_count, created_at, deleted_at
-FROM discussion_post
-WHERE tenant_id = $1 AND course_id = $2 AND deleted_at IS NULL
-ORDER BY is_pinned DESC, created_at DESC, id DESC
+SELECT post.id, post.tenant_id, post.course_id, post.parent_id, post.author_id, post.content,
+       post.is_pinned, post.like_count, post.created_at, post.deleted_at,
+       parent.content AS parent_content
+FROM discussion_post AS post
+LEFT JOIN discussion_post AS parent ON parent.id = post.parent_id
+    AND parent.tenant_id = post.tenant_id AND parent.course_id = post.course_id
+    AND parent.deleted_at IS NULL
+WHERE post.tenant_id = $1 AND post.course_id = $2 AND post.deleted_at IS NULL
+ORDER BY post.is_pinned DESC, post.created_at DESC, post.id DESC
 LIMIT $3 OFFSET $4;
 
 -- name: CountDiscussionPosts :one
@@ -486,7 +512,8 @@ WHERE tenant_id = $1 AND course_id = $2 AND deleted_at IS NULL;
 -- name: GetDiscussionPost :one
 SELECT id, tenant_id, course_id, parent_id, author_id, content, is_pinned, like_count, created_at, deleted_at
 FROM discussion_post
-WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE;
 
 -- name: LikeDiscussionPost :one
 UPDATE discussion_post
@@ -529,19 +556,31 @@ SET is_pinned = $3
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 RETURNING id, tenant_id, course_id, title, content, is_pinned, created_at, deleted_at;
 
+-- name: GetCourseReview :one
+SELECT id, tenant_id, course_id, student_id, rating, comment, created_at
+FROM course_review
+WHERE tenant_id = $1 AND course_id = $2 AND student_id = $3;
+
 -- name: UpsertCourseReview :one
 INSERT INTO course_review (id, tenant_id, course_id, student_id, rating, comment, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, now())
 ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE SET rating = EXCLUDED.rating, comment = EXCLUDED.comment, created_at = now()
 RETURNING id, tenant_id, course_id, student_id, rating, comment, created_at;
 
+-- name: LockCourseGradeWrites :one
+SELECT grades_locked FROM course
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE;
+
 -- name: DeleteGradeWeights :exec
 DELETE FROM grade_weight WHERE tenant_id = $1 AND course_id = $2;
+
 
 -- name: CreateGradeWeight :one
 INSERT INTO grade_weight (id, tenant_id, course_id, source_type, source_ref, weight, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6::text::numeric, now(), now())
 RETURNING id, tenant_id, course_id, source_type, source_ref, weight::float8 AS weight, created_at, updated_at;
+
 
 -- name: ListGradeWeights :many
 SELECT id, tenant_id, course_id, source_type, source_ref, weight::float8 AS weight, created_at, updated_at
@@ -550,21 +589,21 @@ WHERE tenant_id = $1 AND course_id = $2
 ORDER BY source_type ASC, source_ref ASC;
 
 -- name: UpsertCourseGrade :one
-INSERT INTO course_grade (id, tenant_id, course_id, student_id, auto_total, override_total, is_overridden, is_locked, updated_at)
-VALUES ($1, $2, $3, $4, $5::text::numeric, NULL, false, false, now())
+INSERT INTO course_grade (id, tenant_id, course_id, student_id, auto_total, override_total, is_overridden, updated_at)
+VALUES ($1, $2, $3, $4, $5::text::numeric, NULL, false, now())
 ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE
-SET auto_total = EXCLUDED.auto_total,
-    updated_at = now()
-WHERE course_grade.is_locked = false
-RETURNING id, tenant_id, course_id, student_id, auto_total::float8 AS auto_total, COALESCE(override_total::float8, 0)::float8 AS override_total, is_overridden, is_locked, updated_at;
+SET auto_total = EXCLUDED.auto_total, updated_at = now()
+RETURNING id, tenant_id, course_id, student_id, auto_total::float8 AS auto_total, COALESCE(override_total::float8, 0)::float8 AS override_total, is_overridden, false::boolean AS is_locked, updated_at;
+
 
 -- name: GetCourseGrade :one
-SELECT id, tenant_id, course_id, student_id, auto_total::float8 AS auto_total, COALESCE(override_total::float8, 0)::float8 AS override_total, is_overridden, is_locked, updated_at
-FROM course_grade
-WHERE tenant_id = $1 AND course_id = $2 AND student_id = $3;
+SELECT g.id, g.tenant_id, g.course_id, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, c.grades_locked AS is_locked, g.updated_at
+FROM course_grade g
+JOIN course c ON c.tenant_id = g.tenant_id AND c.id = g.course_id
+WHERE g.tenant_id = $1 AND g.course_id = $2 AND g.student_id = $3;
 
 -- name: ListCourseGrades :many
-SELECT g.id, g.tenant_id, g.course_id, c.semester, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, g.is_locked, g.updated_at, c.credits::float8 AS credits
+SELECT g.id, g.tenant_id, g.course_id, c.semester, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, c.grades_locked AS is_locked, g.updated_at, c.credits::float8 AS credits
 FROM course_grade g
 JOIN course c ON c.tenant_id = g.tenant_id AND c.id = g.course_id
 WHERE g.tenant_id = $1 AND g.course_id = $2
@@ -577,7 +616,7 @@ FROM course_grade
 WHERE tenant_id = $1 AND course_id = $2;
 
 -- name: ListStudentGrades :many
-SELECT g.id, g.tenant_id, g.course_id, c.semester, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, g.is_locked, g.updated_at, c.credits::float8 AS credits
+SELECT g.id, g.tenant_id, g.course_id, c.semester, g.student_id, g.auto_total::float8 AS auto_total, COALESCE(g.override_total::float8, 0)::float8 AS override_total, g.is_overridden, c.grades_locked AS is_locked, g.updated_at, c.credits::float8 AS credits
 FROM course_grade g
 JOIN course c ON c.tenant_id = g.tenant_id AND c.id = g.course_id
 WHERE g.tenant_id = $1 AND g.student_id = $2 AND (sqlc.arg(semester)::text = '' OR c.semester = sqlc.arg(semester)::text)
@@ -593,18 +632,22 @@ WHERE g.tenant_id = $1 AND g.student_id = $2 AND (sqlc.arg(semester)::text = '' 
 -- name: OverrideCourseGrade :one
 UPDATE course_grade
 SET override_total = $4::text::numeric, is_overridden = true, updated_at = now()
-WHERE tenant_id = $1 AND course_id = $2 AND student_id = $3 AND is_locked = false
-RETURNING id, tenant_id, course_id, student_id, auto_total::float8 AS auto_total, COALESCE(override_total::float8, 0)::float8 AS override_total, is_overridden, is_locked, updated_at;
+WHERE tenant_id = $1 AND course_id = $2 AND student_id = $3
+RETURNING id, tenant_id, course_id, student_id, auto_total::float8 AS auto_total, COALESCE(override_total::float8, 0)::float8 AS override_total, is_overridden, false::boolean AS is_locked, updated_at;
 
--- name: SetCourseGradesLock :exec
-UPDATE course_grade
-SET is_locked = $3, updated_at = now()
-WHERE tenant_id = $1 AND course_id = $2;
+
+-- name: SetCourseGradesLock :execrows
+UPDATE course
+SET grades_locked = $3, grade_lock_revision = $4
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+  AND $4::bigint > 0 AND grade_lock_revision < $4;
 
 -- name: CreateTeachingGradeEventOutbox :one
-INSERT INTO teaching_grade_event_outbox (id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until)
-VALUES ($1, $2, $3, $4, $5, $6, 1, 0, now(), NULL, now(), now(), '', NULL)
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
+INSERT INTO teaching_grade_event_outbox (id, tenant_id, course_id, student_id, trace_id, event_updated_at, lock_revision, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until)
+SELECT $1, $2, $3, $4, $5, $6, c.grade_lock_revision, 1, 0, now(), NULL, now(), now(), '', NULL
+FROM course AS c
+WHERE c.tenant_id = $2 AND c.id = $3 AND c.deleted_at IS NULL AND NOT c.grades_locked
+RETURNING id, revision, lock_revision, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: ClaimPendingTeachingGradeEventOutbox :many
 WITH expired AS (
@@ -625,20 +668,20 @@ UPDATE teaching_grade_event_outbox AS outbox
 SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = @lease_token, lease_until = @lease_until::timestamptz
 FROM candidates
 WHERE outbox.id = candidates.id
-RETURNING outbox.id, outbox.tenant_id, outbox.course_id, outbox.student_id, outbox.trace_id, outbox.event_updated_at, outbox.status, outbox.retry_count, outbox.next_attempt_at, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
+RETURNING outbox.id, outbox.revision, outbox.lock_revision, outbox.tenant_id, outbox.course_id, outbox.student_id, outbox.trace_id, outbox.event_updated_at, outbox.status, outbox.retry_count, outbox.next_attempt_at, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
 
 -- name: MarkTeachingGradeEventOutboxPublished :one
 UPDATE teaching_grade_event_outbox
 SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING id, revision, lock_revision, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: MarkTeachingGradeEventOutboxFailed :one
 UPDATE teaching_grade_event_outbox
 SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL,
     next_attempt_at = now() + LEAST(interval '1 hour', power(2::numeric, LEAST(retry_count, 10)) * interval '1 second')
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
+RETURNING id, revision, lock_revision, tenant_id, course_id, student_id, trace_id, event_updated_at, status, retry_count, next_attempt_at, last_error, created_at, updated_at, lease_token, lease_until;
 
 -- name: TeachingStats :one
 SELECT
@@ -669,3 +712,46 @@ RETURNING transfer_task_id, tenant_id, account_id, course_id, next_check_at, cre
 -- name: DeleteCourseGradeExportRequest :exec
 DELETE FROM course_grade_export_request
 WHERE transfer_task_id = $1 AND tenant_id = $2;
+
+-- name: UpsertCourseExperimentSource :exec
+-- 来源修订按定义单调递增；乱序得分事件不能恢复已下架或改绑的来源。
+INSERT INTO course_experiment_source (tenant_id, experiment_id, course_id, title, max_score, available, source_revision)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (tenant_id, experiment_id) DO UPDATE SET course_id = EXCLUDED.course_id, title = EXCLUDED.title,
+    max_score = EXCLUDED.max_score, available = EXCLUDED.available, source_revision = EXCLUDED.source_revision
+WHERE EXCLUDED.source_revision > course_experiment_source.source_revision;
+
+-- name: UpsertCourseExperimentScore :exec
+INSERT INTO course_experiment_score (tenant_id, experiment_id, instance_id, student_id, score, max_score, score_revision, pending)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (tenant_id, instance_id, student_id) DO UPDATE SET score = EXCLUDED.score, max_score = EXCLUDED.max_score, score_revision = EXCLUDED.score_revision, pending = EXCLUDED.pending
+WHERE course_experiment_score.experiment_id = EXCLUDED.experiment_id AND EXCLUDED.score_revision > course_experiment_score.score_revision;
+
+-- name: GetCourseExperimentScoreRevision :one
+SELECT COALESCE(MAX(score_revision), 0)::bigint FROM course_experiment_score WHERE tenant_id = $1 AND instance_id = $2;
+
+-- name: DeleteCourseExperimentScoresBeforeRevision :exec
+DELETE FROM course_experiment_score WHERE tenant_id = $1 AND instance_id = $2 AND score_revision < $3;
+
+-- name: ListCourseGradeSources :many
+-- 三类来源共用真实对象；作业与考试复用同一提交执行路径。
+WITH assignment_sources AS (
+    SELECT a.id, a.title, sum(i.score)::float8 AS max_score
+    FROM assignment a JOIN assignment_item i ON i.tenant_id = a.tenant_id AND i.assignment_id = a.id
+    WHERE a.tenant_id = $1 AND a.course_id = $2 AND a.status = 2 AND a.deleted_at IS NULL
+    GROUP BY a.id, a.title HAVING sum(i.score) > 0
+)
+SELECT 1::smallint AS source_type, a.id AS source_id, a.title, a.max_score FROM assignment_sources a
+UNION ALL SELECT 3::smallint, a.id, a.title, a.max_score FROM assignment_sources a
+UNION ALL SELECT 2::smallint, e.experiment_id, e.title, e.max_score FROM course_experiment_source e
+WHERE e.tenant_id = $1 AND e.course_id = $2 AND e.available AND e.max_score > 0
+ORDER BY source_type, title, source_id;
+
+-- name: ListAssignmentGradeSourceScores :many
+-- 每名学生取已出分提交的最高分，待评分提交阻断计算，未提交才计零。
+SELECT student_id, MAX(final_score)::float8 AS score, bool_or(status <> 3) AS pending
+FROM submission WHERE tenant_id = $1 AND assignment_id = $2 GROUP BY student_id ORDER BY student_id;
+
+-- name: ListExperimentGradeSourceScores :many
+SELECT student_id, COALESCE(MAX(score * 100.0 / NULLIF(max_score, 0)) FILTER (WHERE NOT pending), 0)::float8 AS score, bool_or(pending)::boolean AS pending
+FROM course_experiment_score WHERE tenant_id = $1 AND experiment_id = $2 GROUP BY student_id ORDER BY student_id;

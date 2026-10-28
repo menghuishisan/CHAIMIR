@@ -92,14 +92,16 @@ export default function StudentAlertsPage() {
   )
 
   // 指标带取服务端全量口径:预警会跨多页,用当前页数出来的「待确认」是错数
-  const totalCount = useResourceTotal((params) => api.grade.listWarnings(params), [])
+  const totalCount = useResourceTotal((params) => api.grade.listWarnings(params), [], warnings.refreshVersion)
   const pendingCount = useResourceTotal(
     (params) => api.grade.listWarnings({ status: GradeWarningStatus.PENDING, ...params }),
     [],
+    warnings.refreshVersion,
   )
   const acknowledgedCount = useResourceTotal(
     (params) => api.grade.listWarnings({ status: GradeWarningStatus.ACKNOWLEDGED, ...params }),
     [],
+    warnings.refreshVersion,
   )
 
   const columns: TableColumn<GradeWarning>[] = [

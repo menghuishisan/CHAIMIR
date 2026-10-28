@@ -24,10 +24,10 @@ interface RouteErrorBoundaryState {
 }
 
 /**
- * ErrorBoundaryView 是真正的 class 边界(React 只在 class 组件提供捕获钩子)。
+ * RenderErrorBoundary 供启动层与路由层复用渲染错误边界。
  * routeKey 变化时在 getDerivedStateFromProps 阶段清空错误,保证导航后立即恢复渲染。
  */
-class ErrorBoundaryView extends React.Component<RouteErrorBoundaryProps, RouteErrorBoundaryState> {
+export class RenderErrorBoundary extends React.Component<RouteErrorBoundaryProps, RouteErrorBoundaryState> {
   state: RouteErrorBoundaryState = { failed: false }
 
   static getDerivedStateFromError(error: unknown): Partial<RouteErrorBoundaryState> {
@@ -79,5 +79,5 @@ class ErrorBoundaryView extends React.Component<RouteErrorBoundaryProps, RouteEr
  */
 export function RouteErrorBoundary({ children }: { children: React.ReactNode }) {
   const location = useLocation()
-  return <ErrorBoundaryView routeKey={location.pathname}>{children}</ErrorBoundaryView>
+  return <RenderErrorBoundary routeKey={location.pathname}>{children}</RenderErrorBoundary>
 }

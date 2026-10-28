@@ -131,9 +131,13 @@ SET status = $2, reject_reason = $3, reviewed_by = $4, updated_at = now()
 WHERE id = $1 AND status = 1
 RETURNING id, school_name, school_type, contact_name, contact_phone, contact_email, status, reject_reason, reviewed_by, tenant_id, created_at, updated_at;
 
+-- name: LockOrganizationScope :exec
+SELECT pg_advisory_xact_lock(hashtextextended('identity.organization', $1::bigint));
+
 -- name: CreateDepartment :one
 INSERT INTO department (id, tenant_id, name, code)
 VALUES ($1, $2, $3, $4)
+ON CONFLICT (tenant_id, code) WHERE deleted_at IS NULL AND code IS NOT NULL DO NOTHING
 RETURNING id, tenant_id, name, code, deleted_at;
 
 -- name: ListDepartments :many
@@ -145,12 +149,21 @@ ORDER BY name, id;
 -- name: UpdateDepartment :one
 UPDATE department
 SET name = $3, code = $4
-WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, name, code, deleted_at;
+WHERE department.id = $1 AND department.tenant_id = $2 AND department.deleted_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM department other
+      WHERE other.tenant_id = $2 AND other.id <> $1 AND other.deleted_at IS NULL AND other.code = $4
+  )
+RETURNING department.id, department.tenant_id, department.name, department.code, department.deleted_at;
 
--- name: SoftDeleteDepartment :exec
+-- name: SoftDeleteDepartment :execrows
 UPDATE department SET deleted_at = now()
-WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL;
+WHERE department.id = $1 AND department.tenant_id = $2 AND department.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM major WHERE tenant_id = $2 AND department_id = $1 AND deleted_at IS NULL)
+  AND NOT EXISTS (
+      SELECT 1 FROM account_profile p JOIN account a ON a.id = p.account_id AND a.tenant_id = p.tenant_id
+      WHERE p.tenant_id = $2 AND p.org_id = $1 AND a.base_identity = 2 AND a.deleted_at IS NULL
+  );
 
 -- name: DepartmentExists :one
 SELECT EXISTS(SELECT 1 FROM department WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL);
@@ -175,9 +188,10 @@ SET department_id = $3, name = $4
 WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
 RETURNING id, tenant_id, department_id, name, deleted_at;
 
--- name: SoftDeleteMajor :exec
+-- name: SoftDeleteMajor :execrows
 UPDATE major SET deleted_at = now()
-WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL;
+WHERE major.id = $1 AND major.tenant_id = $2 AND major.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM class WHERE tenant_id = $2 AND major_id = $1 AND deleted_at IS NULL);
 
 -- name: CreateClass :one
 INSERT INTO class (id, tenant_id, major_id, name, enrollment_year, status)
@@ -199,9 +213,13 @@ SET major_id = $3, name = $4, enrollment_year = $5, status = $6
 WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
 RETURNING id, tenant_id, major_id, name, enrollment_year, status, deleted_at;
 
--- name: SoftDeleteClass :exec
+-- name: SoftDeleteClass :execrows
 UPDATE class SET deleted_at = now()
-WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL;
+WHERE class.id = $1 AND class.tenant_id = $2 AND class.deleted_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM account_profile p JOIN account a ON a.id = p.account_id AND a.tenant_id = p.tenant_id
+      WHERE p.tenant_id = $2 AND p.org_id = $1 AND a.base_identity = 1 AND a.deleted_at IS NULL
+  );
 
 -- name: ArchiveClassesByEnrollmentYear :exec
 UPDATE class
@@ -235,11 +253,12 @@ WHERE auth_session.account_id = account.id
 
 -- name: PromoteClasses :execrows
 UPDATE class
-SET name = regexp_replace(name, enrollment_year::text, sqlc.arg(target_year)::text, 'g'),
-    enrollment_year = sqlc.arg(target_year)
+SET name = regexp_replace(name, enrollment_year::text, (sqlc.arg(target_year)::smallint)::text, 'g'),
+    enrollment_year = sqlc.arg(target_year)::smallint
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND id = ANY(sqlc.arg(class_ids)::bigint[])
   AND status = 1
+  AND enrollment_year < sqlc.arg(target_year)::smallint
   AND deleted_at IS NULL;
 
 -- name: PromoteClassStudentProfiles :exec
@@ -274,6 +293,11 @@ WHERE a.tenant_id = $1
 -- name: CreateAccountProfile :exec
 INSERT INTO account_profile (account_id, tenant_id, no, org_id, enrollment_year, title)
 VALUES ($1, $2, $3, $4, $5, $6);
+
+-- name: LockAccount :one
+SELECT id FROM account
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE;
 
 -- name: GetAccountByID :one
 SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.base_identity, a.status,
@@ -540,11 +564,28 @@ RETURNING id, tenant_id, operator_id, target_type, file_name, rows, preview_resu
 -- name: GetImportPreview :one
 SELECT id, tenant_id, operator_id, target_type, file_name, rows, preview_result, status, expire_at, submitted_at, created_at
 FROM import_preview
-WHERE id = $1 AND tenant_id = $2 AND operator_id = $3;
+WHERE id = $1 AND tenant_id = $2 AND operator_id = $3
+FOR UPDATE;
+
+-- name: ListPendingImportPreviews :many
+-- 列表只读取公开预览结果,不取包含初始密码的原始rows。
+SELECT id, target_type, file_name, preview_result, expire_at
+FROM import_preview
+WHERE tenant_id = $1 AND operator_id = $2 AND target_type = $3 AND status = 1 AND expire_at > now()
+ORDER BY created_at DESC, id DESC
+LIMIT $4 OFFSET $5;
+
+-- name: CountPendingImportPreviews :one
+SELECT COUNT(*)::bigint FROM import_preview
+WHERE tenant_id = $1 AND operator_id = $2 AND target_type = $3 AND status = 1 AND expire_at > now();
+
+-- name: DiscardImportPreview :execrows
+-- 明确放弃待提交预览时同步清除暂存原始内容,不影响已提交批次。
+DELETE FROM import_preview WHERE id = $1 AND tenant_id = $2 AND operator_id = $3 AND status = 1;
 
 -- name: MarkImportPreviewSubmitted :execrows
 UPDATE import_preview SET status = 2, submitted_at = now()
-WHERE id = $1 AND tenant_id = $2 AND operator_id = $3 AND status = 1;
+WHERE id = $1 AND tenant_id = $2 AND operator_id = $3 AND status = 1 AND expire_at > now();
 
 -- name: CreateImportBatch :one
 INSERT INTO import_batch (id, tenant_id, operator_id, target_type, file_name, total, success, failed, error_detail, status, created_at)

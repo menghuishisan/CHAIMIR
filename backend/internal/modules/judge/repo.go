@@ -33,14 +33,14 @@ type TxStore interface {
 	ListJudgers(ctx context.Context) ([]Judger, error)
 	ListCatalogJudgers(ctx context.Context) ([]CatalogJudger, error)
 	UpsertJudger(ctx context.Context, id int64, req JudgerRequest, spec JudgerResourceSpec, selftestStatus int16) (Judger, error)
-	UpdateJudgerSelftest(ctx context.Context, id int64, selftestStatus, status int16) (Judger, error)
+	UpdateJudgerExecutionState(ctx context.Context, original Judger, spec JudgerResourceSpec, selftestStatus, status int16) (Judger, error)
 	CreateJudgeTask(ctx context.Context, task JudgeTask) (JudgeTask, error)
 	GetJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error)
 	GetJudgeTaskBySourceRef(ctx context.Context, tenantID int64, sourceRef, problemRef string) (JudgeTask, error)
 	GetJudgeTaskInfo(ctx context.Context, tenantID, taskID int64) (JudgeTaskInfo, error)
 	ListJudgeTasksBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]JudgeTask, error)
 	ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, tenantID, submitterTenantID, submitterID int64, problemRef string, windowSeconds int32) ([]JudgeTask, error)
-	ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, state string, limit, offset int32) ([]JudgeTaskInfo, int64, error)
+	ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, state string, modules []string, limit, offset int32) ([]JudgeTaskInfo, int64, error)
 	CancelQueuedJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error)
 	ResetJudgeTaskForRejudge(ctx context.Context, tenantID, taskID int64, snapshot JudgeInputSnapshot) (JudgeTask, error)
 	DequeueJudgeTasks(ctx context.Context, limit int32, staleBefore, leaseUntil time.Time, leaseToken string) ([]JudgeTask, error)
@@ -181,9 +181,16 @@ func (s *txStore) UpsertJudger(ctx context.Context, id int64, req JudgerRequest,
 	return judgerFromRow(row)
 }
 
-// UpdateJudgerSelftest 更新判题器自检状态。
-func (s *txStore) UpdateJudgerSelftest(ctx context.Context, id int64, selftestStatus, status int16) (Judger, error) {
-	row, err := s.q.UpdateJudgerSelftest(ctx, sqlcgen.UpdateJudgerSelftestParams{ID: id, SelftestStatus: selftestStatus, Status: status})
+// UpdateJudgerExecutionState 仅回写所验证配置的执行状态,拒绝覆盖并发管理修改。
+func (s *txStore) UpdateJudgerExecutionState(ctx context.Context, original Judger, spec JudgerResourceSpec, selftestStatus, status int16) (Judger, error) {
+	raw, err := jsonx.AnyBytes(spec, apperr.ErrJudgerConfigInvalid)
+	if err != nil {
+		return Judger{}, err
+	}
+	row, err := s.q.UpdateJudgerExecutionState(ctx, sqlcgen.UpdateJudgerExecutionStateParams{
+		ID: original.ID, ExpectedUpdatedAt: timex.RequiredTimestamptz(original.UpdatedAt),
+		ResourceSpec: raw, SelftestStatus: selftestStatus, Status: status,
+	})
 	if err != nil {
 		return Judger{}, err
 	}
@@ -270,12 +277,12 @@ func (s *txStore) ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, te
 // ListJudgeTasks 查询任务分页列表。
 // state 取运维分组(空串不筛 / active 排队与执行中 / abnormal 失败),
 // 总数按同一条件计,与列表同口径。
-func (s *txStore) ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, state string, limit, offset int32) ([]JudgeTaskInfo, int64, error) {
-	rows, err := s.q.ListJudgeTasks(ctx, sqlcgen.ListJudgeTasksParams{TenantID: tenantID, Column2: sourceRef, Column3: pendingManual, Column4: sourceOwnerID, State: state, PageLimit: limit, PageOffset: offset})
+func (s *txStore) ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, state string, modules []string, limit, offset int32) ([]JudgeTaskInfo, int64, error) {
+	rows, err := s.q.ListJudgeTasks(ctx, sqlcgen.ListJudgeTasksParams{TenantID: tenantID, Column2: sourceRef, Column3: pendingManual, Column4: sourceOwnerID, State: state, EnabledModules: modules, PageLimit: limit, PageOffset: offset})
 	if err != nil {
 		return nil, 0, err
 	}
-	total, err := s.q.CountJudgeTasks(ctx, sqlcgen.CountJudgeTasksParams{TenantID: tenantID, Column2: sourceRef, Column3: pendingManual, Column4: sourceOwnerID, State: state})
+	total, err := s.q.CountJudgeTasks(ctx, sqlcgen.CountJudgeTasksParams{TenantID: tenantID, Column2: sourceRef, Column3: pendingManual, Column4: sourceOwnerID, State: state, EnabledModules: modules})
 	if err != nil {
 		return nil, 0, err
 	}

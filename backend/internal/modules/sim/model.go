@@ -170,10 +170,10 @@ type Share struct {
 // 回答不了"这个算法实现对不对",故必须把帧摊给平台管理员看(见 06 流程 §4)。
 type ValidationReport struct {
 	BundleHash         string           `json:"bundle_hash,omitempty"`
-	MetadataValidation ValidationStatus `json:"metadata_validation,omitempty"`
-	StaticScan         StaticScanReport `json:"static_scan,omitempty"`
-	DeterminismCheck   ValidationStatus `json:"determinism_check,omitempty"`
-	WorkerPreview      ValidationStatus `json:"worker_preview,omitempty"`
+	MetadataValidation ValidationStatus `json:"metadata_validation,omitzero"`
+	StaticScan         StaticScanReport `json:"static_scan,omitzero"`
+	DeterminismCheck   ValidationStatus `json:"determinism_check,omitzero"`
+	WorkerPreview      ValidationStatus `json:"worker_preview,omitzero"`
 	PreviewFrames      json.RawMessage  `json:"preview_frames,omitempty"`
 }
 

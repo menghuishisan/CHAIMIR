@@ -345,6 +345,24 @@ func (q *Queries) CountClassStudents(ctx context.Context, arg CountClassStudents
 	return count, err
 }
 
+const countPendingImportPreviews = `-- name: CountPendingImportPreviews :one
+SELECT COUNT(*)::bigint FROM import_preview
+WHERE tenant_id = $1 AND operator_id = $2 AND target_type = $3 AND status = 1 AND expire_at > now()
+`
+
+type CountPendingImportPreviewsParams struct {
+	TenantID   int64 `json:"tenant_id"`
+	OperatorID int64 `json:"operator_id"`
+	TargetType int16 `json:"target_type"`
+}
+
+func (q *Queries) CountPendingImportPreviews(ctx context.Context, arg CountPendingImportPreviewsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countPendingImportPreviews, arg.TenantID, arg.OperatorID, arg.TargetType)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createAccount = `-- name: CreateAccount :one
 INSERT INTO account (id, tenant_id, phone_enc, phone_hash, password_hash, name, base_identity, status, must_change_pwd, activated_at, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now(), now())
@@ -620,6 +638,7 @@ func (q *Queries) CreateClass(ctx context.Context, arg CreateClassParams) (Class
 const createDepartment = `-- name: CreateDepartment :one
 INSERT INTO department (id, tenant_id, name, code)
 VALUES ($1, $2, $3, $4)
+ON CONFLICT (tenant_id, code) WHERE deleted_at IS NULL AND code IS NOT NULL DO NOTHING
 RETURNING id, tenant_id, name, code, deleted_at
 `
 
@@ -1051,6 +1070,25 @@ func (q *Queries) DepartmentExists(ctx context.Context, arg DepartmentExistsPara
 	return exists, err
 }
 
+const discardImportPreview = `-- name: DiscardImportPreview :execrows
+DELETE FROM import_preview WHERE id = $1 AND tenant_id = $2 AND operator_id = $3 AND status = 1
+`
+
+type DiscardImportPreviewParams struct {
+	ID         int64 `json:"id"`
+	TenantID   int64 `json:"tenant_id"`
+	OperatorID int64 `json:"operator_id"`
+}
+
+// 明确放弃待提交预览时同步清除暂存原始内容,不影响已提交批次。
+func (q *Queries) DiscardImportPreview(ctx context.Context, arg DiscardImportPreviewParams) (int64, error) {
+	result, err := q.db.Exec(ctx, discardImportPreview, arg.ID, arg.TenantID, arg.OperatorID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getAccountByID = `-- name: GetAccountByID :one
 SELECT a.id, a.tenant_id, a.phone_enc, a.phone_hash, a.password_hash, a.name, a.base_identity, a.status,
        a.must_change_pwd, a.pwd_failed_count, a.locked_until, a.activated_at, a.deleted_at, a.created_at, a.updated_at,
@@ -1323,6 +1361,7 @@ const getImportPreview = `-- name: GetImportPreview :one
 SELECT id, tenant_id, operator_id, target_type, file_name, rows, preview_result, status, expire_at, submitted_at, created_at
 FROM import_preview
 WHERE id = $1 AND tenant_id = $2 AND operator_id = $3
+FOR UPDATE
 `
 
 type GetImportPreviewParams struct {
@@ -2025,6 +2064,63 @@ func (q *Queries) ListMajors(ctx context.Context, dollar_1 int64) ([]Major, erro
 	return items, nil
 }
 
+const listPendingImportPreviews = `-- name: ListPendingImportPreviews :many
+SELECT id, target_type, file_name, preview_result, expire_at
+FROM import_preview
+WHERE tenant_id = $1 AND operator_id = $2 AND target_type = $3 AND status = 1 AND expire_at > now()
+ORDER BY created_at DESC, id DESC
+LIMIT $4 OFFSET $5
+`
+
+type ListPendingImportPreviewsParams struct {
+	TenantID   int64 `json:"tenant_id"`
+	OperatorID int64 `json:"operator_id"`
+	TargetType int16 `json:"target_type"`
+	Limit      int32 `json:"limit"`
+	Offset     int32 `json:"offset"`
+}
+
+type ListPendingImportPreviewsRow struct {
+	ID            int64              `json:"id"`
+	TargetType    int16              `json:"target_type"`
+	FileName      string             `json:"file_name"`
+	PreviewResult []byte             `json:"preview_result"`
+	ExpireAt      pgtype.Timestamptz `json:"expire_at"`
+}
+
+// 列表只读取公开预览结果,不取包含初始密码的原始rows。
+func (q *Queries) ListPendingImportPreviews(ctx context.Context, arg ListPendingImportPreviewsParams) ([]ListPendingImportPreviewsRow, error) {
+	rows, err := q.db.Query(ctx, listPendingImportPreviews,
+		arg.TenantID,
+		arg.OperatorID,
+		arg.TargetType,
+		arg.Limit,
+		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingImportPreviewsRow{}
+	for rows.Next() {
+		var i ListPendingImportPreviewsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TargetType,
+			&i.FileName,
+			&i.PreviewResult,
+			&i.ExpireAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPlatformAuthSessionsByAdmin = `-- name: ListPlatformAuthSessionsByAdmin :many
 SELECT id, platform_admin_id, refresh_token_hash, device_info, ip, status, expire_at, created_at
 FROM platform_auth_session
@@ -2254,6 +2350,33 @@ func (q *Queries) ListTenantsPaged(ctx context.Context, arg ListTenantsPagedPara
 	return items, nil
 }
 
+const lockAccount = `-- name: LockAccount :one
+SELECT id FROM account
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE
+`
+
+type LockAccountParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) LockAccount(ctx context.Context, arg LockAccountParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockAccount, arg.TenantID, arg.ID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockOrganizationScope = `-- name: LockOrganizationScope :exec
+SELECT pg_advisory_xact_lock(hashtextextended('identity.organization', $1::bigint))
+`
+
+func (q *Queries) LockOrganizationScope(ctx context.Context, dollar_1 int64) error {
+	_, err := q.db.Exec(ctx, lockOrganizationScope, dollar_1)
+	return err
+}
+
 const majorExists = `-- name: MajorExists :one
 SELECT EXISTS(SELECT 1 FROM major WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL)
 `
@@ -2272,7 +2395,7 @@ func (q *Queries) MajorExists(ctx context.Context, arg MajorExistsParams) (bool,
 
 const markImportPreviewSubmitted = `-- name: MarkImportPreviewSubmitted :execrows
 UPDATE import_preview SET status = 2, submitted_at = now()
-WHERE id = $1 AND tenant_id = $2 AND operator_id = $3 AND status = 1
+WHERE id = $1 AND tenant_id = $2 AND operator_id = $3 AND status = 1 AND expire_at > now()
 `
 
 type MarkImportPreviewSubmittedParams struct {
@@ -2434,11 +2557,12 @@ func (q *Queries) PromoteClassStudentProfiles(ctx context.Context, arg PromoteCl
 
 const promoteClasses = `-- name: PromoteClasses :execrows
 UPDATE class
-SET name = regexp_replace(name, enrollment_year::text, $1::text, 'g'),
-    enrollment_year = $1
+SET name = regexp_replace(name, enrollment_year::text, ($1::smallint)::text, 'g'),
+    enrollment_year = $1::smallint
 WHERE tenant_id = $2
   AND id = ANY($3::bigint[])
   AND status = 1
+  AND enrollment_year < $1::smallint
   AND deleted_at IS NULL
 `
 
@@ -2783,9 +2907,13 @@ func (q *Queries) RevokeStudentSessionsByEnrollmentYear(ctx context.Context, arg
 	return err
 }
 
-const softDeleteClass = `-- name: SoftDeleteClass :exec
+const softDeleteClass = `-- name: SoftDeleteClass :execrows
 UPDATE class SET deleted_at = now()
-WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+WHERE class.id = $1 AND class.tenant_id = $2 AND class.deleted_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM account_profile p JOIN account a ON a.id = p.account_id AND a.tenant_id = p.tenant_id
+      WHERE p.tenant_id = $2 AND p.org_id = $1 AND a.base_identity = 1 AND a.deleted_at IS NULL
+  )
 `
 
 type SoftDeleteClassParams struct {
@@ -2793,14 +2921,22 @@ type SoftDeleteClassParams struct {
 	TenantID int64 `json:"tenant_id"`
 }
 
-func (q *Queries) SoftDeleteClass(ctx context.Context, arg SoftDeleteClassParams) error {
-	_, err := q.db.Exec(ctx, softDeleteClass, arg.ID, arg.TenantID)
-	return err
+func (q *Queries) SoftDeleteClass(ctx context.Context, arg SoftDeleteClassParams) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteClass, arg.ID, arg.TenantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const softDeleteDepartment = `-- name: SoftDeleteDepartment :exec
+const softDeleteDepartment = `-- name: SoftDeleteDepartment :execrows
 UPDATE department SET deleted_at = now()
-WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+WHERE department.id = $1 AND department.tenant_id = $2 AND department.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM major WHERE tenant_id = $2 AND department_id = $1 AND deleted_at IS NULL)
+  AND NOT EXISTS (
+      SELECT 1 FROM account_profile p JOIN account a ON a.id = p.account_id AND a.tenant_id = p.tenant_id
+      WHERE p.tenant_id = $2 AND p.org_id = $1 AND a.base_identity = 2 AND a.deleted_at IS NULL
+  )
 `
 
 type SoftDeleteDepartmentParams struct {
@@ -2808,14 +2944,18 @@ type SoftDeleteDepartmentParams struct {
 	TenantID int64 `json:"tenant_id"`
 }
 
-func (q *Queries) SoftDeleteDepartment(ctx context.Context, arg SoftDeleteDepartmentParams) error {
-	_, err := q.db.Exec(ctx, softDeleteDepartment, arg.ID, arg.TenantID)
-	return err
+func (q *Queries) SoftDeleteDepartment(ctx context.Context, arg SoftDeleteDepartmentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteDepartment, arg.ID, arg.TenantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const softDeleteMajor = `-- name: SoftDeleteMajor :exec
+const softDeleteMajor = `-- name: SoftDeleteMajor :execrows
 UPDATE major SET deleted_at = now()
-WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+WHERE major.id = $1 AND major.tenant_id = $2 AND major.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM class WHERE tenant_id = $2 AND major_id = $1 AND deleted_at IS NULL)
 `
 
 type SoftDeleteMajorParams struct {
@@ -2823,9 +2963,12 @@ type SoftDeleteMajorParams struct {
 	TenantID int64 `json:"tenant_id"`
 }
 
-func (q *Queries) SoftDeleteMajor(ctx context.Context, arg SoftDeleteMajorParams) error {
-	_, err := q.db.Exec(ctx, softDeleteMajor, arg.ID, arg.TenantID)
-	return err
+func (q *Queries) SoftDeleteMajor(ctx context.Context, arg SoftDeleteMajorParams) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteMajor, arg.ID, arg.TenantID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const tenantStats = `-- name: TenantStats :one
@@ -3054,8 +3197,12 @@ func (q *Queries) UpdateClass(ctx context.Context, arg UpdateClassParams) (Class
 const updateDepartment = `-- name: UpdateDepartment :one
 UPDATE department
 SET name = $3, code = $4
-WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
-RETURNING id, tenant_id, name, code, deleted_at
+WHERE department.id = $1 AND department.tenant_id = $2 AND department.deleted_at IS NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM department other
+      WHERE other.tenant_id = $2 AND other.id <> $1 AND other.deleted_at IS NULL AND other.code = $4
+  )
+RETURNING department.id, department.tenant_id, department.name, department.code, department.deleted_at
 `
 
 type UpdateDepartmentParams struct {

@@ -148,12 +148,8 @@ export class ApiClient {
     // 登录态失效：用 Refresh Token 轮转一次并重放原请求。
     if (this.shouldRefresh(apiResponse, requestConfig)) {
       requestConfig.chaimirRetried = true
-      try {
-        await this.refreshAccessToken()
-      } catch {
-        // 轮转失败已在 performTokenRefresh 内触发未登录处理，此处只回用户向错误。
-        throw transformApiError(apiResponse)
-      }
+      // 刷新错误保留自己的类别和报障编号，临时网络故障不能被改写为原请求的登录失效。
+      await this.refreshAccessToken()
       return this.client.request(requestConfig)
     }
 
@@ -185,13 +181,8 @@ export class ApiClient {
 
   /** performTokenRefresh 使用独立客户端完成轮转，避免刷新请求进入业务响应拦截器。 */
   private async performTokenRefresh(): Promise<void> {
-    if (!this.config.hasRefreshSession?.()) {
-      this.config.onUnauthorized?.()
-      throw new Error('refresh token unavailable')
-    }
-
-    try {
-      const response = await axios.post<ApiResponse<TokenRefreshResponse>>(
+    const response = await axios
+      .post<ApiResponse<TokenRefreshResponse>>(
         `${this.config.baseURL}/auth/refresh`,
         {},
         {
@@ -200,19 +191,22 @@ export class ApiClient {
           headers: { 'Content-Type': 'application/json', 'X-Chaimir-Refresh': '1' },
         }
       )
-      const envelope = response.data
-      if (
-        !isEnvelope(envelope) ||
-        envelope.code !== API_SUCCESS_CODE ||
-        !envelope.data?.access_token
-      ) {
-        throw new Error('refresh response invalid')
-      }
-      this.config.onTokensRefreshed?.(envelope.data)
-    } catch (error) {
-      this.config.onUnauthorized?.()
-      throw error
+      .catch((error: AxiosError) => {
+        throw transformTransportError(error)
+      })
+    const envelope = response.data
+    if (!isEnvelope(envelope)) {
+      throw new ApiError(API_TRANSPORT_ERROR_MESSAGES.MALFORMED_RESPONSE)
     }
+    if (envelope.code !== API_SUCCESS_CODE) {
+      // 仅服务端明确拒绝当前会话时清除登录态；其他业务失败仍保留原信封。
+      if (requiresReauthentication(envelope.code)) this.config.onUnauthorized?.()
+      throw transformApiError(envelope)
+    }
+    if (typeof envelope.data?.access_token !== 'string' || !envelope.data.access_token.trim()) {
+      throw new ApiError(API_TRANSPORT_ERROR_MESSAGES.MALFORMED_RESPONSE)
+    }
+    this.config.onTokensRefreshed?.(envelope.data)
   }
 
   // === HTTP 方法 ===
@@ -449,11 +443,6 @@ function attachmentFileName(disposition: unknown): string {
   return matched[1]
 }
 
-/**
- * isEnvelope 判断 200 响应体是否为平台统一信封。
- * 后端所有业务出口都写信封(见 internal/platform/response),拿到非信封的 200
- * 说明响应来自网关或代理而不是后端,不能当业务结果解读。
- */
 /** requiresReauthentication 统一识别需要结束本地受保护会话的服务端错误码。 */
 function requiresReauthentication(code: string): boolean {
   return (
@@ -463,6 +452,11 @@ function requiresReauthentication(code: string): boolean {
   )
 }
 
+/**
+ * isEnvelope 判断 200 响应体是否为平台统一信封。
+ * 后端所有业务出口都写信封(见 internal/platform/response),拿到非信封的 200
+ * 说明响应来自网关或代理而不是后端,不能当业务结果解读。
+ */
 function isEnvelope(data: unknown): data is ApiResponse {
   if (!data || typeof data !== 'object') return false
   const candidate = data as Record<string, unknown>

@@ -15,6 +15,7 @@ import type {
   SsoMatchField,
   SsoType,
   TenantStatus,
+  TenantModule,
   UserRole,
 } from '../constants/identity'
 
@@ -93,6 +94,8 @@ export interface Account {
   name: string
   phone_masked?: string
   no?: string
+  org_id?: SnowflakeID
+  enrollment_year?: number
   base_identity: BaseIdentity
   roles: UserRole[]
   status: AccountStatus
@@ -102,6 +105,7 @@ export interface Account {
 
 export interface MeResponse {
   account: Account
+  enabled_modules: TenantModule[]
 }
 
 export interface ChangePasswordRequest {
@@ -308,11 +312,17 @@ export interface BatchAccountIDsRequest {
   account_ids: SnowflakeID[]
 }
 
-export interface ImportPreviewResponse {
+export interface ImportPreviewSummary {
   preview_id: SnowflakeID
+  target_type: ImportTarget
+  file_name: string
+  expire_at: string
   total: number
   valid: number
   invalid: number
+}
+
+export interface ImportPreviewResponse extends ImportPreviewSummary {
   rows: ImportRowResult[]
 }
 

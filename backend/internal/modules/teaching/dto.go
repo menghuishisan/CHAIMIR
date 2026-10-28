@@ -67,6 +67,18 @@ type CourseDTO struct {
 	UpdatedAt   string         `json:"updated_at"`
 }
 
+// SharedCourseDTO仅公开跨租户克隆前的课程目录元数据。
+type SharedCourseDTO struct {
+	ID          ids.ID  `json:"id"`
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Type        int16   `json:"type"`
+	Difficulty  int16   `json:"difficulty"`
+	Semester    string  `json:"semester"`
+	Credits     float64 `json:"credits"`
+	UpdatedAt   string  `json:"updated_at"`
+}
+
 type CourseRequest struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
@@ -244,9 +256,9 @@ type SubmissionDTO struct {
 	AttemptNo    int32          `json:"attempt_no"`
 	Content      map[string]any `json:"content"`
 	JudgeTaskRef string         `json:"judge_task_ref,omitempty"`
-	AutoScore    int32          `json:"auto_score,omitempty"`
-	ManualScore  int32          `json:"manual_score,omitempty"`
-	FinalScore   int32          `json:"final_score,omitempty"`
+	AutoScore    *int32         `json:"auto_score,omitempty"`
+	ManualScore  *int32         `json:"manual_score,omitempty"`
+	FinalScore   *int32         `json:"final_score,omitempty"`
 	Comment      string         `json:"comment,omitempty"`
 	IsLate       bool           `json:"is_late"`
 	Status       int16          `json:"status"`
@@ -281,15 +293,21 @@ type PostRequest struct {
 	Content  string `json:"content"`
 }
 
+// PinRequest 对讨论和公告要求显式目标状态,指针保留false与缺失的区别。
+type PinRequest struct {
+	IsPinned *bool `json:"is_pinned" binding:"required"`
+}
+
 type PostDTO struct {
-	ID        ids.ID `json:"id"`
-	CourseID  ids.ID `json:"course_id"`
-	ParentID  ids.ID `json:"parent_id,omitempty"`
-	AuthorID  ids.ID `json:"author_id"`
-	Content   string `json:"content"`
-	IsPinned  bool   `json:"is_pinned"`
-	LikeCount int32  `json:"like_count"`
-	CreatedAt string `json:"created_at"`
+	ID            ids.ID  `json:"id"`
+	CourseID      ids.ID  `json:"course_id"`
+	ParentID      ids.ID  `json:"parent_id,omitempty"`
+	ParentContent *string `json:"parent_content,omitempty"`
+	AuthorID      ids.ID  `json:"author_id"`
+	Content       string  `json:"content"`
+	IsPinned      bool    `json:"is_pinned"`
+	LikeCount     int32   `json:"like_count"`
+	CreatedAt     string  `json:"created_at"`
 }
 
 type AnnouncementRequest struct {
@@ -310,6 +328,11 @@ type AnnouncementDTO struct {
 type ReviewRequest struct {
 	Rating  int16  `json:"rating"`
 	Comment string `json:"comment"`
+}
+
+// MyCourseReviewDTO明确区分尚未评价和评价读取失败。
+type MyCourseReviewDTO struct {
+	Review *ReviewDTO `json:"review"`
 }
 
 type ReviewDTO struct {

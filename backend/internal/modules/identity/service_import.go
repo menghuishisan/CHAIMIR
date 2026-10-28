@@ -157,8 +157,10 @@ func (s *Service) PreviewAccountImport(ctx context.Context, req ImportPreviewReq
 		return ImportPreviewResponse{}, err
 	}
 	previewID := s.ids.Generate()
+	var saved ImportPreview
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.CreateImportPreview(ctx, CreateImportPreviewInput{
+		var err error
+		saved, err = tx.CreateImportPreview(ctx, CreateImportPreviewInput{
 			ID:            previewID,
 			TenantID:      id.TenantID,
 			OperatorID:    id.AccountID,
@@ -172,13 +174,7 @@ func (s *Service) PreviewAccountImport(ctx context.Context, req ImportPreviewReq
 	}); err != nil {
 		return ImportPreviewResponse{}, apperr.ErrInternal.WithCause(err)
 	}
-	valid := 0
-	for _, r := range rows {
-		if r.Error == "" {
-			valid++
-		}
-	}
-	return ImportPreviewResponse{PreviewID: ids.ID(previewID), Total: len(rows), Valid: valid, Invalid: len(rows) - valid, Rows: results}, nil
+	return importPreviewResponse(saved)
 }
 
 // CommitAccountImport 读取服务端预览并仅提交校验通过的行,激活码明文只在本次响应返回。
@@ -194,7 +190,7 @@ func (s *Service) CommitAccountImport(ctx context.Context, req ImportCommitReque
 		if err != nil {
 			return err
 		}
-		if preview.Status != ImportPreviewPending || timex.Now().After(preview.ExpireAt) {
+		if (preview.TargetType != ImportTargetTeacher && preview.TargetType != ImportTargetStudent) || preview.Status != ImportPreviewPending || !timex.Now().Before(preview.ExpireAt) {
 			return apperr.ErrIdentityImportPreviewExpired
 		}
 		var rows []importRow

@@ -42,6 +42,47 @@ export interface CompositionLink {
   config_binding: string
 }
 
+/** CompositionPreviewRequest 仅声明当前选择与连接,不替使用场景确定访问边界。 */
+export interface CompositionPreviewRequest {
+  runtimes: CompositionRuntimeRef[]
+  workspace_runtime_instance: string
+  infra: CompositionComponentRef[]
+  tools: CompositionComponentRef[]
+  links: CompositionLink[]
+}
+
+/** CompositionBindingOption 是服务端已校验的连接目标,前端不自行拼接端点。 */
+export interface CompositionBindingOption {
+  label: string
+  link: CompositionLink
+}
+
+/** CompositionBindingPreview 中的绑定标识只作稳定键,不作为用户文案。 */
+export interface CompositionBindingPreview {
+  source_component: string
+  source_name: string
+  config_binding: string
+  options: CompositionBindingOption[]
+}
+
+/** CompositionPreviewResponse 是只读候选,不等同于保存、冻结或环境启动成功。 */
+export interface CompositionPreviewResponse {
+  infra: CompositionComponentRef[]
+  bindings: CompositionBindingPreview[]
+  links: CompositionLink[]
+  complete: boolean
+}
+
+/** CompositionInitAsset 将初始化归档明确关联到某个运行时实例。 */
+export interface CompositionInitAsset {
+  name: string
+  source_ref: string
+  target_runtime_instance: string
+  target_domain: string
+  expected_sha256?: string
+  apply_phase?: string
+}
+
 /** SandboxCompositionSpec 是单个环境的唯一声明来源,由教师提交。 */
 export interface SandboxCompositionSpec {
   id: string
@@ -53,6 +94,7 @@ export interface SandboxCompositionSpec {
   access_profile: SandboxAccessProfile
   resource_profile?: Record<string, string>
   network_profile?: Record<string, unknown>
+  init_assets?: CompositionInitAsset[]
   init_code_ref?: string
   init_script_ref?: string
 }
@@ -76,6 +118,7 @@ export interface CompiledRuntimeSnapshot {
   eco: string
   adapter_level: RuntimeAdapterLevel
   capability_impl: string
+  plugin_ref?: string
   adapter_spec: Record<string, unknown>
   image_url: string
   image_version: string

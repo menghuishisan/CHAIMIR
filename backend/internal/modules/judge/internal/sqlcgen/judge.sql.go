@@ -297,21 +297,23 @@ SELECT COUNT(*)::bigint
 FROM judge_task
 JOIN judger ON judger.id = judge_task.judger_id
 WHERE judge_task.tenant_id = $1
+  AND split_part(judge_task.source_ref, ':', 1) = ANY($5::text[])
   AND ($2::text = '' OR judge_task.source_ref = $2)
   AND ($3::boolean = false OR (judge_task.status = 2 AND judger.type = 6))
   AND ($4::bigint = 0 OR judge_task.source_owner_id = $4 OR judge_task.submitter_id = $4)
   -- state 与列表逐字同口径,否则指标带与分页会自相矛盾
-  AND ($5::text = ''
-       OR ($5::text = 'active' AND judge_task.status IN (1, 2))
-       OR ($5::text = 'abnormal' AND judge_task.status = 4))
+  AND ($6::text = ''
+       OR ($6::text = 'active' AND judge_task.status IN (1, 2))
+       OR ($6::text = 'abnormal' AND judge_task.status = 4))
 `
 
 type CountJudgeTasksParams struct {
-	TenantID int64  `json:"tenant_id"`
-	Column2  string `json:"column_2"`
-	Column3  bool   `json:"column_3"`
-	Column4  int64  `json:"column_4"`
-	State    string `json:"state"`
+	TenantID       int64    `json:"tenant_id"`
+	Column2        string   `json:"column_2"`
+	Column3        bool     `json:"column_3"`
+	Column4        int64    `json:"column_4"`
+	EnabledModules []string `json:"enabled_modules"`
+	State          string   `json:"state"`
 }
 
 func (q *Queries) CountJudgeTasks(ctx context.Context, arg CountJudgeTasksParams) (int64, error) {
@@ -320,6 +322,7 @@ func (q *Queries) CountJudgeTasks(ctx context.Context, arg CountJudgeTasksParams
 		arg.Column2,
 		arg.Column3,
 		arg.Column4,
+		arg.EnabledModules,
 		arg.State,
 	)
 	var column_1 int64
@@ -1320,25 +1323,27 @@ LEFT JOIN LATERAL (
 ) r ON true
 JOIN judger j ON j.id = t.judger_id
 WHERE t.tenant_id = $1
+  AND split_part(t.source_ref, ':', 1) = ANY($5::text[])
   AND ($2::text = '' OR t.source_ref = $2)
   AND ($3::boolean = false OR (t.status = 2 AND j.type = 6))
   AND ($4::bigint = 0 OR t.source_owner_id = $4 OR t.submitter_id = $4)
   -- state 取运维分组:active=排队/执行中(1,2),abnormal=失败(4),空串不筛
-  AND ($5::text = ''
-       OR ($5::text = 'active' AND t.status IN (1, 2))
-       OR ($5::text = 'abnormal' AND t.status = 4))
+  AND ($6::text = ''
+       OR ($6::text = 'active' AND t.status IN (1, 2))
+       OR ($6::text = 'abnormal' AND t.status = 4))
 ORDER BY t.created_at DESC, t.id DESC
-LIMIT $7::int OFFSET $6::int
+LIMIT $8::int OFFSET $7::int
 `
 
 type ListJudgeTasksParams struct {
-	TenantID   int64  `json:"tenant_id"`
-	Column2    string `json:"column_2"`
-	Column3    bool   `json:"column_3"`
-	Column4    int64  `json:"column_4"`
-	State      string `json:"state"`
-	PageOffset int32  `json:"page_offset"`
-	PageLimit  int32  `json:"page_limit"`
+	TenantID       int64    `json:"tenant_id"`
+	Column2        string   `json:"column_2"`
+	Column3        bool     `json:"column_3"`
+	Column4        int64    `json:"column_4"`
+	EnabledModules []string `json:"enabled_modules"`
+	State          string   `json:"state"`
+	PageOffset     int32    `json:"page_offset"`
+	PageLimit      int32    `json:"page_limit"`
 }
 
 type ListJudgeTasksRow struct {
@@ -1384,6 +1389,7 @@ func (q *Queries) ListJudgeTasks(ctx context.Context, arg ListJudgeTasksParams) 
 		arg.Column2,
 		arg.Column3,
 		arg.Column4,
+		arg.EnabledModules,
 		arg.State,
 		arg.PageOffset,
 		arg.PageLimit,
@@ -1919,21 +1925,30 @@ func (q *Queries) RetryJudgeTask(ctx context.Context, arg RetryJudgeTaskParams) 
 	return i, err
 }
 
-const updateJudgerSelftest = `-- name: UpdateJudgerSelftest :one
+const updateJudgerExecutionState = `-- name: UpdateJudgerExecutionState :one
 UPDATE judger
-SET selftest_status = $2, status = $3, updated_at = now()
-WHERE id = $1
+SET resource_spec = $1,
+    selftest_status = $2, status = $3, updated_at = clock_timestamp()
+WHERE id = $4 AND updated_at = $5::timestamptz
 RETURNING id, code, name, type, executor_ref, runtime_required, default_timeout_sec, resource_spec, selftest_status, status, created_at, updated_at
 `
 
-type UpdateJudgerSelftestParams struct {
-	ID             int64 `json:"id"`
-	SelftestStatus int16 `json:"selftest_status"`
-	Status         int16 `json:"status"`
+type UpdateJudgerExecutionStateParams struct {
+	ResourceSpec      []byte             `json:"resource_spec"`
+	SelftestStatus    int16              `json:"selftest_status"`
+	Status            int16              `json:"status"`
+	ID                int64              `json:"id"`
+	ExpectedUpdatedAt pgtype.Timestamptz `json:"expected_updated_at"`
 }
 
-func (q *Queries) UpdateJudgerSelftest(ctx context.Context, arg UpdateJudgerSelftestParams) (Judger, error) {
-	row := q.db.QueryRow(ctx, updateJudgerSelftest, arg.ID, arg.SelftestStatus, arg.Status)
+func (q *Queries) UpdateJudgerExecutionState(ctx context.Context, arg UpdateJudgerExecutionStateParams) (Judger, error) {
+	row := q.db.QueryRow(ctx, updateJudgerExecutionState,
+		arg.ResourceSpec,
+		arg.SelftestStatus,
+		arg.Status,
+		arg.ID,
+		arg.ExpectedUpdatedAt,
+	)
 	var i Judger
 	err := row.Scan(
 		&i.ID,

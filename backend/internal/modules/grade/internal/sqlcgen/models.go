@@ -9,27 +9,35 @@ import (
 )
 
 type AcademicWarning struct {
-	ID         int64              `json:"id"`
-	TenantID   int64              `json:"tenant_id"`
-	StudentID  int64              `json:"student_id"`
-	SemesterID int64              `json:"semester_id"`
-	Type       int16              `json:"type"`
-	Detail     []byte             `json:"detail"`
-	Status     int16              `json:"status"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	ID                  int64              `json:"id"`
+	TenantID            int64              `json:"tenant_id"`
+	StudentID           int64              `json:"student_id"`
+	SemesterID          int64              `json:"semester_id"`
+	Type                int16              `json:"type"`
+	Detail              []byte             `json:"detail"`
+	Status              int16              `json:"status"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	NotifyTraceID       string             `json:"notify_trace_id"`
+	NotifyStatus        int16              `json:"notify_status"`
+	NotifyAttempts      int64              `json:"notify_attempts"`
+	NotifyLeaseToken    string             `json:"notify_lease_token"`
+	NotifyLeaseUntil    pgtype.Timestamptz `json:"notify_lease_until"`
+	NotifyNextAttemptAt pgtype.Timestamptz `json:"notify_next_attempt_at"`
+	NotifyLastError     pgtype.Text        `json:"notify_last_error"`
 }
 
 type GradeAppeal struct {
-	ID            int64              `json:"id"`
-	TenantID      int64              `json:"tenant_id"`
-	StudentID     int64              `json:"student_id"`
-	CourseID      int64              `json:"course_id"`
-	Reason        string             `json:"reason"`
-	Status        int16              `json:"status"`
-	HandlerID     pgtype.Int8        `json:"handler_id"`
-	ResultComment pgtype.Text        `json:"result_comment"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	HandledAt     pgtype.Timestamptz `json:"handled_at"`
+	ID             int64              `json:"id"`
+	TenantID       int64              `json:"tenant_id"`
+	StudentID      int64              `json:"student_id"`
+	CourseID       int64              `json:"course_id"`
+	Reason         string             `json:"reason"`
+	Status         int16              `json:"status"`
+	HandlerID      pgtype.Int8        `json:"handler_id"`
+	ResultComment  pgtype.Text        `json:"result_comment"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	HandledAt      pgtype.Timestamptz `json:"handled_at"`
+	UnlockRevision pgtype.Int8        `json:"unlock_revision"`
 }
 
 type GradeLevelConfig struct {
@@ -45,6 +53,7 @@ type GradeLevelConfig struct {
 
 type GradeLockOutbox struct {
 	ID         int64              `json:"id"`
+	Revision   int64              `json:"revision"`
 	TenantID   int64              `json:"tenant_id"`
 	ReviewID   int64              `json:"review_id"`
 	CourseID   int64              `json:"course_id"`

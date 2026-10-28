@@ -55,6 +55,7 @@ capabilities:
     additionalProperties: false
     properties:
       solidity_version:
+        title: Solidity 编译版本
         type: string
         enum:
           - 0.8.20
@@ -71,9 +72,14 @@ judger:
   command:
     - run-static-scan
   exec_target: sandbox/static-scan
+  sidecar_command:
+    - sleep
+    - "2147483647"
   env:
     - name: CHAIMIR_SUBMISSION_DIR
       value: /judge-private
+    - name: HOME
+      value: /judge/home
   suite_archive_name: platform-selftest.tar
   modes:
     - slither
@@ -89,7 +95,7 @@ judger:
 ports: []
 security:
   run_as_non_root: true
-  read_only_root_filesystem: false
+  read_only_root_filesystem: true
   allow_privilege_escalation: false
   privileged: false
   host_network: false
@@ -97,12 +103,6 @@ security:
   drop_capabilities:
     - ALL
   network_policy: deny-all
-security_exceptions:
-  - field: read_only_root_filesystem
-    reason: Slither 判题需要写入 /judge/result.json 与临时分析日志;运行期只允许挂载 judge 工作目录和临时缓存。
-    writable_mounts:
-      - judge-workdir
-      - tool-cache
 student_access:
   enabled: false
 resources:

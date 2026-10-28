@@ -31,6 +31,7 @@ type Store interface {
 type TxStore interface {
 	CreateContest(context.Context, Contest) (Contest, error)
 	GetContest(context.Context, int64, int64) (Contest, error)
+	GetContestForUpdate(context.Context, int64, int64) (Contest, error)
 	FindPublishedContestTenant(context.Context, int64) (int64, error)
 	FindTeamTenant(context.Context, int64) (int64, error)
 	FindBattleMatchTenant(context.Context, int64) (int64, error)
@@ -83,11 +84,13 @@ type TxStore interface {
 	CreateBattleMatch(context.Context, BattleMatch) (BattleMatch, error)
 	ExhaustUnstartedBattleMatches(context.Context, int32, time.Time) ([]BattleMatch, error)
 	ClaimPendingBattleMatches(context.Context, int, int32, time.Time, time.Time, string) ([]BattleMatch, error)
-	ListRunningBattleMatchesWithJudgeTask(context.Context, int) ([]BattleMatch, error)
+	ListBattleMatchesToReconcile(context.Context, int, int64, time.Time) ([]BattleMatch, error)
+	ClaimBattleMatchFinalization(context.Context, int64, int64, string, time.Time) (bool, error)
+	CompleteBattleMatchFinalization(context.Context, int64, int64, string) (bool, error)
 	StartBattleMatch(context.Context, int64, int64, string, string, string) (BattleMatch, bool, error)
 	RenewBattleMatchStartLease(context.Context, int64, int64, string, time.Time) (bool, error)
 	GetBattleMatch(context.Context, int64, int64) (BattleMatch, error)
-	GetBattleMatchByJudgeTask(context.Context, int64, string) (BattleMatch, error)
+	LockBattleMatchByJudgeTask(context.Context, int64, string) (BattleMatch, error)
 	ListBattleMatchesForTeam(context.Context, int64, int64, int64, int, int) ([]BattleMatch, int64, error)
 	ListBattleReplayMatchesForTeam(context.Context, int64, int64, int64, int, int) ([]BattleReplayRow, error)
 	CountBattleReplayPendingForTeam(context.Context, int64, int64, int64) (int64, error)
@@ -182,6 +185,15 @@ func (tx *txStore) CreateContest(ctx context.Context, item Contest) (Contest, er
 // GetContest 读取竞赛定义。
 func (tx *txStore) GetContest(ctx context.Context, tenantID, id int64) (Contest, error) {
 	row, err := tx.q.GetContest(ctx, sqlcgen.GetContestParams{TenantID: tenantID, ID: id})
+	if err != nil {
+		return Contest{}, apperr.ErrContestNotFound.WithCause(err)
+	}
+	return contestFromRow(row)
+}
+
+// GetContestForUpdate 锁定赛事父行,供编排保存和生命周期变更在同一事务内重验当前状态。
+func (tx *txStore) GetContestForUpdate(ctx context.Context, tenantID, id int64) (Contest, error) {
+	row, err := tx.q.GetContestForUpdate(ctx, sqlcgen.GetContestForUpdateParams{TenantID: tenantID, ID: id})
 	if err != nil {
 		return Contest{}, apperr.ErrContestNotFound.WithCause(err)
 	}
@@ -477,7 +489,7 @@ func (tx *txStore) FindContestAccessGrantForSubject(ctx context.Context, sandbox
 	return contestAccessGrantFromRow(row)
 }
 
-// UpsertContestAccessGrant 签发或刷新一个沙箱范围的跨校授权。
+// UpsertContestAccessGrant 原子签发或更新跨校授权,不因未变化的幂等请求推进版本。
 func (tx *txStore) UpsertContestAccessGrant(ctx context.Context, item ContestAccessGrant) (ContestAccessGrant, error) {
 	capabilities, err := jsonx.AnyBytes(item.Capabilities, apperr.ErrContestTeamAccessDenied)
 	if err != nil {
@@ -790,13 +802,13 @@ func (tx *txStore) ClaimPendingBattleMatches(ctx context.Context, limit int, max
 	return out, nil
 }
 
-// ListRunningBattleMatchesWithJudgeTask 查询已启动但尚未结算的对局,用于补偿死信或短暂消费失败的判题完成事件。
-func (tx *txStore) ListRunningBattleMatchesWithJudgeTask(ctx context.Context, limit int) ([]BattleMatch, error) {
+// ListBattleMatchesToReconcile 查询待结算或终态交付未完成的对局,覆盖事件丢失与进程退出。
+func (tx *txStore) ListBattleMatchesToReconcile(ctx context.Context, limit int, afterID int64, matchedBefore time.Time) ([]BattleMatch, error) {
 	limit32, ok := intx.Int32(limit)
 	if !ok || limit32 <= 0 {
 		return nil, apperr.ErrContestBattleMatchFailed
 	}
-	rows, err := tx.q.ListRunningBattleMatchesWithJudgeTask(ctx, limit32)
+	rows, err := tx.q.ListBattleMatchesToReconcile(ctx, sqlcgen.ListBattleMatchesToReconcileParams{PageLimit: limit32, AfterID: afterID, MatchedBefore: timex.Timestamptz(matchedBefore)})
 	if err != nil {
 		return nil, apperr.ErrContestBattleMatchFailed.WithCause(err)
 	}
@@ -809,6 +821,18 @@ func (tx *txStore) ListRunningBattleMatchesWithJudgeTask(ctx context.Context, li
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+// ClaimBattleMatchFinalization 复用短租约认领终态交付,防止事件与周期扫描并发交付。
+func (tx *txStore) ClaimBattleMatchFinalization(ctx context.Context, tenantID, id int64, token string, until time.Time) (bool, error) {
+	rows, err := tx.q.ClaimBattleMatchFinalization(ctx, sqlcgen.ClaimBattleMatchFinalizationParams{TenantID: tenantID, ID: id, LeaseToken: token, LeaseUntil: timex.RequiredTimestamptz(until)})
+	return rows > 0, err
+}
+
+// CompleteBattleMatchFinalization 仅由仍持有租约的交付者确认全部外部动作完成。
+func (tx *txStore) CompleteBattleMatchFinalization(ctx context.Context, tenantID, id int64, token string) (bool, error) {
+	rows, err := tx.q.CompleteBattleMatchFinalization(ctx, sqlcgen.CompleteBattleMatchFinalizationParams{TenantID: tenantID, ID: id, LeaseToken: token})
+	return rows > 0, err
 }
 
 // StartBattleMatch 保存对局沙箱和判题任务引用,未命中表示启动租约已经失效。
@@ -845,9 +869,9 @@ func (tx *txStore) GetBattleMatch(ctx context.Context, tenantID, id int64) (Batt
 	return battleMatchFromRow(row)
 }
 
-// GetBattleMatchByJudgeTask 按判题任务读取对局。
-func (tx *txStore) GetBattleMatchByJudgeTask(ctx context.Context, tenantID int64, judgeTaskRef string) (BattleMatch, error) {
-	row, err := tx.q.GetBattleMatchByJudgeTask(ctx, sqlcgen.GetBattleMatchByJudgeTaskParams{TenantID: tenantID, JudgeTaskRef: pgtypex.Text(judgeTaskRef)})
+// LockBattleMatchByJudgeTask 按判题任务锁定赛事及对局,串行保护结算和当前 ELO。
+func (tx *txStore) LockBattleMatchByJudgeTask(ctx context.Context, tenantID int64, judgeTaskRef string) (BattleMatch, error) {
+	row, err := tx.q.LockBattleMatchByJudgeTask(ctx, sqlcgen.LockBattleMatchByJudgeTaskParams{TenantID: tenantID, JudgeTaskRef: pgtypex.Text(judgeTaskRef)})
 	if err != nil {
 		return BattleMatch{}, err
 	}

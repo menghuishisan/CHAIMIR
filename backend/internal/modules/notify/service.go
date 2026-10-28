@@ -309,7 +309,7 @@ func (s *Service) HandleSubscribe(ctx context.Context, conn *ws.Conn) error {
 	if err != nil {
 		return err
 	}
-	if err := conn.BindSession(ws.SessionKey{TenantID: id.TenantID, AccountID: id.AccountID}); err != nil {
+	if err := conn.BindSession(ctx, ws.SessionKey{TenantID: id.TenantID, AccountID: id.AccountID}); err != nil {
 		return apperr.ErrNotifyChannelUnavailable.WithCause(err)
 	}
 	if err := s.hub.Subscribe(conn, personalNotifyTopic(id.TenantID, id.AccountID)); err != nil {
@@ -318,7 +318,7 @@ func (s *Service) HandleSubscribe(ctx context.Context, conn *ws.Conn) error {
 	for {
 		var msg SubscribeMessage
 		if err := conn.ReadJSON(&msg); err != nil {
-			return nil
+			return err
 		}
 		if strings.TrimSpace(msg.Action) != "subscribe" || len(msg.Topics) == 0 {
 			return apperr.ErrNotifySubscribeInvalid

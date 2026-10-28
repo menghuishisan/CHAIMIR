@@ -310,7 +310,6 @@ func (s *Service) SubmitAssignment(ctx context.Context, assignmentID int64, req 
 			return err
 		}
 		status := SubmissionStatusPending
-		final := int32(0)
 		hasAuto := false
 		for _, item := range items {
 			if item.GradingMode == GradingModeAuto {
@@ -323,7 +322,7 @@ func (s *Service) SubmitAssignment(ctx context.Context, assignmentID int64, req 
 		if !attemptOK || attemptNo <= 0 {
 			return apperr.ErrTeachingSubmissionLimitExceeded
 		}
-		sub, err = tx.CreateSubmission(ctx, Submission{ID: s.ids.Generate(), TenantID: id.TenantID, AssignmentID: assignmentID, StudentID: id.AccountID, AttemptNo: attemptNo, ContentRef: req.ContentRef, FinalScore: final, IsLate: isLate, Status: status})
+		sub, err = tx.CreateSubmission(ctx, Submission{ID: s.ids.Generate(), TenantID: id.TenantID, AssignmentID: assignmentID, StudentID: id.AccountID, AttemptNo: attemptNo, ContentRef: req.ContentRef, IsLate: isLate, Status: status})
 		if err != nil {
 			return err
 		}

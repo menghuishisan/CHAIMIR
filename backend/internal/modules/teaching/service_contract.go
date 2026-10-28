@@ -20,6 +20,19 @@ func (s *Service) GetCourse(ctx context.Context, tenantID, courseID int64) (cont
 	return contractCourse(course), nil
 }
 
+// ListTeacherCourseIDs 实现 M6 对 M11 的授课范围只读契约,不返回课程正文或成绩。
+func (s *Service) ListTeacherCourseIDs(ctx context.Context, tenantID, teacherID int64) ([]int64, error) {
+	var courseIDs []int64
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		courseIDs, err = tx.ListTeacherCourseIDs(ctx, tenantID, teacherID)
+		return err
+	}); err != nil {
+		return nil, mapCourseError(err)
+	}
+	return courseIDs, nil
+}
+
 // GetCourseGrade 实现 M6 对 M11 的学生单课程成绩只读契约。
 func (s *Service) GetCourseGrade(ctx context.Context, tenantID, courseID, studentID int64) (contracts.TeachingCourseGrade, error) {
 	var grade CourseGrade
@@ -64,7 +77,7 @@ func (s *Service) ListCourseGrades(ctx context.Context, tenantID, courseID int64
 func (s *Service) ListStudentGrades(ctx context.Context, tenantID, studentID int64, semester string, page, size int) ([]contracts.TeachingCourseGrade, int64, error) {
 	var grades []CourseGrade
 	var total int64
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+	if err := s.store.TenantReadTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		grades, total, err = tx.ListStudentGrades(ctx, tenantID, studentID, semester, page, size)
 		return err

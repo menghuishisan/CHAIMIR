@@ -25,6 +25,15 @@ func (s *Service) ListTasks(ctx context.Context, tenantID, accountID int64, sour
 		return nil, 0, 0, 0, apperr.ErrJudgeSubmitInvalid
 	}
 	page, size = pagex.Normalize(page, size)
+	modules, err := s.identity.EnabledTenantModules(ctx, tenantID)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+	if strings.TrimSpace(sourceRef) != "" {
+		if err := s.requireTaskModule(ctx, JudgeTask{TenantID: tenantID, SourceRef: strings.TrimSpace(sourceRef)}); err != nil {
+			return nil, 0, 0, 0, err
+		}
+	}
 	limit, offset := pagex.LimitOffset(page, size)
 	var (
 		items []JudgeTaskInfo
@@ -32,7 +41,7 @@ func (s *Service) ListTasks(ctx context.Context, tenantID, accountID int64, sour
 	)
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		items, total, err = tx.ListJudgeTasks(ctx, tenantID, strings.TrimSpace(sourceRef), pendingManual, accountID, state, limit, offset)
+		items, total, err = tx.ListJudgeTasks(ctx, tenantID, strings.TrimSpace(sourceRef), pendingManual, accountID, state, modules, limit, offset)
 		if err != nil {
 			return apperr.ErrInternal.WithCause(err)
 		}
@@ -173,6 +182,9 @@ func (s *Service) ManualScore(ctx context.Context, tenantID, taskID, scorerID in
 		if err := ensureAccountCanAccessTask(task, scorerID); err != nil {
 			return err
 		}
+		if err := s.requireTaskModule(ctx, task); err != nil {
+			return err
+		}
 		if task.Status != JudgeTaskStatusJudging || task.InputSnapshot.JudgerType != JudgerTypeManual {
 			return apperr.ErrJudgeTaskStateInvalid
 		}
@@ -238,6 +250,9 @@ func (s *Service) ProgressSubscription(ctx context.Context, tenantID, accountID,
 	if err := ensureAccountCanAccessTask(info.Task, accountID); err != nil {
 		return "", ProgressMessage{}, err
 	}
+	if err := s.requireTaskModule(ctx, info.Task); err != nil {
+		return "", ProgressMessage{}, err
+	}
 	return judgeProgressTopic(tenantID, taskID), ProgressMessage{TaskID: ids.ID(taskID), Status: statusText(info.Task.Status), Stage: progressStage(info.Task.Status), Message: progressMessage(info.Task.Status)}, nil
 }
 
@@ -250,6 +265,9 @@ func (s *Service) GetTaskInfoForUser(ctx context.Context, tenantID, accountID, t
 	if err := ensureAccountCanAccessTask(info.Task, accountID); err != nil {
 		return JudgeTaskInfo{}, err
 	}
+	if err := s.requireTaskModule(ctx, info.Task); err != nil {
+		return JudgeTaskInfo{}, err
+	}
 	return info, nil
 }
 
@@ -259,7 +277,19 @@ func (s *Service) ensureUserCanAccessTask(ctx context.Context, tenantID, account
 	if err != nil {
 		return err
 	}
-	return ensureAccountCanAccessTask(info.Task, accountID)
+	if err := ensureAccountCanAccessTask(info.Task, accountID); err != nil {
+		return err
+	}
+	return s.requireTaskModule(ctx, info.Task)
+}
+
+// requireTaskModule 复用持久化来源，阻止从判题详情、重判或进度入口绕过功能开关。
+func (s *Service) requireTaskModule(ctx context.Context, task JudgeTask) error {
+	module := contracts.TenantModuleFromSourceRef(task.SourceRef)
+	if module == "" {
+		return apperr.ErrJudgeTaskForbidden
+	}
+	return s.identity.RequireTenantModules(ctx, task.TenantID, module)
 }
 
 // ensureAccountCanAccessTask 防止普通教师按租户横向访问非本人来源任务。
@@ -315,7 +345,7 @@ func (s *Service) bindProgressConn(ctx context.Context, conn *ws.Conn, tenantID,
 	if err != nil {
 		return err
 	}
-	if err := conn.BindSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID}); err != nil {
+	if err := conn.BindSession(ctx, ws.SessionKey{TenantID: tenantID, AccountID: accountID}); err != nil {
 		return apperr.ErrJudgeTaskStateInvalid.WithCause(err)
 	}
 	if err := s.wsHub.Subscribe(conn, topic); err != nil {

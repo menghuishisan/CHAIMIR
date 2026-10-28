@@ -8,6 +8,11 @@ import {
   type ContestBattleRuntimeConfig,
 } from '@chaimir/api-client'
 
+/** 进行中和封榜期均可提交;封榜只影响榜单的公开更新。 */
+export function isContestAnswerable(status: ContestStatus): boolean {
+  return status === ContestStatus.RUNNING || status === ContestStatus.FROZEN
+}
+
 /** 封榜期榜单不再更新,页面据此提示用户当前名次可能与最终结果不同。 */
 export function isContestLeaderboardFrozen(status: ContestStatus): boolean {
   return status === ContestStatus.FROZEN

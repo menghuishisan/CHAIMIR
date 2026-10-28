@@ -76,8 +76,24 @@ func RegisterJudgeModule(ctx context.Context, deps JudgeModuleDeps) (*judge.Serv
 	if err != nil {
 		return nil, err
 	}
+	catalogTask, err := judgeCatalogTask(deps.Config, svc)
+	if err != nil {
+		return nil, err
+	}
 	go background.Run(ctx, task)
+	go background.Run(ctx, catalogTask)
 	return svc, nil
+}
+
+// judgeCatalogTask 复用统一 runner 的启动即执行和周期恢复语义。
+func judgeCatalogTask(cfg config.JudgeConfig, svc *judge.Service) (background.Task, error) {
+	if svc == nil || cfg.CatalogReconcileIntervalMs <= 0 {
+		return background.Task{}, fmt.Errorf("judge catalog 缺少服务或有效 JUDGE_CATALOG_RECONCILE_INTERVAL_MS")
+	}
+	return background.Task{
+		Name: "judge.catalog", Interval: time.Duration(cfg.CatalogReconcileIntervalMs) * time.Millisecond,
+		Run: svc.ReconcileJudgerCatalogOnce,
+	}, nil
 }
 
 // judgeWorkerTask 把 M3 队列消费接入统一后台任务运行器。

@@ -106,9 +106,9 @@ func ServiceSourceRefAuthorized(ctx context.Context, sourceRef string) bool {
 }
 
 // Middleware 校验 Bearer access token 并注入租户身份上下文。
-func (m *Manager) Middleware() gin.HandlerFunc {
+func (m *Manager) Middleware(requiredModules ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !m.AuthenticateAccess(c) {
+		if !m.AuthenticateAccess(c, requiredModules...) {
 			return
 		}
 		c.Next()
@@ -116,12 +116,12 @@ func (m *Manager) Middleware() gin.HandlerFunc {
 }
 
 // AuthenticateAccess 校验当前 HTTP 请求的 Bearer access token 并注入服务端身份上下文。
-func (m *Manager) AuthenticateAccess(c *gin.Context) bool {
+func (m *Manager) AuthenticateAccess(c *gin.Context, requiredModules ...string) bool {
 	claims, token, ok := m.accessClaims(c)
 	if !ok {
 		return false
 	}
-	if !m.validateAccessSession(c, claims) {
+	if !m.validateAccessSession(c, claims, requiredModules...) {
 		return false
 	}
 	injectAccessIdentity(c, claims)
@@ -130,13 +130,13 @@ func (m *Manager) AuthenticateAccess(c *gin.Context) bool {
 }
 
 // WebSocketMiddleware 校验短时 WebSocket 票据并注入租户身份上下文。
-func (m *Manager) WebSocketMiddleware() gin.HandlerFunc {
+func (m *Manager) WebSocketMiddleware(requiredModules ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims, ok := m.webSocketTicketClaims(c)
 		if !ok {
 			return
 		}
-		if !m.validateAccessSession(c, claims) {
+		if !m.validateAccessSession(c, claims, requiredModules...) {
 			return
 		}
 		injectAccessIdentity(c, claims)
@@ -180,8 +180,8 @@ func sameRequestHost(raw, requestHost string) bool {
 }
 
 // BrowserAccessMiddleware 校验浏览器内嵌工具入口的 Bearer、短时路径票据或路径受限 Cookie。
-func (m *Manager) BrowserAccessMiddleware() gin.HandlerFunc {
-	return m.browserAccessGuard(true)
+func (m *Manager) BrowserAccessMiddleware(requiredModules ...string) gin.HandlerFunc {
+	return m.browserAccessGuard(true, requiredModules...)
 }
 
 // FileAccessMiddleware 校验统一文件服务入口的 Bearer 或路径受限 Cookie。
@@ -193,13 +193,13 @@ func (m *Manager) FileAccessMiddleware() gin.HandlerFunc {
 }
 
 // browserAccessGuard 是两个浏览器直连入口共用的鉴权实现,只由 allowBrowserTicket 表达差异。
-func (m *Manager) browserAccessGuard(allowBrowserTicket bool) gin.HandlerFunc {
+func (m *Manager) browserAccessGuard(allowBrowserTicket bool, requiredModules ...string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		claims, token, source, ok := m.browserAccessClaims(c, allowBrowserTicket)
 		if !ok {
 			return
 		}
-		if !m.validateAccessSession(c, claims) {
+		if !m.validateAccessSession(c, claims, requiredModules...) {
 			return
 		}
 		if source == browserAccessSourceTicket {
@@ -546,7 +546,7 @@ func (m *Manager) webSocketTicketClaims(c *gin.Context) (*Claims, bool) {
 }
 
 // validateAccessSession 通过业务模块注入的校验器确认 JWT 对应服务端会话仍有效。
-func (m *Manager) validateAccessSession(c *gin.Context, claims *Claims) bool {
+func (m *Manager) validateAccessSession(c *gin.Context, claims *Claims, requiredModules ...string) bool {
 	if m.sessions == nil {
 		response.Fail(c, apperr.ErrUnauthorized)
 		c.Abort()
@@ -557,12 +557,13 @@ func (m *Manager) validateAccessSession(c *gin.Context, claims *Claims) bool {
 		path = c.Request.URL.Path
 	}
 	err := m.sessions.ValidateAccessSession(c.Request.Context(), SessionIdentity{
-		TenantID:   claims.TenantID,
-		AccountID:  claims.AccountID,
-		SessionID:  claims.SessionID,
-		IsPlatform: claims.IsPlatform,
-		Method:     c.Request.Method,
-		Path:       path,
+		TenantID:        claims.TenantID,
+		AccountID:       claims.AccountID,
+		SessionID:       claims.SessionID,
+		IsPlatform:      claims.IsPlatform,
+		Method:          c.Request.Method,
+		Path:            path,
+		RequiredModules: requiredModules,
 	})
 	if err == nil {
 		return true

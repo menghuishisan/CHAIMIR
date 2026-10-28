@@ -7,6 +7,7 @@
 // 结果快照不对学生开放(teacher 组),最终名次经天梯榜与竞赛战绩呈现。
 
 import { useCallback, useMemo, useState } from 'react'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { useNavigate, useParams } from 'react-router'
 import { ListOrdered, Play, Swords, Trophy, UserPlus, Users } from 'lucide-react'
 import {
@@ -57,15 +58,9 @@ import {
   teamModeLabel,
 } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { isContestLeaderboardFrozen } from '../../rules'
+import { isContestAnswerable, isContestLeaderboardFrozen } from '../../rules'
 import { contestStatusTone } from '../../statusPresentation'
 import { ContestTeamCard } from './contest-team'
-
-/** 允许进入答题的赛事状态:进行中与封榜期(封榜只停榜单更新,不停作答)。 */
-const ANSWERABLE_STATUSES: ReadonlySet<ContestStatus> = new Set([
-  ContestStatus.RUNNING,
-  ContestStatus.FROZEN,
-])
 
 /**
  * StudentContestDetailPage 读取赛事与本人参赛记录。
@@ -119,7 +114,7 @@ interface ContestDetailContentProps {
 function ContestDetailContent({ contest, record, onRefresh }: ContestDetailContentProps) {
   const navigate = useNavigate()
   const joined = record !== undefined
-  const canAnswer = joined && ANSWERABLE_STATUSES.has(contest.status)
+  const canAnswer = joined && isContestAnswerable(contest.status)
 
   return (
     <>
@@ -238,15 +233,18 @@ function ContestActionCard({
 
   const signupOpen = contest.status === ContestStatus.SIGNUP
   const isSolo = contest.team_mode === TeamMode.SOLO
+  const signupValidation = useFormValidation(() => ({
+    teamName: !isSolo && !teamName.trim() ? '请输入队伍名称' : null,
+  }))
+  const joinValidation = useFormValidation(() => ({
+    inviteCode: !inviteCode.trim() ? '请输入队伍邀请码' : null,
+  }))
 
   /** signup 报名并创建队伍(个人赛由后端统一命名,不要求填队名)。 */
   const signup = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (!isSolo && teamName.trim() === '') {
-        setSignupError('请输入队伍名称')
-        return
-      }
+      if (!signupValidation.validate()) return
       setSignupError(undefined)
       setSigningUp(true)
       try {
@@ -259,7 +257,7 @@ function ContestActionCard({
         setSigningUp(false)
       }
     },
-    [contest.id, isSolo, onJoined, teamName],
+    [contest.id, onJoined, signupValidation, teamName],
   )
 
   /**
@@ -270,10 +268,7 @@ function ContestActionCard({
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
       const code = inviteCode.trim()
-      if (!code) {
-        setJoinError('请输入队伍邀请码')
-        return
-      }
+      if (!joinValidation.validate()) return
       setJoinError(undefined)
       setJoining(true)
       try {
@@ -286,7 +281,7 @@ function ContestActionCard({
         setJoining(false)
       }
     },
-    [contest.id, inviteCode, onJoined],
+    [contest.id, inviteCode, joinValidation, onJoined],
   )
 
   if (joined) {
@@ -338,16 +333,18 @@ function ContestActionCard({
         <CardBody>
           <form onSubmit={signup} noValidate>
             {isSolo ? null : (
-              <FormField label="队伍名称" required error={signupError}>
+              <FormField label="队伍名称" htmlFor="contest-team-name" required error={signupValidation.errors.teamName}>
                 <Input
+                  id="contest-team-name"
                   value={teamName}
                   placeholder="给队伍起个名字"
-                  invalid={Boolean(signupError)}
+                  invalid={Boolean(signupValidation.errors.teamName)}
                   onChange={(event) => setTeamName(event.target.value)}
+                  onBlur={() => signupValidation.validate(['teamName'])}
                 />
               </FormField>
             )}
-            {isSolo && signupError ? <Callout tone="danger">{signupError}</Callout> : null}
+            {signupError ? <Callout tone="danger">{signupError}</Callout> : null}
             <Button
               type="submit"
               variant="primary"
@@ -366,15 +363,18 @@ function ContestActionCard({
           <CardHeader title="加入已有队伍" description="向队长索取邀请码后填入即可加入。" />
           <CardBody>
             <form onSubmit={joinTeam} noValidate>
-              <FormField label="队伍邀请码" required error={joinError}>
+              <FormField label="队伍邀请码" htmlFor="contest-team-invite" required error={joinValidation.errors.inviteCode}>
                 <Input
+                  id="contest-team-invite"
                   value={inviteCode}
                   autoComplete="off"
                   placeholder="请输入邀请码"
-                  invalid={Boolean(joinError)}
+                  invalid={Boolean(joinValidation.errors.inviteCode)}
                   onChange={(event) => setInviteCode(event.target.value)}
+                  onBlur={() => joinValidation.validate(['inviteCode'])}
                 />
               </FormField>
+              {joinError ? <Callout tone="danger" className="mt-4">{joinError}</Callout> : null}
               <Button type="submit" variant="outline" leftIcon={Users} loading={joining} className="mt-4 w-full">
                 加入队伍
               </Button>

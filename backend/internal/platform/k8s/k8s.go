@@ -77,12 +77,12 @@ func (c *Client) Metrics() *metricsclientset.Clientset { return c.metricsClient 
 // ImageRegistry 返回配置中的镜像仓库前缀,供上层拼运行时/工具镜像。
 func (c *Client) ImageRegistry() string { return c.imageRegistry }
 
-// Healthz 探测 API Server 连通。
+// Healthz 在调用方预算内探测 API Server 连通，避免发现客户端忽略本次context。
 func (c *Client) Healthz(ctx context.Context) error {
 	if c == nil || c.clientset == nil {
 		return fmt.Errorf("K8s 客户端未初始化")
 	}
-	if _, err := c.clientset.Discovery().ServerVersion(); err != nil {
+	if err := c.clientset.Discovery().RESTClient().Get().AbsPath("/version").Do(ctx).Error(); err != nil {
 		return fmt.Errorf("K8s API 连通性检查失败: %w", err)
 	}
 	return nil

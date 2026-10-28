@@ -148,6 +148,10 @@ paths:
     $ref: './paths/identity.yaml#/api/v1/accounts/import/template'
   /api/v1/accounts/import/batches:
     $ref: './paths/identity.yaml#/api/v1/accounts/import/batches'
+  /api/v1/import-previews:
+    $ref: './paths/identity.yaml#/api/v1/import-previews'
+  /api/v1/import-previews/{id}:
+    $ref: './paths/identity.yaml#/api/v1/import-previews/{id}'
   /api/v1/me:
     $ref: './paths/identity.yaml#/api/v1/me'
   /api/v1/me/password:
@@ -166,6 +170,8 @@ paths:
     $ref: './paths/storage.yaml#/api/v1/storage/download'
   /api/v1/sandbox/catalog:
     $ref: './paths/sandbox.yaml#/api/v1/sandbox/catalog'
+  /api/v1/sandbox/catalog/composition-preview:
+    $ref: './paths/sandbox.yaml#/api/v1/sandbox/catalog/composition-preview'
   /api/v1/sandbox/runtimes:
     $ref: './paths/sandbox.yaml#/api/v1/sandbox/runtimes'
   /api/v1/sandbox/runtimes/{id}:
@@ -322,6 +328,8 @@ paths:
     $ref: './paths/content.yaml#/api/v1/content/papers/{id}/regenerate'
   /api/v1/teaching/courses:
     $ref: './paths/teaching.yaml#/api/v1/teaching/courses'
+  /api/v1/teaching/courses/shared:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/shared'
   /api/v1/teaching/courses/cover:
     $ref: './paths/teaching.yaml#/api/v1/teaching/courses/cover'
   /api/v1/teaching/courses/{id}/cover/access:
@@ -400,6 +408,8 @@ paths:
     $ref: './paths/teaching.yaml#/api/v1/teaching/announcements/{id}/pin'
   /api/v1/teaching/courses/{id}/review:
     $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/review'
+  /api/v1/teaching/courses/{id}/grade-sources:
+    $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/grade-sources'
   /api/v1/teaching/courses/{id}/grade-weights:
     $ref: './paths/teaching.yaml#/api/v1/teaching/courses/{id}/grade-weights'
   /api/v1/teaching/courses/{id}/grades:
@@ -812,6 +822,12 @@ components:
       required: false
       schema: { type: string }
   requestBodies:
+    SandboxWorkspaceFileWriteBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/SandboxWorkspaceFileWriteRequest"
     ContestSolveRequestBody:
       required: true
       content:
@@ -875,6 +891,21 @@ components:
           schema:
             type: string
   schemas:
+    SandboxWorkspaceFileWriteRequest:
+      type: object
+      required: [content_base64, expected_revision]
+      properties:
+        relative_path:
+          type: string
+          description: 工作区相对文件路径;未在正文提供时使用path查询参数。
+        content_base64:
+          type: string
+          format: byte
+          description: 必须显式提供的Base64文件内容;空字符串表示零字节文件,不接受null。
+        expected_revision:
+          type: integer
+          format: int64
+          minimum: 1
     SnowflakeID:
       type: string
       pattern: '^[1-9][0-9]*$'

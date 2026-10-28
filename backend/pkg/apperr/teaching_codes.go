@@ -69,6 +69,8 @@ const (
 	CodeTeachingGradeExportFailed = "64004"
 	// CodeTeachingGradeEventPublishFailed 表示成绩变更事件发布失败。
 	CodeTeachingGradeEventPublishFailed = "64005"
+	// CodeTeachingGradePending 表示来源仍待评分。
+	CodeTeachingGradePending = "64006"
 )
 
 var (
@@ -131,8 +133,10 @@ var (
 var (
 	// ErrTeachingGradeInvalid 表示成绩信息不正确。
 	ErrTeachingGradeInvalid = New(CodeTeachingGradeInvalid, "成绩信息不正确")
+	// ErrTeachingGradePending 提示教师先完成评分。
+	ErrTeachingGradePending = New(CodeTeachingGradePending, "部分成绩尚未完成评分,请完成后再结算")
 	// ErrTeachingGradeWeightInvalid 表示成绩权重不正确。
-	ErrTeachingGradeWeightInvalid = New(CodeTeachingGradeWeightInvalid, "成绩权重需要合计为 100%")
+	ErrTeachingGradeWeightInvalid = New(CodeTeachingGradeWeightInvalid, "成绩权重配置不正确,请检查来源和占比后重试")
 	// ErrTeachingGradeLocked 表示成绩已锁定。
 	ErrTeachingGradeLocked = New(CodeTeachingGradeLocked, "成绩已锁定,暂不能修改")
 	// ErrTeachingGradeExportFailed 表示成绩导出失败。

@@ -44,7 +44,7 @@ export type ContestSandboxResponse = {
   status: SandboxStatus
   tool_access: import('./sandbox').SandboxToolAccess[]
   capabilities: import('./sandbox').SandboxCapabilities
-  resource_usage: import('./sandbox').SandboxResourceUsage
+  resource_usage: import('./sandbox').SandboxResourceUsage | null
   workspace_revision: number
 }
 

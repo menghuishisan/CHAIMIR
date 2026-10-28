@@ -1,9 +1,8 @@
-// sandbox service_init 文件实现初始化代码归档恢复,统一复用对象存储与上传安全原语。
+// sandbox service_init 文件实现初始化归档恢复、私有脚本执行与开放前清理,复用对象存储和上传安全原语。
 package sandbox
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/hex"
 	"path"
 	"strings"
@@ -12,6 +11,7 @@ import (
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/storage"
 	"chaimir/internal/platform/upload"
+	"chaimir/internal/platform/workload"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
@@ -78,7 +78,7 @@ func (s *Service) restoreArchiveToDomain(ctx context.Context, sb Sandbox, runtim
 	if !componentCanWriteDomain(runtime.AdapterSpec, ops.ExecTarget, domain.Name) {
 		return apperr.ErrSandboxInitAssetConfigInvalid
 	}
-	command := workspaceCommand(ops.UnpackTar, runtime.AdapterSpec.WorkspaceDir, domain.MountPath, "")
+	command := workspaceCommand(ops.UnpackTar, runtime.AdapterSpec.WorkspaceDir, domain.MountPath)
 	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, ops.ExecTarget, command, tarball, false); err != nil {
 		return sandboxExecFailure(apperr.ErrSandboxInitExecFailed, err, stderr)
 	}
@@ -160,7 +160,11 @@ func (s *Service) restoreArchiveToWorkspaceDirChecked(ctx context.Context, sb Sa
 		}
 		target = path.Join(runtime.AdapterSpec.WorkspaceDir, relative)
 	}
-	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.UnpackTar, runtime.AdapterSpec.WorkspaceDir, target, "")
+	tarball, err = workload.SanitizeWorkspaceArchive(tarball)
+	if err != nil {
+		return apperr.ErrSandboxInitArchiveInvalid.WithCause(err)
+	}
+	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.UnpackTar, runtime.AdapterSpec.WorkspaceDir, target)
 	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, workspaceExecTarget(runtime), command, tarball, false); err != nil {
 		return sandboxExecFailure(apperr.ErrSandboxInitExecFailed, err, stderr)
 	}
@@ -182,8 +186,12 @@ func (s *Service) restoreSandboxArchiveContract(ctx context.Context, req contrac
 	return s.restoreArchiveToWorkspaceDirChecked(ctx, sb, runtime, req.ObjectRef, req.ExpectedHash, req.TargetDir)
 }
 
-// runInitScriptIfNeeded 在沙箱内部执行已授权初始化脚本引用,用于重放部署动作。
+// runInitScriptIfNeeded 仅向非学生容器传递脚本原文,不把私有初始化材料写入公开工作区。
 func (s *Service) runInitScriptIfNeeded(ctx context.Context, sb Sandbox, runtime Runtime, initScriptRef string) error {
+	target, err := initScriptExecTarget(runtime.AdapterSpec)
+	if err != nil {
+		return err
+	}
 	ref, err := storage.ParseObjectRef(initScriptRef)
 	if err != nil {
 		return apperr.ErrSandboxInitObjectRefInvalid.WithCause(err)
@@ -203,15 +211,10 @@ func (s *Service) runInitScriptIfNeeded(ctx context.Context, sb Sandbox, runtime
 	if sizeResult == upload.SizeEmpty || sizeResult == upload.SizeTooLarge {
 		return apperr.ErrSandboxInitArchiveTooLarge
 	}
-	scriptPath := path.Join(runtime.AdapterSpec.WorkspaceDir, ".chaimir-init-script")
-	writeCommand := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.WriteFile, runtime.AdapterSpec.WorkspaceDir, scriptPath, "")
-	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, workspaceExecTarget(runtime), writeCommand, data, false); err != nil {
-		return sandboxExecFailure(apperr.ErrSandboxInitExecFailed, err, stderr)
-	}
-	runCommand := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.RunScript, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir, scriptPath)
-	stdin := []byte(base64.StdEncoding.EncodeToString(data))
-	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, workspaceExecTarget(runtime), runCommand, stdin, false); err != nil {
-		return sandboxExecFailure(apperr.ErrSandboxInitExecFailed, err, stderr)
+	runCommand := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.RunScript, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir)
+	if _, _, err := s.orchestrator.Exec(ctx, sb.Namespace, target, runCommand, data, false); err != nil {
+		// shell 语法错误和脚本自带输出可能回显私有源码,只保留执行错误链,不持久化标准流。
+		return sandboxExecFailure(apperr.ErrSandboxInitExecFailed, err, nil)
 	}
 	return s.store.TenantTx(ctx, sb.TenantID, func(ctx context.Context, tx TxStore) error {
 		detail, err := jsonBytes(map[string]any{"script_ref": initScriptRef})
@@ -223,6 +226,52 @@ func (s *Service) runInitScriptIfNeeded(ctx context.Context, sb Sandbox, runtime
 		}
 		return nil
 	})
+}
+
+// initScriptExecTarget 要求脚本在独立非学生容器执行,且临时文件不能进入共享卷。
+func initScriptExecTarget(adapter AdapterSpec) (string, error) {
+	target := strings.TrimSpace(adapter.WorkspaceOps.ScriptExecTarget)
+	if !explicitExecTarget(target) || target == strings.TrimSpace(adapter.WorkspaceOps.ExecTarget) {
+		return "", apperr.ErrSandboxWorkspaceOpsInvalid
+	}
+	if !workload.ValidNonShellCommand(adapter.WorkspaceOps.RunScript) || !workload.ValidNonShellCommand(adapter.WorkspaceOps.CleanWorkspace) {
+		return "", apperr.ErrSandboxWorkspaceOpsInvalid
+	}
+	for _, pod := range podTopologyForAdapter(adapter) {
+		for _, component := range pod.Containers {
+			if pod.Name+"/"+component.Name != target {
+				continue
+			}
+			if studentAccessibleContainer(component) || !shouldMountWorkspace(component) || len(component.SecretEnv) > 0 || len(component.WritableMountDomains) > 0 {
+				return "", apperr.ErrSandboxWorkspaceOpsInvalid
+			}
+			for _, domain := range component.MountDomains {
+				if strings.TrimSpace(domain) != VolumeDomainPublicAssets {
+					return "", apperr.ErrSandboxWorkspaceOpsInvalid
+				}
+			}
+			for _, mount := range component.EphemeralMounts {
+				if path.Clean(mount.MountPath) == "/tmp" {
+					return target, nil
+				}
+			}
+			return "", apperr.ErrSandboxWorkspaceOpsInvalid
+		}
+	}
+	return "", apperr.ErrSandboxWorkspaceOpsInvalid
+}
+
+// cleanWorkspaceBeforeAccess 在工作台开放前经非学生容器清除历史平台副本,失败保持不可操作。
+func (s *Service) cleanWorkspaceBeforeAccess(ctx context.Context, sb Sandbox, runtime Runtime) error {
+	target, err := initScriptExecTarget(runtime.AdapterSpec)
+	if err != nil {
+		return err
+	}
+	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.CleanWorkspace, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir)
+	if _, stderr, err := s.orchestrator.Exec(ctx, sb.Namespace, target, command, nil, false); err != nil {
+		return sandboxExecFailure(apperr.ErrSandboxInitExecFailed, err, stderr)
+	}
+	return nil
 }
 
 // validateInitObjectRef 校验初始化对象只来自当前租户的代码或附件桶,防止内部调用误传跨租户对象。

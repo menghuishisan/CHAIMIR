@@ -26,6 +26,7 @@ import {
   type BoolFilter,
   PAGINATION_MAX_SIZE,
   SubmissionStatus,
+  TENANT_MODULE,
   type Assignment,
   type Course,
   type JudgeTask,
@@ -68,8 +69,10 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useSession } from '../../../../components/RoleGuard/session'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { GradeAppeals } from '../../../grade/components/GradeAppeals'
 import { isJudgeTaskActive } from '../../../judge/rules'
 import { judgeTaskStatusTone } from '../../../judge/statusPresentation'
@@ -87,20 +90,30 @@ const PENDING_JUDGE_SIZE = 10
  * TeacherGradingPage 按作业列出提交并承载批改。
  */
 export default function TeacherGradingPage() {
+  const { me } = useSession()
+  const gradesEnabled = me.enabled_modules.includes(TENANT_MODULE.GRADE)
+  const [workspace, setWorkspace] = useState('submissions')
   return (
     <PageScaffold>
       <PageHeader
         kicker={<Breadcrumb items={[{ label: '教学' }]} />}
         title="批改中心"
-        description="选择作业查看学生提交。主观题在这里给分评语,编程题的判题异常可以重判。学生的成绩申诉也在本页处理。"
+        description={
+          gradesEnabled
+            ? '选择作业查看学生提交。主观题在这里给分评语,编程题的判题异常可以重判。学生的成绩申诉也在本页处理。'
+            : '选择作业查看学生提交。主观题在这里给分评语,编程题的判题异常可以重判。'
+        }
         icon={CheckSquare}
       />
 
-      <Tabs defaultValue="submissions">
+      <Tabs
+        value={!gradesEnabled && workspace === 'appeals' ? 'submissions' : workspace}
+        onValueChange={setWorkspace}
+      >
         <TabsList aria-label="批改工作区">
           <TabsTrigger value="submissions">学生提交</TabsTrigger>
           <TabsTrigger value="manual">待人工评分</TabsTrigger>
-          <TabsTrigger value="appeals">成绩申诉</TabsTrigger>
+          {gradesEnabled ? <TabsTrigger value="appeals">成绩申诉</TabsTrigger> : null}
         </TabsList>
 
         <TabsContent value="submissions">
@@ -111,10 +124,12 @@ export default function TeacherGradingPage() {
           <JudgeTasksSection />
         </TabsContent>
 
-        <TabsContent value="appeals">
-          {/* 申诉本身也是审阅队列族,由 GradeAppeals 自带该族骨架 */}
-          <GradeAppeals />
-        </TabsContent>
+        {gradesEnabled ? (
+          <TabsContent value="appeals">
+            {/* 申诉本身也是审阅队列族,由 GradeAppeals 自带该族骨架 */}
+            <GradeAppeals />
+          </TabsContent>
+        ) : null}
       </Tabs>
     </PageScaffold>
   )
@@ -141,16 +156,21 @@ function SubmissionsQueue() {
   const courses = useAsyncResource(
     () => api.teaching.getCourses({ role: 'teacher', page: 1, size: PAGINATION_MAX_SIZE }),
     [],
-    () => false,
+    () => false
   )
 
   const assignments = useAsyncResource(
     () =>
       courseId
         ? api.teaching.listCourseAssignments(courseId, { page: 1, size: PAGINATION_MAX_SIZE })
-        : Promise.resolve({ list: [] as Assignment[], total: 0, page: 1, size: PAGINATION_MAX_SIZE }),
+        : Promise.resolve({
+            list: [] as Assignment[],
+            total: 0,
+            page: 1,
+            size: PAGINATION_MAX_SIZE,
+          }),
     [courseId],
-    () => false,
+    () => false
   )
 
   const submissions = usePagedResource<Submission>(
@@ -161,18 +181,31 @@ function SubmissionsQueue() {
             is_late: lateFilter,
             ...params,
           })
-        : Promise.resolve({ list: [] as Submission[], total: 0, page: params.page, size: params.size }),
-    [assignmentId, lateFilter, statusFilter],
+        : Promise.resolve({
+            list: [] as Submission[],
+            total: 0,
+            page: params.page,
+            size: params.size,
+          }),
+    [assignmentId, lateFilter, statusFilter]
   )
 
   const courseOptions = useMemo(
-    () => (courses.data?.list ?? []).map((course: Course) => ({ value: course.id, label: course.name })),
-    [courses.data],
+    () =>
+      (courses.data?.list ?? []).map((course: Course) => ({
+        value: course.id,
+        label: course.name,
+      })),
+    [courses.data]
   )
 
   const assignmentOptions = useMemo(
-    () => (assignments.data?.list ?? []).map((item: Assignment) => ({ value: item.id, label: item.title })),
-    [assignments.data],
+    () =>
+      (assignments.data?.list ?? []).map((item: Assignment) => ({
+        value: item.id,
+        label: item.title,
+      })),
+    [assignments.data]
   )
 
   const list = useMemo(() => submissions.data?.list ?? [], [submissions.data])
@@ -187,6 +220,7 @@ function SubmissionsQueue() {
         ? api.teaching.getSubmissions(assignmentId, { status: SubmissionStatus.PENDING, ...params })
         : Promise.resolve({ list: [] as Submission[], total: 0, page: 1, size: 1 }),
     [assignmentId],
+    submissions.refreshVersion
   )
   const gradedCount = useResourceTotal(
     (params) =>
@@ -194,6 +228,7 @@ function SubmissionsQueue() {
         ? api.teaching.getSubmissions(assignmentId, { status: SubmissionStatus.GRADED, ...params })
         : Promise.resolve({ list: [] as Submission[], total: 0, page: 1, size: 1 }),
     [assignmentId],
+    submissions.refreshVersion
   )
   const lateCount = useResourceTotal(
     (params) =>
@@ -201,12 +236,13 @@ function SubmissionsQueue() {
         ? api.teaching.getSubmissions(assignmentId, { is_late: BOOL_FILTER.YES, ...params })
         : Promise.resolve({ list: [] as Submission[], total: 0, page: 1, size: 1 }),
     [assignmentId],
+    submissions.refreshVersion
   )
 
   /** 批完一条直接落到下一条待批改项;没有下一条就退回队列层 */
   const advanceToNext = useCallback(() => {
     const nextPending = list.find(
-      (item, index) => index > selectedIndex && item.status !== SubmissionStatus.GRADED,
+      (item, index) => index > selectedIndex && item.status !== SubmissionStatus.GRADED
     )
     setSelectedId(nextPending?.id ?? undefined)
     if (!nextPending) setMobileView('queue')
@@ -227,7 +263,7 @@ function SubmissionsQueue() {
       <p className="mb-4 text-sm text-ink-sub">
         {assignmentId === ''
           ? '先选课程与作业,这里会显示这次作业的待批改数量。'
-          : `共 ${submissions.total} 次提交,待批改 ${pendingCount ?? '—'} 次、已出分 ${gradedCount ?? '—'} 次、迟交 ${lateCount ?? '—'} 次。`}
+          : `共 ${submissions.total ?? '—'} 次提交,待批改 ${pendingCount ?? '—'} 次、已出分 ${gradedCount ?? '—'} 次、迟交 ${lateCount ?? '—'} 次。`}
       </p>
 
       {courses.status === 'error' ? (
@@ -264,7 +300,7 @@ function SubmissionsQueue() {
                 返回队列
               </Button>
               <span className="text-sm text-ink-sub tabular-nums">
-                第 {selectedIndex + 1} 条 / 共 {submissions.total} 条
+                第 {selectedIndex + 1} 条 / 共 {submissions.total ?? '—'} 条
               </span>
             </div>
           ) : undefined
@@ -312,7 +348,10 @@ function SubmissionsQueue() {
                   <SegmentedControl
                     aria-label="按批改状态筛选"
                     size="sm"
-                    options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                    options={STATUS_FILTERS.map((item) => ({
+                      value: item.value,
+                      label: item.label,
+                    }))}
                     value={statusFilter}
                     onValueChange={(value) => {
                       setStatusFilter(value)
@@ -385,7 +424,7 @@ function SubmissionsQueue() {
                           }}
                           className={cn(
                             'cursor-pointer border-t border-line px-4 py-3 first:border-t-0',
-                            isActive ? 'bg-primary-soft' : 'hover:bg-surface-hover',
+                            isActive ? 'bg-primary-soft' : 'hover:bg-surface-hover'
                           )}
                         >
                           <div className="flex items-center justify-between gap-2">
@@ -407,7 +446,9 @@ function SubmissionsQueue() {
                         </div>
                       )
                     })}
-                    <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">↑↓ 切换条目</p>
+                    <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">
+                      ↑↓ 切换条目
+                    </p>
                   </div>
                 )}
               </ResourceState>
@@ -477,18 +518,15 @@ function SubmissionGradePane({ submission, onSaved, onError }: SubmissionGradePa
   const [comment, setComment] = useState(submission.comment ?? '')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    score: score.trim() === '' || !Number.isFinite(Number(score)) || Number(score) < 0
+      ? '请输入 0 或更大的评分' : null,
+    comment: comment.trim() === '' ? '请写下评语,让学生知道得分依据' : null,
+  }), [comment, score]))
 
   const submit = useCallback(async () => {
-    const normalizedScore = score.trim()
-    const value = Number(normalizedScore)
-    if (normalizedScore === '' || !Number.isFinite(value) || value < 0) {
-      setFormError('请输入 0 或更大的评分')
-      return
-    }
-    if (comment.trim() === '') {
-      setFormError('请写下评语,让学生知道得分依据')
-      return
-    }
+    if (!validate()) return
+    const value = Number(score)
     setFormError(undefined)
     setWorking(true)
     try {
@@ -502,7 +540,7 @@ function SubmissionGradePane({ submission, onSaved, onError }: SubmissionGradePa
     } finally {
       setWorking(false)
     }
-  }, [comment, onError, onSaved, score, submission.id])
+  }, [comment, onError, onSaved, score, submission.id, validate])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg bg-surface p-5 shadow-xs">
@@ -529,13 +567,15 @@ function SubmissionGradePane({ submission, onSaved, onError }: SubmissionGradePa
         ]}
       />
 
-      <FormField label="我的评分" htmlFor="grade-score" required>
+      <FormField label="我的评分" htmlFor="grade-score" required error={errors.score}>
         <Input
           id="grade-score"
           type="number"
           min="0"
           step="0.5"
           value={score}
+          invalid={Boolean(errors.score)}
+          onBlur={() => validate(['score'])}
           onChange={(event) => setScore(event.target.value)}
         />
       </FormField>
@@ -544,17 +584,20 @@ function SubmissionGradePane({ submission, onSaved, onError }: SubmissionGradePa
         label="评语"
         htmlFor="grade-comment"
         required
-        error={formError}
+        error={errors.comment}
         helper="说清楚扣分点与改进方向,学生会在作业结果页看到"
       >
         <Textarea
           id="grade-comment"
           value={comment}
           rows={6}
-          invalid={Boolean(formError)}
+          invalid={Boolean(errors.comment)}
+          onBlur={() => validate(['comment'])}
           onChange={(event) => setComment(event.target.value)}
         />
       </FormField>
+
+      {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
       {/* 动作条贴详情片底边;<lg 由 QueueDetailLayout 钉到屏幕底部 */}
       <div className="sticky bottom-0 z-sticky -mx-5 -mb-5 mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-line bg-surface px-5 py-4">
@@ -582,7 +625,7 @@ function JudgeTasksSection() {
   const tasks = useAsyncResource(
     () => api.judge.getTasks({ pending_manual: true, page: 1, size: PENDING_JUDGE_SIZE }),
     [],
-    (value) => value.list.length === 0,
+    (value) => value.list.length === 0
   )
   const { rejudge, rejudgingId, actionError } = useRejudgeTask(tasks.reload)
 
@@ -681,22 +724,21 @@ function ManualScoreModal({ task, onClose, onSaved }: ManualScoreModalProps) {
   const [comment, setComment] = useState('')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
-
-  const submit = useCallback(async () => {
+  const { errors, validate } = useFormValidation(useCallback(() => {
     const scoreValue = Number(score)
     const maxValue = Number(maxScore)
-    if (!Number.isFinite(maxValue) || maxValue <= 0) {
-      setFormError('满分需要是大于 0 的数字')
-      return
+    return {
+      maxScore: !Number.isFinite(maxValue) || maxValue <= 0 ? '满分需要是大于 0 的数字' : null,
+      score: score.trim() === '' || !Number.isFinite(scoreValue) || scoreValue < 0 || scoreValue > maxValue
+        ? '得分需要在 0 与满分之间' : null,
+      comment: comment.trim() === '' ? '请写下评分说明,学生会看到这段话' : null,
     }
-    if (!Number.isFinite(scoreValue) || scoreValue < 0 || scoreValue > maxValue) {
-      setFormError('得分需要在 0 与满分之间')
-      return
-    }
-    if (comment.trim() === '') {
-      setFormError('请写下评分说明,学生会看到这段话')
-      return
-    }
+  }, [comment, maxScore, score]))
+
+  const submit = useCallback(async () => {
+    if (!validate()) return
+    const scoreValue = Number(score)
+    const maxValue = Number(maxScore)
     setFormError(undefined)
     setWorking(true)
     try {
@@ -713,7 +755,7 @@ function ManualScoreModal({ task, onClose, onSaved }: ManualScoreModalProps) {
     } finally {
       setWorking(false)
     }
-  }, [comment, maxScore, onSaved, passed, score, task.task_id])
+  }, [comment, maxScore, onSaved, passed, score, task.task_id, validate])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -726,22 +768,26 @@ function ManualScoreModal({ task, onClose, onSaved }: ManualScoreModalProps) {
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
           <div className="grid gap-4 sm:grid-cols-2">
-            <FormField label="得分" htmlFor="manual-score" required>
+            <FormField label="得分" htmlFor="manual-score" required error={errors.score}>
               <Input
                 id="manual-score"
                 type="number"
                 min="0"
                 step="0.5"
                 value={score}
+                invalid={Boolean(errors.score)}
+                onBlur={() => validate(['score'])}
                 onChange={(event) => setScore(event.target.value)}
               />
             </FormField>
-            <FormField label="满分" htmlFor="manual-max" required helper="这道题的分值上限">
+            <FormField label="满分" htmlFor="manual-max" required helper="这道题的分值上限" error={errors.maxScore}>
               <Input
                 id="manual-max"
                 type="number"
                 min="1"
                 value={maxScore}
+                invalid={Boolean(errors.maxScore)}
+                onBlur={() => validate(['maxScore'])}
                 onChange={(event) => setMaxScore(event.target.value)}
               />
             </FormField>
@@ -764,11 +810,14 @@ function ManualScoreModal({ task, onClose, onSaved }: ManualScoreModalProps) {
             htmlFor="manual-comment"
             required
             helper="说清得分依据,学生会在提交结果里看到"
+            error={errors.comment}
           >
             <Textarea
               id="manual-comment"
               value={comment}
               rows={4}
+              invalid={Boolean(errors.comment)}
+              onBlur={() => validate(['comment'])}
               onChange={(event) => setComment(event.target.value)}
             />
           </FormField>

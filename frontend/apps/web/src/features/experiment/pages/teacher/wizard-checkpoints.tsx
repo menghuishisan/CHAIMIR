@@ -33,6 +33,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { judgerTypeLabel } from '../../../../utils/labels/judge'
 import { toContentItemVersionOptions } from '../../../content/contentItemOptions'
 import type { ExperimentDraft } from './wizard-state'
@@ -246,7 +247,6 @@ function CheckpointFormModal({
   const [bindTarget, setBindTarget] = useState(
     checkpoint?.env_id ? `env:${checkpoint.env_id}` : checkpoint?.sim_id ? `sim:${checkpoint.sim_id}` : '',
   )
-  const [formError, setFormError] = useState<string>()
 
   const judgers = useAsyncResource(() => api.judge.getJudgerCatalog(), [], (value) => value.judgers.length === 0)
   const items = useAsyncResource(
@@ -275,34 +275,21 @@ function CheckpointFormModal({
     [draft.components.envs, draft.components.sims],
   )
 
+  const { errors, validate } = useFormValidation(() => ({
+    id: id.trim() === '' ? '请给这个检查点起一个名称,阶段解锁与参数传递会引用它'
+      : !editing && usedIds.includes(id.trim()) ? '这个名称已被其他检查点使用,请换一个' : null,
+    judger: judger === '' ? '请选择判题方式' : null,
+    item: itemCode === '' || itemVersion === '' ? '请选择判分依据的题目' : null,
+    score: score.trim() === '' || !Number.isFinite(Number(score)) || Number(score) <= 0 ? '分值需要是大于 0 的数字' : null,
+  }))
+
   const submit = useCallback(() => {
-    const trimmedId = id.trim()
-    if (trimmedId === '') {
-      setFormError('请给这个检查点起一个名称,阶段解锁与参数传递会引用它')
-      return
-    }
-    if (!editing && usedIds.includes(trimmedId)) {
-      setFormError('这个名称已被其他检查点使用,请换一个')
-      return
-    }
-    if (judger === '') {
-      setFormError('请选择判题方式')
-      return
-    }
-    if (itemCode === '' || itemVersion === '') {
-      setFormError('请选择判分依据的题目')
-      return
-    }
+    if (!validate()) return
     const scoreValue = Number(score)
-    if (!Number.isFinite(scoreValue) || scoreValue <= 0) {
-      setFormError('分值需要是大于 0 的数字')
-      return
-    }
-    setFormError(undefined)
 
     const [bindKind, bindId] = bindTarget === '' ? ['', ''] : bindTarget.split(':')
     onSave({
-      id: trimmedId,
+      id: id.trim(),
       judger,
       item_code: itemCode,
       item_version: itemVersion,
@@ -318,14 +305,13 @@ function CheckpointFormModal({
     bindTarget,
     checkpoint?.extra_input,
     checkpoint?.mode,
-    editing,
     id,
     itemCode,
     itemVersion,
     judger,
     onSave,
     score,
-    usedIds,
+    validate,
   ])
 
   return (
@@ -343,10 +329,13 @@ function CheckpointFormModal({
             htmlFor="checkpoint-id"
             required
             helper="用便于识别的短名,例如 deploy 或 exploit;阶段解锁与参数传递会引用它"
+            error={errors.id}
           >
             <Input
               id="checkpoint-id"
               value={id}
+              invalid={Boolean(errors.id)}
+              onBlur={() => validate(['id'])}
               disabled={editing}
               onChange={(event) => setId(event.target.value)}
             />
@@ -360,11 +349,13 @@ function CheckpointFormModal({
             skeleton={<Skeleton variant="line" lines={2} />}
           >
             {() => (
-              <FormField label="判题方式" htmlFor="checkpoint-judger" required>
+              <FormField label="判题方式" htmlFor="checkpoint-judger" required error={errors.judger}>
                 <Select
                   id="checkpoint-judger"
                   options={judgerOptions}
                   value={judger}
+                  invalid={Boolean(errors.judger)}
+                  onBlur={() => validate(['judger'])}
                   placeholder="选择判题方式"
                   onValueChange={setJudger}
                 />
@@ -385,11 +376,14 @@ function CheckpointFormModal({
                 htmlFor="checkpoint-item"
                 required
                 helper="题目按当前版本锁定,之后题库改动不影响已发布实验"
+                error={errors.item}
               >
                 <Select
                   id="checkpoint-item"
                   options={itemOptions}
                   value={itemCode === '' ? '' : `${itemCode}|${itemVersion}`}
+                  invalid={Boolean(errors.item)}
+                  onBlur={() => validate(['item'])}
                   placeholder={itemOptions.length > 0 ? '选择题目' : '暂无题目'}
                   disabled={itemOptions.length === 0}
                   onValueChange={(value) => {
@@ -403,12 +397,14 @@ function CheckpointFormModal({
           </ResourceState>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <FormField label="分值" htmlFor="checkpoint-score" required>
+            <FormField label="分值" htmlFor="checkpoint-score" required error={errors.score}>
               <Input
                 id="checkpoint-score"
                 type="number"
                 min="1"
                 value={score}
+                invalid={Boolean(errors.score)}
+                onBlur={() => validate(['score'])}
                 onChange={(event) => setScore(event.target.value)}
               />
             </FormField>
@@ -426,7 +422,6 @@ function CheckpointFormModal({
             </FormField>
           </div>
 
-          {formError ? <Callout tone="danger">{formError}</Callout> : null}
         </ModalBody>
         <ModalFooter>
           <Button variant="outline" onClick={onClose}>

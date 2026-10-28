@@ -144,7 +144,7 @@ export enum ClassStatus {
   ARCHIVED = 2,
 }
 
-/** 租户功能开关模块与后端 identity.TenantModule* 保持一致。 */
+/** 租户功能开关模块与后端 contracts.TenantModule* 保持一致。 */
 export const TENANT_MODULE = {
   TEACHING: 'teaching',
   EXPERIMENT: 'experiment',

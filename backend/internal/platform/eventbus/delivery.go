@@ -1,4 +1,4 @@
-// eventbus 提供事件消费重试与死信投递能力,保证平台基础设施层的可靠交付语义。
+// eventbus 统一持久消费确认、broker重投和死信写入,失败不删除原事件。
 package eventbus
 
 import (
@@ -13,111 +13,101 @@ import (
 	"chaimir/internal/platform/config"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/logging"
+
+	"github.com/nats-io/nats.go/jetstream"
 )
 
-// deliveryConfig 描述事件消费重试与死信策略,只承载基础设施配置语义。
+// deliveryConfig 只保存统一传输层策略,不包含业务状态或模块分发逻辑。
 type deliveryConfig struct {
-	retryMax     int
-	retryDelay   time.Duration
-	flushTimeout time.Duration
-	deadPrefix   string
-	publishFlush bool
+	retryMax       int
+	retryDelay     time.Duration
+	requestTimeout time.Duration
+	ackWait        time.Duration
+	deadPrefix     string
+	stream         string
 }
 
-// deadLetterMessage 记录进入死信队列的原始事件与失败上下文,便于后续排查或补偿。
+// deadLetterMessage 保留原事件与消费身份,供修复后受控重放和业务状态核对。
 type deadLetterMessage struct {
 	OriginalSubject string `json:"original_subject"`
-	Queue           string `json:"queue,omitempty"`
+	Queue           string `json:"queue"`
+	Stream          string `json:"stream"`
+	Consumer        string `json:"consumer"`
+	StreamSequence  uint64 `json:"stream_sequence"`
 	Payload         []byte `json:"payload"`
 	LastError       string `json:"last_error"`
-	AttemptCount    int    `json:"attempt_count"`
+	AttemptCount    uint64 `json:"attempt_count"`
 	OccurredAt      string `json:"occurred_at"`
 }
 
-// newDeliveryConfig 根据统一配置构造事件重试与死信策略。
+// newDeliveryConfig 将显式配置转换为当前连接的不可变交付策略。
 func newDeliveryConfig(cfg config.NATSConfig) deliveryConfig {
 	return deliveryConfig{
-		retryMax:     cfg.ConsumerRetryMax,
-		retryDelay:   time.Duration(cfg.ConsumerRetryDelayMs) * time.Millisecond,
-		flushTimeout: time.Duration(cfg.FlushTimeoutMs) * time.Millisecond,
-		deadPrefix:   strings.TrimSpace(cfg.DeadLetterPrefix),
-		publishFlush: true,
+		retryMax: cfg.ConsumerRetryMax, retryDelay: time.Duration(cfg.ConsumerRetryDelayMs) * time.Millisecond,
+		requestTimeout: time.Duration(cfg.RequestTimeoutMs) * time.Millisecond,
+		ackWait:        time.Duration(cfg.ConsumerAckWaitSeconds) * time.Second,
+		deadPrefix:     strings.TrimSpace(cfg.DeadLetterPrefix), stream: cfg.StreamName,
 	}
 }
 
-// deadLetterSubject 生成某个主题对应的死信主题;未配置死信前缀时返回空字符串表示只记日志。
-func (c deliveryConfig) deadLetterSubject(subject string) string {
-	if strings.TrimSpace(c.deadPrefix) == "" || strings.TrimSpace(subject) == "" {
-		return ""
-	}
-	return c.deadPrefix + "." + strings.TrimSpace(subject)
-}
-
-// handleMessage 统一执行消费重试、结构化日志与死信投递。
-func (b *natsBus) handleMessage(ctx context.Context, subject, queue string, data []byte, handler Handler) {
-	eventCtx, metaErr := eventContext(ctx, data)
-	if metaErr != nil {
-		logging.ErrorContext(eventCtx, "事件载荷上下文校验失败", metaErr.Error(),
-			slog.String("subject", subject),
-			slog.String("queue", queue),
-		)
-		if err := b.publishDeadLetter(eventCtx, subject, queue, data, metaErr); err != nil {
-			logging.ErrorContext(eventCtx, "事件死信投递失败", err.Error(),
-				slog.String("subject", subject),
-				slog.String("queue", queue),
-			)
-		}
+// handleMessage 单次投递仅调用一次handler,重试次数由broker持久记录。
+func (b *natsBus) handleMessage(ctx context.Context, subject, queue string, msg jetstream.Msg, handler Handler) {
+	eventCtx, eventErr := eventContext(ctx, msg.Data())
+	meta, err := msg.Metadata()
+	if err != nil {
+		logging.ErrorContext(eventCtx, "读取持久事件投递信息失败", err.Error(), slog.String("subject", subject), slog.String("queue", queue))
+		b.retryDelivery(eventCtx, subject, queue, msg)
 		return
 	}
-	// 第一步:按统一策略重试消费,避免短暂故障直接丢事件。
-	lastErr := b.retryHandle(eventCtx, data, handler)
-	if lastErr == nil {
+	// 处理和确认分开计时;取消订阅/进程退出时不确认尚未完成的事务。
+	if ctx.Err() != nil {
 		return
 	}
-
-	logging.ErrorContext(eventCtx, "事件处理失败", lastErr.Error(),
-		slog.String("subject", subject),
-		slog.String("queue", queue),
-		slog.Int("attempt_count", max(b.cfg.retryMax, 1)),
-	)
-
-	// 第二步:重试耗尽后写入死信,为后续补偿和人工排查保留原始事件。
-	if err := b.publishDeadLetter(eventCtx, subject, queue, data, lastErr); err != nil {
-		logging.ErrorContext(eventCtx, "事件死信投递失败", err.Error(),
-			slog.String("subject", subject),
-			slog.String("queue", queue),
-		)
-	}
-}
-
-// retryHandle 按配置执行有限次消费重试,最终返回最后一次错误。
-func (b *natsBus) retryHandle(ctx context.Context, data []byte, handler Handler) error {
-	attempts := max(b.cfg.retryMax, 1)
-	var lastErr error
-	for attempt := 1; attempt <= attempts; attempt++ {
-		if err := invokeHandler(ctx, data, handler); err != nil {
-			lastErr = err
-			if attempt == attempts {
-				break
+	if eventErr == nil {
+		if meta.NumDelivered <= uint64(b.cfg.retryMax) {
+			handlerCtx, cancel := context.WithTimeout(eventCtx, b.cfg.ackWait)
+			eventErr = invokeHandler(handlerCtx, msg.Data(), handler)
+			if eventErr == nil {
+				eventErr = handlerCtx.Err()
 			}
-			if b.cfg.retryDelay > 0 {
-				// 这里显式等待重试间隔,把短暂网络/下游抖动留给同一次消费窗口吸收。
-				timer := time.NewTimer(b.cfg.retryDelay)
-				select {
-				case <-ctx.Done():
-					timer.Stop()
-					return fmt.Errorf("事件消费被取消: %w", ctx.Err())
-				case <-timer.C:
-				}
-			}
-			continue
+			cancel()
+		} else {
+			// 上次死信写入失败后只重试持久死信,不再执行已耗尽的业务handler。
+			eventErr = fmt.Errorf("事件业务处理已耗尽%d次,等待持久死信", b.cfg.retryMax)
 		}
-		return nil
 	}
-	return lastErr
+	if ctx.Err() != nil {
+		return
+	}
+	if eventErr != nil {
+		logging.ErrorContext(eventCtx, "持久事件处理失败", eventErr.Error(), slog.String("subject", subject),
+			slog.String("queue", queue), slog.Uint64("attempt_count", meta.NumDelivered), slog.Uint64("stream_sequence", meta.Sequence.Stream))
+		if meta.NumDelivered < uint64(b.cfg.retryMax) {
+			b.retryDelivery(eventCtx, subject, queue, msg)
+			return
+		}
+		if err := b.publishDeadLetter(eventCtx, subject, queue, msg.Data(), meta, eventErr); err != nil {
+			logging.ErrorContext(eventCtx, "持久死信写入失败,保留原事件", err.Error(), slog.String("subject", subject), slog.String("queue", queue))
+			b.retryDelivery(eventCtx, subject, queue, msg)
+			return
+		}
+	}
+	// 业务成功或死信已持久接收后,才确认原消息并等待broker确认。
+	ackCtx, cancel := b.requestContext(eventCtx)
+	defer cancel()
+	if err := msg.DoubleAck(ackCtx); err != nil {
+		logging.ErrorContext(eventCtx, "持久事件消费确认失败", err.Error(), slog.String("subject", subject), slog.String("queue", queue))
+	}
 }
 
-// invokeHandler 把业务 handler panic 转成普通错误,使其继续进入统一重试和死信链路。
+// retryDelivery 将失败消息交回broker延迟重投,不在内存中循环重试。
+func (b *natsBus) retryDelivery(ctx context.Context, subject, queue string, msg jetstream.Msg) {
+	if err := msg.NakWithDelay(b.cfg.retryDelay); err != nil {
+		logging.ErrorContext(ctx, "持久事件重投请求失败", err.Error(), slog.String("subject", subject), slog.String("queue", queue))
+	}
+}
+
+// invokeHandler 将业务panic转为保留脱敏调用栈的错误,进入同一持久重试链。
 func invokeHandler(ctx context.Context, data []byte, handler Handler) (err error) {
 	defer func() {
 		if value := recover(); value != nil {
@@ -127,49 +117,30 @@ func invokeHandler(ctx context.Context, data []byte, handler Handler) (err error
 	return handler(ctx, data)
 }
 
-// publishDeadLetter 把失败事件投递到死信主题,供上层补偿任务或人工处理读取。
-func (b *natsBus) publishDeadLetter(ctx context.Context, subject, queue string, data []byte, lastErr error) error {
-	deadSubject := b.cfg.deadLetterSubject(subject)
-	if deadSubject == "" {
-		return nil
-	}
+// publishDeadLetter 等待独立死信流的持久ACK,写失败时调用方不得确认原消息。
+func (b *natsBus) publishDeadLetter(ctx context.Context, subject, queue string, data []byte, meta *jetstream.MsgMetadata, lastErr error) error {
 	payload, err := json.Marshal(deadLetterMessage{
-		OriginalSubject: subject,
-		Queue:           queue,
-		Payload:         data,
-		LastError:       logging.SanitizeError(lastErr.Error()),
-		AttemptCount:    max(b.cfg.retryMax, 1),
-		OccurredAt:      timex.RFC3339OrEmpty(timex.Now()),
+		OriginalSubject: subject, Queue: queue, Stream: meta.Stream, Consumer: meta.Consumer, StreamSequence: meta.Sequence.Stream,
+		Payload: data, LastError: logging.SanitizeError(lastErr.Error()), AttemptCount: meta.NumDelivered,
+		OccurredAt: timex.RFC3339OrEmpty(timex.Now()),
 	})
 	if err != nil {
-		return fmt.Errorf("序列化死信消息失败: %w", err)
+		return fmt.Errorf("序列化持久死信失败: %w", err)
 	}
-	if err := b.conn.Publish(deadSubject, payload); err != nil {
-		return fmt.Errorf("发布死信 %s 失败: %w", deadSubject, err)
-	}
-	if b.cfg.publishFlush {
-		// 死信也必须等待 flush 确认,否则仍可能只停留在客户端缓冲区。
-		if err := b.flush(ctx); err != nil {
-			return fmt.Errorf("确认死信 %s 失败: %w", deadSubject, err)
-		}
+	requestCtx, cancel := b.requestContext(ctx)
+	defer cancel()
+	identity := fmt.Sprintf("%s:%s:%d", meta.Stream, meta.Consumer, meta.Sequence.Stream)
+	if _, err := b.js.Publish(requestCtx, b.cfg.deadPrefix+"."+subject, payload,
+		jetstream.WithExpectStream(b.cfg.stream+"_DEAD"), jetstream.WithMsgID(identity)); err != nil {
+		return fmt.Errorf("发布持久死信失败: %w", err)
 	}
 	return nil
 }
 
-// flush 按平台统一配置等待 NATS 客户端缓冲确认,并及时释放补充的超时计时器。
-func (b *natsBus) flush(ctx context.Context) error {
-	flushCtx, cancel := b.flushContext(ctx)
-	defer cancel()
-	return b.conn.FlushWithContext(flushCtx)
-}
-
-// flushContext 为 NATS flush 确认补充配置化 deadline,满足 nats.go 对上下文的要求。
-func (b *natsBus) flushContext(ctx context.Context) (context.Context, context.CancelFunc) {
+// requestContext 为所有管理/发布/确认请求设置上限,不延长调用方已有期限。
+func (b *natsBus) requestContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if _, ok := ctx.Deadline(); ok {
-		return ctx, func() {}
-	}
-	return context.WithTimeout(ctx, b.cfg.flushTimeout)
+	return context.WithTimeout(ctx, b.cfg.requestTimeout)
 }

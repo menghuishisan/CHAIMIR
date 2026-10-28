@@ -60,27 +60,30 @@ func (d DeployConfig) IsSchool() bool {
 
 // ServerConfig 描述 HTTP、WebSocket 与日志运行边界。
 type ServerConfig struct {
-	Addr                     string
-	Port                     int
-	WSPath                   string
-	WSAllowedOrigins         []string
-	TrustedProxies           []string
-	LogLevel                 string
-	LogFormat                string
-	AppEnv                   string
-	HealthTimeoutSeconds     int
-	ShutdownTimeoutSeconds   int
-	EndpointDrainSeconds     int
-	ReadHeaderTimeoutSeconds int
-	ReadTimeoutSeconds       int
-	WriteTimeoutSeconds      int
-	IdleTimeoutSeconds       int
-	MaxHeaderBytes           int
-	MaxJSONBodyBytes         int64
-	WSReadTimeoutSeconds     int
-	WSWriteTimeoutSeconds    int
-	WSPingIntervalSeconds    int
-	WSReadLimitBytes         int64
+	Addr                           string
+	Port                           int
+	WSPath                         string
+	WSAllowedOrigins               []string
+	TrustedProxies                 []string
+	LogLevel                       string
+	LogFormat                      string
+	AppEnv                         string
+	HealthTimeoutSeconds           int
+	ReadinessProbeTimeoutSeconds   int
+	ReadinessProbePeriodSeconds    int
+	ReadinessProbeFailureThreshold int
+	ShutdownTimeoutSeconds         int
+	EndpointDrainSeconds           int
+	ReadHeaderTimeoutSeconds       int
+	ReadTimeoutSeconds             int
+	WriteTimeoutSeconds            int
+	IdleTimeoutSeconds             int
+	MaxHeaderBytes                 int
+	MaxJSONBodyBytes               int64
+	WSReadTimeoutSeconds           int
+	WSWriteTimeoutSeconds          int
+	WSPingIntervalSeconds          int
+	WSReadLimitBytes               int64
 }
 
 // PostgresConfig 描述 PostgreSQL 连接池和可选特权连接。
@@ -113,13 +116,20 @@ type RedisConfig struct {
 
 // NATSConfig 描述事件总线连接参数。
 type NATSConfig struct {
-	URL                  string
-	Token                string
-	ReconnectWaitSeconds int
-	ConsumerRetryMax     int
-	ConsumerRetryDelayMs int
-	FlushTimeoutMs       int
-	DeadLetterPrefix     string
+	URL                    string
+	Token                  string
+	ReconnectWaitSeconds   int
+	ConsumerRetryMax       int
+	ConsumerRetryDelayMs   int
+	RequestTimeoutMs       int
+	DeadLetterPrefix       string
+	StreamName             string
+	StreamSubjects         []string
+	StreamMaxBytes         int64
+	StreamMaxAgeSeconds    int
+	DeadLetterMaxBytes     int64
+	ConsumerAckWaitSeconds int
+	StreamReplicas         int
 }
 
 // ObjectStorageConfig 描述 S3 兼容对象存储连接和桶命名。
@@ -292,10 +302,10 @@ type ExperimentConfig struct {
 	RecycleBatchSize           int
 	InstanceIdleTimeoutSeconds int
 	PausedTimeoutSeconds       int
-	ScoreOutboxBatchSize       int
-	ScoreOutboxPollMs          int
-	ScoreOutboxStaleMs         int
-	ScoreOutboxMaxAttempts     int
+	EventOutboxBatchSize       int
+	EventOutboxPollMs          int
+	EventOutboxStaleMs         int
+	EventOutboxMaxAttempts     int
 }
 
 // GradeConfig 描述成绩中心申诉和成绩单签名边界。
@@ -346,6 +356,7 @@ type SandboxConfig struct {
 	PrepullTimeoutSeconds         int
 	PrepullHoldSeconds            int
 	ReadyTimeoutSeconds           int
+	ResourceUsageTimeoutSeconds   int
 	PrepullPollIntervalSeconds    int
 	ReadyPollIntervalSeconds      int
 	PrepullRequestCPU             string
@@ -375,6 +386,7 @@ type SandboxConfig struct {
 	TenantDefaultMaxKeepaliveMin  int32
 	TenantDefaultSnapshotMin      int32
 	ReadyIdleTimeoutSeconds       int
+	SelftestTimeoutSeconds        int
 	SelftestRecycleTimeoutSeconds int
 	ControlNamespace              string
 	ControlPodLabelKey            string
@@ -442,6 +454,7 @@ type PlatformImageAttestation struct {
 // JudgeConfig 描述判题队列、结果大小和归档边界。
 type JudgeConfig struct {
 	QueuePollIntervalMs          int
+	CatalogReconcileIntervalMs   int
 	WorkerBatchSize              int
 	SubmitRateLimitSec           int
 	DefaultMaxRetries            int
@@ -556,27 +569,30 @@ func Load() (*Config, error) {
 		SchoolTenantID:  optInt64("SCHOOL_TENANT_ID"),
 	}
 	c.Server = ServerConfig{
-		Addr:                     req("HTTP_ADDR"),
-		Port:                     reqInt("HTTP_PORT"),
-		WSPath:                   req("WS_PATH"),
-		WSAllowedOrigins:         getCSV("WS_ALLOWED_ORIGINS"),
-		TrustedProxies:           getCSV("HTTP_TRUSTED_PROXIES"),
-		LogLevel:                 req("LOG_LEVEL"),
-		LogFormat:                req("LOG_FORMAT"),
-		AppEnv:                   req("APP_ENV"),
-		HealthTimeoutSeconds:     reqInt("HEALTH_CHECK_TIMEOUT_SECONDS"),
-		ShutdownTimeoutSeconds:   reqInt("HTTP_SHUTDOWN_TIMEOUT_SECONDS"),
-		EndpointDrainSeconds:     reqInt("HTTP_ENDPOINT_DRAIN_SECONDS"),
-		ReadHeaderTimeoutSeconds: reqInt("HTTP_READ_HEADER_TIMEOUT_SECONDS"),
-		ReadTimeoutSeconds:       reqInt("HTTP_READ_TIMEOUT_SECONDS"),
-		WriteTimeoutSeconds:      reqInt("HTTP_WRITE_TIMEOUT_SECONDS"),
-		IdleTimeoutSeconds:       reqInt("HTTP_IDLE_TIMEOUT_SECONDS"),
-		MaxHeaderBytes:           reqInt("HTTP_MAX_HEADER_BYTES"),
-		MaxJSONBodyBytes:         reqInt64("HTTP_MAX_JSON_BODY_BYTES"),
-		WSReadTimeoutSeconds:     reqInt("WS_READ_TIMEOUT_SECONDS"),
-		WSWriteTimeoutSeconds:    reqInt("WS_WRITE_TIMEOUT_SECONDS"),
-		WSPingIntervalSeconds:    reqInt("WS_PING_INTERVAL_SECONDS"),
-		WSReadLimitBytes:         reqInt64("WS_READ_LIMIT_BYTES"),
+		Addr:                           req("HTTP_ADDR"),
+		Port:                           reqInt("HTTP_PORT"),
+		WSPath:                         req("WS_PATH"),
+		WSAllowedOrigins:               getCSV("WS_ALLOWED_ORIGINS"),
+		TrustedProxies:                 getCSV("HTTP_TRUSTED_PROXIES"),
+		LogLevel:                       req("LOG_LEVEL"),
+		LogFormat:                      req("LOG_FORMAT"),
+		AppEnv:                         req("APP_ENV"),
+		HealthTimeoutSeconds:           reqInt("HEALTH_CHECK_TIMEOUT_SECONDS"),
+		ReadinessProbeTimeoutSeconds:   reqInt("HTTP_READINESS_PROBE_TIMEOUT_SECONDS"),
+		ReadinessProbePeriodSeconds:    reqInt("HTTP_READINESS_PROBE_PERIOD_SECONDS"),
+		ReadinessProbeFailureThreshold: reqInt("HTTP_READINESS_PROBE_FAILURE_THRESHOLD"),
+		ShutdownTimeoutSeconds:         reqInt("HTTP_SHUTDOWN_TIMEOUT_SECONDS"),
+		EndpointDrainSeconds:           reqInt("HTTP_ENDPOINT_DRAIN_SECONDS"),
+		ReadHeaderTimeoutSeconds:       reqInt("HTTP_READ_HEADER_TIMEOUT_SECONDS"),
+		ReadTimeoutSeconds:             reqInt("HTTP_READ_TIMEOUT_SECONDS"),
+		WriteTimeoutSeconds:            reqInt("HTTP_WRITE_TIMEOUT_SECONDS"),
+		IdleTimeoutSeconds:             reqInt("HTTP_IDLE_TIMEOUT_SECONDS"),
+		MaxHeaderBytes:                 reqInt("HTTP_MAX_HEADER_BYTES"),
+		MaxJSONBodyBytes:               reqInt64("HTTP_MAX_JSON_BODY_BYTES"),
+		WSReadTimeoutSeconds:           reqInt("WS_READ_TIMEOUT_SECONDS"),
+		WSWriteTimeoutSeconds:          reqInt("WS_WRITE_TIMEOUT_SECONDS"),
+		WSPingIntervalSeconds:          reqInt("WS_PING_INTERVAL_SECONDS"),
+		WSReadLimitBytes:               reqInt64("WS_READ_LIMIT_BYTES"),
 	}
 	c.Postgres = PostgresConfig{
 		Host:                             req("PG_HOST"),
@@ -603,13 +619,26 @@ func Load() (*Config, error) {
 		PingTimeoutSeconds: reqInt("REDIS_PING_TIMEOUT_SECONDS"),
 	}
 	c.NATS = NATSConfig{
-		URL:                  req("NATS_URL"),
-		Token:                os.Getenv("NATS_TOKEN"),
-		ReconnectWaitSeconds: reqInt("NATS_RECONNECT_WAIT_SECONDS"),
-		ConsumerRetryMax:     reqInt("NATS_CONSUMER_RETRY_MAX"),
-		ConsumerRetryDelayMs: reqInt("NATS_CONSUMER_RETRY_DELAY_MS"),
-		FlushTimeoutMs:       reqInt("NATS_FLUSH_TIMEOUT_MS"),
-		DeadLetterPrefix:     req("NATS_DEAD_LETTER_PREFIX"),
+		URL:                    req("NATS_URL"),
+		Token:                  os.Getenv("NATS_TOKEN"),
+		ReconnectWaitSeconds:   reqInt("NATS_RECONNECT_WAIT_SECONDS"),
+		ConsumerRetryMax:       reqInt("NATS_CONSUMER_RETRY_MAX"),
+		ConsumerRetryDelayMs:   reqInt("NATS_CONSUMER_RETRY_DELAY_MS"),
+		RequestTimeoutMs:       reqInt("NATS_REQUEST_TIMEOUT_MS"),
+		DeadLetterPrefix:       req("NATS_DEAD_LETTER_PREFIX"),
+		StreamName:             req("NATS_STREAM_NAME"),
+		StreamSubjects:         strings.Split(req("NATS_STREAM_SUBJECTS"), ","),
+		StreamMaxBytes:         reqInt64("NATS_STREAM_MAX_BYTES"),
+		StreamMaxAgeSeconds:    reqInt("NATS_STREAM_MAX_AGE_SECONDS"),
+		DeadLetterMaxBytes:     reqInt64("NATS_DEAD_LETTER_MAX_BYTES"),
+		ConsumerAckWaitSeconds: reqInt("NATS_CONSUMER_ACK_WAIT_SECONDS"),
+		StreamReplicas:         reqInt("NATS_STREAM_REPLICAS"),
+	}
+	for i := range c.NATS.StreamSubjects {
+		c.NATS.StreamSubjects[i] = strings.TrimSpace(c.NATS.StreamSubjects[i])
+		if c.NATS.StreamSubjects[i] == "" {
+			errs = append(errs, "NATS_STREAM_SUBJECTS 不得包含空主题")
+		}
 	}
 	objectStorageEndpoint, objectStorageSecure, objectStorageEndpointErr := parseObjectStorageEndpoint(req("OBJECT_STORAGE_ENDPOINT"))
 	if objectStorageEndpointErr != nil {
@@ -766,10 +795,10 @@ func Load() (*Config, error) {
 		RecycleBatchSize:           reqInt("EXPERIMENT_RECYCLE_BATCH_SIZE"),
 		InstanceIdleTimeoutSeconds: reqInt("EXPERIMENT_INSTANCE_IDLE_TIMEOUT_SECONDS"),
 		PausedTimeoutSeconds:       reqInt("EXPERIMENT_PAUSED_TIMEOUT_SECONDS"),
-		ScoreOutboxBatchSize:       reqInt("EXPERIMENT_SCORE_OUTBOX_BATCH_SIZE"),
-		ScoreOutboxPollMs:          reqInt("EXPERIMENT_SCORE_OUTBOX_POLL_INTERVAL_MS"),
-		ScoreOutboxStaleMs:         reqInt("EXPERIMENT_SCORE_OUTBOX_STALE_INTERVAL_MS"),
-		ScoreOutboxMaxAttempts:     reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
+		EventOutboxBatchSize:       reqInt("EXPERIMENT_EVENT_OUTBOX_BATCH_SIZE"),
+		EventOutboxPollMs:          reqInt("EXPERIMENT_EVENT_OUTBOX_POLL_INTERVAL_MS"),
+		EventOutboxStaleMs:         reqInt("EXPERIMENT_EVENT_OUTBOX_STALE_INTERVAL_MS"),
+		EventOutboxMaxAttempts:     reqInt("ASYNC_OUTBOX_MAX_ATTEMPTS"),
 	}
 	c.Grade = GradeConfig{
 		AppealWindowDays:       reqInt("GRADE_APPEAL_WINDOW_DAYS"),
@@ -813,6 +842,7 @@ func Load() (*Config, error) {
 		PrepullTimeoutSeconds:         reqInt("SANDBOX_PREPULL_TIMEOUT_SECONDS"),
 		PrepullHoldSeconds:            reqInt("SANDBOX_PREPULL_HOLD_SECONDS"),
 		ReadyTimeoutSeconds:           reqInt("SANDBOX_READY_TIMEOUT_SECONDS"),
+		ResourceUsageTimeoutSeconds:   reqInt("SANDBOX_RESOURCE_USAGE_TIMEOUT_SECONDS"),
 		PrepullPollIntervalSeconds:    reqInt("SANDBOX_PREPULL_POLL_INTERVAL_SECONDS"),
 		ReadyPollIntervalSeconds:      reqInt("SANDBOX_READY_POLL_INTERVAL_SECONDS"),
 		PrepullRequestCPU:             req("SANDBOX_PREPULL_REQUEST_CPU"),
@@ -842,6 +872,7 @@ func Load() (*Config, error) {
 		TenantDefaultMaxKeepaliveMin:  reqInt32("SANDBOX_TENANT_DEFAULT_MAX_KEEPALIVE_MIN"),
 		TenantDefaultSnapshotMin:      reqInt32("SANDBOX_TENANT_DEFAULT_MAX_SNAPSHOT_RETENTION_MIN"),
 		ReadyIdleTimeoutSeconds:       reqInt("SANDBOX_READY_IDLE_TIMEOUT_SECONDS"),
+		SelftestTimeoutSeconds:        reqInt("SANDBOX_SELFTEST_TIMEOUT_SECONDS"),
 		SelftestRecycleTimeoutSeconds: reqInt("SANDBOX_SELFTEST_RECYCLE_TIMEOUT_SECONDS"),
 		ControlNamespace:              req("SANDBOX_CONTROL_NAMESPACE"),
 		ControlPodLabelKey:            req("SANDBOX_CONTROL_POD_LABEL_KEY"),
@@ -852,6 +883,7 @@ func Load() (*Config, error) {
 	errs = append(errs, validateSandboxQuantities(c.Sandbox)...)
 	c.Judge = JudgeConfig{
 		QueuePollIntervalMs:          reqInt("JUDGE_QUEUE_POLL_INTERVAL_MS"),
+		CatalogReconcileIntervalMs:   reqInt("JUDGE_CATALOG_RECONCILE_INTERVAL_MS"),
 		WorkerBatchSize:              reqInt("JUDGE_WORKER_BATCH_SIZE"),
 		SubmitRateLimitSec:           reqInt("JUDGE_SUBMIT_RATE_LIMIT_SECONDS"),
 		DefaultMaxRetries:            reqInt("JUDGE_DEFAULT_MAX_RETRIES"),
@@ -920,14 +952,33 @@ func Load() (*Config, error) {
 	if c.Auth.RefreshTTLDay <= 0 {
 		errs = append(errs, "JWT_REFRESH_TTL_DAY 必须大于 0")
 	}
-	if c.Server.HealthTimeoutSeconds <= 0 {
-		errs = append(errs, "HEALTH_CHECK_TIMEOUT_SECONDS 必须大于 0")
+	// 应用与 kubelet 共用同一预算来源；先限制 int32 边界，再按秒比较以避免时长乘法溢出。
+	validReadinessBudget := true
+	for _, setting := range []struct {
+		name  string
+		value int
+	}{
+		{"HEALTH_CHECK_TIMEOUT_SECONDS", c.Server.HealthTimeoutSeconds},
+		{"HTTP_READINESS_PROBE_TIMEOUT_SECONDS", c.Server.ReadinessProbeTimeoutSeconds},
+		{"HTTP_READINESS_PROBE_PERIOD_SECONDS", c.Server.ReadinessProbePeriodSeconds},
+		{"HTTP_READINESS_PROBE_FAILURE_THRESHOLD", c.Server.ReadinessProbeFailureThreshold},
+		{"HTTP_SHUTDOWN_TIMEOUT_SECONDS", c.Server.ShutdownTimeoutSeconds},
+		{"HTTP_ENDPOINT_DRAIN_SECONDS", c.Server.EndpointDrainSeconds},
+	} {
+		if setting.value <= 0 || int64(setting.value) > math.MaxInt32 {
+			errs = append(errs, setting.name+" 必须在 1 到 2147483647 之间")
+			validReadinessBudget = false
+		}
 	}
-	if c.Server.ShutdownTimeoutSeconds <= 0 {
-		errs = append(errs, "HTTP_SHUTDOWN_TIMEOUT_SECONDS 必须大于 0")
-	}
-	if c.Server.EndpointDrainSeconds <= 0 {
-		errs = append(errs, "HTTP_ENDPOINT_DRAIN_SECONDS 必须大于 0")
+	if validReadinessBudget {
+		if c.Server.ReadinessProbeTimeoutSeconds <= c.Server.HealthTimeoutSeconds {
+			errs = append(errs, "HTTP_READINESS_PROBE_TIMEOUT_SECONDS 必须大于 HEALTH_CHECK_TIMEOUT_SECONDS")
+		}
+		probeWindow := int64(max(c.Server.ReadinessProbePeriodSeconds, c.Server.ReadinessProbeTimeoutSeconds)) * int64(c.Server.ReadinessProbeFailureThreshold)
+		drainMinimum := int64(c.Server.HealthTimeoutSeconds) + int64(c.Server.ReadinessProbeTimeoutSeconds) + probeWindow
+		if int64(c.Server.EndpointDrainSeconds) < drainMinimum {
+			errs = append(errs, "HTTP_ENDPOINT_DRAIN_SECONDS 必须覆盖应用检查、探针等待及连续失败探测窗口")
+		}
 	}
 	if c.Server.ReadHeaderTimeoutSeconds <= 0 {
 		errs = append(errs, "HTTP_READ_HEADER_TIMEOUT_SECONDS 必须大于 0")
@@ -941,8 +992,8 @@ func Load() (*Config, error) {
 	if c.Server.WriteTimeoutSeconds > 0 && c.Sandbox.PrepullTimeoutSeconds > 0 && c.Server.WriteTimeoutSeconds <= c.Sandbox.PrepullTimeoutSeconds {
 		errs = append(errs, "HTTP_WRITE_TIMEOUT_SECONDS 必须大于 SANDBOX_PREPULL_TIMEOUT_SECONDS,否则预拉取完成后 HTTP 响应会被提前中断")
 	}
-	if c.Server.WriteTimeoutSeconds > 0 && c.Sandbox.SelftestRecycleTimeoutSeconds > 0 && c.Server.WriteTimeoutSeconds <= 2*c.Sandbox.SelftestRecycleTimeoutSeconds {
-		errs = append(errs, "HTTP_WRITE_TIMEOUT_SECONDS 必须大于两倍 SANDBOX_SELFTEST_RECYCLE_TIMEOUT_SECONDS,否则自检执行和清理完成后 HTTP 响应会被提前中断")
+	if c.Server.WriteTimeoutSeconds > 0 && c.Sandbox.SelftestTimeoutSeconds > 0 && c.Sandbox.SelftestRecycleTimeoutSeconds > 0 && c.Sandbox.ReadyTimeoutSeconds > 0 && c.Server.WriteTimeoutSeconds <= c.Sandbox.SelftestTimeoutSeconds+c.Sandbox.SelftestRecycleTimeoutSeconds+c.Sandbox.ReadyTimeoutSeconds {
+		errs = append(errs, "HTTP_WRITE_TIMEOUT_SECONDS 必须大于运行时自检执行、资源清理与终态写回预算之和,否则自检完成前 HTTP 响应会被提前中断")
 	}
 	if c.Server.IdleTimeoutSeconds <= 0 {
 		errs = append(errs, "HTTP_IDLE_TIMEOUT_SECONDS 必须大于 0")
@@ -989,11 +1040,20 @@ func Load() (*Config, error) {
 	if c.NATS.ConsumerRetryDelayMs <= 0 {
 		errs = append(errs, "NATS_CONSUMER_RETRY_DELAY_MS 必须大于 0")
 	}
-	if c.NATS.FlushTimeoutMs <= 0 {
-		errs = append(errs, "NATS_FLUSH_TIMEOUT_MS 必须大于 0")
+	if c.NATS.RequestTimeoutMs <= 0 {
+		errs = append(errs, "NATS_REQUEST_TIMEOUT_MS 必须大于 0")
 	}
 	if strings.TrimSpace(c.NATS.DeadLetterPrefix) == "" {
 		errs = append(errs, "NATS_DEAD_LETTER_PREFIX 不能为空")
+	}
+	if c.NATS.StreamMaxBytes <= 0 || c.NATS.DeadLetterMaxBytes <= 0 {
+		errs = append(errs, "NATS_STREAM_MAX_BYTES 和 NATS_DEAD_LETTER_MAX_BYTES 必须大于 0")
+	}
+	if c.NATS.StreamMaxAgeSeconds <= 0 || c.NATS.ConsumerAckWaitSeconds <= 0 {
+		errs = append(errs, "NATS_STREAM_MAX_AGE_SECONDS 和 NATS_CONSUMER_ACK_WAIT_SECONDS 必须大于 0")
+	}
+	if c.NATS.StreamReplicas < 1 || c.NATS.StreamReplicas > 5 {
+		errs = append(errs, "NATS_STREAM_REPLICAS 必须在 1 到 5 之间")
 	}
 	if c.ObjectStorage.PingTimeoutSeconds <= 0 {
 		errs = append(errs, "OBJECT_STORAGE_PING_TIMEOUT_SECONDS 必须大于 0")
@@ -1187,16 +1247,16 @@ func Load() (*Config, error) {
 	if c.Experiment.PausedTimeoutSeconds <= 0 {
 		errs = append(errs, "EXPERIMENT_PAUSED_TIMEOUT_SECONDS 必须大于 0")
 	}
-	if c.Experiment.ScoreOutboxBatchSize <= 0 {
-		errs = append(errs, "EXPERIMENT_SCORE_OUTBOX_BATCH_SIZE 必须大于 0")
+	if c.Experiment.EventOutboxBatchSize <= 0 {
+		errs = append(errs, "EXPERIMENT_EVENT_OUTBOX_BATCH_SIZE 必须大于 0")
 	}
-	if c.Experiment.ScoreOutboxPollMs <= 0 {
-		errs = append(errs, "EXPERIMENT_SCORE_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
+	if c.Experiment.EventOutboxPollMs <= 0 {
+		errs = append(errs, "EXPERIMENT_EVENT_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
 	}
-	if c.Experiment.ScoreOutboxStaleMs <= 0 {
-		errs = append(errs, "EXPERIMENT_SCORE_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
+	if c.Experiment.EventOutboxStaleMs <= 0 {
+		errs = append(errs, "EXPERIMENT_EVENT_OUTBOX_STALE_INTERVAL_MS 必须大于 0")
 	}
-	if c.Experiment.ScoreOutboxMaxAttempts <= 0 {
+	if c.Experiment.EventOutboxMaxAttempts <= 0 {
 		errs = append(errs, "ASYNC_OUTBOX_MAX_ATTEMPTS 必须大于 0")
 	}
 	if c.Grade.AppealWindowDays <= 0 {
@@ -1222,6 +1282,9 @@ func Load() (*Config, error) {
 	}
 	if c.Judge.QueuePollIntervalMs <= 0 {
 		errs = append(errs, "JUDGE_QUEUE_POLL_INTERVAL_MS 必须大于 0")
+	}
+	if c.Judge.CatalogReconcileIntervalMs <= 0 {
+		errs = append(errs, "JUDGE_CATALOG_RECONCILE_INTERVAL_MS 必须大于 0")
 	}
 	if c.Judge.WorkerBatchSize <= 0 {
 		errs = append(errs, "JUDGE_WORKER_BATCH_SIZE 必须大于 0")
@@ -1279,6 +1342,9 @@ func Load() (*Config, error) {
 	}
 	if c.Snowflake.CronNodeID < 0 || c.Snowflake.CronNodeID > 1023 {
 		errs = append(errs, "CRON_SNOWFLAKE_NODE_ID 必须在 0 到 1023 之间,且不得与后端服务副本节点号冲突")
+	}
+	if c.Sandbox.ResourceUsageTimeoutSeconds <= 0 || int64(c.Sandbox.ResourceUsageTimeoutSeconds) > math.MaxInt32 {
+		errs = append(errs, "SANDBOX_RESOURCE_USAGE_TIMEOUT_SECONDS 必须在 1 到 2147483647 之间")
 	}
 	if c.Sandbox.PrepullTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_PREPULL_TIMEOUT_SECONDS 必须大于 0")
@@ -1348,6 +1414,9 @@ func Load() (*Config, error) {
 	}
 	if c.Sandbox.SelftestRecycleTimeoutSeconds <= 0 {
 		errs = append(errs, "SANDBOX_SELFTEST_RECYCLE_TIMEOUT_SECONDS 必须大于 0")
+	}
+	if c.Sandbox.SelftestTimeoutSeconds <= 0 {
+		errs = append(errs, "SANDBOX_SELFTEST_TIMEOUT_SECONDS 必须大于 0")
 	}
 	if c.Sandbox.DNSPort <= 0 || c.Sandbox.DNSPort > 65535 {
 		errs = append(errs, "SANDBOX_DNS_PORT 必须在 1 到 65535 之间")

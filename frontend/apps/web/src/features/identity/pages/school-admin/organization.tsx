@@ -59,6 +59,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { CLASS_STATUS_LABELS } from '../../../../utils/labels/identity'
 import {
@@ -136,14 +137,14 @@ export default function SchoolAdminOrganizationPage() {
   const data = view.data
 
   const stats = useMemo(() => {
-    if (!data) return { departments: 0, majors: 0, classes: 0, active: 0 }
+    if ((view.status !== 'success' && view.status !== 'empty') || !data) return undefined
     return {
       departments: data.departments.length,
       majors: data.majors.length,
       classes: data.classes.length,
       active: data.classes.filter((item) => item.status === ClassStatus.ACTIVE).length,
     }
-  }, [data])
+  }, [data, view.status])
 
   return (
     <PageScaffold>
@@ -173,13 +174,13 @@ export default function SchoolAdminOrganizationPage() {
         label="组织规模摘要"
         className="mb-5"
         items={[
-          { label: '院系', value: stats.departments, hint: '已建立的院系' },
-          { label: '专业', value: stats.majors, hint: '各院系下设专业' },
-          { label: '班级', value: stats.classes, hint: '含已归档' },
+          { label: '院系', value: stats?.departments, hint: '已建立的院系' },
+          { label: '专业', value: stats?.majors, hint: '各院系下设专业' },
+          { label: '班级', value: stats?.classes, hint: '含已归档' },
           {
             label: '在读班级',
-            value: stats.active,
-            hint: `已归档 ${stats.classes - stats.active} 个`,
+            value: stats?.active,
+            hint: stats ? `已归档 ${stats.classes - stats.active} 个` : undefined,
           },
         ]}
       />
@@ -536,20 +537,17 @@ function DepartmentFormModal({ department, onClose, onSaved }: DepartmentFormMod
   const editing = department !== undefined
   const [name, setName] = useState(department?.name ?? '')
   const [code, setCode] = useState(department?.code ?? '')
+  const { errors, validate } = useFormValidation(() => ({
+    name: name.trim() ? null : '请输入院系名称',
+    code: code.trim() ? null : '请输入院系代码',
+  }))
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (name.trim() === '') {
-        setFormError('请输入院系名称')
-        return
-      }
-      if (code.trim() === '') {
-        setFormError('请输入院系代码')
-        return
-      }
+      if (!validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -564,7 +562,7 @@ function DepartmentFormModal({ department, onClose, onSaved }: DepartmentFormMod
         setWorking(false)
       }
     },
-    [code, department?.id, editing, name, onSaved],
+    [code, department?.id, editing, name, onSaved, validate],
   )
 
   return (
@@ -576,11 +574,23 @@ function DepartmentFormModal({ department, onClose, onSaved }: DepartmentFormMod
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <FormField label="院系名称" htmlFor="dept-name" required>
-              <Input id="dept-name" value={name} onChange={(event) => setName(event.target.value)} />
+            <FormField label="院系名称" htmlFor="dept-name" required error={errors.name}>
+              <Input
+                id="dept-name"
+                value={name}
+                invalid={Boolean(errors.name)}
+                onChange={(event) => setName(event.target.value)}
+                onBlur={() => validate(['name'])}
+              />
             </FormField>
-            <FormField label="院系代码" htmlFor="dept-code" required helper="校内唯一,用于导入与对接">
-              <Input id="dept-code" value={code} onChange={(event) => setCode(event.target.value)} />
+            <FormField label="院系代码" htmlFor="dept-code" required error={errors.code} helper="校内唯一,用于导入与对接">
+              <Input
+                id="dept-code"
+                value={code}
+                invalid={Boolean(errors.code)}
+                onChange={(event) => setCode(event.target.value)}
+                onBlur={() => validate(['code'])}
+              />
             </FormField>
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </ModalBody>
@@ -612,20 +622,17 @@ function MajorFormModal({ major, departments, onClose, onSaved }: MajorFormModal
   const editing = major !== undefined
   const [name, setName] = useState(major?.name ?? '')
   const [departmentId, setDepartmentId] = useState(major?.department_id ?? '')
+  const { errors, validate } = useFormValidation(() => ({
+    name: name.trim() ? null : '请输入专业名称',
+    department: departmentId ? null : '请选择所属院系',
+  }))
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (name.trim() === '') {
-        setFormError('请输入专业名称')
-        return
-      }
-      if (departmentId === '') {
-        setFormError('请选择所属院系')
-        return
-      }
+      if (!validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -640,7 +647,7 @@ function MajorFormModal({ major, departments, onClose, onSaved }: MajorFormModal
         setWorking(false)
       }
     },
-    [departmentId, editing, major?.id, name, onSaved],
+    [departmentId, editing, major?.id, name, onSaved, validate],
   )
 
   return (
@@ -652,17 +659,25 @@ function MajorFormModal({ major, departments, onClose, onSaved }: MajorFormModal
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <FormField label="所属院系" htmlFor="major-dept" required>
+            <FormField label="所属院系" htmlFor="major-dept" required error={errors.department}>
               <Select
                 id="major-dept"
                 options={departments.map((item) => ({ value: item.id, label: item.name }))}
                 value={departmentId}
+                invalid={Boolean(errors.department)}
                 placeholder="选择院系"
                 onValueChange={setDepartmentId}
+                onBlur={() => validate(['department'])}
               />
             </FormField>
-            <FormField label="专业名称" htmlFor="major-name" required>
-              <Input id="major-name" value={name} onChange={(event) => setName(event.target.value)} />
+            <FormField label="专业名称" htmlFor="major-name" required error={errors.name}>
+              <Input
+                id="major-name"
+                value={name}
+                invalid={Boolean(errors.name)}
+                onChange={(event) => setName(event.target.value)}
+                onBlur={() => validate(['name'])}
+              />
             </FormField>
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </ModalBody>
@@ -696,25 +711,19 @@ function ClassFormModal({ item, majors, onClose, onSaved }: ClassFormModalProps)
   const [majorId, setMajorId] = useState(item?.major_id ?? '')
   const [year, setYear] = useState(String(item?.enrollment_year ?? new Date().getFullYear()))
   const [status, setStatus] = useState(String(item?.status ?? ClassStatus.ACTIVE))
+  const { errors, validate } = useFormValidation(() => ({
+    name: name.trim() ? null : '请输入班级名称',
+    major: majorId ? null : '请选择所属专业',
+    year: Number.isInteger(Number(year)) && Number(year) >= 1990 ? null : '请输入有效的入学年份',
+  }))
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (name.trim() === '') {
-        setFormError('请输入班级名称')
-        return
-      }
-      if (majorId === '') {
-        setFormError('请选择所属专业')
-        return
-      }
+      if (!validate()) return
       const yearValue = Number(year)
-      if (!Number.isInteger(yearValue) || yearValue < 1990) {
-        setFormError('请输入有效的入学年份')
-        return
-      }
       setFormError(undefined)
       setWorking(true)
       try {
@@ -734,7 +743,7 @@ function ClassFormModal({ item, majors, onClose, onSaved }: ClassFormModalProps)
         setWorking(false)
       }
     },
-    [editing, item?.id, majorId, name, onSaved, status, year],
+    [editing, item?.id, majorId, name, onSaved, status, validate, year],
   )
 
   return (
@@ -746,26 +755,36 @@ function ClassFormModal({ item, majors, onClose, onSaved }: ClassFormModalProps)
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <FormField label="所属专业" htmlFor="class-major" required>
+            <FormField label="所属专业" htmlFor="class-major" required error={errors.major}>
               <Select
                 id="class-major"
                 options={majors.map((major) => ({ value: major.id, label: major.name }))}
                 value={majorId}
+                invalid={Boolean(errors.major)}
                 placeholder="选择专业"
                 onValueChange={setMajorId}
+                onBlur={() => validate(['major'])}
               />
             </FormField>
             <div className="grid gap-4 sm:grid-cols-2">
-              <FormField label="班级名称" htmlFor="class-name" required>
-                <Input id="class-name" value={name} onChange={(event) => setName(event.target.value)} />
+              <FormField label="班级名称" htmlFor="class-name" required error={errors.name}>
+                <Input
+                  id="class-name"
+                  value={name}
+                  invalid={Boolean(errors.name)}
+                  onChange={(event) => setName(event.target.value)}
+                  onBlur={() => validate(['name'])}
+                />
               </FormField>
-              <FormField label="入学年份" htmlFor="class-year" required>
+              <FormField label="入学年份" htmlFor="class-year" required error={errors.year}>
                 <Input
                   id="class-year"
                   type="number"
                   min="1990"
                   value={year}
+                  invalid={Boolean(errors.year)}
                   onChange={(event) => setYear(event.target.value)}
+                  onBlur={() => validate(['year'])}
                 />
               </FormField>
             </div>
@@ -810,6 +829,10 @@ interface PromoteClassesModalProps {
 function PromoteClassesModal({ classes, onClose, onDone }: PromoteClassesModalProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [targetYear, setTargetYear] = useState(String(new Date().getFullYear()))
+  const { errors, validate } = useFormValidation(() => ({
+    classes: selected.size > 0 ? null : '请至少勾选一个班级',
+    year: Number.isInteger(Number(targetYear)) && Number(targetYear) >= 1990 ? null : '请输入有效的目标年份',
+  }))
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
@@ -819,15 +842,8 @@ function PromoteClassesModal({ classes, onClose, onDone }: PromoteClassesModalPr
   )
 
   const submit = useCallback(async () => {
-    if (selected.size === 0) {
-      setFormError('请至少勾选一个班级')
-      return
-    }
+    if (!validate()) return
     const year = Number(targetYear)
-    if (!Number.isInteger(year) || year < 1990) {
-      setFormError('请输入有效的目标年份')
-      return
-    }
     setFormError(undefined)
     setWorking(true)
     try {
@@ -839,7 +855,7 @@ function PromoteClassesModal({ classes, onClose, onDone }: PromoteClassesModalPr
     } finally {
       setWorking(false)
     }
-  }, [onDone, selected, targetYear])
+  }, [onDone, selected, targetYear, validate])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -851,20 +867,22 @@ function PromoteClassesModal({ classes, onClose, onDone }: PromoteClassesModalPr
           </ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
-          <FormField label="目标入学年份" htmlFor="promote-year" required>
+          <FormField label="目标入学年份" htmlFor="promote-year" required error={errors.year}>
             <Input
               id="promote-year"
               type="number"
               min="1990"
               value={targetYear}
+              invalid={Boolean(errors.year)}
               onChange={(event) => setTargetYear(event.target.value)}
+              onBlur={() => validate(['year'])}
             />
           </FormField>
 
           {activeClasses.length === 0 ? (
             <Empty icon={Users} title="没有在读班级" description="只有在读班级可以升届。" />
           ) : (
-            <FormField label="选择班级" required>
+            <FormField label="选择班级" required error={errors.classes}>
               <div className="flex max-h-72 flex-col gap-2 overflow-y-auto well p-3">
                 {activeClasses.map((item) => (
                   <Checkbox
@@ -913,6 +931,9 @@ interface ArchiveClassesModalProps {
  */
 function ArchiveClassesModal({ classes, onClose, onDone }: ArchiveClassesModalProps) {
   const [year, setYear] = useState('')
+  const { errors, validate } = useFormValidation(() => ({
+    year: year ? null : '请选择要归档的入学年份',
+  }))
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
@@ -930,10 +951,7 @@ function ArchiveClassesModal({ classes, onClose, onDone }: ArchiveClassesModalPr
   }, [classes])
 
   const submit = useCallback(async () => {
-    if (year === '') {
-      setFormError('请选择要归档的入学年份')
-      return
-    }
+    if (!validate()) return
     setFormError(undefined)
     setWorking(true)
     try {
@@ -945,7 +963,7 @@ function ArchiveClassesModal({ classes, onClose, onDone }: ArchiveClassesModalPr
     } finally {
       setWorking(false)
     }
-  }, [onDone, year])
+  }, [onDone, validate, year])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -960,13 +978,15 @@ function ArchiveClassesModal({ classes, onClose, onDone }: ArchiveClassesModalPr
           {yearOptions.length === 0 ? (
             <Empty icon={Archive} title="没有可归档的年份" description="所有班级都已归档。" />
           ) : (
-            <FormField label="入学年份" htmlFor="archive-year" required>
+            <FormField label="入学年份" htmlFor="archive-year" required error={errors.year}>
               <Select
                 id="archive-year"
                 options={yearOptions}
                 value={year}
+                invalid={Boolean(errors.year)}
                 placeholder="选择年份"
                 onValueChange={setYear}
+                onBlur={() => validate(['year'])}
               />
             </FormField>
           )}

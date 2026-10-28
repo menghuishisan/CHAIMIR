@@ -28,9 +28,11 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { ImportActionFooter } from '../../components/ImportActionFooter'
 import { ImportPreviewPanel } from '../../components/ImportPreviewPanel'
+import { ImportPreviewRecovery } from '../../components/ImportPreviewRecovery'
 
 /** 导入目标:教师与学生模板列不同,后端按 type 分别解析。 */
 const IMPORT_TARGETS = [
@@ -56,12 +58,12 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
   const [activationCodes, setActivationCodes] = useState<ImportActivationCode[]>()
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(() => ({
+    file: file ? null : '请选择要导入的文件',
+  }), target)
 
   const runPreview = useCallback(async () => {
-    if (!file) {
-      setFormError('请选择要导入的文件')
-      return
-    }
+    if (working || !validate() || !file) return
     setFormError(undefined)
     setWorking(true)
     try {
@@ -73,7 +75,7 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
       setWorking(false)
       setUploadProgress(undefined)
     }
-  }, [file, target])
+  }, [file, target, validate, working])
 
   const commit = useCallback(async () => {
     if (!preview) return
@@ -146,7 +148,7 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
   }
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
+    <Modal open onOpenChange={(open) => !open && !working && onClose()}>
       <ModalContent size="xl">
         <ModalHeader>
           <ModalTitle>批量导入账号</ModalTitle>
@@ -172,9 +174,11 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
               aria-label="导入对象"
               options={IMPORT_TARGETS.map((item) => ({ value: item.value, label: item.label }))}
               value={target}
+              disabled={working}
               onValueChange={(value) => {
                 setTarget(value as ImportTargetValue)
                 setPreview(undefined)
+                setFile(undefined)
               }}
             />
           </FormField>
@@ -183,14 +187,21 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
             label="导入文件"
             htmlFor="import-file"
             required
+            error={errors.file}
             helper="支持模板导出的 Excel 或 CSV 文件"
           >
             <Input
               id="import-file"
+              key={target}
+              disabled={working}
               type="file"
               accept=".xlsx,.csv"
+              invalid={Boolean(errors.file)}
+              onBlur={() => validate(['file'])}
               onChange={(event) => {
-                setFile(event.target.files?.[0])
+                const selected = event.target.files?.[0]
+                if (!selected) return
+                setFile(selected)
                 setPreview(undefined)
               }}
             />
@@ -199,6 +210,8 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
           {uploadProgress !== undefined ? (
             <Progress value={uploadProgress} label="正在上传文件" />
           ) : null}
+
+          {!preview ? <ImportPreviewRecovery key={target} target={target} disabled={working} onRestore={setPreview} /> : null}
 
           <ImportPreviewPanel
             preview={preview}

@@ -25,6 +25,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) error {
 	registerTenantRoutes(api, svc, authn)
 	registerOrgRoutes(api, svc, authn)
 	registerAccountRoutes(api, svc, authn)
+	registerImportPreviewRoutes(api, svc, authn)
 	registerMeRoutes(api, svc, authn)
 	return nil
 }

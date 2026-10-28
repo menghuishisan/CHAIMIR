@@ -37,6 +37,7 @@ import { formatDateTime } from '../../../../utils/formatters'
 import { judgerStatusLabel, judgerTypeLabel } from '../../../../utils/labels/judge'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { JUDGER_TYPES } from '../../options'
+import { getFrozenJudgerSnapshot } from '../../rules'
 import { judgerStatusTone } from '../../statusPresentation'
 import { JudgerFormModal } from './judger-form'
 
@@ -73,14 +74,15 @@ export default function PlatformJudgesPage() {
     [list, typeFilter],
   )
 
-  const stats = useMemo(
-    () => ({
+  const stats = useMemo(() => {
+    if ((judgers.status !== 'success' && judgers.status !== 'empty') || !judgers.data) return undefined
+    return {
+      total: list.length,
       available: list.filter((item) => item.status === JudgerStatus.AVAILABLE).length,
       runtimeBound: list.filter((item) => item.runtime_required).length,
       manual: list.filter((item) => item.type === JudgerType.MANUAL).length,
-    }),
-    [list],
-  )
+    }
+  }, [judgers.data, judgers.status, list])
 
   return (
     <PageScaffold>
@@ -106,10 +108,10 @@ export default function PlatformJudgesPage() {
         label="判题器总量摘要"
         className="mb-5"
         items={[
-          { label: '判题器总数', value: list.length, hint: '含已停用' },
-          { label: '可用', value: stats.available, hint: '教师可以引用' },
-          { label: '需要链环境', value: stats.runtimeBound, hint: '判题时会准备实验环境' },
-          { label: '人工评分', value: stats.manual, hint: '由教师打分' },
+          { label: '判题器总数', value: stats?.total, hint: '含已停用' },
+          { label: '可用', value: stats?.available, hint: '教师可以引用' },
+          { label: '需要链环境', value: stats?.runtimeBound, hint: '判题时会准备实验环境' },
+          { label: '人工评分', value: stats?.manual, hint: '由教师打分' },
         ]}
       />
 
@@ -218,7 +220,7 @@ function JudgerCard({ judger, onEdit, onSelftested, onError }: JudgerCardProps) 
 
   const spec = judger.resource_spec
   // 组合快照是服务端编译冻结的事实,页面只读展示,不回填成编辑输入(§8.3)
-  const snapshot = spec.composition_snapshot
+  const snapshot = getFrozenJudgerSnapshot(spec)
 
   const items = useMemo(() => {
     const base = [
@@ -236,7 +238,7 @@ function JudgerCard({ judger, onEdit, onSelftested, onError }: JudgerCardProps) 
         term: '判题环境',
         description: snapshot
           ? (snapshot.runtimes ?? []).map((runtime) => `${runtime.instance_code}: ${runtime.code} · ${runtime.image_version}`).join(' / ')
-          : '需要判题环境但还没有冻结出可执行快照',
+          : '判题环境尚未准备完成',
         mono: true,
       })
     }

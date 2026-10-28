@@ -121,7 +121,7 @@ func (s *Service) recycleOne(ctx context.Context, sb Sandbox, reason string) err
 			s.markRecycleFailed(ctx, sb, wrapped)
 			return wrapped
 		}
-		if _, _, err := s.saveSandboxFiles(ctx, sb.TenantID, sb.ID); err != nil {
+		if _, err := s.saveSandboxFiles(ctx, sb.TenantID, sb.ID); err != nil {
 			s.markRecycleFailed(ctx, sb, err)
 			return err
 		}

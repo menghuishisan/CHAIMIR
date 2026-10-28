@@ -233,7 +233,10 @@ func (a *StdioJSONAdapter) replayRunner(ctx context.Context, namespace string, s
 //
 // 与生产运行同一套设施:"跑起来看效果对不对"本身就需要一个能安全执行第三方代码的地方,
 // 不为审核另建一套(见 docs/04-仿真可视化引擎/06-业务流程与状态机.md §4)。
-func (a *StdioJSONAdapter) Preview(ctx context.Context, pkg Package, bundle *ExecutionBundle, frameCount int) (PreviewResult, error) {
+func (a *StdioJSONAdapter) Preview(ctx context.Context, pkg Package, bundle *ExecutionBundle, frameCount int) (result PreviewResult, previewErr error) {
+	if frameCount <= 0 || frameCount > maxPreviewFrames {
+		return PreviewResult{}, fmt.Errorf("隔离预览帧数量超出协议范围")
+	}
 	session := SessionWithPackage{
 		Session:    Session{ID: pkg.ID, InitParams: map[string]any{}, Seed: previewSeed},
 		ScaleLimit: pkg.ScaleLimit,
@@ -242,15 +245,15 @@ func (a *StdioJSONAdapter) Preview(ctx context.Context, pkg Package, bundle *Exe
 		return PreviewResult{}, fmt.Errorf("仿真包已有隔离预览在执行")
 	}
 	defer a.active.Delete(session.ID)
-	// 释放失败记日志而不并进返回值:预览的返回错误会写成包作者能看到的审核结论,
-	// 而"命名空间没删掉"是集群侧问题、不是包的问题 —— 并进去等于给作者一个他改不了的失败原因。
-	// 但它也绝不能被吞掉:Pod 泄漏必须能从日志定位到具体包与命名空间。
+	// 回收失败属于基础设施重试，不得写成预览成功；原执行取消不取消独立回收预算。
 	defer func() {
 		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Duration(a.cfg.PodReadyTimeoutSeconds)*time.Second)
 		defer cancel()
 		if err := a.Release(releaseCtx, session); err != nil {
 			logging.ErrorContext(releaseCtx, "sim package preview release failed", err.Error(),
 				slog.Int64("package_id", pkg.ID), slog.String("code", pkg.Code), slog.String("version", pkg.Version))
+			previewErr = errors.Join(previewErr, err)
+			result = PreviewResult{}
 		}
 	}()
 
@@ -267,6 +270,11 @@ func (a *StdioJSONAdapter) Preview(ctx context.Context, pkg Package, bundle *Exe
 	if err != nil {
 		return PreviewResult{}, err
 	}
+	return decodePreviewResponse(raw, frameCount, pkg.ScaleLimit)
+}
+
+// decodePreviewResponse 严格校验容器响应、明确终态和请求数量，再复用教学帧协议校验。
+func decodePreviewResponse(raw []byte, frameCount int, scaleLimit map[string]any) (PreviewResult, error) {
 	var response runnerVerifyResponse
 	if err := jsonx.DecodeStrictKnownFields(raw, &response); err != nil {
 		return PreviewResult{}, fmt.Errorf("隔离预览输出无效: %w", err)
@@ -274,11 +282,14 @@ func (a *StdioJSONAdapter) Preview(ctx context.Context, pkg Package, bundle *Exe
 	if !response.OK {
 		return PreviewResult{}, fmt.Errorf("隔离预览失败: %s", response.Error)
 	}
-	// 帧同样要过后端协议校验:它们会展示给平台管理员作为判断依据,不能把非法帧当审核证据。
-	for _, frame := range response.Frames {
-		if err := validateBackendSnapshot(frame, pkg.ScaleLimit); err != nil {
-			return PreviewResult{}, err
-		}
+	if response.Determinism != validationPassed && response.Determinism != validationFailed {
+		return PreviewResult{}, fmt.Errorf("隔离预览缺少有效的确定性结论")
+	}
+	if len(response.Frames) != frameCount {
+		return PreviewResult{}, fmt.Errorf("隔离预览样例帧数量与请求不一致: expected=%d actual=%d", frameCount, len(response.Frames))
+	}
+	if err := validatePreviewFrames(response.Frames, scaleLimit); err != nil {
+		return PreviewResult{}, err
 	}
 	return PreviewResult{
 		DeterminismPassed: response.Determinism == "passed",
@@ -287,14 +298,9 @@ func (a *StdioJSONAdapter) Preview(ctx context.Context, pkg Package, bundle *Exe
 	}, nil
 }
 
-// Release 删除会话独占命名空间,调用可重复执行。
+// Release 沿唯一删除等待流程确认会话独占命名空间已回收,调用可重复执行。
 func (a *StdioJSONAdapter) Release(ctx context.Context, session SessionWithPackage) error {
-	policy := metav1.DeletePropagationBackground
-	err := a.k8s.Clientset().CoreV1().Namespaces().Delete(ctx, a.namespace(session.ID), metav1.DeleteOptions{PropagationPolicy: &policy})
-	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("删除后端仿真会话资源失败: %w", err)
-	}
-	return nil
+	return a.deleteNamespaceAndWait(ctx, a.namespace(session.ID))
 }
 
 // prepareSession 清理残留资源后创建独立命名空间、拒绝全部网络的策略和计算 Pod。
@@ -364,12 +370,12 @@ func (a *StdioJSONAdapter) prepareSession(ctx context.Context, session SessionWi
 	return nil
 }
 
-// deleteNamespaceAndWait 删除服务异常退出后遗留的同会话资源,避免复用未知状态。
+// deleteNamespaceAndWait 统一执行启动前清理与终态回收,确认资源消失后才释放会话占用。
 func (a *StdioJSONAdapter) deleteNamespaceAndWait(ctx context.Context, namespace string) error {
 	policy := metav1.DeletePropagationBackground
 	err := a.k8s.Clientset().CoreV1().Namespaces().Delete(ctx, namespace, metav1.DeleteOptions{PropagationPolicy: &policy})
 	if err != nil && !apierrors.IsNotFound(err) {
-		return fmt.Errorf("清理残留后端仿真命名空间失败: %w", err)
+		return fmt.Errorf("删除后端仿真命名空间失败: %w", err)
 	}
 	if apierrors.IsNotFound(err) {
 		return nil
@@ -386,7 +392,7 @@ func (a *StdioJSONAdapter) deleteNamespaceAndWait(ctx context.Context, namespace
 		}
 		return false, err
 	}); err != nil {
-		return fmt.Errorf("等待残留后端仿真命名空间删除失败: %w", err)
+		return fmt.Errorf("等待后端仿真命名空间删除失败: %w", err)
 	}
 	return nil
 }

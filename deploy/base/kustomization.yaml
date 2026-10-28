@@ -28,6 +28,42 @@ resources:
 components:
   - ../config
 
+# 就绪预算复用后端环境变量源，所有 overlay 由本层生成同一探针策略。
+replacements:
+  - source:
+      kind: ConfigMap
+      name: chaimir-config
+      namespace: chaimir-system
+      fieldPath: data.HTTP_READINESS_PROBE_TIMEOUT_SECONDS
+    targets:
+      - select:
+          kind: Deployment
+          name: chaimir-backend
+        fieldPaths:
+          - spec.template.spec.containers.[name=server].readinessProbe.timeoutSeconds
+  - source:
+      kind: ConfigMap
+      name: chaimir-config
+      namespace: chaimir-system
+      fieldPath: data.HTTP_READINESS_PROBE_PERIOD_SECONDS
+    targets:
+      - select:
+          kind: Deployment
+          name: chaimir-backend
+        fieldPaths:
+          - spec.template.spec.containers.[name=server].readinessProbe.periodSeconds
+  - source:
+      kind: ConfigMap
+      name: chaimir-config
+      namespace: chaimir-system
+      fieldPath: data.HTTP_READINESS_PROBE_FAILURE_THRESHOLD
+    targets:
+      - select:
+          kind: Deployment
+          name: chaimir-backend
+        fieldPaths:
+          - spec.template.spec.containers.[name=server].readinessProbe.failureThreshold
+
 # 密钥真实值(Secret chaimir-secret / chaimir-data-secret)不放 base:
 #   所有形态统一由 ExternalSecret 从环境 SecretStore 同步,provider 由基础设施配置。
 # base 资源只引用固定名称,避免把密钥内容纳入 Kustomize 输入或生成哈希名称。
@@ -37,16 +73,16 @@ components:
 images:
   - name: chaimir/backend
     newName: registry.chaimir.io/service/backend
-    digest: sha256:64835c7df05f7ed9ca40d86bf5ece0b002dfcb5f157166776aa63ae9d766b514
+    digest: sha256:fb8a62fa8685ee8e7eef2ce52bf89dcd168e5a02a2fe26b9508ee55c56b08193
   - name: chaimir/frontend
     newName: registry.chaimir.io/service/frontend
-    digest: sha256:2458b359ce756a118021b576563fdc5defd9ab0c31f61c5288399b51dcf807d1
+    digest: sha256:2a39207771da10ef13bbeb6de16301565064e607c9f6a4dbd2bbf1aa6f82b688
   - name: chaimir/migrate
     newName: registry.chaimir.io/service/migrate
-    digest: sha256:97928ba5522727a58828afc0728fe48a4316a8000343ac2e7757d6faf33a9824
+    digest: sha256:2644969d18b59473aac7812088f405ab2d102778296927de71e0632368d24fcc
   - name: chaimir/cron
     newName: registry.chaimir.io/service/cron
-    digest: sha256:12320c7c93b90ca62bfd6e0b817caae274097f36c3295be95d9ac434dc40fdb4
+    digest: sha256:d7af3fba9ef173e085e4f1e9118e91697cfd7c4114d9bb6f549bdbd1be0a317d
 
 # generator 默认行为:加哈希后缀(配置变更触发滚动)。
 generatorOptions:

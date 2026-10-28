@@ -50,7 +50,7 @@ export default function StudentSubmissionsPage() {
 
   const list = submissions.data ? submissions.data.list : []
   // 最新一次提交按后端排序(submitted_at DESC)取首条
-  const latest = list.length > 0 ? list[0] : undefined
+  const latest = submissions.status === 'success' ? list[0] : undefined
 
   const columns: TableColumn<Submission>[] = [
     { key: 'attempt_no', header: '提交次数', align: 'right', mono: true },

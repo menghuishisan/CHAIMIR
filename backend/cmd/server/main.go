@@ -269,7 +269,7 @@ func livenessProbe(c *gin.Context) {
 }
 
 // readinessProbe 依次探测启动期强依赖,任一不可用即回 503 让 kubelet 摘掉本副本流量。
-// 失败原因(哪个依赖、原始错误链)只进结构化日志并带 trace_id;响应体不含依赖名,
+// 分项和总耗时、失败原因只进结构化日志并带 trace_id;响应体不含依赖名,
 // 既不向调用者播报内部拓扑,也不吞错(§8 错误暴露分层)。
 func readinessProbe(cfg *config.Config, infra *infrastructure) gin.HandlerFunc {
 	dependencies := []struct {
@@ -287,14 +287,33 @@ func readinessProbe(cfg *config.Config, infra *infrastructure) gin.HandlerFunc {
 		}
 		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Duration(cfg.Server.HealthTimeoutSeconds)*time.Second)
 		defer cancel()
+		started := time.Now()
+		results := make([]slog.Attr, 0, len(dependencies))
 		for _, dependency := range dependencies {
-			if err := dependency.check(infra, ctx); err != nil {
+			dependencyStarted := time.Now()
+			err := dependency.check(infra, ctx)
+			if err == nil {
+				err = ctx.Err()
+			}
+			results = append(results, slog.Group(dependency.name,
+				slog.Duration("duration", time.Since(dependencyStarted)), slog.Bool("ready", err == nil)))
+			if err != nil {
 				logging.ErrorContext(c.Request.Context(), "readiness probe failed",
 					fmt.Errorf("依赖 %s 不可用: %w", dependency.name, err).Error(),
-					slog.String("dependency", dependency.name))
+					slog.String("dependency", dependency.name),
+					slog.Duration("duration", time.Since(started)),
+					slog.Attr{Key: "checks", Value: slog.GroupValue(results...)})
 				c.String(http.StatusServiceUnavailable, "not ready")
 				return
 			}
+		}
+		slog.Default().LogAttrs(ctx, slog.LevelDebug, "readiness dependencies succeeded",
+			logging.AttrsFromContext(ctx, slog.Duration("duration", time.Since(started)),
+				slog.Attr{Key: "checks", Value: slog.GroupValue(results...)})...)
+		// 探测期间也可能开始退出，不能以刚完成的依赖检查重新开放流量。
+		if infra.draining.Load() {
+			c.String(http.StatusServiceUnavailable, "not ready")
+			return
 		}
 		c.String(http.StatusOK, "ready")
 	}

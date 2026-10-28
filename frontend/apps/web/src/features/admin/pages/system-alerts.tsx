@@ -57,6 +57,7 @@ import {
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../hooks'
+import { useFormValidation } from '../../../hooks/useFormValidation'
 import { formatDate, formatDateTime, formatTime } from '../../../utils/formatters'
 import {
   alertConditionOperatorLabel,
@@ -209,14 +210,16 @@ function AlertEventsSection({ eventScope }: { eventScope: string }) {
 
   // 指标带取服务端全量口径,不随下方筛选变化(§6.5.4)。
   // 「待处理紧急」现在也走服务端 level 参数,不再用当前页切片数 —— 那是错数。
-  const totalCount = useResourceTotal((params) => api.admin.listAlertEvents(params), [])
+  const totalCount = useResourceTotal((params) => api.admin.listAlertEvents(params), [], events.refreshVersion)
   const pendingCount = useResourceTotal(
     (params) => api.admin.listAlertEvents({ status: AlertStatus.PENDING, ...params }),
-    []
+    [],
+    events.refreshVersion
   )
   const handledCount = useResourceTotal(
     (params) => api.admin.listAlertEvents({ status: AlertStatus.HANDLED, ...params }),
-    []
+    [],
+    events.refreshVersion
   )
   const urgentPendingCount = useResourceTotal(
     (params) =>
@@ -225,7 +228,8 @@ function AlertEventsSection({ eventScope }: { eventScope: string }) {
         level: AlertLevel.CRITICAL,
         ...params,
       }),
-    []
+    [],
+    events.refreshVersion
   )
 
   /**
@@ -551,30 +555,28 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
     String(readNumber(rule?.condition, CONDITION_FIELDS.threshold))
   )
   const [duration, setDuration] = useState(
-    String(readNumber(rule?.condition, CONDITION_FIELDS.durationSeconds) || 60)
+    String(rule ? readNumber(rule.condition, CONDITION_FIELDS.durationSeconds) : 60)
   )
   const [level, setLevel] = useState(String(rule?.level ?? ALERT_LEVELS[1]))
   const [enabled, setEnabled] = useState(rule?.enabled ?? true)
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(() => ({
+    name: name.trim() === '' ? '请输入规则名称' : null,
+    // 先检查原文,显式0合法,空白不得转换为0。
+    threshold: threshold.trim() === '' ? '请输入阈值'
+      : !Number.isFinite(Number(threshold)) ? '阈值要是一个数字' : null,
+    duration: duration.trim() === '' ? '请输入持续时间'
+      : !Number.isInteger(Number(duration)) || Number(duration) < 0
+        ? '持续时间要是 0 或更大的整数秒' : null,
+  }))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (name.trim() === '') {
-        setFormError('请输入规则名称')
-        return
-      }
+      if (working || !validate()) return
       const thresholdValue = Number(threshold)
-      if (!Number.isFinite(thresholdValue)) {
-        setFormError('阈值要是一个数字')
-        return
-      }
       const durationValue = Number(duration)
-      if (!Number.isInteger(durationValue) || durationValue < 0) {
-        setFormError('持续时间要是 0 或更大的整数秒')
-        return
-      }
       setFormError(undefined)
       setWorking(true)
       try {
@@ -601,7 +603,7 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
         setWorking(false)
       }
     },
-    [duration, editing, enabled, level, metric, name, onSaved, operator, rule?.id, scope, threshold]
+    [duration, editing, enabled, level, metric, name, onSaved, operator, rule?.id, scope, threshold, validate, working]
   )
 
   return (
@@ -619,11 +621,14 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
               label="规则名称"
               htmlFor="rule-name"
               required
+              error={errors.name}
               helper="告警列表里显示这个名字"
             >
               <Input
                 id="rule-name"
                 value={name}
+                invalid={Boolean(errors.name)}
+                onBlur={() => validate(['name'])}
                 onChange={(event) => setName(event.target.value)}
               />
             </FormField>
@@ -652,12 +657,15 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
                   onValueChange={setOperator}
                 />
               </FormField>
-              <FormField label="阈值" htmlFor="rule-threshold" required>
+              <FormField label="阈值" htmlFor="rule-threshold" required error={errors.threshold}>
                 <Input
                   id="rule-threshold"
+                  required
                   type="number"
                   step="0.1"
                   value={threshold}
+                  invalid={Boolean(errors.threshold)}
+                  onBlur={() => validate(['threshold'])}
                   onChange={(event) => setThreshold(event.target.value)}
                 />
               </FormField>
@@ -665,13 +673,17 @@ function AlertRuleFormModal({ rule, scope, onClose, onSaved }: AlertRuleFormModa
                 label="持续时间(秒)"
                 htmlFor="rule-duration"
                 required
+                error={errors.duration}
                 helper="填 0 表示立即触发"
               >
                 <Input
                   id="rule-duration"
+                  required
                   type="number"
                   min="0"
                   value={duration}
+                  invalid={Boolean(errors.duration)}
+                  onBlur={() => validate(['duration'])}
                   onChange={(event) => setDuration(event.target.value)}
                 />
               </FormField>

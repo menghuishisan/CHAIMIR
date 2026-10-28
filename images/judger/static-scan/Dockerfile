@@ -61,7 +61,7 @@ RUN echo "0479d44fdf9c501c25337fdc540419f1593b884a87b47f023da4f1c700fda782  /usr
     && for version in 0.8.20 0.8.24 0.8.26; do chmod 0755 /usr/local/bin/solc-${version}; done
 
 USER 1000:1000
-ENV HOME=/judge
+ENV HOME=/judge/home
 ENV TMPDIR=/tmp/slither
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/slither/bin
 WORKDIR /judge

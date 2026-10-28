@@ -53,6 +53,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDateTime, formatScore } from '../../../../utils/formatters'
 import { cheatActionLabel, cheatTypeLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -242,6 +243,13 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
   const [suspects, setSuspects] = useState<CheatSuspect[]>()
   const [searchError, setSearchError] = useState<string>()
   const [searching, setSearching] = useState(false)
+  const thresholdValue = Number(threshold)
+  const { errors, validate } = useFormValidation(() => ({
+    problemId: !problemId ? '请选择要查重的赛题' : null,
+    threshold: !Number.isFinite(thresholdValue) || thresholdValue <= 0 || thresholdValue >= 1
+      ? '相似度阈值需要在 0 与 1 之间,例如 0.8'
+      : null,
+  }))
 
   const problems = useAsyncResource(
     () => api.contest.getProblems(contest.id),
@@ -262,15 +270,7 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
       if (readOnly) return
-      if (problemId === '') {
-        setSearchError('请选择要查重的赛题')
-        return
-      }
-      const thresholdValue = Number(threshold)
-      if (!Number.isFinite(thresholdValue) || thresholdValue <= 0 || thresholdValue >= 1) {
-        setSearchError('相似度阈值需要在 0 与 1 之间,例如 0.8')
-        return
-      }
+      if (!validate()) return
       setSearchError(undefined)
       setSearching(true)
       try {
@@ -286,7 +286,7 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
         setSearching(false)
       }
     },
-    [codeHash, contest.id, problemId, readOnly, threshold]
+    [codeHash, contest.id, problemId, readOnly, thresholdValue, validate]
   )
 
   return (
@@ -311,14 +311,16 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
         >
           {() => (
             <form onSubmit={search} noValidate className="flex flex-col gap-4">
-              <FormField label="赛题" htmlFor="cheat-problem" required>
+              <FormField label="赛题" htmlFor="cheat-problem" required error={errors.problemId}>
                 <Select
                   id="cheat-problem"
                   options={problemOptions}
                   value={problemId}
                   placeholder="选择赛题"
                   disabled={readOnly}
+                  invalid={Boolean(errors.problemId)}
                   onValueChange={setProblemId}
+                  onBlur={() => validate(['problemId'])}
                 />
               </FormField>
 
@@ -341,6 +343,7 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
                 label="相似度阈值"
                 htmlFor="cheat-threshold"
                 required
+                error={errors.threshold}
                 helper="0 到 1 之间。0.8 表示相似度达到 80% 才列出"
               >
                 <Input
@@ -351,7 +354,9 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
                   step="0.05"
                   value={threshold}
                   disabled={readOnly}
+                  invalid={Boolean(errors.threshold)}
                   onChange={(event) => setThreshold(event.target.value)}
+                  onBlur={() => validate(['threshold'])}
                 />
               </FormField>
 
@@ -448,23 +453,19 @@ function CheatRecordModal({ contest, sourceRef, onClose, onSaved }: CheatRecordM
   )
 
   const actionValue = Number(action) as CheatAction
+  const { errors, validate } = useFormValidation(() => ({
+    team: teamId === '' ? '请选择要处理的队伍' : null,
+    note: note.trim() === '' ? '请写下判定依据,处理记录会留档并计入审计' : null,
+    penalty: actionValue === CheatAction.PENALTY && (
+      !Number.isFinite(Number(penaltyScore)) || Number(penaltyScore) <= 0
+    ) ? '扣分需要是大于 0 的数字' : null,
+  }))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (teamId === '') {
-        setFormError('请选择要处理的队伍')
-        return
-      }
-      if (note.trim() === '') {
-        setFormError('请写下判定依据,处理记录会留档并计入审计')
-        return
-      }
+      if (submitting || !validate()) return
       const penalty = Number(penaltyScore)
-      if (actionValue === CheatAction.PENALTY && (!Number.isFinite(penalty) || penalty <= 0)) {
-        setFormError('扣分需要是大于 0 的数字')
-        return
-      }
       setFormError(undefined)
       setSubmitting(true)
       try {
@@ -487,7 +488,7 @@ function CheatRecordModal({ contest, sourceRef, onClose, onSaved }: CheatRecordM
         setSubmitting(false)
       }
     },
-    [actionValue, contest.id, note, onSaved, penaltyScore, sourceRef, teamId, type]
+    [actionValue, contest.id, note, onSaved, penaltyScore, sourceRef, submitting, teamId, type, validate]
   )
 
   return (
@@ -513,12 +514,15 @@ function CheatRecordModal({ contest, sourceRef, onClose, onSaved }: CheatRecordM
                   label="队伍"
                   htmlFor="cheat-team"
                   required
+                  error={errors.team}
                   helper="按榜单名次识别队伍;队伍名不在榜单响应里"
                 >
                   <Select
                     id="cheat-team"
                     options={teamOptions}
                     value={teamId}
+                    invalid={Boolean(errors.team)}
+                    onBlur={() => validate(['team'])}
                     placeholder={teamOptions.length > 0 ? '选择队伍' : '暂无上榜队伍'}
                     disabled={teamOptions.length === 0}
                     onValueChange={setTeamId}
@@ -552,12 +556,14 @@ function CheatRecordModal({ contest, sourceRef, onClose, onSaved }: CheatRecordM
             </FormField>
 
             {actionValue === CheatAction.PENALTY ? (
-              <FormField label="扣除分数" htmlFor="cheat-penalty" required>
+              <FormField label="扣除分数" htmlFor="cheat-penalty" required error={errors.penalty}>
                 <Input
                   id="cheat-penalty"
                   type="number"
                   min="1"
                   value={penaltyScore}
+                  invalid={Boolean(errors.penalty)}
+                  onBlur={() => validate(['penalty'])}
                   onChange={(event) => setPenaltyScore(event.target.value)}
                 />
               </FormField>
@@ -567,11 +573,14 @@ function CheatRecordModal({ contest, sourceRef, onClose, onSaved }: CheatRecordM
               label="判定依据"
               htmlFor="cheat-note"
               required
+              error={errors.note}
               helper="写清楚判定理由与证据来源,这条记录会留档"
             >
               <Textarea
                 id="cheat-note"
                 value={note}
+                invalid={Boolean(errors.note)}
+                onBlur={() => validate(['note'])}
                 rows={4}
                 onChange={(event) => setNote(event.target.value)}
               />

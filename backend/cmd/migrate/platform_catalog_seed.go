@@ -81,6 +81,7 @@ type platformJudgerManifest struct {
 		RuntimeCode         string                `json:"runtime_code"`
 		GenesisRef          string                `json:"genesis_ref"`
 		Command             []string              `json:"command"`
+		SidecarCommand      []string              `json:"sidecar_command"`
 		ExecTarget          string                `json:"exec_target"`
 		Env                 []workload.EnvVarSpec `json:"env"`
 		SuiteArchiveName    string                `json:"suite_archive_name"`
@@ -589,9 +590,7 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 		if resourceErr != nil {
 			return fmt.Errorf("生成判题器 %s 执行契约失败: %w", m.Name, resourceErr)
 		}
-		// Persist the manifest execution contract even while its runtime is not ready.
-		// The missing composition is then explicit and fail-closed instead of looking like
-		// a successfully compiled but empty snapshot.
+		// 未就绪记录仅在唯一快照的 Spec 保留声明,无摘要时不得执行。
 		resource = execution
 		if proven {
 			ready, readyErr := platformRuntimeReadyForJudger(ctx, database, composition.Runtimes[0].Code)
@@ -617,6 +616,7 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 					return fmt.Errorf("登记判题器 %s 最终组合快照失败: %w", m.Name, replaceErr)
 				}
 				execution.CompositionSnapshot = snapshot
+				execution.DisabledReason = "判题器等待平台自检"
 				resource = execution
 			} else {
 				resource.DisabledReason = fmt.Sprintf("运行时 %s 尚未完成平台自检", composition.Runtimes[0].Code)
@@ -628,6 +628,15 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 	}
 	onchainResource := judge.JudgerResourceSpec{}
 	onchainComposition := contracts.SandboxCompositionSpec{ID: "judge:onchain-assert", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}
+	genesisRef := strings.TrimSpace(genesisRefs["testcase-evm"])
+	if genesisRef == "" {
+		return fmt.Errorf("onchain-assert 缺少 testcase-evm manifest 的 genesis_ref")
+	}
+	onchainResource = judge.JudgerResourceSpec{
+		CompositionSnapshot: contracts.SandboxCompositionSnapshot{Spec: onchainComposition},
+		GenesisRef:          genesisRef, TimeoutSec: 60, MaxRetries: 1,
+		DisabledReason: "判题环境尚未准备完成",
+	}
 	ready, err := platformRuntimeReadyForJudger(ctx, database, onchainComposition.Runtimes[0].Code)
 	if err != nil {
 		return fmt.Errorf("读取链上断言运行时状态失败: %w", err)
@@ -637,14 +646,8 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 		if compileErr != nil {
 			return fmt.Errorf("编译链上断言组合快照失败: %w", compileErr)
 		}
-		genesisRef := strings.TrimSpace(genesisRefs["testcase-evm"])
-		if genesisRef == "" {
-			return fmt.Errorf("onchain-assert 缺少 testcase-evm manifest 的 genesis_ref")
-		}
-		onchainResource = judge.JudgerResourceSpec{Composition: onchainComposition, CompositionSnapshot: snapshot, GenesisRef: genesisRef, TimeoutSec: 60, MaxRetries: 1}
-	}
-	if onchainResource.Composition.ID == "" {
-		onchainResource.Composition = onchainComposition
+		onchainResource.CompositionSnapshot = snapshot
+		onchainResource.DisabledReason = "判题器等待平台自检"
 	}
 	items = append(items, catalogJudger{id: platformJudgerID("onchain-assert"), code: "onchain-assert", name: "链上状态断言判题器", typ: 2, executorRef: "m3-backend-strategy", runtimeNeeded: true, defaultTimeout: 60, resource: onchainResource})
 	return database.WithPrivilegedTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -653,7 +656,7 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 			if marshalErr != nil {
 				return fmt.Errorf("编码判题器 %s 执行事实失败: %w", item.code, marshalErr)
 			}
-			if err := execJSON(ctx, tx, `INSERT INTO judger (id,code,name,type,executor_ref,runtime_required,default_timeout_sec,resource_spec,selftest_status,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,2) ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name,type=EXCLUDED.type,executor_ref=EXCLUDED.executor_ref,runtime_required=EXCLUDED.runtime_required,default_timeout_sec=EXCLUDED.default_timeout_sec,resource_spec=EXCLUDED.resource_spec,selftest_status=CASE WHEN judger.resource_spec IS DISTINCT FROM EXCLUDED.resource_spec THEN 1 ELSE judger.selftest_status END,status=CASE WHEN judger.resource_spec IS DISTINCT FROM EXCLUDED.resource_spec THEN 2 ELSE judger.status END,updated_at=now()`, item.id, item.code, item.name, item.typ, item.executorRef, item.runtimeNeeded, item.defaultTimeout, resourceJSON); err != nil {
+			if err := execJSON(ctx, tx, `INSERT INTO judger (id,code,name,type,executor_ref,runtime_required,default_timeout_sec,resource_spec,selftest_status,status) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,1,2) ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name,type=EXCLUDED.type,executor_ref=EXCLUDED.executor_ref,runtime_required=EXCLUDED.runtime_required,default_timeout_sec=EXCLUDED.default_timeout_sec,resource_spec=CASE WHEN (judger.resource_spec - 'disabled_reason') IS NOT DISTINCT FROM (EXCLUDED.resource_spec - 'disabled_reason') THEN judger.resource_spec ELSE EXCLUDED.resource_spec END,selftest_status=CASE WHEN (judger.resource_spec - 'disabled_reason') IS DISTINCT FROM (EXCLUDED.resource_spec - 'disabled_reason') THEN 1 ELSE judger.selftest_status END,status=CASE WHEN (judger.resource_spec - 'disabled_reason') IS DISTINCT FROM (EXCLUDED.resource_spec - 'disabled_reason') THEN 2 ELSE judger.status END,updated_at=now()`, item.id, item.code, item.name, item.typ, item.executorRef, item.runtimeNeeded, item.defaultTimeout, resourceJSON); err != nil {
 				return fmt.Errorf("同步判题器 %s 失败: %w", item.code, err)
 			}
 		}
@@ -705,6 +708,16 @@ func platformJudgerResourceSpec(manifest platformJudgerManifest, imageURL string
 	if !workload.ValidNonShellCommand(manifest.Judger.Command) {
 		return contracts.SandboxCompositionSpec{}, judge.JudgerResourceSpec{}, fmt.Errorf("manifest 未声明有效 judger.command")
 	}
+	if !workload.ValidNonShellCommand(manifest.Judger.SidecarCommand) {
+		return contracts.SandboxCompositionSpec{}, judge.JudgerResourceSpec{}, fmt.Errorf("manifest 未声明有效 judger.sidecar_command")
+	}
+	prepullCommand, err := platformManifestSelftestCommand(manifest.Selftest)
+	if err != nil {
+		return contracts.SandboxCompositionSpec{}, judge.JudgerResourceSpec{}, fmt.Errorf("判题器预拉取自检命令无效: %w", err)
+	}
+	if len(prepullCommand) == 0 {
+		return contracts.SandboxCompositionSpec{}, judge.JudgerResourceSpec{}, fmt.Errorf("判题器必须声明 selftest.commands")
+	}
 	genesisRef := strings.TrimSpace(manifest.Judger.GenesisRef)
 	if genesisRef == "" {
 		return contracts.SandboxCompositionSpec{}, judge.JudgerResourceSpec{}, fmt.Errorf("manifest 未声明 judger.genesis_ref")
@@ -725,7 +738,7 @@ func platformJudgerResourceSpec(manifest platformJudgerManifest, imageURL string
 	component := workload.ComponentSpec{
 		Name:                   manifest.Name,
 		ImageURL:               imageURL,
-		Command:                []string{"sleep", "2147483647"},
+		Command:                append([]string(nil), manifest.Judger.SidecarCommand...),
 		Env:                    env,
 		Workdir:                "/judge",
 		Resources:              workload.ResourceSpec{Requests: map[string]string{"cpu": manifest.Resources.CPURequest, "memory": manifest.Resources.MemoryRequest}, Limits: map[string]string{"cpu": manifest.Resources.CPULimit, "memory": manifest.Resources.MemoryLimit}},
@@ -734,19 +747,19 @@ func platformJudgerResourceSpec(manifest platformJudgerManifest, imageURL string
 		MountWorkspace:         func() *bool { value := true; return &value }(),
 		MountDomains:           []string{sandbox.VolumeDomainJudgePrivate},
 		EphemeralMounts:        []workload.EphemeralMountSpec{{Name: "judge-workdir", MountPath: "/judge"}, {Name: "judge-tmp", MountPath: "/tmp"}},
-		PrepullCommand:         []string{"sleep", "1"},
+		PrepullCommand:         prepullCommand,
 	}
 	composition := contracts.SandboxCompositionSpec{ID: "judge:" + manifest.Name, Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: runtimeCode, ImageVersion: platformRuntimeImageVersion(runtimeCode)}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}
 	return composition, judge.JudgerResourceSpec{
-		Composition:       composition,
-		GenesisRef:        genesisRef,
-		Command:           append([]string(nil), manifest.Judger.Command...),
-		ExecTarget:        execTarget,
-		ExecutionSidecars: []workload.ComponentSpec{component},
-		TimeoutSec:        manifest.Resources.TimeoutSeconds,
-		MaxRetries:        1,
-		SuiteArchiveName:  suiteName,
-		Selftest:          manifest.Selftest,
+		CompositionSnapshot: contracts.SandboxCompositionSnapshot{Spec: composition},
+		GenesisRef:          genesisRef,
+		Command:             append([]string(nil), manifest.Judger.Command...),
+		ExecTarget:          execTarget,
+		ExecutionSidecars:   []workload.ComponentSpec{component},
+		TimeoutSec:          manifest.Resources.TimeoutSeconds,
+		MaxRetries:          1,
+		SuiteArchiveName:    suiteName,
+		Selftest:            manifest.Selftest,
 	}, nil
 }
 

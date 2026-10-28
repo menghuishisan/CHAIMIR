@@ -47,6 +47,8 @@ type SessionIdentity struct {
 	IsPlatform bool
 	Method     string
 	Path       string
+	// RequiredModules 来自服务端路由声明，不从 JWT 或客户端输入取得。
+	RequiredModules []string
 }
 
 // SessionValidator 校验 JWT 所指向的服务端会话仍处于有效状态。

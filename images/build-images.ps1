@@ -353,7 +353,7 @@ function Get-RegistryDigest {
     return Get-RemoteDigestFromRegistryV2 -TaggedRef $Ref
 }
 
-# Invoke-DockerBuildWithRetry 执行构建并按配置重试。
+# Invoke-DockerBuildWithRetry 只重试同一 builder 的完整构建推送,失败不发布本机同名旧镜像。
 function Invoke-DockerBuildWithRetry {
     param(
         [string[]]$Arguments,
@@ -362,11 +362,9 @@ function Invoke-DockerBuildWithRetry {
     $exitCode = 1
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         Write-Host "Docker build attempt [$attempt/$MaxAttempts] $Image"
-        # 保留 BuildKit 的完整输出,便于只对“已导出 manifest 但 Harbor 传输失败”做
-        # 标准 Docker push 重试;编译或校验失败绝不能拿本地旧标签冒充新构建。
+        # 远端 builder 的导出日志不证明本机 tag 属于本次构建,只接受本次命令成功退出。
         $buildResult = Invoke-DockerCliWithTimeout -Arguments $Arguments -TimeoutSeconds $BuildTimeoutSeconds
         $buildExitCode = $buildResult.Code
-        $buildOutput = @($buildResult.Text)
         if (-not [string]::IsNullOrWhiteSpace($buildResult.Text)) { Write-Host $buildResult.Text }
         if ($buildExitCode -eq 0) {
             return
@@ -374,47 +372,6 @@ function Invoke-DockerBuildWithRetry {
         $exitCode = $buildExitCode
         Write-Warning "docker build 失败: $Image, attempt=$attempt, exit=$exitCode"
 
-        $buildText = ($buildOutput | ForEach-Object { [string]$_ }) -join "`n"
-        $tagMatch = [regex]::Match($buildText, "(?m)naming to (?<ref>[^\s]+) done")
-        $tagRef = if ($tagMatch.Success) { $tagMatch.Groups["ref"].Value } else { "" }
-        if ([string]::IsNullOrWhiteSpace($tagRef)) {
-            foreach ($tagOption in @("-t", "--tag")) {
-                $tagIndex = [Array]::IndexOf($Arguments, $tagOption)
-                if ($tagIndex -ge 0 -and $tagIndex + 1 -lt $Arguments.Count) {
-                    $tagRef = [string]$Arguments[$tagIndex + 1]
-                    break
-                }
-            }
-        }
-        # BuildKit 的不同版本对 naming 行是否追加 done 输出不一致;manifest 行本身已足以证明本地产物已导出。
-        $manifestExported = $buildText -match "(?m)exporting manifest sha256:[0-9a-f]{64}"
-        $networkPushFailure = $buildText -match "(?i)(failed to fetch oauth token|failed to do request|TLS handshake timeout|timeout awaiting response headers)"
-        if ($manifestExported -and $networkPushFailure -and -not [string]::IsNullOrWhiteSpace($tagRef)) {
-            $savedErrorActionPreference = $ErrorActionPreference
-            try {
-                $ErrorActionPreference = "Continue"
-                $localImage = @(Invoke-DockerCli -Arguments @("image", "inspect", $tagRef) 2>&1)
-                $localImageExitCode = $LASTEXITCODE
-            } finally {
-                $ErrorActionPreference = $savedErrorActionPreference
-            }
-            if ($localImageExitCode -eq 0) {
-                Write-Warning "BuildKit manifest 已导出但 Harbor 推送握手失败,改用标准 Docker push 重试: $tagRef"
-                $savedErrorActionPreference = $ErrorActionPreference
-                try {
-                    $ErrorActionPreference = "Continue"
-                    $pushOutput = @(Invoke-DockerCli -Arguments @("push", $tagRef) 2>&1)
-                    $pushExitCode = $LASTEXITCODE
-                } finally {
-                    $ErrorActionPreference = $savedErrorActionPreference
-                }
-                $pushOutput | ForEach-Object { Write-Host ([string]$_) }
-                if ($pushExitCode -eq 0) {
-                    return
-                }
-                Write-Warning "标准 Docker push 失败: $tagRef, exit=$pushExitCode"
-            }
-        }
         if ($attempt -lt $MaxAttempts -and $RetryDelaySeconds -gt 0) {
             Start-Sleep -Seconds $RetryDelaySeconds
         }

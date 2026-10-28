@@ -44,6 +44,9 @@ func (s *Service) ReportAction(ctx context.Context, tenantID, accountID, session
 		if !sessionAccountAuthorized(session.Session, accountID) {
 			return apperr.ErrForbidden
 		}
+		if err := s.requireSessionModules(ctx, tenantID, session.SourceRef); err != nil {
+			return err
+		}
 		if !canMutateSession(session.Status) {
 			return apperr.ErrSimSessionStateInvalid
 		}
@@ -96,6 +99,9 @@ func (s *Service) GetReplayForUser(ctx context.Context, tenantID, accountID, ses
 	if !sessionAccountAuthorized(session.Session, accountID) {
 		return SimReplayResponse{}, apperr.ErrForbidden
 	}
+	if err := s.requireSessionModules(ctx, tenantID, session.SourceRef); err != nil {
+		return SimReplayResponse{}, err
+	}
 	return replayToResponse(session, actions), nil
 }
 
@@ -127,6 +133,9 @@ func (s *Service) ShareSession(ctx context.Context, tenantID, accountID, session
 		}
 		if !sessionAccountAuthorized(session, accountID) {
 			return apperr.ErrForbidden
+		}
+		if err := s.requireSessionModules(ctx, tenantID, session.SourceRef); err != nil {
+			return err
 		}
 		if session.Status == SessionFailed || session.Status == SessionArchived {
 			return apperr.ErrSimSessionStateInvalid
@@ -196,7 +205,19 @@ func (s *Service) GetSharedReplay(ctx context.Context, code string) (SimReplayRe
 	}); err != nil {
 		return SimReplayResponse{}, err
 	}
+	if err := s.requireSessionModules(ctx, share.TenantID, session.SourceRef); err != nil {
+		return SimReplayResponse{}, err
+	}
 	return replayToPublicResponse(session, actions), nil
+}
+
+// requireSessionModules 同时检查仿真与稳定来源模块，匿名分享和业务内嵌会话共用。
+func (s *Service) requireSessionModules(ctx context.Context, tenantID int64, sourceRef string) error {
+	modules := []string{contracts.TenantModuleSim}
+	if source := contracts.TenantModuleFromSourceRef(sourceRef); source != "" && source != contracts.TenantModuleSim {
+		modules = append(modules, source)
+	}
+	return s.identity.RequireTenantModules(ctx, tenantID, modules...)
 }
 
 // loadReplay 读取会话和有序操作序列。

@@ -10,7 +10,7 @@
 import { useCallback, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
 import { Building, Gauge, Save } from 'lucide-react'
-import { TenantStatus, type SandboxQuota, type Tenant } from '@chaimir/api-client'
+import { API_ERROR_CODES, ApiError, TenantStatus, type SandboxQuota, type Tenant } from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
@@ -32,6 +32,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { TENANT_MODULE_LABELS } from '../../../../utils/labels/identity'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
@@ -53,9 +54,16 @@ export default function PlatformSchoolDetailPage() {
   const navigate = useNavigate()
 
   const tenant = useAsyncResource(
-    () => api.identity.getTenant(tenantId),
+    async () => {
+      try {
+        return await api.identity.getTenant(tenantId)
+      } catch (error) {
+        if (error instanceof ApiError && error.code === API_ERROR_CODES.RESOURCE_NOT_FOUND) return null
+        throw error
+      }
+    },
     [tenantId],
-    () => false
+    (value) => value === null
   )
 
   return (
@@ -87,10 +95,13 @@ export default function PlatformSchoolDetailPage() {
           </div>
         }
       >
-        {(data) => <SchoolOverview tenant={data} onBack={() => navigate('/platform-admin/schools')} />}
+        {(data) => data ? (
+          <>
+            <SchoolOverview tenant={data} onBack={() => navigate('/platform-admin/schools')} />
+            <QuotaSection key={data.id} tenantId={data.id} />
+          </>
+        ) : null}
       </ResourceState>
-
-      <QuotaSection tenantId={tenantId} />
     </PageScaffold>
   )
 }
@@ -290,28 +301,27 @@ function QuotaForm({ quota, tenantId, onSaved }: QuotaFormProps) {
     max_keepalive_min: String(quota.max_keepalive_min),
     max_snapshot_retention_min: String(quota.max_snapshot_retention_min),
   }))
-  const [errors, setErrors] = useState<Partial<Record<QuotaFieldKey, string>>>({})
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+
+  const { errors, validate } = useFormValidation(useCallback(() => {
+    const next: Partial<Record<QuotaFieldKey, string>> = {}
+    for (const field of QUOTA_FIELDS) {
+      const parsed = Number(values[field.key])
+      if (!Number.isInteger(parsed) || parsed < 0 || (!field.allowZero && parsed === 0)) {
+        next[field.key] = field.allowZero ? '请填 0 或更大的整数' : '请填大于 0 的整数'
+      }
+    }
+    return next
+  }, [values]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const nextErrors: Partial<Record<QuotaFieldKey, string>> = {}
-      const numbers = {} as Record<QuotaFieldKey, number>
-      for (const field of QUOTA_FIELDS) {
-        const parsed = Number(values[field.key])
-        if (!Number.isInteger(parsed) || parsed < 0 || (!field.allowZero && parsed === 0)) {
-          nextErrors[field.key] = field.allowZero ? '请填 0 或更大的整数' : '请填大于 0 的整数'
-          continue
-        }
-        numbers[field.key] = parsed
-      }
-      setErrors(nextErrors)
-      if (Object.keys(nextErrors).length > 0) {
-        setFormError('有几项填得不对,按提示改一下再保存。')
-        return
-      }
+      if (!validate()) return
+      const numbers = Object.fromEntries(
+        QUOTA_FIELDS.map((field) => [field.key, Number(values[field.key])]),
+      ) as Record<QuotaFieldKey, number>
 
       setFormError(undefined)
       setWorking(true)
@@ -325,7 +335,7 @@ function QuotaForm({ quota, tenantId, onSaved }: QuotaFormProps) {
         setWorking(false)
       }
     },
-    [onSaved, tenantId, values]
+    [onSaved, tenantId, validate, values]
   )
 
   return (
@@ -336,7 +346,7 @@ function QuotaForm({ quota, tenantId, onSaved }: QuotaFormProps) {
         items={[
           {
             label: '当前活跃实验环境',
-            value: quota.active_sandbox_count ?? 0,
+            value: quota.active_sandbox_count,
             hint: `并发上限 ${quota.max_concurrent_sandbox}`,
           },
           { label: 'CPU 上限', value: `${quota.max_cpu} 核`, hint: '全校沙箱合计' },

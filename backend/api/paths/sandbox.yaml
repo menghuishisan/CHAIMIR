@@ -7,6 +7,15 @@
     x-chaimir-audience: platform-admin-or-teacher
     security: [{ bearerAuth: [] }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/sandbox/catalog/composition-preview:
+  post:
+    tags: [sandbox]
+    summary: 只读解析组合依赖与连接候选
+    operationId: sandboxPreviewComposition
+    x-chaimir-audience: platform-admin-or-teacher
+    security: [{ bearerAuth: [] }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sandbox/runtimes:
   get:
     tags: [sandbox]
@@ -143,6 +152,7 @@
     tags: [sandbox]
     summary: 查询沙箱状态、资源用量和工具入口
     operationId: sandboxGetSandbox
+    description: resource_usage 为完整用量摘要或 null；采样失败与未采样明确为未知，不阻断生命周期和权限读取，也不以零值替代未知。
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
@@ -213,7 +223,7 @@
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/FilePathQuery" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody: { $ref: "#/components/requestBodies/SandboxWorkspaceFileWriteBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/sandbox/sandboxes/{id}/files/save:
   post:

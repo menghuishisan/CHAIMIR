@@ -61,7 +61,7 @@ export type RunnerCommand =
       frame_count: number;
     };
 
-/** RunnerSnapshot 是回传给后端的完整教学快照;扩展包的 render 不在浏览器执行,故帧在此产出。 */
+/** RunnerSnapshot 仅回传教学快照;操作历史由后端持有并在 apply/restore 输入，不在响应中重复。 */
 interface RunnerSnapshot {
   tick: number;
   state: SimState;
@@ -69,7 +69,6 @@ interface RunnerSnapshot {
   current_step?: unknown;
   interaction_availability: Record<string, boolean>;
   checkpoint_results: Record<string, unknown>;
-  events: SimEvent[];
 }
 
 /** RunnerResponse 只有成功与失败两种形态;失败必须带可定位的原因,不静默返回空帧。 */
@@ -211,6 +210,5 @@ function toSnapshot(engine: SimEngine): RunnerSnapshot {
     current_step: snapshot.currentStep,
     interaction_availability: snapshot.interactionAvailability,
     checkpoint_results: snapshot.checkpointResults,
-    events: snapshot.events,
   };
 }

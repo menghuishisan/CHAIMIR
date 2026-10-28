@@ -27,10 +27,10 @@ export function reduceGasEvent(state: GasState, event: SimEvent, _context: Reduc
 }
 
 /**
- * finalizeGasState 刷新 gas 指标、检查点和代码追踪。
+ * finalizeGasState 刷新 gas 指标、检查点和代码追踪，仅在费用结算阶段达成检查点。
  */
 function finalizeGasState(state: GasState): GasState {
-  const settled = state.steps.every((step) => step.executed) && !state.outOfGas;
+  const settled = state.phaseIndex === gasPhases.length - 1 && state.steps.every((step) => step.executed) && !state.outOfGas;
   return { ...state, phase: gasPhases[state.phaseIndex].label, explanation: explain(state.phaseIndex), metrics: { result: state.outOfGas ? 'Gas 不足回滚' : settled ? '费用已结算' : '执行中', risk: state.outOfGas ? 72 : 8, gasUsed: state.gasUsed }, checkpointValues: { settled }, _trace: { triggeredLines: traceLinesForGas(state.lastTransition), variables: { gasUsed: state.gasUsed, gasLimit: state.gasLimit }, executionPath: `gas/${state.lastTransition}` } };
 }
 
@@ -38,7 +38,7 @@ function finalizeGasState(state: GasState): GasState {
  * gasSettled 输出 gas 结算检查点。
  */
 export function gasSettled(state: GasState): CheckpointResult {
-  return { achieved: Boolean(state.checkpointValues.settled), answer: { gasUsed: state.gasUsed, refund: state.refund }, explanation: state.checkpointValues.settled ? '所有指令执行完成且费用可结算。' : '执行尚未完成或已因 gas 不足回滚。' };
+  return { achieved: Boolean(state.checkpointValues.settled), answer: { gasUsed: state.gasUsed, refund: state.refund }, explanation: state.checkpointValues.settled ? '所有指令与退款计算已完成,费用已结算。' : '费用尚未结算或已因 gas 不足回滚。' };
 }
 
 /**

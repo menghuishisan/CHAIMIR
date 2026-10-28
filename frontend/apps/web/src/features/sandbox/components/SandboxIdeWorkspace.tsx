@@ -28,6 +28,7 @@ import {
   SandboxPhase,
   SandboxStatus,
   SandboxToolKind,
+  SandboxToolStatus,
   type SandboxChainOperation,
   type SandboxChainRequest,
   type SandboxChainResponse,
@@ -51,6 +52,12 @@ import {
   Button,
   ChainProgress,
   Input,
+  Modal,
+  ModalContent,
+  ModalDescription,
+  ModalFooter,
+  ModalHeader,
+  ModalTitle,
   Select,
   Tabs,
   TabsContent,
@@ -62,10 +69,12 @@ import {
 import { api } from '../../../app/api'
 import { appConfig } from '../../../app/config'
 import { useTicketedWebSocket } from '../../../hooks'
+import { useFormValidation } from '../../../hooks/useFormValidation'
 import { decodeUtf8Base64, encodeUtf8Base64 } from '../../../utils/base64'
 import { sandboxChainOperationLabel, sandboxPhaseLabel } from '../../../utils/labels/sandbox'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
 import { SANDBOX_PHASES, SANDBOX_STATUSES } from '../options'
+import { isSandboxReadyForOperation } from '../rules'
 import { asRecord } from '../runtimeSpec'
 
 /**
@@ -105,10 +114,13 @@ export interface SandboxIdeWorkspaceProps {
   refreshKey?: number
   /** 保存工作区成功后回调:调用方据此提交或触发判分 */
   onSaved?: (result: SandboxFileSaveResponse) => void
-  /** 环境首次就绪后回调,用于业务页面同步可操作状态或恢复权威工作区状态。 */
-  onReady?: () => Promise<void>
+  /** 当前可操作性变化后回调,业务页面据此关闭提交或恢复权威工作区引用。 */
+  onReadinessChange?: (ready: boolean) => Promise<void>
   /** 工作区能力入口。竞赛页面注入 M8 授权网关,实验页面使用 M2 租户内入口。 */
   workspaceApi?: SandboxWorkspaceApi
+  /** 来源页面提供受控重建入口，工作台不自行创建或重放初始化。 */
+  onRebuild?: () => void
+  rebuilding?: boolean
 }
 
 /**
@@ -161,62 +173,63 @@ export type SandboxWorkspaceInstance = Omit<SandboxInstance, 'tenant_id'> & {
  * 上游模块(M7 实例、M8 环境)的响应里工具字段命名与 M2 不同(`code` 对 `tool_code`),
  * 更重要的是「出现什么」的权威在 M2,让调用方传等于给了绕过这层判定的口子。
  */
-export function SandboxIdeWorkspace({
+export function SandboxIdeWorkspace(props: SandboxIdeWorkspaceProps) {
+  return <SandboxIdeWorkspaceSession key={props.sandboxId} {...props} />
+}
+
+/** SandboxIdeWorkspaceSession 的状态仅属于一个沙箱,切换实例时整组工作面板重新装配。 */
+function SandboxIdeWorkspaceSession({
   sandboxId,
   refreshKey = 0,
   onSaved,
-  onReady,
+  onReadinessChange,
   workspaceApi,
+  onRebuild,
+  rebuilding,
 }: SandboxIdeWorkspaceProps) {
   const workspace = workspaceApi ?? api.sandbox
   const [instance, setInstance] = useState<SandboxWorkspaceInstance>()
   const [loadError, setLoadError] = useState<string>()
   const [progress, setProgress] = useState<SandboxProgress>()
-  const readyNotifiedRef = useRef(false)
+  // 同一沙箱已访问面板保留挂载,切标签不丢编辑、终端或嵌入工具状态。
+  const [visitedTabs, setVisitedTabs] = useState<Set<string>>(() => new Set())
+  const lastReadinessRef = useRef<boolean | undefined>(undefined)
+  const instanceRequestRef = useRef(0)
 
   /** loadInstance 读取沙箱详情:能力声明与工具入口都以它为准。 */
   const loadInstance = useCallback(async () => {
-    setLoadError(undefined)
+    const request = ++instanceRequestRef.current
     try {
-      setInstance(await workspace.getInstance(sandboxId))
+      const current = await workspace.getInstance(sandboxId)
+      if (request !== instanceRequestRef.current) return
+      setInstance(current)
+      setLoadError(undefined)
     } catch (error) {
+      if (request !== instanceRequestRef.current) return
       setLoadError(userFacingErrorMessage(error, '实验环境的状态读不到,请稍后重试。'))
     }
   }, [sandboxId, workspace])
 
   useEffect(() => {
     void loadInstance()
+    return () => {
+      instanceRequestRef.current += 1
+    }
   }, [loadInstance, refreshKey])
 
+  const ready = loadError === undefined && isSandboxReadyForOperation(instance)
   useEffect(() => {
-    readyNotifiedRef.current = false
-  }, [sandboxId])
+    if (!onReadinessChange || lastReadinessRef.current === ready) return
+    lastReadinessRef.current = ready
+    void onReadinessChange(ready)
+  }, [onReadinessChange, ready])
 
-  useEffect(() => {
-    if (
-      readyNotifiedRef.current ||
-      !onReady ||
-      !instance ||
-      (instance.phase !== SandboxPhase.READY && instance.phase !== SandboxPhase.FULLY_READY) ||
-      instance.status === SandboxStatus.FAILED ||
-      instance.status === SandboxStatus.DESTROYED
-    ) {
-      return
-    }
-    readyNotifiedRef.current = true
-    void onReady()
-  }, [instance, onReady])
-
-  // 环境还没就绪时订阅准备进度:第一次拉容器要十几秒,期间界面必须说清在做什么。
+  // 持续订阅生命周期变化,就绪后回收或暂停也必须及时关闭工作面。
   // 已回收的沙箱是终态,不能把旧 phase 当成“正在释放”继续展示,也不应再建立进度连接。
   const terminal =
     instance?.status === SandboxStatus.DESTROYED || instance?.status === SandboxStatus.FAILED
   // 当前实例阶段是服务端权威状态;进度 WebSocket 只补充同一阶段的说明,不能提前开放工作面。
-  const notReady =
-    instance !== undefined &&
-    !terminal &&
-    instance.phase !== SandboxPhase.READY &&
-    instance.phase !== SandboxPhase.FULLY_READY
+  const notReady = instance !== undefined && !terminal && !isSandboxReadyForOperation(instance)
   // 进度消息只补充服务端当前 phase/status 的说明,旧消息不能覆盖失败或终态文案。
   const matchingProgress =
     instance !== undefined &&
@@ -224,27 +237,36 @@ export function SandboxIdeWorkspace({
     progress.status === instance.status
       ? progress
       : undefined
-  const progressUrl = useMemo(
-    () => (notReady ? workspace.getProgressWsUrl(sandboxId) : undefined),
-    [notReady, sandboxId, workspace]
-  )
+  const progressUrl =
+    instance !== undefined && !terminal ? workspace.getProgressWsUrl(sandboxId) : undefined
 
   const progressSocket = useTicketedWebSocket({
     url: progressUrl,
+    onOpen: () => void loadInstance(),
     onMessage: (data) => {
       const message = parseProgress(data)
       if (!message) return
       setProgress(message)
-      // 就绪或失败都要重读实例:能力声明与工具入口只在详情里
-      if (message.stage === 'ready' || message.stage === 'failed') void loadInstance()
+      // 推送只触发重读,能力和生命周期仍以 HTTP 详情为准。
+      void loadInstance()
     },
   })
 
-  // HTTP 沙箱详情是状态权威,WebSocket 只负责实时提示。准备阶段即使进度连接丢失或
-  // 某条推送未到达,也要周期性重读详情,让页面最终进入真实的就绪或失败状态,不把用户
-  // 永久留在旧的准备进度上。进入就绪/失败后 effect 自动清理定时器。
+  const toolAccess = instance?.tool_access ?? []
+  const hasDynamicTools = toolAccess.some(
+    (tool) => tool.kind === SandboxToolKind.WEB_EMBED || tool.kind === SandboxToolKind.COMMAND
+  )
+
+  // 工具就绪可能回退,工作台存续期间持续读取实时状态,不把一次Ready永久当成可访问。
+  const shouldPoll =
+    !terminal &&
+    (notReady ||
+      hasDynamicTools ||
+      loadError !== undefined ||
+      progressSocket.status === 'error' ||
+      progressSocket.status === 'closed')
   useEffect(() => {
-    if (!notReady) return
+    if (!shouldPoll) return
     let disposed = false
     let timer: number | undefined
     const poll = async () => {
@@ -257,11 +279,9 @@ export function SandboxIdeWorkspace({
       disposed = true
       if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [loadInstance, notReady])
+  }, [loadInstance, shouldPoll])
 
-  const toolAccess = instance?.tool_access ?? []
-
-  if (loadError) {
+  if (loadError && !instance) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <TriangleAlert aria-hidden="true" className="size-6 text-on-dark-danger" />
@@ -293,12 +313,17 @@ export function SandboxIdeWorkspace({
         <TriangleAlert aria-hidden="true" className="size-6 text-on-dark-danger" />
         <p className="text-base text-on-dark">实验环境没能准备好</p>
         <p className="max-w-md text-sm text-on-dark-sub">
-          {matchingProgress?.message ?? '环境准备失败。返回当前页面重新打开环境即可重试。'}
+          {matchingProgress?.message ?? '环境准备失败，请重新准备环境后继续。'}
         </p>
         {matchingProgress?.trace_id ? (
           <p className="font-mono text-xs text-on-dark-faint">
             如需帮助,请提供编号 {matchingProgress.trace_id}
           </p>
+        ) : null}
+        {onRebuild ? (
+          <Button variant="primary" size="sm" loading={rebuilding} onClick={onRebuild}>
+            重新准备环境
+          </Button>
         ) : null}
         <Button
           variant="on-dark"
@@ -328,6 +353,19 @@ export function SandboxIdeWorkspace({
         >
           重新读取状态
         </Button>
+      </div>
+    )
+  }
+
+  if (instance.status === SandboxStatus.PAUSED || instance.status === SandboxStatus.RECYCLING) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <p className="text-base text-on-dark">
+          {instance.status === SandboxStatus.PAUSED ? '实验环境已暂停' : '实验环境正在释放'}
+        </p>
+        <p className="max-w-md text-sm text-on-dark-sub">
+          已保存的代码和实验进度仍然保留,当前环境暂时无法操作。
+        </p>
       </div>
     )
   }
@@ -396,84 +434,140 @@ export function SandboxIdeWorkspace({
       ? 'terminal'
       : capabilities.chain_operations.length > 0
         ? 'chain'
-        : commandTools.length > 0
+        : capabilities.command_tools && commandTools.length > 0
           ? 'commands'
-          : 'web'
+          : `web:${webTools[0].tool_code}`
 
   return (
-    <Tabs defaultValue={defaultTab} className="flex h-full min-h-0 flex-col">
-      <TabsList className="shrink-0">
-        {capabilities.file_workspace ? (
-          <TabsTrigger value="files" icon={FileCode}>
-            代码
-          </TabsTrigger>
-        ) : null}
-        {capabilities.terminal ? (
-          <TabsTrigger value="terminal" icon={SquareTerminal}>
-            终端
-          </TabsTrigger>
-        ) : null}
-        {capabilities.chain_operations.length > 0 ? (
-          <TabsTrigger value="chain" icon={Link2}>
-            链操作
-          </TabsTrigger>
-        ) : null}
-        {capabilities.command_tools && commandTools.length > 0 ? (
-          <TabsTrigger value="commands" icon={Wrench}>
-            工具命令
-          </TabsTrigger>
-        ) : null}
-        {webTools.map((tool) => (
-          <TabsTrigger key={tool.tool_code} value={`web:${tool.tool_code}`} icon={FolderOpen}>
-            {tool.tool_code}
-          </TabsTrigger>
-        ))}
-      </TabsList>
-
-      {capabilities.file_workspace ? (
-        <TabsContent value="files" className="min-h-0 flex-1">
-          <FilesPanel
-            sandboxId={sandboxId}
-            workspaceApi={workspace}
-            workspaceRevision={instance.workspace_revision}
-            onSaved={onSaved}
-          />
-        </TabsContent>
+    <div className="flex h-full min-h-0 flex-col">
+      {instance.resource_usage === null ? (
+        <p role="status" className="shrink-0 px-3 py-2 text-xs text-on-dark-sub">
+          资源用量暂时无法读取，环境功能可继续使用。
+        </p>
       ) : null}
-
-      {capabilities.terminal ? (
-        <TabsContent value="terminal" className="min-h-0 flex-1">
-          <TerminalPanel sandboxId={sandboxId} workspaceApi={workspace} />
-        </TabsContent>
-      ) : null}
-
-      {capabilities.chain_operations.length > 0 ? (
-        <TabsContent value="chain" className="min-h-0 flex-1">
-          <ChainPanel
-            sandboxId={sandboxId}
-            workspaceApi={workspace}
-            operations={capabilities.chain_operations}
-            runtimeInstances={instance.runtime_instances}
-          />
-        </TabsContent>
-      ) : null}
-
-      {capabilities.command_tools && commandTools.length > 0 ? (
-        <TabsContent value="commands" className="min-h-0 flex-1">
-          <CommandPanel sandboxId={sandboxId} workspaceApi={workspace} tools={commandTools} />
-        </TabsContent>
-      ) : null}
-
-      {webTools.map((tool) => (
-        <TabsContent
-          key={tool.tool_code}
-          value={`web:${tool.tool_code}`}
-          className="min-h-0 flex-1"
+      {loadError ? (
+        <div
+          role="alert"
+          className="flex shrink-0 items-center gap-3 px-3 py-2 text-sm text-on-dark-danger"
         >
-          <WebToolPanel sandboxId={sandboxId} workspaceApi={workspace} toolCode={tool.tool_code} />
-        </TabsContent>
-      ))}
-    </Tabs>
+          <p className="flex-1">{loadError}</p>
+          <Button
+            variant="on-dark"
+            size="sm"
+            leftIcon={RefreshCw}
+            onClick={() => void loadInstance()}
+          >
+            重新读取状态
+          </Button>
+        </div>
+      ) : null}
+      <Tabs
+        inert={loadError !== undefined}
+        defaultValue={defaultTab}
+        onValueChange={(tab) => setVisitedTabs((current) => new Set([...current, tab]))}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <TabsList className="shrink-0">
+          {capabilities.file_workspace ? (
+            <TabsTrigger value="files" icon={FileCode}>
+              代码
+            </TabsTrigger>
+          ) : null}
+          {capabilities.terminal ? (
+            <TabsTrigger value="terminal" icon={SquareTerminal}>
+              终端
+            </TabsTrigger>
+          ) : null}
+          {capabilities.chain_operations.length > 0 ? (
+            <TabsTrigger value="chain" icon={Link2}>
+              链操作
+            </TabsTrigger>
+          ) : null}
+          {capabilities.command_tools && commandTools.length > 0 ? (
+            <TabsTrigger value="commands" icon={Wrench}>
+              工具命令
+            </TabsTrigger>
+          ) : null}
+          {webTools.map((tool) => (
+            <TabsTrigger key={tool.tool_code} value={`web:${tool.tool_code}`} icon={FolderOpen}>
+              {tool.tool_code}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        {capabilities.file_workspace ? (
+          <TabsContent
+            value="files"
+            forceMount={defaultTab === 'files' || visitedTabs.has('files') ? true : undefined}
+            className="min-h-0 flex-1 data-[state=inactive]:hidden"
+          >
+            <FilesPanel sandboxId={sandboxId} workspaceApi={workspace} onSaved={onSaved} />
+          </TabsContent>
+        ) : null}
+
+        {capabilities.terminal ? (
+          <TabsContent
+            value="terminal"
+            forceMount={defaultTab === 'terminal' || visitedTabs.has('terminal') ? true : undefined}
+            className="min-h-0 flex-1 data-[state=inactive]:hidden"
+          >
+            <TerminalPanel sandboxId={sandboxId} workspaceApi={workspace} />
+          </TabsContent>
+        ) : null}
+
+        {capabilities.chain_operations.length > 0 ? (
+          <TabsContent
+            value="chain"
+            forceMount={defaultTab === 'chain' || visitedTabs.has('chain') ? true : undefined}
+            className="min-h-0 flex-1 data-[state=inactive]:hidden"
+          >
+            <ChainPanel
+              sandboxId={sandboxId}
+              workspaceApi={workspace}
+              operations={capabilities.chain_operations}
+              runtimeInstances={instance.runtime_instances}
+            />
+          </TabsContent>
+        ) : null}
+
+        {capabilities.command_tools && commandTools.length > 0 ? (
+          <TabsContent
+            value="commands"
+            forceMount={defaultTab === 'commands' || visitedTabs.has('commands') ? true : undefined}
+            className="min-h-0 flex-1 data-[state=inactive]:hidden"
+          >
+            <CommandPanel
+              sandboxId={sandboxId}
+              workspaceApi={workspace}
+              tools={commandTools}
+              available={ready}
+              onReload={() => void loadInstance()}
+            />
+          </TabsContent>
+        ) : null}
+
+        {webTools.map((tool) => (
+          <TabsContent
+            key={tool.tool_code}
+            value={`web:${tool.tool_code}`}
+            forceMount={
+              defaultTab === `web:${tool.tool_code}` || visitedTabs.has(`web:${tool.tool_code}`)
+                ? true
+                : undefined
+            }
+            className="min-h-0 flex-1 data-[state=inactive]:hidden"
+          >
+            <WebToolPanel
+              sandboxId={sandboxId}
+              workspaceApi={workspace}
+              toolCode={tool.tool_code}
+              status={ready ? tool.status : undefined}
+              onReload={loadInstance}
+            />
+          </TabsContent>
+        ))}
+      </Tabs>
+    </div>
   )
 }
 
@@ -482,7 +576,6 @@ export function SandboxIdeWorkspace({
 interface FilesPanelProps {
   sandboxId: string
   workspaceApi: SandboxWorkspaceApi
-  workspaceRevision: number
   onSaved?: (result: SandboxFileSaveResponse) => void
 }
 
@@ -491,91 +584,137 @@ interface FilesPanelProps {
  * 目录逐层展开而不是一次拉全树:后端 listFiles 是按路径列一层,递归拉整棵树在
  * 大工程上会打出几十个请求,而学生真正会点开的往往只有一两层。
  */
-function FilesPanel({
-  sandboxId,
-  workspaceApi,
-  workspaceRevision: initialWorkspaceRevision,
-  onSaved,
-}: FilesPanelProps) {
+function FilesPanel({ sandboxId, workspaceApi, onSaved }: FilesPanelProps) {
   const [path, setPath] = useState('.')
   const [entries, setEntries] = useState<SandboxFileEntry[]>([])
+  const [directoryLoading, setDirectoryLoading] = useState(true)
+  const [directoryError, setDirectoryError] = useState<string>()
   const [openPath, setOpenPath] = useState<string>()
-  const [content, setContent] = useState('')
+  const [fileReadVersion, setFileReadVersion] = useState(0)
   const [dirty, setDirty] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [confirmReload, setConfirmReload] = useState(false)
   const [panelError, setPanelError] = useState<string>()
-  const [workspaceRevision, setWorkspaceRevision] = useState(initialWorkspaceRevision)
+  const [editorError, setEditorError] = useState<string>()
 
   const editorHost = useRef<HTMLDivElement>(null)
   const editorRef = useRef<MountedEditor | undefined>(undefined)
+  const directoryRequestRef = useRef(0)
+  const fileRequestRef = useRef(0)
+  const mountedRef = useRef(false)
+  const busyRef = useRef(false)
+  const dirtyRef = useRef(false)
+  const editVersionRef = useRef(0)
+  // 编辑版本只属于实际读入或写入的内容,不能由详情轮询或归档保存推进。
+  const fileRevisionRef = useRef(0)
   // 编辑内容放进 ref:Monaco 的 onChange 回调在装配时固定,不能依赖闭包里的 state
   const contentRef = useRef('')
-  contentRef.current = content
 
-  useEffect(() => {
-    setWorkspaceRevision(initialWorkspaceRevision)
-  }, [initialWorkspaceRevision])
+  /** markDirty 同步更新事件门禁,不等待下一次渲染才保护尚未写入的编辑。 */
+  const markDirty = useCallback((value: boolean) => {
+    dirtyRef.current = value
+    setDirty(value)
+  }, [])
 
   const language = useMemo(() => languageFor(openPath), [openPath])
 
-  /** listDirectory 列出一层目录。 */
+  /** listDirectory 只接收最新目录读取结果,读取完成前不把初始数组显示为空目录。 */
   const listDirectory = useCallback(
     async (target: string) => {
-      setPanelError(undefined)
+      const request = ++directoryRequestRef.current
+      setDirectoryLoading(true)
+      setDirectoryError(undefined)
       try {
         const result = await workspaceApi.listFiles(sandboxId, target)
+        if (request !== directoryRequestRef.current) return
         setPath(result.relative_path)
         setEntries(result.entries)
       } catch (error) {
-        setPanelError(userFacingErrorMessage(error, '这个目录暂时打不开,请稍后重试。'))
+        if (request !== directoryRequestRef.current) return
+        setDirectoryError(userFacingErrorMessage(error, '这个目录暂时打不开,请稍后重试。'))
+      } finally {
+        if (request === directoryRequestRef.current) setDirectoryLoading(false)
       }
     },
     [sandboxId, workspaceApi]
   )
 
   useEffect(() => {
+    mountedRef.current = true
     void listDirectory('.')
+    return () => {
+      mountedRef.current = false
+      // 路由、沙箱或网关切换后,旧请求不能继续写入当前文件面板。
+      directoryRequestRef.current += 1
+      fileRequestRef.current += 1
+    }
   }, [listDirectory])
 
-  /** openFile 读一个文件并载入编辑器。 */
+  /** openFile 只载入最后一次选择的文件,避免慢请求覆盖后选文件及其修订号。 */
   const openFile = useCallback(
-    async (relativePath: string) => {
+    async (relativePath: string, discardChanges = false) => {
+      if (busyRef.current) return
+      if (dirtyRef.current && !discardChanges) {
+        setPanelError('当前文件有未写入的修改,请先写入,或重新读取并放弃修改。')
+        return
+      }
+      const request = ++fileRequestRef.current
+      const editVersion = editVersionRef.current
       setPanelError(undefined)
       try {
         const file = await workspaceApi.readFile(sandboxId, relativePath)
+        if (request !== fileRequestRef.current) return
+        if (editVersionRef.current !== editVersion) {
+          setPanelError('当前文件有新修改,请先写入后再打开其他文件。')
+          return
+        }
+        const nextContent = decodeUtf8Base64(file.content_base64)
+        contentRef.current = nextContent
+        fileRevisionRef.current = file.workspace_revision
         setOpenPath(file.relative_path)
-        setContent(decodeUtf8Base64(file.content_base64))
-        setDirty(false)
-        setWorkspaceRevision(file.workspace_revision)
+        markDirty(false)
+        setFileReadVersion((version) => version + 1)
       } catch (error) {
+        if (request !== fileRequestRef.current) return
         setPanelError(userFacingErrorMessage(error, '这个文件暂时读不出来,请稍后重试。'))
       }
     },
-    [sandboxId, workspaceApi]
+    [markDirty, sandboxId, workspaceApi]
   )
 
-  // 编辑器与「当前打开的文件」同生共死:换文件即重新装配,拿到的 language 才是对的
+  // 每次成功读取都重建编辑器,同路径重读也必须显示本次内容与语言。
   useEffect(() => {
     const host = editorHost.current
     if (!host || openPath === undefined) return
     let disposed = false
     let mounted: MountedEditor | undefined
+    setEditorError(undefined)
 
     void mountMonacoEditor(host, {
       value: contentRef.current,
       language,
       onChange: (value) => {
-        setContent(value)
-        setDirty(true)
+        if (disposed) return
+        contentRef.current = value
+        editVersionRef.current += 1
+        markDirty(true)
       },
-    }).then((editor) => {
-      if (disposed) {
-        editor.dispose()
-        return
-      }
-      mounted = editor
-      editorRef.current = editor
     })
+      .then((editor) => {
+        if (disposed) {
+          editor.dispose()
+          return
+        }
+        mounted = editor
+        editorRef.current = editor
+      })
+      .catch((error) => {
+        if (!disposed) {
+          setEditorError(
+            userFacingErrorMessage(error, '编辑器没有加载成功,请检查网络后重新加载页面。')
+          )
+        }
+      })
 
     return () => {
       disposed = true
@@ -584,28 +723,35 @@ function FilesPanel({
     }
     // language 随 openPath 推导,不单独列进依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openPath])
+  }, [fileReadVersion, openPath])
 
   /** writeCurrentFile 把编辑内容写回工作区(还没落对象存储)。 */
   const writeCurrentFile = useCallback(async () => {
-    if (!openPath) return
+    if (!openPath || busyRef.current) return
+    busyRef.current = true
+    fileRequestRef.current += 1
+    const savedContent = contentRef.current
+    const savedEditVersion = editVersionRef.current
     setBusy(true)
     setPanelError(undefined)
     try {
       const result = await workspaceApi.writeFile(sandboxId, {
         relative_path: openPath,
-        content_base64: encodeUtf8Base64(contentRef.current),
-        expected_revision: workspaceRevision,
+        content_base64: encodeUtf8Base64(savedContent),
+        expected_revision: fileRevisionRef.current,
       })
-      setWorkspaceRevision(result.workspace_revision)
-      setDirty(false)
+      if (!mountedRef.current) return
+      fileRevisionRef.current = result.workspace_revision
+      markDirty(editVersionRef.current !== savedEditVersion)
       toast.success('已写入工作区')
     } catch (error) {
+      if (!mountedRef.current) return
       setPanelError(userFacingErrorMessage(error, '没能写入工作区,请稍后重试。'))
     } finally {
-      setBusy(false)
+      busyRef.current = false
+      if (mountedRef.current) setBusy(false)
     }
-  }, [openPath, sandboxId, workspaceApi, workspaceRevision])
+  }, [markDirty, openPath, sandboxId, workspaceApi])
 
   /**
    * persistWorkspace 把整个工作区持久化并交出代码引用。
@@ -613,25 +759,31 @@ function FilesPanel({
    * 比让后端再去容器里抓一次可靠(容器随时可能被回收)。
    */
   const persistWorkspace = useCallback(async () => {
+    if (busyRef.current) return
+    busyRef.current = true
+    fileRequestRef.current += 1
     setBusy(true)
     setPanelError(undefined)
     try {
-      if (openPath && dirty) {
+      if (openPath && dirtyRef.current) {
+        const savedContent = contentRef.current
+        const savedEditVersion = editVersionRef.current
         const result = await workspaceApi.writeFile(sandboxId, {
           relative_path: openPath,
-          content_base64: encodeUtf8Base64(contentRef.current),
-          expected_revision: workspaceRevision,
+          content_base64: encodeUtf8Base64(savedContent),
+          expected_revision: fileRevisionRef.current,
         })
-        setWorkspaceRevision(result.workspace_revision)
-        setDirty(false)
+        if (!mountedRef.current) return
+        fileRevisionRef.current = result.workspace_revision
+        markDirty(editVersionRef.current !== savedEditVersion)
       }
       const result = await workspaceApi.saveFiles(sandboxId)
-      setWorkspaceRevision(result.workspace_revision)
+      if (!mountedRef.current) return
       if (onSaved && (!result.code_storage_key || !result.code_hash)) {
         setPanelError('工作区已保存,但没有生成判分所需的快照。请稍后重试。')
         return
       }
-      toast.success('工作区已保存')
+      toast.success(dirtyRef.current ? '已保存写入的内容,还有修改需要写入' : '工作区已保存')
       if (onSaved && result.code_storage_key && result.code_hash) {
         onSaved({
           workspace_revision: result.workspace_revision,
@@ -640,11 +792,13 @@ function FilesPanel({
         })
       }
     } catch (error) {
+      if (!mountedRef.current) return
       setPanelError(userFacingErrorMessage(error, '保存没有成功,请稍后重试。'))
     } finally {
-      setBusy(false)
+      busyRef.current = false
+      if (mountedRef.current) setBusy(false)
     }
-  }, [dirty, onSaved, openPath, sandboxId, workspaceApi, workspaceRevision])
+  }, [markDirty, onSaved, openPath, sandboxId, workspaceApi])
 
   return (
     <div className="flex h-full min-h-0 flex-col lg:flex-row">
@@ -671,14 +825,27 @@ function FilesPanel({
             </Button>
           </div>
         </div>
-        <ul className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
-          {entries.length === 0 ? (
+        <ul
+          aria-label="工作区目录"
+          aria-busy={directoryLoading}
+          className="min-h-0 flex-1 overflow-y-auto px-1 pb-2"
+        >
+          {directoryLoading ? (
+            <li role="status" className="px-2 py-1 text-xs text-on-dark-sub">
+              正在读取目录…
+            </li>
+          ) : directoryError ? (
+            <li role="alert" className="px-2 py-1 text-xs text-on-dark-danger">
+              {directoryError}
+            </li>
+          ) : entries.length === 0 ? (
             <li className="px-2 py-1 text-xs text-on-dark-sub">这个目录是空的</li>
           ) : (
             entries.map((entry) => (
               <li key={entry.relative_path}>
                 <button
                   type="button"
+                  disabled={busy}
                   onClick={() =>
                     entry.is_dir
                       ? void listDirectory(entry.relative_path)
@@ -706,7 +873,20 @@ function FilesPanel({
             {openPath ?? '从左侧选一个文件开始'}
             {dirty ? ' · 有未写入的修改' : ''}
           </span>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Button
+              variant="on-dark"
+              size="sm"
+              leftIcon={RefreshCw}
+              disabled={!openPath || busy}
+              onClick={() => {
+                if (!openPath) return
+                if (dirtyRef.current) setConfirmReload(true)
+                else void openFile(openPath)
+              }}
+            >
+              重新读取文件
+            </Button>
             <Button
               variant="on-dark"
               size="sm"
@@ -728,7 +908,23 @@ function FilesPanel({
         </div>
 
         {panelError ? (
-          <p className="shrink-0 px-3 py-2 text-xs text-on-dark-danger">{panelError}</p>
+          <p role="alert" className="shrink-0 px-3 py-2 text-xs text-on-dark-danger">
+            {panelError}
+          </p>
+        ) : null}
+
+        {editorError ? (
+          <div role="alert" className="flex shrink-0 items-center gap-3 px-3 py-2">
+            <p className="flex-1 text-sm text-on-dark-danger">{editorError}</p>
+            <Button
+              variant="on-dark"
+              size="sm"
+              leftIcon={RefreshCw}
+              onClick={() => window.location.reload()}
+            >
+              重新加载页面
+            </Button>
+          </div>
         ) : null}
 
         {openPath === undefined ? (
@@ -741,6 +937,30 @@ function FilesPanel({
           <div ref={editorHost} className="min-h-0 flex-1" />
         )}
       </div>
+      <Modal open={confirmReload} onOpenChange={setConfirmReload}>
+        <ModalContent size="sm">
+          <ModalHeader>
+            <ModalTitle>放弃未写入的修改并重新读取？</ModalTitle>
+            <ModalDescription>
+              请先复制需要保留的内容。成功读取后会用工作区里的文件替换当前编辑,读取失败则保留当前内容。
+            </ModalDescription>
+          </ModalHeader>
+          <ModalFooter>
+            <Button variant="outline" onClick={() => setConfirmReload(false)}>
+              继续编辑
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
+                setConfirmReload(false)
+                if (openPath) void openFile(openPath, true)
+              }}
+            >
+              放弃修改并重新读取
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </div>
   )
 }
@@ -762,12 +982,14 @@ function TerminalPanel({
   const host = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<MountedTerminal | undefined>(undefined)
   const [ready, setReady] = useState(false)
+  const [mountAttempt, setMountAttempt] = useState(0)
+  const [mountError, setMountError] = useState<string>()
 
   const url = useMemo(() => workspaceApi.getTerminalWsUrl(sandboxId), [sandboxId, workspaceApi])
 
   const socket = useTicketedWebSocket({
-    url,
-    onMessage: (data) => terminalRef.current?.write(data),
+    url: ready ? url : undefined,
+    onBinaryMessage: (data) => terminalRef.current?.write(data),
     onOpen: () => terminalRef.current?.focus(),
   })
 
@@ -777,18 +999,25 @@ function TerminalPanel({
     if (!container) return
     let disposed = false
     let mounted: MountedTerminal | undefined
+    setReady(false)
+    setMountError(undefined)
 
     void mountTerminal(container, {
       onData: (data) => socket.send(data),
-    }).then((terminal) => {
-      if (disposed) {
-        terminal.dispose()
-        return
-      }
-      mounted = terminal
-      terminalRef.current = terminal
-      setReady(true)
+      onBinary: (data) => socket.send(data),
     })
+      .then((terminal) => {
+        if (disposed) {
+          terminal.dispose()
+          return
+        }
+        mounted = terminal
+        terminalRef.current = terminal
+        setReady(true)
+      })
+      .catch((error) => {
+        if (!disposed) setMountError(userFacingErrorMessage(error, '终端没有加载成功,请重新加载。'))
+      })
 
     return () => {
       disposed = true
@@ -798,20 +1027,23 @@ function TerminalPanel({
     }
     // socket.send 引用稳定(useCallback 空依赖),不列进依赖以免重建终端
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sandboxId])
-
-  // 终端尺寸随面板变化:切标签页回来时容器宽高才确定,需要重新适配
-  useEffect(() => {
-    if (!ready) return
-    const timer = setTimeout(() => terminalRef.current?.resize(), 50)
-    return () => clearTimeout(timer)
-  }, [ready])
+  }, [mountAttempt, sandboxId])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-dark-line px-3 py-2">
         <span className="text-xs text-on-dark-sub">{socketStatusText(socket.status)}</span>
         <div className="flex items-center gap-2">
+          {mountError ? (
+            <Button
+              variant="on-dark"
+              size="sm"
+              leftIcon={RefreshCw}
+              onClick={() => setMountAttempt((current) => current + 1)}
+            >
+              重新加载终端
+            </Button>
+          ) : null}
           <Button variant="on-dark" size="sm" onClick={() => terminalRef.current?.clear()}>
             清屏
           </Button>
@@ -822,8 +1054,10 @@ function TerminalPanel({
           ) : null}
         </div>
       </div>
-      {socket.error ? (
-        <p className="shrink-0 px-3 py-2 text-xs text-on-dark-danger">{socket.error}</p>
+      {mountError || socket.error ? (
+        <p className="shrink-0 px-3 py-2 text-xs text-on-dark-danger">
+          {mountError ?? socket.error}
+        </p>
       ) : null}
       <div ref={host} className="min-h-0 flex-1 bg-terminal" />
     </div>
@@ -854,37 +1088,41 @@ function ChainPanel({ sandboxId, workspaceApi, operations, runtimeInstances }: C
   const [panelError, setPanelError] = useState<string>()
   const [busy, setBusy] = useState(false)
 
+  const { errors, validate } = useFormValidation(() => {
+    let payloadError: string | null = null
+    if (operation !== 'query') {
+      try {
+        const parsed: unknown = JSON.parse(payloadText)
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+          payloadError = '内容格式不正确,最外层应当是大括号包裹的内容。'
+        }
+      } catch {
+        payloadError = '内容格式不正确,请检查是否漏了逗号或引号。'
+      }
+    }
+    return {
+      target: operation === 'query' && !target.trim()
+        ? '请填写要查询的目标,例如合约地址或状态键。' : null,
+      runtimeInstance: operation === 'query' && !runtimeInstance
+        ? '当前环境没有可用的运行时实例。' : null,
+      payloadText: payloadError,
+    }
+  }, operation)
+
   const run = useCallback(async () => {
+    if (!validate()) return
     setBusy(true)
     setPanelError(undefined)
     setResult(undefined)
     try {
       if (operation === 'query') {
-        if (target.trim() === '') {
-          setPanelError('请填写要查询的目标,例如合约地址或状态键。')
-          return
-        }
-        if (runtimeInstance === '') {
-          setPanelError('当前环境没有可用的运行时实例。')
-          return
-        }
         const response = await workspaceApi.chainQuery(sandboxId, runtimeInstance, target.trim())
         setResult(JSON.stringify(response, null, 2))
         return
       }
 
-      let payload: Record<string, unknown>
-      try {
-        const parsed: unknown = JSON.parse(payloadText)
-        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-          setPanelError('内容格式不正确,最外层应当是大括号包裹的内容。')
-          return
-        }
-        payload = parsed as Record<string, unknown>
-      } catch {
-        setPanelError('内容格式不正确,请检查是否漏了逗号或引号。')
-        return
-      }
+      // 同步字段校验已确认参数为对象,接口继续接收运行时规定的原对象。
+      const payload = JSON.parse(payloadText) as Record<string, unknown>
 
       const response =
         operation === 'deploy'
@@ -902,7 +1140,7 @@ function ChainPanel({ sandboxId, workspaceApi, operations, runtimeInstances }: C
     } finally {
       setBusy(false)
     }
-  }, [operation, payloadText, runtimeInstance, sandboxId, target, workspaceApi])
+  }, [operation, payloadText, runtimeInstance, sandboxId, target, validate, workspaceApi])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
@@ -913,6 +1151,9 @@ function ChainPanel({ sandboxId, workspaceApi, operations, runtimeInstances }: C
           value={runtimeInstance}
           placeholder="选择运行时实例"
           disabled={runtimeInstances.length === 0}
+          invalid={Boolean(errors.runtimeInstance)}
+          aria-describedby={errors.runtimeInstance ? `${sandboxId}-chain-runtime-error` : undefined}
+          onBlur={() => validate(['runtimeInstance'])}
           onValueChange={setRuntimeInstance}
         />
         {operations.map((item) => (
@@ -931,6 +1172,12 @@ function ChainPanel({ sandboxId, workspaceApi, operations, runtimeInstances }: C
         ))}
       </div>
 
+      {errors.runtimeInstance ? (
+        <p id={`${sandboxId}-chain-runtime-error`} role="alert" className="text-xs text-on-dark-danger">
+          {errors.runtimeInstance}
+        </p>
+      ) : null}
+
       {operation === 'query' ? (
         <label className="flex flex-col gap-1">
           <span className="text-xs text-on-dark-sub">查询目标</span>
@@ -939,7 +1186,10 @@ function ChainPanel({ sandboxId, workspaceApi, operations, runtimeInstances }: C
             value={target}
             placeholder="合约地址或状态键"
             className="font-mono text-sm"
+            invalid={Boolean(errors.target)}
+            aria-describedby={errors.target ? `${sandboxId}-chain-input-error` : undefined}
             onChange={(event) => setTarget(event.target.value)}
+            onBlur={() => validate(['target'])}
           />
         </label>
       ) : (
@@ -953,10 +1203,19 @@ function ChainPanel({ sandboxId, workspaceApi, operations, runtimeInstances }: C
             rows={8}
             spellCheck={false}
             className="font-mono text-sm"
+            invalid={Boolean(errors.payloadText)}
+            aria-describedby={errors.payloadText ? `${sandboxId}-chain-input-error` : undefined}
             onChange={(event) => setPayloadText(event.target.value)}
+            onBlur={() => validate(['payloadText'])}
           />
         </label>
       )}
+
+      {errors.target || errors.payloadText ? (
+        <p id={`${sandboxId}-chain-input-error`} role="alert" className="text-xs text-on-dark-danger">
+          {errors.target ?? errors.payloadText}
+        </p>
+      ) : null}
 
       <div>
         <Button
@@ -987,6 +1246,8 @@ interface CommandPanelProps {
   sandboxId: string
   workspaceApi: SandboxWorkspaceApi
   tools: SandboxToolAccess[]
+  available: boolean
+  onReload: () => void
 }
 
 /**
@@ -994,22 +1255,25 @@ interface CommandPanelProps {
  * 允许哪些命令由平台在工具定义里配白名单,学生侧读不到那份清单(工具定义接口在平台组),
  * 所以这里不做本地过滤 —— 白名单在服务端强制,越界命令会被拒绝并给出用户向说明。
  */
-function CommandPanel({ sandboxId, workspaceApi, tools }: CommandPanelProps) {
+function CommandPanel({ sandboxId, workspaceApi, tools, available, onReload }: CommandPanelProps) {
   const [toolCode, setToolCode] = useState(tools[0].tool_code)
   const [commandLine, setCommandLine] = useState('')
   const [output, setOutput] = useState<string>()
   const [panelError, setPanelError] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const selectedTool = tools.find((tool) => tool.tool_code === toolCode)
+  const toolReady = available && selectedTool?.status === SandboxToolStatus.READY
+  const { errors, validate } = useFormValidation(() => ({
+    commandLine: !commandLine.trim() ? '请输入要执行的命令。' : null,
+  }))
 
   const run = useCallback(async () => {
+    if (busy || !toolReady) return
     const command = commandLine
       .split(/\s+/)
       .map((item) => item.trim())
       .filter((item) => item !== '')
-    if (command.length === 0) {
-      setPanelError('请输入要执行的命令。')
-      return
-    }
+    if (!validate()) return
     setBusy(true)
     setPanelError(undefined)
     setOutput(undefined)
@@ -1027,7 +1291,7 @@ function CommandPanel({ sandboxId, workspaceApi, tools }: CommandPanelProps) {
     } finally {
       setBusy(false)
     }
-  }, [commandLine, sandboxId, toolCode, workspaceApi])
+  }, [busy, commandLine, sandboxId, toolCode, toolReady, validate, workspaceApi])
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-3">
@@ -1038,6 +1302,7 @@ function CommandPanel({ sandboxId, workspaceApi, tools }: CommandPanelProps) {
               key={tool.tool_code}
               variant={tool.tool_code === toolCode ? 'primary' : 'on-dark'}
               size="sm"
+              disabled={busy}
               onClick={() => setToolCode(tool.tool_code)}
             >
               {tool.tool_code}
@@ -1046,19 +1311,36 @@ function CommandPanel({ sandboxId, workspaceApi, tools }: CommandPanelProps) {
         </div>
       ) : null}
 
+      {!toolReady ? (
+        <ToolReadinessNotice
+          status={available ? selectedTool?.status : undefined}
+          onReload={onReload}
+        />
+      ) : null}
+
       <label className="flex flex-col gap-1">
         <span className="text-xs text-on-dark-sub">命令与参数(按空格分隔)</span>
         <Input
           variant="underline"
           value={commandLine}
+          disabled={!toolReady}
           placeholder="forge test"
           className="font-mono text-sm"
+          invalid={Boolean(errors.commandLine)}
+          aria-describedby={errors.commandLine ? `${sandboxId}-command-input-error` : undefined}
           onChange={(event) => setCommandLine(event.target.value)}
+          onBlur={() => validate(['commandLine'])}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !busy) void run()
           }}
         />
       </label>
+
+      {errors.commandLine ? (
+        <p id={`${sandboxId}-command-input-error`} role="alert" className="text-xs text-on-dark-danger">
+          {errors.commandLine}
+        </p>
+      ) : null}
 
       <div>
         <Button
@@ -1066,6 +1348,7 @@ function CommandPanel({ sandboxId, workspaceApi, tools }: CommandPanelProps) {
           size="sm"
           leftIcon={Play}
           loading={busy}
+          disabled={!toolReady}
           onClick={() => void run()}
         >
           执行
@@ -1094,35 +1377,71 @@ function WebToolPanel({
   sandboxId,
   workspaceApi,
   toolCode,
+  status,
+  onReload,
 }: {
   sandboxId: string
   workspaceApi: SandboxWorkspaceApi
   toolCode: string
+  status: SandboxToolStatus | undefined
+  onReload: () => void
 }) {
   const [src, setSrc] = useState<string>()
   const [loadError, setLoadError] = useState('')
+  const [loadAttempt, setLoadAttempt] = useState(0)
 
   useEffect(() => {
     let active = true
     setSrc(undefined)
     setLoadError('')
-    void workspaceApi
-      .getToolProxyUrl(sandboxId, toolCode, '', appConfig.sandboxToolOrigin)
-      .then((url) => {
-        if (active) setSrc(url)
-      })
-      .catch((error) => {
-        if (active) setLoadError(userFacingErrorMessage(error, '这个工具暂时打不开,请稍后重试。'))
-      })
+    if (status !== SandboxToolStatus.READY) return
+    // 首次打开和主动重开都重读权威状态,旧标签中的Ready不能直接换票。
+    void (async () => {
+      const current = await workspaceApi.getInstance(sandboxId)
+      if (!active) return
+      const tool = current.tool_access.find((item) => item.tool_code === toolCode)
+      if (!isSandboxReadyForOperation(current) || tool?.status !== SandboxToolStatus.READY) {
+        setLoadError('工具尚未准备好,请稍后重新打开。')
+        onReload()
+        return
+      }
+      const url = await workspaceApi.getToolProxyUrl(
+        sandboxId,
+        toolCode,
+        '',
+        appConfig.sandboxToolOrigin
+      )
+      if (active) setSrc(url)
+    })().catch((error) => {
+      if (active) setLoadError(userFacingErrorMessage(error, '这个工具暂时打不开,请稍后重试。'))
+    })
     return () => {
       active = false
     }
-  }, [sandboxId, toolCode, workspaceApi])
+  }, [loadAttempt, onReload, sandboxId, status, toolCode, workspaceApi])
+
+  if (status !== SandboxToolStatus.READY) {
+    return (
+      <div className="grid h-full place-items-center px-4">
+        <ToolReadinessNotice status={status} onReload={onReload} />
+      </div>
+    )
+  }
 
   if (loadError) {
     return (
-      <div className="grid h-full place-items-center px-4 text-sm text-on-dark-danger">
-        {loadError}
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
+        <p role="alert" className="text-sm text-on-dark-danger">
+          {loadError}
+        </p>
+        <Button
+          variant="on-dark"
+          size="sm"
+          leftIcon={RefreshCw}
+          onClick={() => setLoadAttempt((current) => current + 1)}
+        >
+          重新打开工具
+        </Button>
       </div>
     )
   }
@@ -1141,6 +1460,35 @@ function WebToolPanel({
       referrerPolicy="no-referrer"
       className="h-full w-full border-0 bg-dark-surface"
     />
+  )
+}
+
+/** ToolReadinessNotice 统一呈现网页和命令工具的准备、失败与状态重读入口。 */
+function ToolReadinessNotice({
+  status,
+  onReload,
+}: {
+  status: SandboxToolStatus | undefined
+  onReload: () => void
+}) {
+  if (status === SandboxToolStatus.STARTING) {
+    return (
+      <p role="status" className="text-sm text-on-dark-sub">
+        工具正在准备,请稍候。
+      </p>
+    )
+  }
+  return (
+    <div className="flex flex-col items-start gap-3">
+      <p role="alert" className="text-sm text-on-dark-danger">
+        {status === SandboxToolStatus.FAILED
+          ? '工具没有准备成功,请重新读取状态。'
+          : '当前工具暂时无法使用,请重新读取状态。'}
+      </p>
+      <Button variant="on-dark" size="sm" leftIcon={RefreshCw} onClick={onReload}>
+        重新读取状态
+      </Button>
+    </div>
   )
 }
 

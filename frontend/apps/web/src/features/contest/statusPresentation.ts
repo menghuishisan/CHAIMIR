@@ -1,4 +1,4 @@
-// contest statusPresentation 文件维护竞赛状态到界面语义色的映射。
+// contest statusPresentation 文件统一竞赛状态的筛选选项和界面语义色。
 
 import type { BadgeTone, StatusTone } from '@chaimir/ui'
 import {
@@ -10,6 +10,17 @@ import {
   VulnPrevalidateStatus,
   VulnProblemStatus,
 } from '@chaimir/api-client'
+import { contestStatusLabel } from '../../utils/labels/contest'
+
+/** contestStatusFilterOptions 从唯一状态枚举生成精确筛选项;学生列表排除草稿。 */
+export function contestStatusFilterOptions(includeDraft: boolean) {
+  return [
+    { value: '', label: '全部' },
+    ...Object.values(ContestStatus)
+      .filter((status): status is ContestStatus => typeof status === 'number' && (includeDraft || status !== ContestStatus.DRAFT))
+      .map((status) => ({ value: String(status), label: status === ContestStatus.DRAFT ? '草稿' : contestStatusLabel(status) })),
+  ]
+}
 
 const CONTEST_STATUS_TONES: Record<ContestStatus, StatusTone> = {
   [ContestStatus.DRAFT]: 'neutral',

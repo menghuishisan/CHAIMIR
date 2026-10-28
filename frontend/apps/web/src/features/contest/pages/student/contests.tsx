@@ -30,18 +30,13 @@ import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../.
 import { formatDateTime, formatRelativeDeadline } from '../../../../utils/formatters'
 import { contestStatusLabel } from '../../../../utils/labels/contest'
 import { ContestIdentityCell, ContestScheduleCell } from '../../components/ContestTableCells'
-import { contestStatusTone } from '../../statusPresentation'
+import { contestStatusFilterOptions, contestStatusTone } from '../../statusPresentation'
 
 /** 报名进行中的状态:只有此状态下报名入口有效(后端 validateSignupWindow 同口径)。 */
 const SIGNUP_OPEN_STATUS = ContestStatus.SIGNUP
 
-/** 状态筛选项:值为空串表示不过滤。学生看不到草稿赛事,故不列草稿。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(ContestStatus.SIGNUP), label: '报名中' },
-  { value: String(ContestStatus.RUNNING), label: '进行中' },
-  { value: String(ContestStatus.ENDED), label: '已结束' },
-] as const
+/** 学生可发现的完整赛事状态,与服务端非草稿可见区间一致。 */
+const STATUS_FILTERS = contestStatusFilterOptions(false)
 
 /**
  * StudentContestsPage 列出可参与赛事并标注本人参赛状态。
@@ -66,22 +61,26 @@ export default function StudentContestsPage() {
     setSubmittedKeyword(keyword.trim())
   }, [keyword])
   // 战绩同时承担「已报名判定」:有记录说明已在某支队伍里
-  const records = useAsyncResource(() => api.contest.getMyContestRecords(), [], () => false)
+  const records = useAsyncResource(() => api.contest.getMyContestRecords(), [contests.refreshVersion], () => false)
 
   const joinedContestIds = useMemo(
-    () => new Set((records.data ?? []).map((record: ContestRecord) => record.contest_id)),
-    [records.data],
+    () => records.status === 'success' && records.data
+      ? new Set(records.data.map((record: ContestRecord) => record.contest_id))
+      : undefined,
+    [records.data, records.status],
   )
 
   // 指标带取服务端全量口径:第 1 页的 20 条里数出来的「报名中 3」在赛事更多时是错数
-  const totalCount = useResourceTotal((params) => api.contest.getStudentContests(params), [])
+  const totalCount = useResourceTotal((params) => api.contest.getStudentContests(params), [], contests.refreshVersion)
   const signupOpenCount = useResourceTotal(
     (params) => api.contest.getStudentContests({ status: SIGNUP_OPEN_STATUS, ...params }),
     [],
+    contests.refreshVersion,
   )
   const runningCount = useResourceTotal(
     (params) => api.contest.getStudentContests({ status: ContestStatus.RUNNING, ...params }),
     [],
+    contests.refreshVersion,
   )
 
   const columns: TableColumn<Contest>[] = [
@@ -115,7 +114,7 @@ export default function StudentContestsPage() {
       render: (contest) => (
         <div className="flex flex-wrap items-center gap-1.5">
           <StatusIndicator tone={contestStatusTone(contest.status)} label={contestStatusLabel(contest.status)} />
-          {joinedContestIds.has(contest.id) ? <Badge tone="jade">已报名</Badge> : null}
+          {joinedContestIds?.has(contest.id) ? <Badge tone="jade">已报名</Badge> : null}
         </div>
       ),
     },
@@ -125,7 +124,7 @@ export default function StudentContestsPage() {
       align: 'right',
       render: (contest) => (
         <Button variant="ghost" size="sm" onClick={() => navigate(`/student/contests/${contest.id}`)}>
-          {joinedContestIds.has(contest.id) ? '进入赛事' : '查看详情'}
+          {joinedContestIds?.has(contest.id) ? '进入赛事' : '查看详情'}
         </Button>
       ),
     },
@@ -148,7 +147,7 @@ export default function StudentContestsPage() {
           { label: '可参与赛事', value: totalCount ?? '—', hint: '不受下方筛选影响' },
           { label: '报名中', value: signupOpenCount ?? '—', hint: '报名窗口尚未关闭' },
           { label: '进行中', value: runningCount ?? '—', hint: '正在进行的比赛' },
-          { label: '我已报名', value: joinedContestIds.size, hint: '按我的战绩判定' },
+          { label: '我已报名', value: joinedContestIds?.size, hint: '按我的战绩判定' },
         ]}
       />
 
@@ -169,7 +168,7 @@ export default function StudentContestsPage() {
               <SegmentedControl
                 aria-label="按赛事状态筛选"
                 size="sm"
-                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                options={STATUS_FILTERS}
                 value={statusFilter}
                 onValueChange={setStatusFilter}
               />
@@ -213,7 +212,7 @@ export default function StudentContestsPage() {
                       tone={contestStatusTone(item.status)}
                       label={contestStatusLabel(item.status)}
                     />
-                    {joinedContestIds.has(item.id) ? <Badge tone="jade">已报名</Badge> : null}
+                    {joinedContestIds?.has(item.id) ? <Badge tone="jade">已报名</Badge> : null}
                   </div>
                 ),
                 action: (
@@ -222,7 +221,7 @@ export default function StudentContestsPage() {
                     size="sm"
                     onClick={() => navigate(`/student/contests/${item.id}`)}
                   >
-                    {joinedContestIds.has(item.id) ? '进入' : '详情'}
+                    {joinedContestIds?.has(item.id) ? '进入' : '详情'}
                   </Button>
                 ),
               })}

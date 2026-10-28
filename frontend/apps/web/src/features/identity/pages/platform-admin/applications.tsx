@@ -76,13 +76,14 @@ export default function PlatformApplicationsPage() {
   // 复用上面这份会让「待审核」在筛「已开通」时变成 0(规范 §6.5)。
   const allApplications = useAsyncResource(() => api.identity.getApplications(), [])
   const stats = useMemo(() => {
-    const all = allApplications.data ?? []
+    if ((allApplications.status !== 'success' && allApplications.status !== 'empty') || !allApplications.data) return undefined
+    const all = allApplications.data
     return {
       pending: all.filter((item) => item.status === ApplicationStatus.PENDING).length,
       approved: all.filter((item) => item.status === ApplicationStatus.APPROVED).length,
       rejected: all.filter((item) => item.status === ApplicationStatus.REJECTED).length,
     }
-  }, [allApplications.data])
+  }, [allApplications.data, allApplications.status])
 
   const columns: TableColumn<TenantApplication>[] = [
     {
@@ -170,11 +171,11 @@ export default function PlatformApplicationsPage() {
         items={[
           {
             label: '待审核',
-            value: stats.pending,
-            hint: stats.pending > 0 ? '需要你处理' : '暂时没有积压',
+            value: stats?.pending,
+            hint: stats ? (stats.pending > 0 ? '需要你处理' : '暂时没有积压') : undefined,
           },
-          { label: '已开通', value: stats.approved, hint: '不受下方筛选影响' },
-          { label: '已驳回', value: stats.rejected, hint: '学校可重新提交' },
+          { label: '已开通', value: stats?.approved, hint: '不受下方筛选影响' },
+          { label: '已驳回', value: stats?.rejected, hint: '学校可重新提交' },
         ]}
       />
 

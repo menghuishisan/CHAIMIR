@@ -120,7 +120,8 @@ WITH candidates AS (
       AND p.status = 2
       AND p.compute = 2
       AND r.preview_attempt_count < $3::int
-      AND NOT (r.preview_report ? 'determinism_check' AND r.preview_report ? 'worker_preview')
+      AND NOT (COALESCE(r.preview_report #>> '{determinism_check,status}', '') IN ('passed', 'failed')
+               AND COALESCE(r.preview_report #>> '{worker_preview,status}', '') IN ('passed', 'failed'))
       AND (r.preview_lease_until IS NULL OR r.preview_lease_until <= $4::timestamptz)
     ORDER BY r.created_at ASC, p.id ASC
     LIMIT $5::int
@@ -644,9 +645,9 @@ SET preview_report = preview_report || $1,
     preview_lease_token = '', preview_lease_until = NULL, updated_at = now()
 WHERE result = 1
   AND preview_attempt_count >= $2::int
-  AND NOT (preview_report ? 'determinism_check' AND preview_report ? 'worker_preview')
-  AND preview_lease_until IS NOT NULL
-  AND preview_lease_until <= $3::timestamptz
+  AND NOT (COALESCE(preview_report #>> '{determinism_check,status}', '') IN ('passed', 'failed')
+           AND COALESCE(preview_report #>> '{worker_preview,status}', '') IN ('passed', 'failed'))
+  AND (preview_lease_until IS NULL OR preview_lease_until <= $3::timestamptz)
 RETURNING id, package_id, submitter_id, preview_report, reviewer_id, result, comment, created_at, updated_at
 `
 

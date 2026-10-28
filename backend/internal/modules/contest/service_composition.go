@@ -29,27 +29,27 @@ func sandboxProfileForContestMode(mode int16) (contracts.SandboxAccessProfile, e
 func (s *Service) compileCompositionFromContent(ctx context.Context, tenantID int64, itemCode, itemVersion string, profile contracts.SandboxAccessProfile) (contracts.SandboxCompositionSnapshot, error) {
 	face, err := s.content.GetContentFull(ctx, tenantID, contracts.ContentItemRef{ItemCode: itemCode, ItemVersion: itemVersion})
 	if err != nil {
-		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid.WithCause(err)
+		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("重读组合内容失败: %w", err))
 	}
 	rawValue, ok := face.Body["composition"]
 	if !ok {
-		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid
+		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("重读组合内容缺少组合声明"))
 	}
 	raw, err := json.Marshal(rawValue)
 	if err != nil {
-		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid.WithCause(err)
+		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("编码组合声明失败: %w", err))
 	}
 	var spec contracts.SandboxCompositionSpec
 	if err := jsonx.DecodeStrictKnownFields(raw, &spec); err != nil {
-		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid.WithCause(err)
+		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("解析组合声明失败: %w", err))
 	}
 	spec, err = normalizeContestComposition(spec, profile)
 	if err != nil {
-		return contracts.SandboxCompositionSnapshot{}, err
+		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("规范化组合声明失败: %w", err))
 	}
 	snapshot, err := s.sandbox.CompileSandboxComposition(ctx, tenantID, spec)
 	if err != nil {
-		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(err)
+		return contracts.SandboxCompositionSnapshot{}, apperr.ErrContestSandboxUnavailable.WithCause(fmt.Errorf("调用组合编译失败: %w", err))
 	}
 	return snapshot, nil
 }

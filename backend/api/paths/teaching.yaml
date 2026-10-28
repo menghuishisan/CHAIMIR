@@ -21,6 +21,19 @@
     security: [{ bearerAuth: [] }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/shared:
+  get:
+    tags: [teaching]
+    summary: 共享课程目录
+    operationId: teachingListSharedCourses
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: keyword, in: query, schema: { type: string } }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
+    description: 仅返回其他租户当前共享课程的id/name/description/type/difficulty/semester/credits/updated_at，不包含邀请码与学生业务数据。克隆时重新校验共享状态。
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/courses/cover:
   post:
     tags: [teaching]
@@ -99,6 +112,14 @@
     tags: [teaching]
     summary: 共享课程到课程库
     operationId: teachingShareCourse
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  delete:
+    tags: [teaching]
+    summary: 取消课程共享
+    operationId: teachingUnshareCourse
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
@@ -372,6 +393,7 @@
   get:
     tags: [teaching]
     summary: 课程讨论分页列表
+    description: 主帖与回复使用同一分页流。parent_id表示回复关系，parent_content仅投影同租户、同课程且未删除的父帖正文；父帖删除后回复保留且不返回原文。
     operationId: teachingListPosts
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -380,6 +402,7 @@
   post:
     tags: [teaching]
     summary: 发布讨论帖或回复
+    description: 正文content必填；parent_id可选，提供时必须指向同租户、同课程且未删除的父帖，校验与创建在同一事务中完成。
     operationId: teachingCreatePost
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -403,6 +426,11 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { type: object, required: [is_pinned], properties: { is_pinned: { type: boolean } } }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/posts/{id}:
   delete:
@@ -439,16 +467,41 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: { type: object, required: [is_pinned], properties: { is_pinned: { type: boolean } } }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/courses/{id}/review:
+  get:
+    tags: [teaching]
+    summary: 读取本人课程评价
+    description: 仅已加入且课程已结课或归档的当前学生可读。返回review对象,尚未评价时review明确为null;不得读取其他学生的评价。
+    operationId: teachingGetMyCourseReview
+    x-chaimir-audience: student
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [teaching]
-    summary: 课程评价
+    summary: 创建或更新本人课程评价
+    description: 成员和结课或归档状态与读取接口使用相同门禁,同一学生同一课程更新原评价。
     operationId: teachingReviewCourse
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
     requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/teaching/courses/{id}/grade-sources:
+  get:
+    tags: [teaching]
+    summary: 查询本课程全部可用成绩来源
+    description: 返回 source_type、source_ref、title、max_score 数组。仅授课教师可读，作业和考试复用本课程已发布作业，实验来自教学模块事件投影，不受公开列表分页限制。
+    operationId: teachingListGradeSources
+    x-chaimir-audience: teacher
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/courses/{id}/grade-weights:
   get:

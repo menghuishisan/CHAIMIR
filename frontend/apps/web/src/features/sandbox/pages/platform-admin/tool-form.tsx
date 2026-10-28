@@ -35,6 +35,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { sandboxToolKindLabel, toolStatusLabel } from '../../../../utils/labels/sandbox'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { SANDBOX_TOOL_KINDS, TOOL_STATUSES } from '../../options'
@@ -76,7 +77,6 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
   const [webServiceName, setWebServiceName] = useState('editor')
   const [webRoutePrefix, setWebRoutePrefix] = useState('/')
 
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
 
@@ -167,7 +167,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
   ])
 
   /** validate 按类型逐项校验,校验口径与后端 validateToolResourceSpecShape 对齐。 */
-  const validate = useCallback((): boolean => {
+  const { errors, validate } = useFormValidation(useCallback(() => {
     const next: Record<string, string | null> = {
       code: CODE_PATTERN.test(code.trim())
         ? null
@@ -236,8 +236,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
           : null
     }
 
-    setErrors(next)
-    return Object.values(next).every((value) => value === null)
+    return next
   }, [
     builtinEndpoint,
     code,
@@ -256,15 +255,12 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
     webRoutePrefix,
     webServiceName,
     webServicePort,
-  ])
+  ]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (!validate()) {
-        setFormError('有几项还不能提交,按提示改一下。')
-        return
-      }
+      if (submitting || !validate()) return
       setFormError(undefined)
       setSubmitting(true)
       try {
@@ -288,7 +284,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
         setSubmitting(false)
       }
     },
-    [buildResourceSpec, code, ecoTags, kindValue, name, onSaved, status, validate]
+    [buildResourceSpec, code, ecoTags, kindValue, name, onSaved, status, submitting, validate]
   )
 
   return (
@@ -315,6 +311,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                   value={code}
                   placeholder="code-server"
                   invalid={Boolean(errors.code)}
+                  onBlur={() => validate(['code'])}
                   onChange={(event) => setCode(event.target.value)}
                 />
               </FormField>
@@ -324,6 +321,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                   value={name}
                   placeholder="在线代码编辑器"
                   invalid={Boolean(errors.name)}
+                  onBlur={() => validate(['name'])}
                   onChange={(event) => setName(event.target.value)}
                 />
               </FormField>
@@ -385,6 +383,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                   className="font-mono text-sm"
                   value={builtinEndpoint}
                   invalid={Boolean(errors.builtinEndpoint)}
+                  onBlur={() => validate(['builtinEndpoint'])}
                   onChange={(event) => setBuiltinEndpoint(event.target.value)}
                 />
               </FormField>
@@ -519,6 +518,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                       min={1}
                       value={defaultTimeout}
                       invalid={Boolean(errors.timeout)}
+                      onBlur={() => validate(['timeout'])}
                       onChange={(event) => setDefaultTimeout(event.target.value)}
                     />
                   </FormField>
@@ -534,6 +534,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                       min={1}
                       value={maxTimeout}
                       invalid={Boolean(errors.timeout)}
+                      onBlur={() => validate(['timeout'])}
                       onChange={(event) => setMaxTimeout(event.target.value)}
                     />
                   </FormField>
@@ -551,6 +552,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                       id={`${fieldId}-component-name`}
                       value={componentName}
                       invalid={Boolean(errors.components)}
+                      onBlur={() => validate(['components'])}
                       onChange={(event) => setComponentName(event.target.value)}
                     />
                   </FormField>
@@ -585,6 +587,7 @@ export function ToolFormModal({ onClose, onSaved }: ToolFormModalProps) {
                       id={`${fieldId}-web-component`}
                       value={webComponentName}
                       invalid={Boolean(errors.webSpec)}
+                      onBlur={() => validate(['webSpec'])}
                       onChange={(event) => setWebComponentName(event.target.value)}
                     />
                   </FormField>

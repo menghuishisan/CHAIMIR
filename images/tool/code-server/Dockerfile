@@ -24,6 +24,10 @@ RUN export http_proxy="${HTTP_PROXY}" https_proxy="${HTTPS_PROXY}" no_proxy="${N
         install --omit=dev --ignore-scripts --package-lock=false --no-audit --no-fund adm-zip@0.6.0 \
     && test -x /usr/lib/code-server/bin/code-server
 
+# 固定来源与校验和的纯语言扩展提供离线 .sol 识别,不启动外部语言服务或下载编译器。
+ADD --checksum=sha256:cd932cfeb93d4deee1415b77f35b35c4ec402f82e516c230f95b7e6a96ef56c8 https://open-vsx.org/api/tintinweb/vscode-solidity-language/0.0.7/file/tintinweb.vscode-solidity-language-0.0.7.vsix /tmp/solidity-language.vsix
+RUN node -e 'const fs = require("fs"); const Zip = require("/usr/lib/code-server/node_modules/adm-zip"); new Zip("/tmp/solidity-language.vsix").extractAllTo("/tmp/solidity-language"); fs.renameSync("/tmp/solidity-language/extension", "/usr/lib/code-server/lib/vscode/extensions/solidity-language"); fs.rmSync("/tmp/solidity-language", {recursive:true}); fs.unlinkSync("/tmp/solidity-language.vsix");'
+
 FROM cgr.dev/chainguard/wolfi-base@sha256:6677ae802613d558c16d8bbb2ef2ec89e2e33089bbf78c8f3090ac159bf02d4c
 
 ARG HTTP_PROXY
@@ -46,7 +50,7 @@ RUN --mount=type=cache,target=/var/cache/apk,sharing=locked \
     done \
     && addgroup -g 1000 coder \
     && adduser -D -u 1000 -G coder -h /home/coder -s /bin/bash coder \
-    && mkdir -p /workspace /home/coder/.config /home/coder/.local/share/code-server \
+    && mkdir -p /workspace /home/coder/.config /home/coder/.local/share/code-server /home/coder/.cache \
     && chown -R 1000:1000 /workspace /home/coder
 
 COPY --from=patched /usr/lib/code-server /usr/lib/code-server

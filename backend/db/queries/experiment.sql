@@ -51,13 +51,13 @@ SET course_id = $3,
     group_config = $10,
     require_report = $11,
     wizard_step = $12,
-    updated_at = now()
+    updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE tenant_id = $1 AND id = $2 AND status = 1 AND deleted_at IS NULL
 RETURNING id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at;
 
 -- name: SetExperimentStatus :one
 UPDATE experiment
-SET status = $3, updated_at = now()
+SET status = $3, updated_at = GREATEST(clock_timestamp(), updated_at + interval '1 microsecond')
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 RETURNING id, tenant_id, course_id, author_id, template_ref, template_version, name, description, components, collab_mode, group_config, require_report, wizard_step, status, created_at, updated_at, deleted_at;
 
@@ -328,6 +328,9 @@ SELECT COALESCE(SUM(score)::float8, 0)::float8
 FROM checkpoint_result
 WHERE tenant_id = $1 AND instance_id = $2;
 
+-- name: HasPendingInstanceReports :one
+SELECT EXISTS(SELECT 1 FROM experiment_report WHERE tenant_id = $1 AND instance_id = $2 AND status = 1)::boolean;
+
 -- name: SumReportScores :one
 SELECT COALESCE(SUM(manual_score)::float8, 0)::float8
 FROM experiment_report
@@ -340,46 +343,42 @@ SELECT
 FROM experiment e
 WHERE e.tenant_id = $1 AND e.deleted_at IS NULL AND ($2::bigint = 0 OR e.course_id = $2);
 
--- name: CreateExperimentScoreOutbox :one
+-- name: CreateExperimentEventOutbox :one
+-- 实例行锁内生成得分修订，绑定使用定义的单调修订；载荷与修订同次提交。
 WITH next_revision AS (
-    SELECT COALESCE(MAX(score_revision), 0) + 1 AS score_revision
-    FROM experiment_score_outbox
-    WHERE tenant_id = $2 AND instance_id = $4
+    SELECT CASE WHEN sqlc.arg(subject)::text = 'experiment.scored'
+        THEN COALESCE(MAX(event_revision), 0) + 1 ELSE sqlc.arg(event_revision)::bigint END AS revision
+    FROM experiment_event_outbox
+    WHERE tenant_id = sqlc.arg(tenant_id)::bigint AND aggregate_id = sqlc.arg(aggregate_id)::bigint AND subject = sqlc.arg(subject)::text
 )
-INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
-SELECT $1, $2, $3, $4, $5, $6::text::numeric, next_revision.score_revision, $7, $8, 1, 0, NULL, now(), now(), '', NULL
-FROM next_revision
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
+INSERT INTO experiment_event_outbox (id, tenant_id, experiment_id, aggregate_id, event_revision, trace_id, occurred_at, subject, payload)
+SELECT sqlc.arg(id)::bigint, sqlc.arg(tenant_id)::bigint, sqlc.arg(experiment_id)::bigint, sqlc.arg(aggregate_id)::bigint, n.revision,
+    sqlc.arg(trace_id)::text, sqlc.arg(occurred_at)::timestamptz, sqlc.arg(subject)::text,
+    CASE WHEN sqlc.arg(subject)::text = 'experiment.scored'
+        THEN jsonb_set(sqlc.arg(payload)::jsonb, '{score_revision}', to_jsonb(n.revision)) ELSE sqlc.arg(payload)::jsonb END
+FROM next_revision n
+ON CONFLICT (tenant_id, subject, aggregate_id, event_revision) DO UPDATE SET payload = experiment_event_outbox.payload
+RETURNING *;
 
--- name: ClaimPendingExperimentScoreOutbox :many
+-- name: ClaimPendingExperimentEventOutbox :many
 WITH exhausted AS (
-    UPDATE experiment_score_outbox AS expired
-    SET status = 4, last_error = 'score lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
+    UPDATE experiment_event_outbox AS expired
+    SET status = 4, last_error = 'event lease expired after retry limit', updated_at = now(), lease_token = '', lease_until = NULL
     WHERE expired.status = 2 AND expired.lease_until <= @stale_before::timestamptz AND expired.retry_count >= @max_attempts
     RETURNING expired.id
 ), candidates AS (
-    SELECT o.id
-    FROM experiment_score_outbox o
-    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= @stale_before::timestamptz))
-      AND o.retry_count < @max_attempts
-    ORDER BY o.created_at ASC, o.id ASC
-    LIMIT @page_limit
-    FOR UPDATE SKIP LOCKED
+    SELECT o.id FROM experiment_event_outbox o
+    WHERE (o.status IN (1, 4) OR (o.status = 2 AND o.lease_until <= @stale_before::timestamptz)) AND o.retry_count < @max_attempts
+    ORDER BY o.created_at ASC, o.id ASC LIMIT @page_limit FOR UPDATE SKIP LOCKED
 )
-UPDATE experiment_score_outbox AS outbox
+UPDATE experiment_event_outbox AS outbox
 SET status = 2, retry_count = outbox.retry_count + 1, updated_at = now(), lease_token = @lease_token, lease_until = @lease_until::timestamptz
-FROM candidates
-WHERE outbox.id = candidates.id
-RETURNING outbox.id, outbox.tenant_id, outbox.experiment_id, outbox.instance_id, outbox.student_id, outbox.score, outbox.score_revision, outbox.trace_id, outbox.scored_at, outbox.status, outbox.retry_count, outbox.last_error, outbox.created_at, outbox.updated_at, outbox.lease_token, outbox.lease_until;
+FROM candidates WHERE outbox.id = candidates.id RETURNING outbox.*;
 
--- name: MarkExperimentScoreOutboxPublished :one
-UPDATE experiment_score_outbox
-SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now()
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
+-- name: MarkExperimentEventOutboxPublished :one
+UPDATE experiment_event_outbox SET status = 3, last_error = NULL, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now() RETURNING *;
 
--- name: MarkExperimentScoreOutboxFailed :one
-UPDATE experiment_score_outbox
-SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
-WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until;
+-- name: MarkExperimentEventOutboxFailed :one
+UPDATE experiment_event_outbox SET status = 4, last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now() RETURNING *;

@@ -6,27 +6,29 @@
 //
 // 键名与取值形状由后端固定(数值枚举按十进制字符串、布尔按 "true"/"false"、
 // 字符串列按原值),故这里只做安全读取与求和,不猜测键名:
-// 没有声明聚合契约的接口不会有 facets,读不到就按 0 展示。
+// 整个分组未返回时数量未知,只有已返回分组中的缺失取值才按 0 展示。
 
 import type { PageFacets } from '@chaimir/api-client'
 
-/** facetGroup 取出某一列的分组计数;缺失即空对象。 */
-export function facetGroup(facets: PageFacets | undefined, key: string): Record<string, number> {
-  return facets?.[key] ?? {}
+/** facetGroup 取出某一列的分组计数;未读取或未声明时保持未知。 */
+export function facetGroup(facets: PageFacets | undefined, key: string): Record<string, number> | undefined {
+  return facets?.[key]
 }
 
-/** facetCount 取出某一列某个取值的计数;缺失即 0。 */
+/** facetCount 读取某个取值的计数;已知分组内缺失为0,整个分组缺失为未知。 */
 export function facetCount(
   facets: PageFacets | undefined,
   key: string,
   value: string | number | boolean,
-): number {
-  return facetGroup(facets, key)[String(value)] ?? 0
+): number | undefined {
+  const group = facetGroup(facets, key)
+  return group ? group[String(value)] ?? 0 : undefined
 }
 
 /** facetSum 把某一列的全部分组计数相加,用于「已声明该列的记录总数」。 */
-export function facetSum(facets: PageFacets | undefined, key: string): number {
-  return Object.values(facetGroup(facets, key)).reduce((sum, item) => sum + item, 0)
+export function facetSum(facets: PageFacets | undefined, key: string): number | undefined {
+  const group = facetGroup(facets, key)
+  return group ? Object.values(group).reduce((sum, item) => sum + item, 0) : undefined
 }
 
 /**
@@ -37,8 +39,10 @@ export function facetTopEntries(
   facets: PageFacets | undefined,
   key: string,
   limit: number,
-): { value: string; count: number }[] {
-  return Object.entries(facetGroup(facets, key))
+): { value: string; count: number }[] | undefined {
+  const group = facetGroup(facets, key)
+  if (!group) return undefined
+  return Object.entries(group)
     .map(([value, count]) => ({ value, count }))
     .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
     .slice(0, limit)

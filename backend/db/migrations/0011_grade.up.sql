@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS semester (
     name VARCHAR(64) NOT NULL,
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
-    is_current BOOLEAN NOT NULL DEFAULT false
+    is_current BOOLEAN NOT NULL DEFAULT false,
+    CONSTRAINT chk_semester_date_range CHECK (start_date <= end_date)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_semester_name ON semester(tenant_id, name);
@@ -43,6 +44,7 @@ CREATE INDEX IF NOT EXISTS idx_grade_review_course_status ON grade_review(tenant
 
 CREATE TABLE IF NOT EXISTS grade_lock_outbox (
     id BIGINT PRIMARY KEY,
+    revision BIGINT GENERATED ALWAYS AS IDENTITY NOT NULL UNIQUE CHECK (revision > 0),
     tenant_id BIGINT NOT NULL,
     review_id BIGINT NOT NULL,
     course_id BIGINT NOT NULL,
@@ -76,6 +78,14 @@ CREATE TABLE IF NOT EXISTS student_semester_grade (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_student_semester_grade ON student_semester_grade(tenant_id, student_id, semester_id);
 
+CREATE TABLE IF NOT EXISTS grade_update_cursor (
+    tenant_id BIGINT NOT NULL,
+    course_id BIGINT NOT NULL,
+    student_id BIGINT NOT NULL,
+    revision BIGINT NOT NULL CHECK (revision > 0),
+    PRIMARY KEY (tenant_id, course_id, student_id)
+);
+
 CREATE TABLE IF NOT EXISTS grade_appeal (
     id BIGINT PRIMARY KEY,
     tenant_id BIGINT NOT NULL,
@@ -87,6 +97,8 @@ CREATE TABLE IF NOT EXISTS grade_appeal (
     result_comment TEXT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     handled_at TIMESTAMPTZ NULL,
+    unlock_revision BIGINT NULL REFERENCES grade_lock_outbox(revision),
+    CONSTRAINT chk_grade_appeal_unlock_revision CHECK (status NOT IN (2,3) OR (unlock_revision IS NOT NULL AND unlock_revision > 0)),
     CONSTRAINT chk_grade_appeal_status CHECK (status IN (1,2,3,4))
 );
 
@@ -104,11 +116,20 @@ CREATE TABLE IF NOT EXISTS academic_warning (
     detail JSONB NOT NULL DEFAULT '{}'::jsonb,
     status SMALLINT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    notify_trace_id VARCHAR(128) NOT NULL CHECK (btrim(notify_trace_id) <> ''),
+    notify_status SMALLINT NOT NULL DEFAULT 1 CHECK (notify_status IN (1,2,3,4)),
+    notify_attempts BIGINT NOT NULL DEFAULT 0 CHECK (notify_attempts >= 0),
+    notify_lease_token VARCHAR(64) NOT NULL DEFAULT '',
+    notify_lease_until TIMESTAMPTZ NULL,
+    notify_next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    notify_last_error VARCHAR(255) NULL,
     CONSTRAINT chk_academic_warning_type CHECK (type IN (1,2)),
-    CONSTRAINT chk_academic_warning_status CHECK (status IN (1,2,3))
+    CONSTRAINT chk_academic_warning_status CHECK (status IN (1,2))
 );
 
 CREATE INDEX IF NOT EXISTS idx_academic_warning_student_semester ON academic_warning(tenant_id, student_id, semester_id);
+CREATE INDEX IF NOT EXISTS idx_academic_warning_notify_due ON academic_warning(notify_next_attempt_at, created_at) WHERE notify_status IN (1,4);
+CREATE INDEX IF NOT EXISTS idx_academic_warning_notify_lease ON academic_warning(notify_lease_until) WHERE notify_status = 2;
 
 CREATE TABLE IF NOT EXISTS transcript_record (
     id BIGINT PRIMARY KEY,
@@ -129,6 +150,7 @@ ALTER TABLE grade_review ENABLE ROW LEVEL SECURITY;
 ALTER TABLE grade_lock_outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE student_semester_grade ENABLE ROW LEVEL SECURITY;
 ALTER TABLE grade_appeal ENABLE ROW LEVEL SECURITY;
+ALTER TABLE grade_update_cursor ENABLE ROW LEVEL SECURITY;
 ALTER TABLE academic_warning ENABLE ROW LEVEL SECURITY;
 ALTER TABLE transcript_record ENABLE ROW LEVEL SECURITY;
 
@@ -145,6 +167,9 @@ CREATE POLICY grade_lock_outbox_tenant_rls ON grade_lock_outbox
     USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
     WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY student_semester_grade_tenant_rls ON student_semester_grade
+    USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+CREATE POLICY grade_update_cursor_tenant_rls ON grade_update_cursor
     USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
     WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
 CREATE POLICY grade_appeal_tenant_rls ON grade_appeal

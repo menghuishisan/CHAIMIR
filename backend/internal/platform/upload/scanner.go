@@ -75,7 +75,7 @@ func VerifyScan(ctx context.Context, scanner Scanner, policy ScanPolicy, req Sca
 		if signature == "" {
 			signature = "unknown"
 		}
-		return fmt.Errorf("文件命中病毒特征: %s", signature)
+		return fmt.Errorf("%w: 文件命中病毒特征: %s", ErrInvalidFile, signature)
 	default:
 		return fmt.Errorf("文件病毒扫描结果非法: %s", result.Verdict)
 	}

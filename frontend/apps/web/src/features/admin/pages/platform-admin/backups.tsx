@@ -36,22 +36,26 @@ export default function PlatformBackupsPage() {
   // 只看当前页会在这一页恰好没有成功记录时误报「暂无成功记录」。
   const latestSucceeded = useAsyncResource(
     () => api.admin.listBackups({ status: BackupStatus.SUCCEEDED, page: 1, size: 1 }),
-    [],
+    [backups.refreshVersion],
     () => false,
   )
   const succeededCount = useResourceTotal(
     (params) => api.admin.listBackups({ status: BackupStatus.SUCCEEDED, ...params }),
     [],
+    backups.refreshVersion,
   )
   const failedCount = useResourceTotal(
     (params) => api.admin.listBackups({ status: BackupStatus.FAILED, ...params }),
     [],
+    backups.refreshVersion,
   )
   const runningCount = useResourceTotal(
     (params) => api.admin.listBackups({ status: BackupStatus.RUNNING, ...params }),
     [],
+    backups.refreshVersion,
   )
-  const latest = latestSucceeded.data ? latestSucceeded.data.list[0] : undefined
+  const latestResult = latestSucceeded.status === 'success' ? latestSucceeded.data : null
+  const latest = latestResult?.list[0]
 
   const columns: TableColumn<BackupRecord>[] = [
     {
@@ -120,14 +124,14 @@ export default function PlatformBackupsPage() {
         items={[
           {
             label: '最近一次成功',
-            value: latest ? formatDateTime(latest.started_at) : '暂无',
+            value: latest ? formatDateTime(latest.started_at) : latestResult ? '暂无' : undefined,
             hint: latest ? formatFileSize(latest.size_bytes) : '备份成功后显示时间与大小',
           },
           { label: '已成功', value: succeededCount ?? '—', hint: '不受下方翻页影响' },
           {
             label: '已失败',
             value: failedCount ?? '—',
-            hint: failedCount === 0 ? '暂无失败' : '需要查原因',
+            hint: failedCount === undefined ? undefined : failedCount === 0 ? '暂无失败' : '需要查原因',
           },
           { label: '进行中', value: runningCount ?? '—', hint: '正在执行的备份' },
         ]}

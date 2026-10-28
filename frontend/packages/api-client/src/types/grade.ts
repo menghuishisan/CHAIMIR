@@ -70,11 +70,13 @@ export interface GradeReview {
 
 export interface GradeReviewRequest {
   course_id: SnowflakeID
+  /** 省略时按课程学期名称精确解析并保存学校登记的学期。 */
   semester_id?: SnowflakeID
   comment?: string
 }
 
 export interface ReviewDecision {
+  /** 通过时优先使用显式学期，否则沿用报送学期；均省略则按课程精确解析。 */
   semester_id?: SnowflakeID
   comment?: string
 }

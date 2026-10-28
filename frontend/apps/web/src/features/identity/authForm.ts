@@ -1,4 +1,4 @@
-// authForm 是认证域表单的校验规则与就近错误状态原语。
+// authForm 提供认证域表单的纯校验规则与短信重发冷却。
 // 同一条规则只有一处实现:手机号格式、密码强度、两次输入一致等在八个认证页里口径完全相同,
 // 各页各写一遍的后果是规则调整时漏改某几页,提示语也会长出好几种说法。
 // 这里只做「填没填、格式对不对」的就近校验(规范 §5.2 校验时机),
@@ -89,31 +89,6 @@ export function confirmPasswordError(
   if (!confirm) return `请再次输入${noun}`
   if (confirm !== password) return `两次输入的${noun}不一致,请重新确认`
   return null
-}
-
-export interface FieldErrorState {
-  /** errors 各字段当前的就近错误;值为 null 表示该字段已通过 */
-  errors: Record<string, string | null>
-  /** setError 记录或清除一个字段的错误,并返回该字段是否通过 —— 提交时可直接汇总各字段结果 */
-  setError: (key: string, message: string | null) => boolean
-  /** clearErrors 清空全部就近错误(切换登录方式等换表单场景) */
-  clearErrors: () => void
-}
-
-/**
- * useFieldErrors 管理就近字段错误:blur 时校验单个字段,提交时校验全部并把错误留在原位。
- */
-export function useFieldErrors(): FieldErrorState {
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
-
-  const setError = useCallback((key: string, message: string | null): boolean => {
-    setErrors((previous) => ({ ...previous, [key]: message }))
-    return message === null
-  }, [])
-
-  const clearErrors = useCallback(() => setErrors({}), [])
-
-  return { errors, setError, clearErrors }
 }
 
 export interface SmsCooldown {

@@ -3,6 +3,7 @@ package teaching
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -150,6 +151,10 @@ func mapAssignmentError(err error) error {
 	if err == nil {
 		return nil
 	}
+	// 内容版本可能在选题后被弃用,保留M5可操作的版本提示和原始错误链。
+	if errors.Is(err, apperr.ErrContentVersionNotPublished) {
+		return err
+	}
 	if isNoRows(err) {
 		return apperr.ErrTeachingAssignmentNotFound
 	}
@@ -160,6 +165,10 @@ func mapAssignmentError(err error) error {
 func mapGradeError(err error) error {
 	if err == nil {
 		return nil
+	}
+	// 来源校验会包装数据库未命中,应保留明确的业务错误,不能误报为成绩已锁定。
+	if _, ok := apperr.As(err); ok {
+		return err
 	}
 	if isNoRows(err) {
 		return apperr.ErrTeachingGradeLocked

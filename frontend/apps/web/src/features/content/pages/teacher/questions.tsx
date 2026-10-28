@@ -131,18 +131,21 @@ export default function TeacherQuestionsPage() {
   )
 
   // 指标带取服务端全量口径,不随上方题型筛选变化:它回答「我的题库整体状况」
-  const totalCount = useResourceTotal((params) => api.content.getItems(params), [])
+  const totalCount = useResourceTotal((params) => api.content.getItems(params), [], items.refreshVersion)
   const publishedCount = useResourceTotal(
     (params) => api.content.getItems({ status: ContentStatus.PUBLISHED, ...params }),
     [],
+    items.refreshVersion,
   )
   const draftCount = useResourceTotal(
     (params) => api.content.getItems({ status: ContentStatus.DRAFT, ...params }),
     [],
+    items.refreshVersion,
   )
   const sharedCount = useResourceTotal(
     (params) => api.content.getItems({ visibility: ContentVisibility.SHARED, ...params }),
     [],
+    items.refreshVersion,
   )
 
   const columns: TableColumn<ContentItem>[] = [

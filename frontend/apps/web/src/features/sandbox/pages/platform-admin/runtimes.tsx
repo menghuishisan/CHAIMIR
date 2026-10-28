@@ -78,14 +78,15 @@ export default function PlatformRuntimesPage() {
     [list, statusFilter]
   )
 
-  const stats = useMemo(
-    () => ({
+  const stats = useMemo(() => {
+    if ((runtimes.status !== 'success' && runtimes.status !== 'empty') || !runtimes.data) return undefined
+    return {
+      total: list.length,
       available: list.filter((item) => item.status === RuntimeStatus.AVAILABLE).length,
       onboarding: list.filter((item) => item.status === RuntimeStatus.ONBOARDING).length,
       failed: list.filter((item) => item.selftest_status === RuntimeSelftestStatus.FAILED).length,
-    }),
-    [list]
-  )
+    }
+  }, [list, runtimes.data, runtimes.status])
 
   return (
     <PageScaffold>
@@ -110,13 +111,13 @@ export default function PlatformRuntimesPage() {
         label="运行时总量摘要"
         className="mb-5"
         items={[
-          { label: '运行时总数', value: list.length, hint: '含接入中与已停用' },
-          { label: '可用', value: stats.available, hint: '学校可以选用' },
-          { label: '接入中', value: stats.onboarding, hint: '还没通过自检' },
+          { label: '运行时总数', value: stats?.total, hint: '含接入中与已停用' },
+          { label: '可用', value: stats?.available, hint: '学校可以选用' },
+          { label: '接入中', value: stats?.onboarding, hint: '还没通过自检' },
           {
             label: '自检未通过',
-            value: stats.failed,
-            hint: stats.failed > 0 ? '需要查看失败原因' : '暂无失败记录',
+            value: stats?.failed,
+            hint: stats ? (stats.failed === 0 ? '暂无失败记录' : '需要查看失败原因') : undefined,
           },
         ]}
       />

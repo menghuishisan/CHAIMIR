@@ -13,7 +13,9 @@ import type { SandboxCatalogTool } from '@chaimir/api-client'
 import { ResourceState } from '../../../components/ResourceState'
 import { sandboxToolKindLabel } from '../../../utils/labels/sandbox'
 import { useOrchestrationCatalog } from '../useOrchestrationCatalog'
-import type { CompositionDeclaration } from '../composition'
+import { compositionSelectionError, compositionSelectionKey, type CompositionDeclaration } from '../composition'
+import { CompositionConnectionsFields } from './CompositionConnectionsFields'
+import { CompositionParameterFields } from './CompositionParameterFields'
 
 export interface CompositionDeclarationFieldsProps {
   /** idPrefix 保证同页多个实例的表单控件 id 不撞车 */
@@ -22,22 +24,22 @@ export interface CompositionDeclarationFieldsProps {
   onChange: (next: CompositionDeclaration) => void
   /** toolsHelper 让各场景说明工具在这里意味着什么(学生打开 / 验证时使用 / 判题执行) */
   toolsHelper: string
-  /** 已由编译器按依赖补齐的基础设施编码,只读提示,不参与勾选 */
-  derivedInfraCodes?: readonly string[]
 }
 
 /**
- * CompositionDeclarationFields 渲染组合声明的四个字段。
- * 换运行时会清空镜像与组件:上一个运行时的版本号与组件对新运行时没有意义。
+ * CompositionDeclarationFields 渲染选择和连接配置。
+ * 换运行时清空旧镜像与参数,组件兼容性和连接由M2重新检查。
  */
 export function CompositionDeclarationFields({
   idPrefix,
   value,
-  onChange,
+  onChange: commit,
   toolsHelper,
-  derivedInfraCodes = [],
 }: CompositionDeclarationFieldsProps) {
   const catalog = useOrchestrationCatalog()
+  // 任何选择变化立即撤销预览证明;保留仍存在的连接,由M2重算依赖和候选。
+  const onChange = (next: CompositionDeclaration) => commit({ ...next, connectionCheck: undefined })
+  const selectionError = compositionSelectionError(value)
 
   return (
     <ResourceState
@@ -64,6 +66,10 @@ export function CompositionDeclarationFields({
                           ...value,
                           runtimes: value.runtimes.map((item, itemIndex) => itemIndex === index ? { ...item, instanceCode: event.target.value } : item),
                           workspaceRuntimeInstance: runtime.instanceCode === value.workspaceRuntimeInstance ? event.target.value : value.workspaceRuntimeInstance,
+                          links: value.links.map((link) => ({ ...link,
+                            source_component: link.source_component === runtime.instanceCode ? event.target.value : link.source_component,
+                            target_component: link.target_component === runtime.instanceCode ? event.target.value : link.target_component,
+                          })),
                         })}
                       />
                     </FormField>
@@ -73,7 +79,7 @@ export function CompositionDeclarationFields({
                         options={catalog.runtimeOptions}
                         value={runtime.runtimeCode}
                         placeholder="选择运行时"
-                        onValueChange={(runtimeCode) => onChange({ ...value, runtimes: value.runtimes.map((item, itemIndex) => itemIndex === index ? { ...item, runtimeCode, imageVersion: '' } : item) })}
+                        onValueChange={(runtimeCode) => onChange({ ...value, runtimes: value.runtimes.map((item, itemIndex) => itemIndex === index ? { ...item, runtimeCode, imageVersion: '', params: undefined } : item) })}
                       />
                     </FormField>
                     <FormField label="镜像版本" htmlFor={`${idPrefix}-runtime-${index}-image`} required>
@@ -86,16 +92,30 @@ export function CompositionDeclarationFields({
                         onValueChange={(imageVersion) => onChange({ ...value, runtimes: value.runtimes.map((item, itemIndex) => itemIndex === index ? { ...item, imageVersion } : item) })}
                       />
                     </FormField>
-                    <Button type="button" variant="ghost" size="sm" aria-label={`移除运行时实例 ${runtime.instanceCode || index + 1}`} title="移除运行时实例" disabled={value.runtimes.length <= 1} onClick={() => {
+                    <Button type="button" variant="ghost" size="sm" aria-label={`移除运行时实例 ${runtime.instanceCode || index + 1}`} title="移除运行时实例" disabled={value.runtimes.length <= 1 || runtime.initAssetBound === true} onClick={() => {
                       const runtimes = value.runtimes.filter((_, itemIndex) => itemIndex !== index)
-                      onChange({ ...value, runtimes, workspaceRuntimeInstance: runtime.instanceCode === value.workspaceRuntimeInstance ? '' : value.workspaceRuntimeInstance })
+                      onChange({ ...value, runtimes, workspaceRuntimeInstance: runtime.instanceCode === value.workspaceRuntimeInstance ? '' : value.workspaceRuntimeInstance,
+                        links: value.links.filter((link) => link.source_component !== runtime.instanceCode && link.target_component !== runtime.instanceCode) })
                     }}>
                       <Trash2 size={16} aria-hidden="true" />
                     </Button>
+                    {runtime.initAssetBound ? <p className="text-xs text-ink-sub sm:col-span-4">初始化材料仍关联此实例,调整材料关联后才能移除;更名会同步保留关联。</p> : null}
+                    <div className="sm:col-span-4">
+                      <CompositionParameterFields
+                        idPrefix={`${idPrefix}-runtime-${index}`}
+                        schema={catalog.resource.data?.runtimes.find((item) => item.code === runtime.runtimeCode)?.capabilities.config_schema}
+                        value={runtime.params}
+                        onChange={(params) => onChange({ ...value, runtimes: value.runtimes.map((item, itemIndex) => itemIndex === index ? { ...item, params } : item) })}
+                      />
+                    </div>
                   </div>
                 )
               })}
-              <Button type="button" variant="outline" size="sm" leftIcon={Plus} onClick={() => onChange({ ...value, runtimes: [...value.runtimes, { instanceCode: `chain-${value.runtimes.length + 1}`, runtimeCode: '', imageVersion: '' }] })}>
+              <Button type="button" variant="outline" size="sm" leftIcon={Plus} onClick={() => {
+                let number = 1
+                while (value.runtimes.some((runtime) => runtime.instanceCode === `chain-${number}`)) number++
+                onChange({ ...value, runtimes: [...value.runtimes, { instanceCode: `chain-${number}`, runtimeCode: '', imageVersion: '' }] })
+              }}>
                 添加运行时实例
               </Button>
             </div>
@@ -115,8 +135,11 @@ export function CompositionDeclarationFields({
             <ComponentChecklist
               items={catalog.tools}
               selected={value.toolCodes}
+              params={value.componentParams}
+              idPrefix={`${idPrefix}-tool`}
+              onParamsChange={(code, params) => onChange({ ...value, componentParams: { ...value.componentParams, [code]: params } })}
               emptyHint="平台还没有可用工具,可只使用运行时自身能力。"
-              onToggle={(toolCodes) => onChange({ ...value, toolCodes })}
+              onToggle={(toolCodes) => onChange({ ...value, toolCodes, links: value.links.filter((link) => !value.toolCodes.some((code) => !toolCodes.includes(code) && (link.source_component === code || link.target_component === code))) })}
             />
           </FormField>
 
@@ -127,17 +150,19 @@ export function CompositionDeclarationFields({
             <ComponentChecklist
               items={catalog.infra}
               selected={value.infraCodes}
+              params={value.componentParams}
+              idPrefix={`${idPrefix}-infra`}
+              onParamsChange={(code, params) => onChange({ ...value, componentParams: { ...value.componentParams, [code]: params } })}
               emptyHint="平台还没有可声明的基础设施组件。"
-              onToggle={(infraCodes) => onChange({ ...value, infraCodes })}
+              onToggle={(infraCodes) => onChange({ ...value, infraCodes, links: value.links.filter((link) => !value.infraCodes.some((code) => !infraCodes.includes(code) && (link.source_component === code || link.target_component === code))) })}
             />
           </FormField>
 
-          {derivedInfraCodes.length > 0 ? (
-            <Callout tone="info" title="平台已自动补齐的支撑组件">
-              {derivedInfraCodes.join('、')}——
-              这些是上次保存时按组件依赖补上的,保存后会重新计算。
-            </Callout>
-          ) : null}
+          {selectionError === undefined ? (
+            <FormField label="组件连接" helper="平台会检查依赖和可用目标;多个目标时请明确选择。">
+              <CompositionConnectionsFields key={compositionSelectionKey(value)} idPrefix={idPrefix} value={value} onChange={commit} />
+            </FormField>
+          ) : <Callout tone="info">{selectionError}</Callout>}
         </div>
       )}
     </ResourceState>
@@ -149,28 +174,35 @@ interface ComponentChecklistProps {
   selected: readonly string[]
   emptyHint: string
   onToggle: (next: string[]) => void
+  idPrefix: string
+  params?: Record<string, Record<string, unknown>>
+  onParamsChange: (code: string, params: Record<string, unknown>) => void
 }
 
 /** ComponentChecklist 是工具与基础设施共用的勾选列表,两处口径一致。 */
-function ComponentChecklist({ items, selected, emptyHint, onToggle }: ComponentChecklistProps) {
+function ComponentChecklist({ items, selected, emptyHint, onToggle, idPrefix, params, onParamsChange }: ComponentChecklistProps) {
   if (items.length === 0) {
     return <p className="text-sm text-ink-sub">{emptyHint}</p>
   }
   return (
     <div className="flex flex-col gap-2">
       {items.map((item) => (
-        <Checkbox
-          key={item.code}
-          checked={selected.includes(item.code)}
-          label={`${item.name} · ${sandboxToolKindLabel(item.kind)}`}
-          onCheckedChange={(checked) =>
-            onToggle(
-              checked === true
-                ? [...selected, item.code]
-                : selected.filter((code) => code !== item.code),
-            )
-          }
-        />
+        <div key={item.code} className="flex flex-col gap-3">
+          <Checkbox
+            checked={selected.includes(item.code)}
+            label={`${item.name} · ${sandboxToolKindLabel(item.kind)}`}
+            onCheckedChange={(checked) =>
+              onToggle(
+                checked === true
+                  ? [...selected, item.code]
+                  : selected.filter((code) => code !== item.code),
+              )
+            }
+          />
+          {selected.includes(item.code) ? (
+            <CompositionParameterFields idPrefix={`${idPrefix}-${item.code}`} schema={item.capabilities.config_schema} value={params?.[item.code]} onChange={(next) => onParamsChange(item.code, next)} />
+          ) : null}
+        </div>
       ))}
     </div>
   )

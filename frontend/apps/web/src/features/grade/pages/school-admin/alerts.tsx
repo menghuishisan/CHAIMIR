@@ -61,7 +61,6 @@ const STATUS_FILTERS = [
   { value: '', label: '全部' },
   { value: String(GradeWarningStatus.PENDING), label: '待学生确认' },
   { value: String(GradeWarningStatus.ACKNOWLEDGED), label: '学生已确认' },
-  { value: String(GradeWarningStatus.NOTIFY_FAILED), label: '提醒未送达' },
 ] as const
 
 /**
@@ -84,14 +83,16 @@ export default function SchoolAdminAlertsPage() {
   )
 
   // 指标带取全量口径,不随下方筛选变化:它回答「全校预警总体分布」
-  const totalCount = useResourceTotal((params) => api.grade.listWarnings(params), [])
+  const totalCount = useResourceTotal((params) => api.grade.listWarnings(params), [], warnings.refreshVersion)
   const pendingCount = useResourceTotal(
     (params) => api.grade.listWarnings({ status: GradeWarningStatus.PENDING, ...params }),
-    []
+    [],
+    warnings.refreshVersion
   )
   const acknowledgedCount = useResourceTotal(
     (params) => api.grade.listWarnings({ status: GradeWarningStatus.ACKNOWLEDGED, ...params }),
-    []
+    [],
+    warnings.refreshVersion
   )
 
   // 预警只回 student_id / semester_id,姓名与学期名在此解析

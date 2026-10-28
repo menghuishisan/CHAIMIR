@@ -85,6 +85,16 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 		"ephemeral_mounts": []map[string]any{{"name": "private-archive-tmp", "mount_path": "/tmp"}},
 		"prepull_command":  []string{"tar", "--help"}, "prepull_hold": false,
 	}
+	// 初始化脚本与学生 shell 使用相同受控工具镜像,但不共享临时卷或进程入口。
+	initScript := map[string]any{
+		"name": "init-script", "image_url": workspaceImageURL, "command": []string{"sleep", "2147483647"},
+		"env":                       []map[string]any{{"name": "HOME", "value": "/tmp"}},
+		"resources":                 map[string]any{"requests": map[string]string{"cpu": "50m", "memory": "64Mi"}, "limits": map[string]string{"cpu": "250m", "memory": "256Mi"}},
+		"read_only_root_filesystem": true, "labels": map[string]string{"chaimir.io/student-access": "false", "chaimir.io/sensitivity": "init-script"}, "mount_workspace": true,
+		"ephemeral_mounts": []map[string]any{{"name": "init-script-tmp", "mount_path": "/tmp"}},
+		"mount_domains":    []string{sandbox.VolumeDomainPublicAssets},
+		"prepull_command":  []string{"/usr/local/bin/chaimir-workspace", "selftest"}, "prepull_hold": false,
+	}
 	initAssetSidecar := map[string]any{
 		"name": "init-assets", "image_url": archiveImageURL, "command": []string{"sleep", "2147483647"},
 		"resources":                 map[string]any{"requests": map[string]string{"cpu": "50m", "memory": "64Mi"}, "limits": map[string]string{"cpu": "250m", "memory": "256Mi"}},
@@ -94,7 +104,7 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 		"prepull_command":  []string{"tar", "--help"}, "prepull_hold": false,
 	}
 	initAssets := append([]sandbox.InitAssetSpec(nil), manifest.Runtime.InitAssets...)
-	infraSidecars := []map[string]any{studentShell, privateArchive}
+	infraSidecars := []map[string]any{studentShell, privateArchive, initScript}
 	if len(initAssets) > 0 {
 		infraSidecars = append(infraSidecars, initAssetSidecar)
 	}
@@ -120,18 +130,20 @@ func genericRuntimeAdapterSpec(manifest platformRuntimeManifest, runtimeImageURL
 		"infra_sidecars": infraSidecars,
 		"pods": []map[string]any{
 			{"name": "sandbox", "init_containers": initContainers, "containers": []map[string]any{{"name": "runtime"}}},
-			{"name": "workspace", "containers": []map[string]any{studentShell}},
+			{"name": "workspace", "containers": []map[string]any{studentShell, initScript}},
 		},
 		"workspace_ops": map[string]any{
-			"exec_target": "workspace/student-shell",
-			"read_file":   []string{"/usr/local/bin/chaimir-workspace", "read", "{{workspace}}", "{{path}}"},
-			"write_file":  []string{"/usr/local/bin/chaimir-workspace", "write", "{{workspace}}", "{{path}}"},
-			"list_files":  []string{"/usr/local/bin/chaimir-workspace", "list", "{{workspace}}", "{{path}}"},
-			"pack_tar":    []string{"/usr/local/bin/chaimir-workspace", "pack", "{{workspace}}", "{{path}}"},
-			"unpack_tar":  []string{"/usr/local/bin/chaimir-workspace", "unpack", "{{workspace}}", "{{path}}"},
-			"run_script":  []string{"/usr/local/bin/chaimir-workspace", "run", "{{workspace}}", "{{workspace}}", "{{script}}"},
-			"terminal":    []string{"/usr/local/bin/chaimir-workspace", "terminal", "{{workspace}}"},
-			"selftest":    []string{"/usr/local/bin/chaimir-workspace", "selftest"},
+			"exec_target":        "workspace/student-shell",
+			"script_exec_target": "workspace/init-script",
+			"clean_workspace":    []string{"/usr/local/bin/chaimir-workspace", "clean", "{{workspace}}"},
+			"read_file":          []string{"/usr/local/bin/chaimir-workspace", "read", "{{workspace}}", "{{path}}"},
+			"write_file":         []string{"/usr/local/bin/chaimir-workspace", "write", "{{workspace}}", "{{path}}"},
+			"list_files":         []string{"/usr/local/bin/chaimir-workspace", "list", "{{workspace}}", "{{path}}"},
+			"pack_tar":           []string{"/usr/local/bin/chaimir-workspace", "pack", "{{workspace}}", "{{path}}"},
+			"unpack_tar":         []string{"/usr/local/bin/chaimir-workspace", "unpack", "{{workspace}}", "{{path}}"},
+			"run_script":         []string{"/usr/local/bin/chaimir-workspace", "run", "{{workspace}}", "{{workspace}}"},
+			"terminal":           []string{"/usr/local/bin/chaimir-workspace", "terminal", "{{workspace}}"},
+			"selftest":           []string{"/usr/local/bin/chaimir-workspace", "selftest"},
 		},
 		"private_archive_ops": map[string]any{
 			"exec_target": archiveTarget,

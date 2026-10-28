@@ -40,7 +40,7 @@ type Querier interface {
 	RenewJudgeTaskLease(ctx context.Context, arg RenewJudgeTaskLeaseParams) (int64, error)
 	ResetJudgeTaskForRejudge(ctx context.Context, arg ResetJudgeTaskForRejudgeParams) (ResetJudgeTaskForRejudgeRow, error)
 	RetryJudgeTask(ctx context.Context, arg RetryJudgeTaskParams) (RetryJudgeTaskRow, error)
-	UpdateJudgerSelftest(ctx context.Context, arg UpdateJudgerSelftestParams) (Judger, error)
+	UpdateJudgerExecutionState(ctx context.Context, arg UpdateJudgerExecutionStateParams) (Judger, error)
 	UpsertJudgeResult(ctx context.Context, arg UpsertJudgeResultParams) (JudgeResult, error)
 	UpsertJudger(ctx context.Context, arg UpsertJudgerParams) (Judger, error)
 }

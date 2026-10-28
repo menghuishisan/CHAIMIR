@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import {
   FlaskConical,
   FileUp,
@@ -44,7 +45,9 @@ import {
 import {
   Badge,
   Button,
+  Callout,
   ChainProgress,
+  FormField,
   Modal,
   ModalBody,
   ModalContent,
@@ -60,6 +63,7 @@ import { api } from '../../../../app/api'
 import { errorDiagnostics } from '../../../../utils/userFacingError'
 import { AppStatusScreen } from '../../../../components/AppStatusScreen'
 import { SandboxIdeWorkspace } from '../../../sandbox/components/SandboxIdeWorkspace'
+import { isSandboxReadyForOperation } from '../../../sandbox/rules'
 import { useTicketedWebSocket } from '../../../../hooks'
 import { useImmersive } from '../../../../layouts/immersive/context'
 import { experimentInstanceStatusLabel } from '../../../../utils/labels/experiment'
@@ -83,6 +87,7 @@ export default function StudentExperimentWorkspacePage() {
   const [instance, setInstance] = useState<ExperimentInstance>()
   const [instanceRefreshKey, setInstanceRefreshKey] = useState(0)
   const [fatalError, setFatalError] = useState<string>()
+  const workspaceRequestRef = useRef(0)
 
   const instanceId = searchParams.get(INSTANCE_PARAM) ?? ''
 
@@ -92,18 +97,25 @@ export default function StudentExperimentWorkspacePage() {
    * 取到后把编号写进地址,后续刷新就不再走这条路。
    */
   const openWorkspace = useCallback(async () => {
+    const request = ++workspaceRequestRef.current
     setFatalError(undefined)
+    setExperiment(undefined)
+    setInstance(undefined)
     try {
       const definition = await api.experiment.getPublishedExperiment(experimentId)
+      if (request !== workspaceRequestRef.current) return
       setExperiment(definition)
 
       if (instanceId) {
-        setInstance(await api.experiment.getInstance(instanceId))
+        const current = await api.experiment.getInstance(instanceId)
+        if (request !== workspaceRequestRef.current) return
+        setInstance(current)
         return
       }
       const created = await api.experiment.createInstance(experimentId, {
         group_id: definition.my_group_id,
       })
+      if (request !== workspaceRequestRef.current) return
       setInstance(created)
       setSearchParams(
         (current) => {
@@ -114,21 +126,29 @@ export default function StudentExperimentWorkspacePage() {
         { replace: true }
       )
     } catch (error) {
+      if (request !== workspaceRequestRef.current) return
       setFatalError(userFacingErrorMessage(error, '实验环境没能打开,请退出后重试。'))
     }
   }, [experimentId, instanceId, setSearchParams])
 
   useEffect(() => {
     void openWorkspace()
+    return () => {
+      workspaceRequestRef.current += 1
+    }
   }, [openWorkspace])
 
   /** reloadInstance 只重读实例:实验定义不会在会话中途变化。 */
   const reloadInstance = useCallback(async () => {
     if (!instanceId) return
+    const request = ++workspaceRequestRef.current
     try {
-      setInstance(await api.experiment.getInstance(instanceId))
+      const current = await api.experiment.getInstance(instanceId)
+      if (request !== workspaceRequestRef.current) return
+      setInstance(current)
       setInstanceRefreshKey((current) => current + 1)
     } catch (error) {
+      if (request !== workspaceRequestRef.current) return
       if (error instanceof ApiError && error.code === API_ERROR_CODES.UNAUTHORIZED) {
         setInstance(undefined)
         setFatalError(userFacingErrorMessage(error, '登录状态已失效,请重新登录后再进入实验。'))
@@ -184,6 +204,7 @@ export default function StudentExperimentWorkspacePage() {
 
   return (
     <ExperimentWorkbench
+      key={instance.instance_id}
       title={title}
       experiment={experiment}
       instance={instance}
@@ -222,8 +243,14 @@ function ExperimentWorkbench({
   const [sandboxStates, setSandboxStates] = useState<
     Record<string, { instance?: SandboxInstance; error?: string }>
   >({})
+  const [workspaceReadiness, setWorkspaceReadiness] = useState<{
+    sandboxId: string
+    ready: boolean
+  }>()
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string>()
+  const codeRefRequestRef = useRef(0)
+  const sandboxStateRequestRef = useRef(0)
 
   // 三处可选字段各自定住引用:直接写 `instance.stages ?? []` 会每次渲染换一个新数组,
   // 把下面按阶段过滤的 useMemo 变成每帧重算
@@ -269,14 +296,17 @@ function ExperimentWorkbench({
     () => sandboxes.find((item) => item.sandbox_id === activeSandboxId) ?? sandboxes[0],
     [activeSandboxId, sandboxes]
   )
+  const currentSandboxId = currentSandbox?.sandbox_id
 
   /** refreshSandboxStates 读取实例全部 M2 沙箱的实时状态,供生命周期操作门禁使用。 */
   const refreshSandboxStates = useCallback(async (refs: SandboxRef[]) => {
+    const request = ++sandboxStateRequestRef.current
     let pending = false
     await Promise.all(
       refs.map(async (ref) => {
         try {
           const liveInstance = await api.sandbox.getInstance(ref.sandbox_id)
+          if (request !== sandboxStateRequestRef.current) return
           setSandboxStates((current) => ({
             ...current,
             [ref.sandbox_id]: { instance: liveInstance },
@@ -289,6 +319,7 @@ function ExperimentWorkbench({
             liveInstance.status === SandboxStatus.DESTROYED
           pending ||= !phaseReady && !terminal
         } catch (error) {
+          if (request !== sandboxStateRequestRef.current) return
           pending = true
           setSandboxStates((current) => ({
             ...current,
@@ -321,25 +352,34 @@ function ExperimentWorkbench({
     void refreshUntilSettled()
     return () => {
       disposed = true
+      sandboxStateRequestRef.current += 1
       if (timer !== undefined) window.clearTimeout(timer)
     }
   }, [instance.sandboxes, instance.status, refreshSandboxStates])
 
   // 页面重开后先通过正式保存接口重新固化当前工作区,再把返回的引用交给判分。
   // 不把对象存储 key 加到沙箱详情响应,避免把内部存储字段变成新的读取面。
-  const restoreCodeRef = useCallback(async () => {
-    if (!currentSandbox) return
+  const restoreCodeRef = useCallback(async (ready: boolean) => {
+    const request = ++codeRefRequestRef.current
+    setCodeRef(undefined)
+    setWorkspaceReadiness(currentSandboxId ? { sandboxId: currentSandboxId, ready } : undefined)
+    if (!ready || !currentSandboxId) return
     try {
-      const saved = await api.sandbox.saveFiles(currentSandbox.sandbox_id)
+      const saved = await api.sandbox.saveFiles(currentSandboxId)
+      if (request !== codeRefRequestRef.current) return
       setCodeRef({ codeStorageKey: saved.code_storage_key, codeHash: saved.code_hash })
     } catch (error) {
+      if (request !== codeRefRequestRef.current) return
       setActionError(userFacingErrorMessage(error, '已保存的工作区引用没能恢复,请稍后重试。'))
     }
-  }, [currentSandbox])
+  }, [currentSandboxId])
 
   useEffect(() => {
     setCodeRef(undefined)
-  }, [currentSandbox?.sandbox_id])
+    return () => {
+      codeRefRequestRef.current += 1
+    }
+  }, [currentSandboxId])
 
   /** openSimulation 打开实例已经授权的仿真会话,退出后回到当前实验实例。 */
   const openSimulation = useCallback(
@@ -446,6 +486,9 @@ function ExperimentWorkbench({
     instance.status === ExperimentInstanceStatus.FINISHED ||
     instance.status === ExperimentInstanceStatus.RECYCLED
   const recycled = instance.status === ExperimentInstanceStatus.RECYCLED
+  const currentWorkspaceReady = !currentSandboxId || (
+    workspaceReadiness?.sandboxId === currentSandboxId && workspaceReadiness.ready
+  )
   const environmentPreparing = instance.sandboxes.some((sandbox) =>
     !isSandboxReadyForOperation(sandboxStates[sandbox.sandbox_id]?.instance)
   )
@@ -455,12 +498,14 @@ function ExperimentWorkbench({
   )
   const canPause =
     instance.status === ExperimentInstanceStatus.RUNNING &&
+    currentWorkspaceReady &&
     instance.sandboxes.every((sandbox) =>
       isSandboxReadyForOperation(sandboxStates[sandbox.sandbox_id]?.instance)
     )
   const canJudge =
     (instance.status === ExperimentInstanceStatus.RUNNING ||
       instance.status === ExperimentInstanceStatus.PAUSED) &&
+    currentWorkspaceReady &&
     sandboxes.every((sandbox) =>
       isSandboxReadyForOperation(sandboxStates[sandbox.sandbox_id]?.instance)
     )
@@ -536,13 +581,13 @@ function ExperimentWorkbench({
             <FailedEnvironmentStage />
           ) : currentSandbox ? (
             <SandboxIdeWorkspace
-              key={currentSandbox.sandbox_id}
               sandboxId={currentSandbox.sandbox_id}
               refreshKey={instanceRefreshKey}
-              onReady={restoreCodeRef}
-              onSaved={(result) =>
+              onReadinessChange={restoreCodeRef}
+              onSaved={(result) => {
+                codeRefRequestRef.current += 1
                 setCodeRef({ codeStorageKey: result.code_storage_key, codeHash: result.code_hash })
-              }
+              }}
             />
           ) : (
             <NoEnvironmentStage sims={sims} />
@@ -639,19 +684,6 @@ function ExperimentWorkbench({
       ) : null}
     </>
   )
-}
-
-/** isSandboxReadyForOperation 检查 M2 实时状态是否允许操作当前工作区。 */
-function isSandboxReadyForOperation(sandbox?: SandboxInstance): boolean {
-  if (!sandbox) return false
-  const phaseReady =
-    sandbox.phase === SandboxPhase.READY || sandbox.phase === SandboxPhase.FULLY_READY
-  const statusAllowsPause =
-    sandbox.status === SandboxStatus.READY ||
-    sandbox.status === SandboxStatus.RUNNING ||
-    sandbox.status === SandboxStatus.IDLE ||
-    sandbox.status === SandboxStatus.PAUSED
-  return phaseReady && statusAllowsPause
 }
 
 /** StudentReportPanel 展示学生本人报告的提交与批改结果,不暴露存储引用。 */
@@ -864,12 +896,12 @@ function ReportModal({ instanceId, onClose, onSubmitted }: ReportModalProps) {
   const [progress, setProgress] = useState<number>()
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    file: file ? null : '请选择实验报告文件',
+  }), [file]))
 
   const submit = useCallback(async () => {
-    if (!file) {
-      setFormError('请选择实验报告文件')
-      return
-    }
+    if (!validate() || !file) return
     setFormError(undefined)
     setWorking(true)
     try {
@@ -882,7 +914,7 @@ function ReportModal({ instanceId, onClose, onSubmitted }: ReportModalProps) {
       setWorking(false)
       setProgress(undefined)
     }
-  }, [file, instanceId, onSubmitted])
+  }, [file, instanceId, onSubmitted, validate])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -894,41 +926,43 @@ function ReportModal({ instanceId, onClose, onSubmitted }: ReportModalProps) {
           </ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-3">
-          <input
-            ref={inputRef}
-            type="file"
-            accept=".pdf,.md,.markdown,.txt,application/pdf,text/markdown,text/plain"
-            aria-label="选择实验报告文件"
-            className="sr-only"
-            onChange={(event) => {
-              const selected = event.target.files?.[0]
-              event.target.value = ''
-              if (selected) {
-                setFile(selected)
-                setFormError(undefined)
-              }
-            }}
-          />
-          <div className="flex flex-wrap items-center gap-3">
-            <Button
-              type="button"
-              variant="outline"
-              leftIcon={FileUp}
-              aria-hidden="true"
-              tabIndex={-1}
-              onClick={() => inputRef.current?.click()}
-            >
-              {file ? '更换报告' : '选择报告'}
-            </Button>
-            <span role="status" className="min-w-0 text-sm text-ink-sub">
-              {progress !== undefined
-                ? `已上传 ${progress}%`
-                : file
-                  ? `${file.name} · ${formatFileSize(file.size)}`
-                  : ''}
-            </span>
-          </div>
-          {formError ? <p className="text-sm text-danger">{formError}</p> : null}
+          <FormField label="实验报告文件" htmlFor="report-file" required error={errors.file}>
+            <input
+              id="report-file"
+              ref={inputRef}
+              type="file"
+              accept=".pdf,.md,.markdown,.txt,application/pdf,text/markdown,text/plain"
+              aria-label="选择实验报告文件"
+              aria-invalid={Boolean(errors.file)}
+              onBlur={() => validate(['file'])}
+              className="sr-only"
+              onChange={(event) => {
+                const selected = event.target.files?.[0]
+                event.target.value = ''
+                if (selected) setFile(selected)
+              }}
+            />
+            <div className="flex flex-wrap items-center gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                leftIcon={FileUp}
+                aria-hidden="true"
+                tabIndex={-1}
+                onClick={() => inputRef.current?.click()}
+              >
+                {file ? '更换报告' : '选择报告'}
+              </Button>
+              <span role="status" className="min-w-0 text-sm text-ink-sub">
+                {progress !== undefined
+                  ? `已上传 ${progress}%`
+                  : file
+                    ? `${file.name} · ${formatFileSize(file.size)}`
+                    : ''}
+              </span>
+            </div>
+          </FormField>
+          {formError ? <Callout tone="danger">{formError}</Callout> : null}
         </ModalBody>
         <ModalFooter>
           <Button variant="outline" onClick={onClose}>

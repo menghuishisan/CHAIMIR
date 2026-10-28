@@ -20,10 +20,12 @@ export interface MountedEditor extends DisposableHandle {
 export interface TerminalMountOptions {
   initialText?: string
   onData?: (data: string) => void
+  /** xterm生成的非UTF-8输入按字节透传,不经字符串编码。 */
+  onBinary?: (data: ArrayBuffer) => void
 }
 
 export interface MountedTerminal extends DisposableHandle {
-  write: (data: string) => void
+  write: (data: string | Uint8Array) => void
   clear: () => void
   focus: () => void
   resize: () => void

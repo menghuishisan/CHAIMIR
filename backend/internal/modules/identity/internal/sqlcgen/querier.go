@@ -19,6 +19,7 @@ type Querier interface {
 	ClearPasswordFailure(ctx context.Context, arg ClearPasswordFailureParams) error
 	CountActiveRoleAccounts(ctx context.Context, arg CountActiveRoleAccountsParams) (int64, error)
 	CountClassStudents(ctx context.Context, arg CountClassStudentsParams) (int64, error)
+	CountPendingImportPreviews(ctx context.Context, arg CountPendingImportPreviewsParams) (int64, error)
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (Account, error)
 	CreateAccountProfile(ctx context.Context, arg CreateAccountProfileParams) error
 	CreateAccountRole(ctx context.Context, arg CreateAccountRoleParams) error
@@ -38,6 +39,8 @@ type Querier interface {
 	CreateTenantProvisionOutbox(ctx context.Context, arg CreateTenantProvisionOutboxParams) (TenantProvisionOutbox, error)
 	DeleteAccountRole(ctx context.Context, arg DeleteAccountRoleParams) error
 	DepartmentExists(ctx context.Context, arg DepartmentExistsParams) (bool, error)
+	// 明确放弃待提交预览时同步清除暂存原始内容,不影响已提交批次。
+	DiscardImportPreview(ctx context.Context, arg DiscardImportPreviewParams) (int64, error)
 	GetAccountByID(ctx context.Context, id int64) (GetAccountByIDRow, error)
 	GetAccountByNo(ctx context.Context, no string) (GetAccountByNoRow, error)
 	GetAccountByPhoneHash(ctx context.Context, arg GetAccountByPhoneHashParams) (GetAccountByPhoneHashRow, error)
@@ -67,11 +70,15 @@ type Querier interface {
 	ListDepartments(ctx context.Context) ([]Department, error)
 	ListImportBatches(ctx context.Context, tenantID int64) ([]ImportBatch, error)
 	ListMajors(ctx context.Context, dollar_1 int64) ([]Major, error)
+	// 列表只读取公开预览结果,不取包含初始密码的原始rows。
+	ListPendingImportPreviews(ctx context.Context, arg ListPendingImportPreviewsParams) ([]ListPendingImportPreviewsRow, error)
 	ListPlatformAuthSessionsByAdmin(ctx context.Context, platformAdminID int64) ([]PlatformAuthSession, error)
 	ListSSOConfigs(ctx context.Context, tenantID int64) ([]SsoConfig, error)
 	ListTenantApplications(ctx context.Context, dollar_1 int16) ([]TenantApplication, error)
 	ListTenants(ctx context.Context) ([]Tenant, error)
 	ListTenantsPaged(ctx context.Context, arg ListTenantsPagedParams) ([]ListTenantsPagedRow, error)
+	LockAccount(ctx context.Context, arg LockAccountParams) (int64, error)
+	LockOrganizationScope(ctx context.Context, dollar_1 int64) error
 	MajorExists(ctx context.Context, arg MajorExistsParams) (bool, error)
 	MarkImportPreviewSubmitted(ctx context.Context, arg MarkImportPreviewSubmittedParams) (int64, error)
 	MarkSMSCodeUsed(ctx context.Context, arg MarkSMSCodeUsedParams) error
@@ -91,9 +98,9 @@ type Querier interface {
 	RevokePlatformAuthSessionByID(ctx context.Context, id int64) (int64, error)
 	RevokePlatformSessions(ctx context.Context, platformAdminID int64) error
 	RevokeStudentSessionsByEnrollmentYear(ctx context.Context, arg RevokeStudentSessionsByEnrollmentYearParams) error
-	SoftDeleteClass(ctx context.Context, arg SoftDeleteClassParams) error
-	SoftDeleteDepartment(ctx context.Context, arg SoftDeleteDepartmentParams) error
-	SoftDeleteMajor(ctx context.Context, arg SoftDeleteMajorParams) error
+	SoftDeleteClass(ctx context.Context, arg SoftDeleteClassParams) (int64, error)
+	SoftDeleteDepartment(ctx context.Context, arg SoftDeleteDepartmentParams) (int64, error)
+	SoftDeleteMajor(ctx context.Context, arg SoftDeleteMajorParams) (int64, error)
 	TenantStats(ctx context.Context, tenantID int64) (TenantStatsRow, error)
 	UpdateAccountBasic(ctx context.Context, arg UpdateAccountBasicParams) error
 	UpdateAccountPassword(ctx context.Context, arg UpdateAccountPasswordParams) (Account, error)

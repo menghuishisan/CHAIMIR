@@ -29,6 +29,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
+import { useFormValidation } from '../../../hooks/useFormValidation'
 import {
   courseTypeLabel,
   teachingDifficultyLabel,
@@ -84,15 +85,14 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
   const savedCoverSrc = useCourseCoverSrc(course?.id, course?.cover_ref)
   const coverSrc = coverPreview !== '' ? coverPreview : coverRef !== '' ? savedCoverSrc : ''
 
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
 
   /** validate 校验必填与取值范围,返回是否通过并把错误留在原位。 */
-  const validate = useCallback((): boolean => {
+  const { errors, validate } = useFormValidation(useCallback(() => {
     const next: Record<string, string | null> = {
       name: name.trim() === '' ? '请输入课程名称' : null,
-      semester: semester.trim() === '' ? '请输入学期,例如 2026 春' : null,
+      semester: semester.trim() === '' ? '请输入学校登记的完整学期名称' : null,
       credits:
         Number.isFinite(Number(credits)) && Number(credits) > 0 ? null : '学分需要是大于 0 的数字',
       startAt: startAt === '' ? '请选择开课日期' : null,
@@ -103,9 +103,8 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
             ? '结课日期不能早于开课日期'
             : null,
     }
-    setErrors(next)
-    return Object.values(next).every((value) => value === null)
-  }, [credits, endAt, name, semester, startAt])
+    return next
+  }, [credits, endAt, name, semester, startAt]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -196,7 +195,7 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
                 value={name}
                 invalid={Boolean(errors.name)}
                 onChange={(event) => setName(event.target.value)}
-                onBlur={() => setErrors((prev) => ({ ...prev, name: name.trim() === '' ? '请输入课程名称' : null }))}
+                onBlur={() => validate(['name'])}
               />
             </FormField>
 
@@ -229,7 +228,7 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
                 htmlFor={`${fieldId}-semester`}
                 required
                 error={errors.semester}
-                helper="例如 2026 春"
+                helper="填写学校登记的完整学期名称,成绩将按此归档"
               >
                 <Input
                   id={`${fieldId}-semester`}

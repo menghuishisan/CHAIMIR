@@ -36,6 +36,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { experimentStatusLabel } from '../../../../utils/labels/experiment'
@@ -51,6 +52,7 @@ import {
   WIZARD_STEP_COUNT,
   draftFromExperiment,
   emptyComponents,
+  stageAssignmentError,
   useWizardPersistence,
   type ExperimentDraft,
 } from './wizard-state'
@@ -167,7 +169,6 @@ interface WizardContentProps {
 function WizardContent({ experiment, courses }: WizardContentProps) {
   const navigate = useNavigate()
   const [draft, setDraft] = useState<ExperimentDraft>(() => draftFromExperiment(experiment))
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [validateResult, setValidateResult] = useState<ValidationResult>()
   const [publishing, setPublishing] = useState(false)
   const [actionError, setActionError] = useState<string>()
@@ -179,7 +180,7 @@ function WizardContent({ experiment, courses }: WizardContentProps) {
   }, [])
 
   /** validateStep 校验当前步的必填项,返回是否可以进入下一步。 */
-  const validateStep = useCallback((): boolean => {
+  const { errors, validate: validateStep } = useFormValidation(useCallback(() => {
     const stepKey = WIZARD_STEPS[persistence.stepIndex].key
     const next: Record<string, string | null> = {}
 
@@ -201,13 +202,7 @@ function WizardContent({ experiment, courses }: WizardContentProps) {
     }
 
     if (stepKey === 'stages') {
-      // 不分阶段是合法的;分了阶段则每个阶段都必须有内容(阶段表单已校验,此处兜住整体)
-      next.stages = draft.components.stages.some(
-        (stage) =>
-          (stage.components.envs?.length ?? 0) === 0 && (stage.components.sims?.length ?? 0) === 0
-      )
-        ? '有阶段没有启用任何组件,请补齐或删除该阶段'
-        : null
+      next.stages = stageAssignmentError(draft.components)
     }
 
     if (stepKey === 'checkpoints') {
@@ -217,9 +212,8 @@ function WizardContent({ experiment, courses }: WizardContentProps) {
           : null
     }
 
-    setErrors(next)
-    return Object.values(next).every((value) => value === null)
-  }, [draft, persistence.stepIndex])
+    return next
+  }, [draft, persistence.stepIndex]), persistence.stepIndex)
 
   const goNext = useCallback(async () => {
     if (!validateStep()) return

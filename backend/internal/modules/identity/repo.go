@@ -46,6 +46,7 @@ type TxStore interface {
 	RejectTenantApplication(ctx context.Context, id, reviewerID int64, reason string) (TenantApplication, error)
 	CreateAccount(ctx context.Context, input CreateAccountInput) (Account, error)
 	GetAccount(ctx context.Context, id int64) (Account, error)
+	LockAccount(ctx context.Context, tenantID, id int64) error
 	BatchGetAccounts(ctx context.Context, ids []int64) ([]Account, error)
 	ListAccountsByPhoneHash(ctx context.Context, phoneHash string) ([]LoginCandidate, error)
 	GetAccountByPhoneHash(ctx context.Context, tenantID int64, phoneHash string) (Account, error)
@@ -88,6 +89,8 @@ type TxStore interface {
 	ListSSOConfigs(ctx context.Context, tenantID int64) ([]SSOConfig, error)
 	CreateImportPreview(ctx context.Context, input CreateImportPreviewInput) (ImportPreview, error)
 	GetImportPreview(ctx context.Context, tenantID, operatorID, id int64) (ImportPreview, error)
+	ListPendingImportPreviews(ctx context.Context, tenantID, operatorID int64, targetType int16, page, size int) ([]ImportPreview, int64, error)
+	DiscardImportPreview(ctx context.Context, tenantID, operatorID, id int64) error
 	MarkImportPreviewSubmitted(ctx context.Context, tenantID, operatorID, id int64) error
 	CreateImportBatch(ctx context.Context, input CreateImportBatchInput) (ImportBatch, error)
 	ListImportBatches(ctx context.Context, tenantID int64) ([]ImportBatch, error)

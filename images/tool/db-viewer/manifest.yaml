@@ -55,9 +55,11 @@ capabilities:
       - database_user
     properties:
       database_name:
+        title: 数据库名称
         type: string
         x-chaimir-env: web/CHAIMIR_DATABASE_NAME
       database_user:
+        title: 数据库账户
         type: string
         x-chaimir-env: web/CHAIMIR_DATABASE_USER
   student_access: public

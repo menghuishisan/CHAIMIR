@@ -69,11 +69,12 @@ type TxStore interface {
 	GetReportByInstanceStudent(context.Context, int64, int64, int64) (ExperimentReport, error)
 	ListReports(context.Context, int64, int64, int16, int, int) ([]ExperimentReport, int64, error)
 	SumScores(context.Context, int64, int64) (float64, error)
+	HasPendingInstanceReports(context.Context, int64, int64) (bool, error)
 	Stats(context.Context, int64, int64) (ExperimentStatsSnapshot, error)
-	CreateExperimentScoreOutbox(context.Context, int64, ExperimentInstance, string, time.Time) (ExperimentScoreOutbox, error)
-	ClaimPendingExperimentScoreOutbox(context.Context, int32, int32, time.Time, time.Time) ([]ExperimentScoreOutbox, error)
-	MarkExperimentScoreOutboxPublished(context.Context, int64, int64, string) (ExperimentScoreOutbox, error)
-	MarkExperimentScoreOutboxFailed(context.Context, int64, int64, string, string) (ExperimentScoreOutbox, error)
+	CreateExperimentEventOutbox(context.Context, ExperimentEventOutbox) (ExperimentEventOutbox, error)
+	ClaimPendingExperimentEventOutbox(context.Context, int32, int32, time.Time, time.Time) ([]ExperimentEventOutbox, error)
+	MarkExperimentEventOutboxPublished(context.Context, int64, int64, string) (ExperimentEventOutbox, error)
+	MarkExperimentEventOutboxFailed(context.Context, int64, int64, string, string) (ExperimentEventOutbox, error)
 }
 
 type store struct{ database *db.DB }
@@ -598,28 +599,28 @@ func (tx *txStore) Stats(ctx context.Context, tenantID, courseID int64) (Experim
 	return ExperimentStatsSnapshot{ExperimentCount: row.ExperimentCount, ActiveInstanceCount: row.ActiveInstanceCount}, nil
 }
 
-// CreateExperimentScoreOutbox 在实例得分变更事务内保存得分事件。
-func (tx *txStore) CreateExperimentScoreOutbox(ctx context.Context, id int64, inst ExperimentInstance, traceID string, scoredAt time.Time) (ExperimentScoreOutbox, error) {
-	row, err := tx.q.CreateExperimentScoreOutbox(ctx, sqlcgen.CreateExperimentScoreOutboxParams{ID: id, TenantID: inst.TenantID, ExperimentID: inst.ExperimentID, InstanceID: inst.ID, StudentID: inst.OwnerAccountID, Column6: fmt.Sprintf("%.2f", inst.Score), TraceID: traceID, ScoredAt: timex.RequiredTimestamptz(scoredAt)})
+// CreateExperimentEventOutbox 与业务变更同事务保存事件，得分修订由唯一SQL生成。
+func (tx *txStore) CreateExperimentEventOutbox(ctx context.Context, item ExperimentEventOutbox) (ExperimentEventOutbox, error) {
+	row, err := tx.q.CreateExperimentEventOutbox(ctx, sqlcgen.CreateExperimentEventOutboxParams{ID: item.ID, TenantID: item.TenantID, ExperimentID: item.ExperimentID, AggregateID: item.AggregateID, EventRevision: item.EventRevision, Subject: item.Subject, Payload: item.Payload, TraceID: item.TraceID, OccurredAt: timex.RequiredTimestamptz(item.OccurredAt)})
 	if err != nil {
-		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
+		return ExperimentEventOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
 	}
-	return experimentScoreOutbox(row)
+	return experimentEventOutbox(row)
 }
 
-// ClaimPendingExperimentScoreOutbox 跨租户领取待发布、失败待重试或卡住超时的得分事件。
-func (tx *txStore) ClaimPendingExperimentScoreOutbox(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time) ([]ExperimentScoreOutbox, error) {
+// ClaimPendingExperimentEventOutbox 跨租户领取待发布、失败待重试或卡住超时的得分事件。
+func (tx *txStore) ClaimPendingExperimentEventOutbox(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time) ([]ExperimentEventOutbox, error) {
 	leaseToken, err := pkgcrypto.RandomToken(48)
 	if err != nil {
 		return nil, apperr.ErrExperimentEventFailed.WithCause(err)
 	}
-	rows, err := tx.q.ClaimPendingExperimentScoreOutbox(ctx, sqlcgen.ClaimPendingExperimentScoreOutboxParams{LeaseToken: leaseToken, LeaseUntil: timex.RequiredTimestamptz(leaseUntil), StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit, MaxAttempts: maxAttempts})
+	rows, err := tx.q.ClaimPendingExperimentEventOutbox(ctx, sqlcgen.ClaimPendingExperimentEventOutboxParams{LeaseToken: leaseToken, LeaseUntil: timex.RequiredTimestamptz(leaseUntil), StaleBefore: timex.RequiredTimestamptz(staleBefore), PageLimit: limit, MaxAttempts: maxAttempts})
 	if err != nil {
 		return nil, apperr.ErrExperimentEventFailed.WithCause(err)
 	}
-	out := make([]ExperimentScoreOutbox, 0, len(rows))
+	out := make([]ExperimentEventOutbox, 0, len(rows))
 	for _, row := range rows {
-		item, err := experimentScoreOutbox(row)
+		item, err := experimentEventOutbox(row)
 		if err != nil {
 			return nil, err
 		}
@@ -628,20 +629,25 @@ func (tx *txStore) ClaimPendingExperimentScoreOutbox(ctx context.Context, limit,
 	return out, nil
 }
 
-// MarkExperimentScoreOutboxPublished 标记得分事件投递成功。
-func (tx *txStore) MarkExperimentScoreOutboxPublished(ctx context.Context, tenantID, id int64, leaseToken string) (ExperimentScoreOutbox, error) {
-	row, err := tx.q.MarkExperimentScoreOutboxPublished(ctx, sqlcgen.MarkExperimentScoreOutboxPublishedParams{TenantID: tenantID, ID: id, LeaseToken: leaseToken})
+// MarkExperimentEventOutboxPublished 标记得分事件投递成功。
+func (tx *txStore) MarkExperimentEventOutboxPublished(ctx context.Context, tenantID, id int64, leaseToken string) (ExperimentEventOutbox, error) {
+	row, err := tx.q.MarkExperimentEventOutboxPublished(ctx, sqlcgen.MarkExperimentEventOutboxPublishedParams{TenantID: tenantID, ID: id, LeaseToken: leaseToken})
 	if err != nil {
-		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
+		return ExperimentEventOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
 	}
-	return experimentScoreOutbox(row)
+	return experimentEventOutbox(row)
 }
 
-// MarkExperimentScoreOutboxFailed 标记得分事件投递失败并保留脱敏原因。
-func (tx *txStore) MarkExperimentScoreOutboxFailed(ctx context.Context, tenantID, id int64, reason, leaseToken string) (ExperimentScoreOutbox, error) {
-	row, err := tx.q.MarkExperimentScoreOutboxFailed(ctx, sqlcgen.MarkExperimentScoreOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason), LeaseToken: leaseToken})
+// MarkExperimentEventOutboxFailed 标记得分事件投递失败并保留脱敏原因。
+func (tx *txStore) MarkExperimentEventOutboxFailed(ctx context.Context, tenantID, id int64, reason, leaseToken string) (ExperimentEventOutbox, error) {
+	row, err := tx.q.MarkExperimentEventOutboxFailed(ctx, sqlcgen.MarkExperimentEventOutboxFailedParams{TenantID: tenantID, ID: id, LastError: pgtypex.Text(reason), LeaseToken: leaseToken})
 	if err != nil {
-		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
+		return ExperimentEventOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
 	}
-	return experimentScoreOutbox(row)
+	return experimentEventOutbox(row)
+}
+
+// HasPendingInstanceReports 区分待批改报告和已经评分为零的报告。
+func (tx *txStore) HasPendingInstanceReports(ctx context.Context, tenantID, instanceID int64) (bool, error) {
+	return tx.q.HasPendingInstanceReports(ctx, sqlcgen.HasPendingInstanceReportsParams{TenantID: tenantID, InstanceID: instanceID})
 }

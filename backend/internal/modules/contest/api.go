@@ -3,6 +3,7 @@ package contest
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/ws"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/logging"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,17 +34,17 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	}
 	api := contestAPI{svc: svc, authn: authn}
 	g := r.Group("/api/v1/contest")
-	teacher := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
-	student := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent))
-	all := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
+	teacher := g.Group("", authn.Middleware(contracts.TenantModuleContest), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
+	student := g.Group("", authn.Middleware(contracts.TenantModuleContest), auth.RequireTenantAnyRole(roles, contracts.RoleStudent))
+	all := g.Group("", authn.Middleware(contracts.TenantModuleContest), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
 	platform := g.Group("/platform", authn.Middleware(), auth.RequirePlatformIdentity())
 	internal := g.Group("/internal", authn.ServiceMiddleware())
 	api.registerTeacherRoutes(teacher)
 	api.registerStudentRoutes(student)
 	api.registerSharedRoutes(all)
 	api.registerContestSandboxRoutes(student)
-	api.registerContestSandboxInteractiveRoutes(g.Group("", authn.WebSocketMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent)))
-	api.registerContestSandboxToolProxyRoutes(g.Group("", authn.BrowserAccessMiddleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent)))
+	api.registerContestSandboxInteractiveRoutes(g.Group("", authn.WebSocketMiddleware(contracts.TenantModuleContest), auth.RequireTenantAnyRole(roles, contracts.RoleStudent)))
+	api.registerContestSandboxToolProxyRoutes(g.Group("", authn.BrowserAccessMiddleware(contracts.TenantModuleContest), auth.RequireTenantAnyRole(roles, contracts.RoleStudent)))
 	api.registerPlatformRoutes(platform)
 	api.registerInternalRoutes(internal)
 	return nil
@@ -713,7 +715,7 @@ func (a contestAPI) writeContestSandboxFile(c *gin.Context) {
 	if strings.TrimSpace(req.RelativePath) == "" {
 		req.RelativePath = c.Query("path")
 	}
-	revision, err := a.svc.WriteContestSandboxFile(c.Request.Context(), sandboxID, req.RelativePath, req.ContentBase64, req.ExpectedRevision)
+	revision, err := a.svc.WriteContestSandboxFile(c.Request.Context(), sandboxID, req.RelativePath, *req.ContentBase64, req.ExpectedRevision)
 	httpx.Write(c, ContestSandboxFileWriteResponse{WorkspaceRevision: revision}, err)
 }
 
@@ -799,7 +801,7 @@ func (a contestAPI) contestSandboxProgress(c *gin.Context) {
 		if err != nil {
 			return err
 		}
-		if err := conn.BindSession(ws.SessionKey{TenantID: id.TenantID, AccountID: id.AccountID, Scope: contestSandboxSessionScope(access.Principal.AuthorizationID, sandboxID) + ":progress"}); err != nil {
+		if err := conn.BindSession(c.Request.Context(), ws.SessionKey{TenantID: id.TenantID, AccountID: id.AccountID, Scope: contestSandboxSessionScope(access.Principal.AuthorizationID, sandboxID) + ":progress"}); err != nil {
 			return apperr.ErrContestTeamAccessDenied.WithCause(err)
 		}
 		if err := a.svc.wsHub.Subscribe(conn, topic); err != nil {
@@ -832,10 +834,10 @@ func (a contestAPI) contestSandboxTerminal(c *gin.Context) {
 		return
 	}
 	if err := a.svc.wsHub.ServeInteractive(c.Writer, c.Request, func(conn *ws.Conn) error {
-		if err := conn.BindSession(ws.SessionKey{TenantID: id.TenantID, AccountID: id.AccountID, Scope: contestSandboxSessionScope(access.Principal.AuthorizationID, sandboxID)}); err != nil {
+		if err := conn.BindSession(c.Request.Context(), ws.SessionKey{TenantID: id.TenantID, AccountID: id.AccountID, Scope: contestSandboxSessionScope(access.Principal.AuthorizationID, sandboxID)}); err != nil {
 			return apperr.ErrContestTeamAccessDenied.WithCause(err)
 		}
-		return a.svc.AttachContestSandboxTerminal(c.Request.Context(), access, target, conn.Reader(), conn.Writer())
+		return a.svc.AttachContestSandboxTerminal(conn.Context(), access, target, conn.Reader(), conn.Writer())
 	}); err != nil {
 		response.Fail(c, apperr.ErrSandboxToolProxyUnavailable.WithCause(err))
 	}
@@ -868,7 +870,11 @@ func (a contestAPI) contestSandboxToolProxy(c *gin.Context) {
 		},
 	})
 	proxy.ServeHTTP(c.Writer, c.Request)
-	_ = a.svc.ObserveContestSandboxToolAccess(c.Request.Context(), access)
+	if err := a.svc.ObserveContestSandboxToolAccess(c.Request.Context(), access); err != nil {
+		// 代理响应可能已经结束,保存观察失败只进入日志,不再向已写出的响应追加错误信封。
+		logging.ErrorContext(c.Request.Context(), "contest sandbox tool access observation failed", apperr.AsAppError(err).LogString(),
+			slog.Int64("tenant_id", access.TenantID), slog.Int64("sandbox_id", sandboxID), slog.String("tool_code", c.Param("tool_code")))
+	}
 }
 
 // prepareContestToolBrowserAccess 将浏览器入口票据收敛为路径受限 Cookie，避免令牌进入上游工具日志。

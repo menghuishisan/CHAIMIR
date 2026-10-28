@@ -47,6 +47,7 @@ import {
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
 import { usePagedResource } from '../../../hooks'
+import { useFormValidation } from '../../../hooks/useFormValidation'
 import { facetCount } from '../../../utils/facets'
 import { formatDateTime } from '../../../utils/formatters'
 import { announcementScopeLabel } from '../../../utils/labels/notify'
@@ -106,13 +107,14 @@ export default function AnnouncementsPage({ publisher }: AnnouncementsPageProps)
   )
 
   // 按范围分桶取后端 facets.scope:全量分组计数,不用当前页切片去数(§6.5.4)
+  const facets = announcements.total === undefined ? undefined : announcements.data?.facets
   const platformCount = facetCount(
-    announcements.data?.facets,
+    facets,
     'scope',
     AnnouncementScope.PLATFORM,
   )
-  const tenantCount = facetCount(announcements.data?.facets, 'scope', AnnouncementScope.TENANT)
-  const roleCount = facetCount(announcements.data?.facets, 'scope', AnnouncementScope.ROLES)
+  const tenantCount = facetCount(facets, 'scope', AnnouncementScope.TENANT)
+  const roleCount = facetCount(facets, 'scope', AnnouncementScope.ROLES)
 
   return (
     <PageScaffold>
@@ -273,22 +275,16 @@ function AnnouncementFormModal({ publisher, onClose, onPublished }: Announcement
 
   const scopeValue = Number(scope) as AnnouncementScope
   const isRoleScoped = scopeValue === AnnouncementScope.ROLES
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    title: title.trim() === '' ? '请输入公告标题' : null,
+    content: content.trim() === '' ? '请输入公告内容' : null,
+    roles: isRoleScoped && roles.length === 0 ? '定向公告要选至少一个角色' : null,
+  }), [content, isRoleScoped, roles, title]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (title.trim() === '') {
-        setFormError('请输入公告标题')
-        return
-      }
-      if (content.trim() === '') {
-        setFormError('请输入公告内容')
-        return
-      }
-      if (isRoleScoped && roles.length === 0) {
-        setFormError('定向公告要选至少一个角色')
-        return
-      }
+      if (!validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -308,7 +304,7 @@ function AnnouncementFormModal({ publisher, onClose, onPublished }: Announcement
         setWorking(false)
       }
     },
-    [content, expireAt, isRoleScoped, onPublished, roles, scopeValue, title],
+    [content, expireAt, isRoleScoped, onPublished, roles, scopeValue, title, validate],
   )
 
   return (
@@ -322,10 +318,12 @@ function AnnouncementFormModal({ publisher, onClose, onPublished }: Announcement
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <FormField label="公告标题" htmlFor="announcement-title" required>
+            <FormField label="公告标题" htmlFor="announcement-title" required error={errors.title}>
               <Input
                 id="announcement-title"
                 value={title}
+                invalid={Boolean(errors.title)}
+                onBlur={() => validate(['title'])}
                 onChange={(event) => setTitle(event.target.value)}
               />
             </FormField>
@@ -335,11 +333,14 @@ function AnnouncementFormModal({ publisher, onClose, onPublished }: Announcement
               htmlFor="announcement-content"
               required
               helper="换行会原样保留"
+              error={errors.content}
             >
               <Textarea
                 id="announcement-content"
                 value={content}
                 rows={8}
+                invalid={Boolean(errors.content)}
+                onBlur={() => validate(['content'])}
                 onChange={(event) => setContent(event.target.value)}
               />
             </FormField>
@@ -366,8 +367,14 @@ function AnnouncementFormModal({ publisher, onClose, onPublished }: Announcement
             )}
 
             {isRoleScoped ? (
-              <FormField label="定向角色" required helper="只有选中角色的人能看到这条公告">
-                <div className="flex flex-col gap-2">
+              <FormField label="定向角色" required helper="只有选中角色的人能看到这条公告" error={errors.roles}>
+                <div
+                  className="flex flex-col gap-2"
+                  role="group"
+                  aria-label="定向角色"
+                  aria-invalid={Boolean(errors.roles)}
+                  onBlur={() => validate(['roles'])}
+                >
                   {TARGET_ROLE_OPTIONS.map((role) => (
                     <Checkbox
                       key={role}

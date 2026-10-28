@@ -238,6 +238,13 @@ func validateApprovalReport(report ValidationReport, pkg Package) error {
 	if !pkgcrypto.ValidSHA256Hex(report.BundleHash) || report.BundleHash != pkg.BundleHash {
 		return apperr.ErrSimPackageValidationFailed
 	}
+	var frames []BackendSnapshot
+	if err := jsonx.DecodeStrictKnownFields(report.PreviewFrames, &frames); err != nil {
+		return apperr.ErrSimPackageValidationFailed.WithCause(err)
+	}
+	if err := validatePreviewFrames(frames, pkg.ScaleLimit); err != nil {
+		return apperr.ErrSimPackageValidationFailed.WithCause(err)
+	}
 	return nil
 }
 

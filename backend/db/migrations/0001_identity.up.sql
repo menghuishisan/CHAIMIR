@@ -84,6 +84,9 @@ CREATE TABLE IF NOT EXISTS department (
     UNIQUE (tenant_id, id)
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS uk_department_code ON department(tenant_id, code)
+    WHERE deleted_at IS NULL AND code IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS major (
     id BIGINT PRIMARY KEY,
     tenant_id BIGINT NOT NULL REFERENCES tenant(id),

@@ -39,13 +39,14 @@ export default function StudentRecordsPage() {
   const records = useAsyncResource(() => api.contest.getMyContestRecords(), [])
 
   const stats = useMemo(() => {
-    const list = records.data ?? []
+    if ((records.status !== 'success' && records.status !== 'empty') || !records.data) return undefined
+    const list = records.data
     const settled = list.filter((item) => SETTLED_STATUSES.has(item.contest_status))
     const ranked = settled.filter((item) => item.rank > 0)
     const bestRank = ranked.length > 0 ? Math.min(...ranked.map((item) => item.rank)) : undefined
     const totalScore = list.reduce((sum, item) => sum + item.score, 0)
     return { count: list.length, settledCount: settled.length, bestRank, totalScore }
-  }, [records.data])
+  }, [records.data, records.status])
 
   const columns: TableColumn<ContestRecord>[] = [
     {
@@ -111,13 +112,13 @@ export default function StudentRecordsPage() {
         label="战绩摘要"
         className="mb-5"
         items={[
-          { label: '参赛场次', value: stats.count, hint: '含进行中的赛事' },
+          { label: '参赛场次', value: stats?.count, hint: '含进行中的赛事' },
           {
             label: '最好名次',
-            value: stats.bestRank ? `第 ${stats.bestRank} 名` : '—',
-            hint: `已完赛 ${stats.settledCount} 场`,
+            value: stats?.bestRank ? `第 ${stats.bestRank} 名` : undefined,
+            hint: stats ? `已完赛 ${stats.settledCount} 场` : undefined,
           },
-          { label: '累计得分', value: formatScore(stats.totalScore), hint: '全部赛事求和' },
+          { label: '累计得分', value: stats ? formatScore(stats.totalScore) : undefined, hint: '全部赛事求和' },
         ]}
       />
 

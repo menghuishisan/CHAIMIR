@@ -35,6 +35,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
+import { useFormValidation } from '../../../hooks/useFormValidation'
 import {
   vulnLevelLabel,
   vulnSourceTypeLabel,
@@ -95,12 +96,11 @@ export function VulnSourceFormModal({
   )
   const [mapping, setMapping] = useState(() => readMapping(source))
 
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
 
   /** validate 按后端 validateVulnSourceConfig 的要求校验必填与取值范围。 */
-  const validate = useCallback((): boolean => {
+  const { errors, validate } = useFormValidation(useCallback(() => {
     const timeout = Number(timeoutSeconds)
     const next: Record<string, string | null> = {
       name: name.trim() === '' ? '请输入来源名称' : null,
@@ -113,9 +113,8 @@ export function VulnSourceFormModal({
       title: mapping.title.trim() === '' ? '请填写标题所在的字段路径' : null,
       draftBody: mapping.draftBody.trim() === '' ? '请填写题目正文所在的字段路径' : null,
     }
-    setErrors(next)
-    return Object.values(next).every((value) => value === null)
-  }, [endpoint, mapping, name, timeoutSeconds])
+    return next
+  }, [endpoint, mapping, name, timeoutSeconds]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {

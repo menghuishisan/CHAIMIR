@@ -12,8 +12,8 @@ export interface PaginationProps {
   /** 当前页(从 1 起) */
   page: number;
   pageSize: number;
-  /** 总记录数(非总页数) */
-  total: number;
+  /** 总记录数(非总页数);undefined 表示尚未取得当前查询的总数。 */
+  total: number | undefined;
   onPageChange: (page: number) => void;
   className?: string;
 }
@@ -47,6 +47,15 @@ const BUTTON_BASE =
   "hit-target inline-flex h-8 min-w-8 items-center justify-center rounded-md px-1 text-sm tabular-nums pressable focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:opacity-50 disabled:pointer-events-none";
 
 export function Pagination({ page, pageSize, total, onPageChange, className }: PaginationProps) {
+  // 未知数量独立于成功空结果,也不根据上一次查询的页数提供翻页操作。
+  if (total === undefined) {
+    return (
+      <p className={cn("flex items-center justify-end text-sm text-ink-sub tabular-nums", className)}>
+        共 — 条
+      </p>
+    );
+  }
+
   // pageSize 防御:<=0 或小数会算出 Infinity/NaN 页,先夹到至少 1 的整数
   const safePageSize = Math.max(1, Math.floor(pageSize));
   // 至少 1 页:total 为 0 时也按 1 页算,分支走下方的「只给总条数」

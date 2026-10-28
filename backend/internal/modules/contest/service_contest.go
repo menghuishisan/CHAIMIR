@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -182,7 +183,6 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 		return ProblemDTO{}, err
 	}
 	var contest Contest
-	var existingProblems []ContestProblem
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		contest, err = s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
@@ -192,8 +192,7 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 		if contest.Status != ContestStatusDraft {
 			return apperr.ErrContestStateInvalid
 		}
-		existingProblems, err = tx.ListContestProblems(ctx, id.TenantID, contestID)
-		return err
+		return nil
 	}); err != nil {
 		return ProblemDTO{}, err
 	}
@@ -201,17 +200,12 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 	if err != nil {
 		return ProblemDTO{}, err
 	}
-	for _, existing := range existingProblems {
-		if existing.ItemCode == req.ItemCode && existing.ItemVersion == req.ItemVersion && existing.Seq != req.Seq {
-			return ProblemDTO{}, apperr.ErrContestProblemInvalid
-		}
-	}
 	full, err := s.content.GetContentFull(ctx, id.TenantID, contracts.ContentItemRef{ItemCode: req.ItemCode, ItemVersion: req.ItemVersion})
 	if err != nil {
-		return ProblemDTO{}, apperr.ErrContestContentUnavailable.WithCause(err)
+		return ProblemDTO{}, apperr.ErrContestContentUnavailable.WithCause(fmt.Errorf("读取赛题内容失败 tenant_id=%d contest_id=%d: %w", id.TenantID, contestID, err))
 	}
 	if !contestContentTypeAllowed(contest.Mode, full.Type) {
-		return ProblemDTO{}, apperr.ErrContestProblemInvalid
+		return ProblemDTO{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("内容类型与赛制不匹配 tenant_id=%d contest_id=%d mode=%d content_type=%d", id.TenantID, contestID, contest.Mode, full.Type))
 	}
 	var compositionSnapshot *contracts.SandboxCompositionSnapshot
 	if _, declared := full.Body["composition"]; declared {
@@ -221,15 +215,15 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 		}
 		compiled, err := s.compileCompositionFromContent(ctx, id.TenantID, req.ItemCode, req.ItemVersion, profile)
 		if err != nil {
-			return ProblemDTO{}, apperr.ErrContestProblemInvalid.WithCause(err)
+			return ProblemDTO{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("编译赛题组合失败 tenant_id=%d contest_id=%d: %w", id.TenantID, contestID, err))
 		}
 		compositionSnapshot = &compiled
 	} else if contest.Mode == ContestModeBattle {
-		return ProblemDTO{}, apperr.ErrContestProblemInvalid
+		return ProblemDTO{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("对抗赛题缺少组合声明 tenant_id=%d contest_id=%d", id.TenantID, contestID))
 	}
 	if contest.Mode == ContestModeBattle {
 		if err := s.judge.ValidateJudgeMode(ctx, id.TenantID, req.ItemCode, req.ItemVersion, contracts.JudgeSandboxModeReuse); err != nil {
-			return ProblemDTO{}, apperr.ErrContestProblemInvalid.WithCause(err)
+			return ProblemDTO{}, apperr.ErrContestProblemInvalid.WithCause(fmt.Errorf("校验赛题判题模式失败 tenant_id=%d contest_id=%d: %w", id.TenantID, contestID, err))
 		}
 	}
 	item := ContestProblem{ID: s.ids.Generate(), TenantID: id.TenantID, ContestID: contestID, ItemCode: req.ItemCode, ItemVersion: req.ItemVersion, Score: req.Score, DynamicScore: req.DynamicScore, BattleConfig: req.BattleConfig, BattleRule: req.BattleRule, Seq: req.Seq, CompositionSnapshot: compositionSnapshot}
@@ -237,7 +231,23 @@ func (s *Service) AddProblem(ctx context.Context, contestID int64, req ProblemRe
 		item.CompositionDigest = compositionSnapshot.Digest
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
+		// 外部依赖校验结束后锁定父赛事,拒绝已发布或已切换赛制的陈旧请求。
+		current, err := s.lockContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
+		if err != nil {
+			return err
+		}
+		if current.Status != ContestStatusDraft || current.Mode != contest.Mode {
+			return apperr.ErrContestStateInvalid
+		}
+		existingProblems, err := tx.ListContestProblems(ctx, id.TenantID, contestID)
+		if err != nil {
+			return err
+		}
+		for _, existing := range existingProblems {
+			if existing.ItemCode == req.ItemCode && existing.ItemVersion == req.ItemVersion && existing.Seq != req.Seq {
+				return apperr.ErrContestProblemInvalid
+			}
+		}
 		item, err = tx.UpsertContestProblem(ctx, item)
 		return err
 	}); err != nil {
@@ -717,25 +727,42 @@ func (s *Service) transitionContest(ctx context.Context, contestID int64, next i
 				}
 			}
 		}
-		if next == ContestStatusRunning {
-			if err := tx.LockContestTeams(ctx, id.TenantID, contestID); err != nil {
-				return err
-			}
-		}
 		item = current
 		return nil
 	}); err != nil {
 		return ContestDTO{}, err
 	}
+	// M5 自有事务在 M8 事务外执行,避免持有应用池连接时再次等待同一连接池。
 	if requireProblems {
-		if err := s.refreshProblemUsageRefs(ctx, item.TenantID, contestID, problems); err != nil {
+		if err := s.refreshProblemUsageRefs(ctx, item, problems); err != nil {
 			return ContestDTO{}, err
 		}
 	}
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		var err error
+		current, err := s.lockContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
+		if err != nil {
+			return err
+		}
+		if err := validateContestTransitionWindow(current, next, timex.Now()); err != nil {
+			return err
+		}
+		if requireProblems {
+			latestProblems, err := tx.ListContestProblems(ctx, id.TenantID, contestID)
+			if err != nil {
+				return err
+			}
+			// 引用登记后再次比对完整题目集合,不以旧赛制或旧快照发布并发改过的草稿。
+			if current.Mode != item.Mode || !reflect.DeepEqual(problems, latestProblems) {
+				return apperr.ErrContestStateInvalid
+			}
+		}
+		if next == ContestStatusRunning {
+			if err := tx.LockContestTeams(ctx, id.TenantID, contestID); err != nil {
+				return err
+			}
+		}
 		if next == ContestStatusFrozen {
-			ranks, _, err := tx.ListLadder(ctx, id.TenantID, contestID, 1, 1000)
+			ranks, err := s.listAllContestLadder(ctx, tx, id.TenantID, contestID)
 			if err != nil {
 				return err
 			}
@@ -776,7 +803,7 @@ func (s *Service) saveLadderSnapshot(ctx context.Context, tx TxStore, tenantID, 
 }
 
 // refreshProblemUsageRefs 在发布时登记 M5 内容引用,用于删除保护和复用统计。
-func (s *Service) refreshProblemUsageRefs(ctx context.Context, tenantID, contestID int64, problems []ContestProblem) error {
+func (s *Service) refreshProblemUsageRefs(ctx context.Context, contest Contest, problems []ContestProblem) error {
 	seen := map[string]bool{}
 	refs := make([]contracts.ContentItemRef, 0, len(problems))
 	for _, problem := range problems {
@@ -787,19 +814,8 @@ func (s *Service) refreshProblemUsageRefs(ctx context.Context, tenantID, contest
 		seen[key] = true
 		refs = append(refs, contracts.ContentItemRef{ItemCode: problem.ItemCode, ItemVersion: problem.ItemVersion})
 	}
-	var createdAt time.Time
-	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
-		contest, err := tx.GetContest(ctx, tenantID, contestID)
-		if err != nil {
-			return err
-		}
-		createdAt = contest.CreatedAt
-		return nil
-	}); err != nil {
-		return err
-	}
-	sourceRef := fmt.Sprintf("contest:%d:contest:%s", createdAt.Year(), ids.Format(contestID))
-	if err := s.content.ReplaceUsageRefs(ctx, tenantID, "contest.contest", sourceRef, refs); err != nil {
+	sourceRef := fmt.Sprintf("contest:%d:contest:%s", contest.CreatedAt.Year(), ids.Format(contest.ID))
+	if err := s.content.ReplaceUsageRefs(ctx, contest.TenantID, "contest.contest", sourceRef, refs); err != nil {
 		return apperr.ErrContestContentUnavailable.WithCause(err)
 	}
 	return nil

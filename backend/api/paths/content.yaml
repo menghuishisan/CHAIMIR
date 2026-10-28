@@ -151,6 +151,7 @@
   post:
     tags: [content]
     summary: 上传题库附件
+    description: 文件校验拒绝返回51013，文件读取或扫描/存储服务不可用返回51012；响应仅包含用户提示与trace_id，底层原因只记日志。
     operationId: contentUploadAttachment
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]

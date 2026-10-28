@@ -190,7 +190,10 @@ func (s *Service) CreateExperiment(ctx context.Context, req ExperimentRequest) (
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		item, err = tx.CreateExperiment(ctx, item)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.enqueueExperimentSourceEvent(ctx, tx, item)
 	}); err != nil {
 		return ExperimentDTO{}, err
 	}
@@ -237,7 +240,10 @@ func (s *Service) UpdateExperiment(ctx context.Context, experimentID int64, req 
 		current.RequireReport = req.RequireReport
 		current.WizardStep = req.WizardStep
 		item, err = tx.UpdateExperiment(ctx, current)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.enqueueExperimentSourceEvent(ctx, tx, item)
 	}); err != nil {
 		return ExperimentDTO{}, err
 	}
@@ -297,7 +303,10 @@ func (s *Service) PublishExperiment(ctx context.Context, experimentID int64) (Ex
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		item, err = tx.SetExperimentStatus(ctx, id.TenantID, experimentID, ExperimentStatusPublished)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.enqueueExperimentSourceEvent(ctx, tx, item)
 	}); err != nil {
 		return ExperimentDTO{}, err
 	}
@@ -326,7 +335,10 @@ func (s *Service) UnpublishExperiment(ctx context.Context, experimentID int64) (
 			return apperr.ErrExperimentStateInvalid
 		}
 		item, err = tx.SetExperimentStatus(ctx, id.TenantID, experimentID, ExperimentStatusUnpublished)
-		return err
+		if err != nil {
+			return err
+		}
+		return s.enqueueExperimentSourceEvent(ctx, tx, item)
 	}); err != nil {
 		return ExperimentDTO{}, err
 	}

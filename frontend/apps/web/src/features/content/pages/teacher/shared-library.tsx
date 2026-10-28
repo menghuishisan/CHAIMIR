@@ -6,7 +6,7 @@
 
 import { useCallback, useState } from 'react'
 import { Copy, Eye, Search, Share2 } from 'lucide-react'
-import { ContentType, type ContentItem } from '@chaimir/api-client'
+import { ContentType, TENANT_MODULE, type ContentItem } from '@chaimir/api-client'
 import {
   Badge,
   Breadcrumb,
@@ -36,6 +36,7 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useSession } from '../../../../components/RoleGuard/session'
 import { ResourceState } from '../../../../components/ResourceState'
 import { usePagedResource, useAsyncResource } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
@@ -46,6 +47,8 @@ import {
   contentTypeLabel,
 } from '../../../../utils/labels/content'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
+import { SharedCourseLibrary } from '../../../teaching/components/SharedCourseLibrary'
 import {
   ContentItemClassificationCell,
   ContentItemIdentityCell,
@@ -61,6 +64,39 @@ const TYPE_FILTERS = [
  * TeacherSharedLibraryPage 浏览共享资源库并克隆题目。
  */
 export default function TeacherSharedLibraryPage() {
+  const { me } = useSession()
+  const coursesEnabled = me.enabled_modules.includes(TENANT_MODULE.TEACHING)
+  const [resourceType, setResourceType] = useState('questions')
+  return (
+    <PageScaffold>
+      <PageHeader
+        kicker={<Breadcrumb items={[{ label: '资源' }]} />}
+        title="共享资源库"
+        description="浏览其他学校共享的题目与课程,克隆后成为本校的独立草稿。"
+        icon={Share2}
+      />
+      {coursesEnabled ? (
+        <SegmentedControl
+          aria-label="共享资源类型"
+          options={[
+            { value: 'questions', label: '题目' },
+            { value: 'courses', label: '课程' },
+          ]}
+          value={resourceType}
+          onValueChange={setResourceType}
+        />
+      ) : null}
+      {coursesEnabled && resourceType === 'courses' ? (
+        <SharedCourseLibrary />
+      ) : (
+        <SharedQuestionLibrary />
+      )}
+    </PageScaffold>
+  )
+}
+
+/** SharedQuestionLibrary保留题目的题面预览与跨校克隆流程。 */
+function SharedQuestionLibrary() {
   const [typeFilter, setTypeFilter] = useState<string>('')
   const [keyword, setKeyword] = useState('')
   const [submittedKeyword, setSubmittedKeyword] = useState('')
@@ -74,7 +110,7 @@ export default function TeacherSharedLibraryPage() {
         keyword: submittedKeyword || undefined,
         ...params,
       }),
-    [submittedKeyword, typeFilter],
+    [submittedKeyword, typeFilter]
   )
 
   // FilterBar 自己是 form 并接住回车,故这里只需要提交动作本身
@@ -148,14 +184,7 @@ export default function TeacherSharedLibraryPage() {
   ]
 
   return (
-    <PageScaffold>
-      <PageHeader
-        kicker={<Breadcrumb items={[{ label: '资源' }]} />}
-        title="共享资源库"
-        description="其他学校共享出来的题目。克隆到本校后成为你的独立草稿,可以自由修改。"
-        icon={Share2}
-      />
-
+    <>
       {/* 不做指标带:共享题目数由 Pagination 的「共 N 条」给出,而「涵盖类型/涵盖知识点」需要跨全库去重统计,
           服务端没有这个聚合,用当前页数出来就是错数(§6.5.4 全量口径);类型与知识点在每一行里可见。 */}
       <DataPanel
@@ -191,63 +220,65 @@ export default function TeacherSharedLibraryPage() {
           />
         }
       >
-          <ResourceState
-            resource={shared}
-            emptyIcon={Share2}
-            emptyTitle={submittedKeyword || typeFilter ? '没有匹配的共享题目' : '共享资源库还是空的'}
-            emptyDescription={
-              submittedKeyword || typeFilter
-                ? '换个条件再试,或清空筛选查看全部。'
-                : '其他学校把题目共享到资源库后会显示在这里。'
-            }
-            emptyAction={
-              submittedKeyword || typeFilter ? (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setKeyword('')
-                    setSubmittedKeyword('')
-                    setTypeFilter('')
-                  }}
-                >
-                  清空筛选
-                </Button>
-              ) : undefined
-            }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-          >
-            {(page) => (
-              <Table
-                columns={columns}
-                data={page.list}
-                rowKey={(item) => item.id}
-                elevated={false}
-                // <md 换行卡(§6.4.1 规则 3):题目标题一行、类型与来源学校一行
-                mobileCard={(item) => ({
-                  title: item.title,
-                  meta: `${contentTypeLabel(item.type)} · ${item.code} · ${item.version}`,
-                  action: (
-                    <div className="flex shrink-0 items-center gap-1">
-                      <IconButton
-                        variant="ghost"
-                        size="sm"
-                        icon={Eye}
-                        aria-label={`预览题面 ${item.title}`}
-                        onClick={() => setPreviewTarget(item)}
-                      />
-                      <IconButton
-                        variant="ghost"
-                        size="sm"
-                        icon={Copy}
-                        aria-label={`克隆题目 ${item.title}`}
-                        onClick={() => setCloneTarget(item)}
-                      />
-                    </div>
-                  ),
-                })}
-              />
-            )}
-          </ResourceState>
+        <ResourceState
+          resource={shared}
+          emptyIcon={Share2}
+          emptyTitle={submittedKeyword || typeFilter ? '没有匹配的共享题目' : '共享资源库还是空的'}
+          emptyDescription={
+            submittedKeyword || typeFilter
+              ? '换个条件再试,或清空筛选查看全部。'
+              : '其他学校把题目共享到资源库后会显示在这里。'
+          }
+          emptyAction={
+            submittedKeyword || typeFilter ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setKeyword('')
+                  setSubmittedKeyword('')
+                  setTypeFilter('')
+                }}
+              >
+                清空筛选
+              </Button>
+            ) : undefined
+          }
+          skeleton={
+            <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
+          }
+        >
+          {(page) => (
+            <Table
+              columns={columns}
+              data={page.list}
+              rowKey={(item) => item.id}
+              elevated={false}
+              // <md 换行卡(§6.4.1 规则 3):题目标题一行、类型与来源学校一行
+              mobileCard={(item) => ({
+                title: item.title,
+                meta: `${contentTypeLabel(item.type)} · ${item.code} · ${item.version}`,
+                action: (
+                  <div className="flex shrink-0 items-center gap-1">
+                    <IconButton
+                      variant="ghost"
+                      size="sm"
+                      icon={Eye}
+                      aria-label={`预览题面 ${item.title}`}
+                      onClick={() => setPreviewTarget(item)}
+                    />
+                    <IconButton
+                      variant="ghost"
+                      size="sm"
+                      icon={Copy}
+                      aria-label={`克隆题目 ${item.title}`}
+                      onClick={() => setCloneTarget(item)}
+                    />
+                  </div>
+                ),
+              })}
+            />
+          )}
+        </ResourceState>
       </DataPanel>
 
       {previewTarget ? (
@@ -264,7 +295,7 @@ export default function TeacherSharedLibraryPage() {
           }}
         />
       ) : null}
-    </PageScaffold>
+    </>
   )
 }
 
@@ -283,7 +314,7 @@ function SharedFaceModal({ item, onClose }: SharedFaceModalProps) {
   const face = useAsyncResource(
     () => api.content.getItemFace(item.code, item.version),
     [item.code, item.version],
-    () => false,
+    () => false
   )
 
   return (
@@ -316,7 +347,11 @@ function SharedFaceModal({ item, onClose }: SharedFaceModalProps) {
                   { term: '难度', description: contentDifficultyLabel(data.difficulty) },
                   { term: '来源', description: contentAuthorTypeLabel(data.author_type) },
                   { term: '被引用', description: String(data.usage_count), mono: true },
-                  { term: '更新时间', description: formatShortDateTime(data.updated_at), mono: true },
+                  {
+                    term: '更新时间',
+                    description: formatShortDateTime(data.updated_at),
+                    mono: true,
+                  },
                 ]}
               />
               {data.knowledge_points.length > 0 ? (
@@ -355,7 +390,8 @@ function SharedFaceModal({ item, onClose }: SharedFaceModalProps) {
 /** renderBodyValue 把正文字段值转成可读文本:数组按行、对象按 JSON、其余原样。 */
 function renderBodyValue(value: unknown): string {
   if (typeof value === 'string') return value
-  if (Array.isArray(value)) return value.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).join('\n')
+  if (Array.isArray(value))
+    return value.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).join('\n')
   if (value === null || value === undefined) return '—'
   if (typeof value === 'object') return JSON.stringify(value, null, 2)
   return String(value)
@@ -376,17 +412,14 @@ function CloneSharedModal({ item, onClose, onCloned }: CloneSharedModalProps) {
   const [newVersion, setNewVersion] = useState('1.0.0')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(() => ({
+    code: /^[a-z0-9-]{3,}$/.test(newCode.trim()) ? null : '短名用小写字母、数字与连字符,至少 3 位',
+    version: /^\d+\.\d+\.\d+$/.test(newVersion.trim()) ? null : '版本号形如 1.0.0',
+  }))
 
   const submit = useCallback(async () => {
+    if (working || !validate()) return
     const code = newCode.trim()
-    if (!/^[a-z0-9-]{3,}$/.test(code)) {
-      setFormError('短名用小写字母、数字与连字符,至少 3 位')
-      return
-    }
-    if (!/^\d+\.\d+\.\d+$/.test(newVersion.trim())) {
-      setFormError('版本号形如 1.0.0')
-      return
-    }
     setFormError(undefined)
     setWorking(true)
     try {
@@ -401,7 +434,7 @@ function CloneSharedModal({ item, onClose, onCloned }: CloneSharedModalProps) {
     } finally {
       setWorking(false)
     }
-  }, [item.code, item.version, newCode, newVersion, onCloned])
+  }, [item.code, item.version, newCode, newVersion, onCloned, validate, working])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -417,22 +450,26 @@ function CloneSharedModal({ item, onClose, onCloned }: CloneSharedModalProps) {
           </Callout>
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <FormField label="本校题目短名" htmlFor="shared-clone-code" required error={formError}>
+            <FormField label="本校题目短名" htmlFor="shared-clone-code" required error={errors.code}>
               <Input
                 id="shared-clone-code"
                 value={newCode}
-                invalid={Boolean(formError)}
+                invalid={Boolean(errors.code)}
+                onBlur={() => validate(['code'])}
                 onChange={(event) => setNewCode(event.target.value)}
               />
             </FormField>
-            <FormField label="版本号" htmlFor="shared-clone-version" required>
+            <FormField label="版本号" htmlFor="shared-clone-version" required error={errors.version}>
               <Input
                 id="shared-clone-version"
                 value={newVersion}
+                invalid={Boolean(errors.version)}
+                onBlur={() => validate(['version'])}
                 onChange={(event) => setNewVersion(event.target.value)}
               />
             </FormField>
           </div>
+          {formError ? <Callout tone="danger">{formError}</Callout> : null}
         </ModalBody>
         <ModalFooter>
           <Button variant="outline" onClick={onClose}>

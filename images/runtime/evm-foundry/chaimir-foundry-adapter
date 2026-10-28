@@ -62,10 +62,6 @@ case "$action" in
       # 统一 Secret 契约只注入助记词,由运行时在受控容器内派生首个解锁账户。
       from="$(cast wallet address --mnemonic "$CHAIMIR_EVM_DEPLOYER_MNEMONIC" --account 0)"
     fi
-    if [ -z "$bytecode" ] && [ -n "$project_dir" ] && [ -n "$artifact" ]; then
-      bytecode="$(jq -r '.bytecode.object // .bytecode // empty' "$project_dir/$artifact")"
-    fi
-    [ -n "$bytecode" ] || fail "deploy payload requires bytecode or project_dir plus artifact" 22
     if [ "$compile" = "true" ]; then
       [ -n "$project_dir" ] || fail "deploy payload compile requires project_dir" 22
       [ -n "$artifact" ] || fail "deploy payload compile requires artifact" 22
@@ -78,7 +74,10 @@ case "$action" in
       rm -f "$compile_log"
       bytecode="$(jq -r '.bytecode.object // .bytecode // empty' "$project_dir/$artifact")"
       [ -n "$bytecode" ] || fail "compiled deploy artifact has no bytecode" 70
+    elif [ -z "$bytecode" ] && [ -n "$project_dir" ] && [ -n "$artifact" ]; then
+      bytecode="$(jq -r '.bytecode.object // .bytecode // empty' "$project_dir/$artifact")"
     fi
+    [ -n "$bytecode" ] || fail "deploy payload requires bytecode or project_dir plus artifact" 22
     constructor_args="$(printf '%s' "$payload" | jq -c 'if has("constructor_args") then .constructor_args else [] end')"
     printf '%s' "$constructor_args" | jq -e 'type == "array" and all(.[]; type == "object" and .type == "address" and (.target_ref | type == "string") and (.target_ref | length > 0))' >/dev/null || fail "constructor_args must contain address target_ref entries" 22
     for constructor_arg in $(printf '%s' "$constructor_args" | jq -c '.[]'); do

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/response"
@@ -50,6 +51,30 @@ func (s *Service) ListCourses(ctx context.Context, filter CourseListFilter) ([]C
 			return nil, 0, 0, 0, mapCourseError(err)
 		}
 		out = append(out, dto)
+	}
+	return out, total, filter.Page, filter.Size, nil
+}
+
+// ListSharedCourses用当前租户的共享SELECT权限发现课程，不开放来源课程业务详情。
+func (s *Service) ListSharedCourses(ctx context.Context, filter CourseListFilter) ([]SharedCourseDTO, int64, int, int, error) {
+	id, err := currentIdentity(ctx)
+	if err != nil {
+		return nil, 0, 0, 0, err
+	}
+	filter.Page, filter.Size = pagex.Normalize(filter.Page, filter.Size)
+	filter.Keyword = strings.TrimSpace(filter.Keyword)
+	var courses []Course
+	var total int64
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		courses, total, err = tx.ListSharedCourses(ctx, id.TenantID, filter)
+		return err
+	}); err != nil {
+		return nil, 0, 0, 0, mapCourseError(err)
+	}
+	out := make([]SharedCourseDTO, 0, len(courses))
+	for _, course := range courses {
+		out = append(out, SharedCourseDTO{ID: ids.ID(course.ID), Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, Semester: course.Semester, Credits: course.Credits, UpdatedAt: timex.RFC3339OrEmpty(course.UpdatedAt)})
 	}
 	return out, total, filter.Page, filter.Size, nil
 }
@@ -198,6 +223,16 @@ func (s *Service) ArchiveCourse(ctx context.Context, courseID int64) (CourseDTO,
 
 // ShareCourse 共享课程到课程库。
 func (s *Service) ShareCourse(ctx context.Context, courseID int64) (CourseDTO, error) {
+	return s.setCourseVisibility(ctx, courseID, CourseVisibilityShared, "teaching.course.share")
+}
+
+// UnshareCourse 撤销课程库可见性,不改变课程、学生或独立克隆。
+func (s *Service) UnshareCourse(ctx context.Context, courseID int64) (CourseDTO, error) {
+	return s.setCourseVisibility(ctx, courseID, CourseVisibilityPrivate, "teaching.course.unshare")
+}
+
+// setCourseVisibility 统一共享状态变更的租户、负责人、发布门禁和审计。
+func (s *Service) setCourseVisibility(ctx context.Context, courseID int64, visibility int16, action string) (CourseDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
 		return CourseDTO{}, err
@@ -211,10 +246,19 @@ func (s *Service) ShareCourse(ctx context.Context, courseID int64) (CourseDTO, e
 		if err := ensureTeacherOwned(current, id.AccountID); err != nil {
 			return err
 		}
-		course, err = tx.SetCourseVisibility(ctx, id.TenantID, courseID, CourseVisibilityShared)
+		if visibility == CourseVisibilityShared && current.Status == CourseStatusDraft {
+			return apperr.ErrTeachingCourseStateInvalid
+		}
+		course, err = tx.SetCourseVisibility(ctx, id.TenantID, courseID, visibility)
 		return err
 	}); err != nil {
-		return CourseDTO{}, mapCourseError(err)
+		if isNoRows(err) {
+			return CourseDTO{}, apperr.ErrTeachingCourseNotFound
+		}
+		return CourseDTO{}, apperr.AsAppError(err)
+	}
+	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, action, auditTargetCourse, course.ID, map[string]any{"visibility": visibility}); err != nil {
+		return CourseDTO{}, err
 	}
 	return courseDTO(course)
 }

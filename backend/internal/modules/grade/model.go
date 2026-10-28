@@ -1,7 +1,10 @@
 // grade model 文件定义 M11 成绩中心领域模型和内部 outbox 载荷。
 package grade
 
-import "chaimir/internal/platform/ids"
+import (
+	"chaimir/internal/platform/ids"
+	"time"
+)
 
 // LevelRule 是分数到等级和绩点的映射规则。
 type LevelRule struct {
@@ -27,6 +30,8 @@ type CourseGradeInput struct {
 // GradeLockOutbox 是成绩锁定事件的生产者 outbox 记录。
 type GradeLockOutbox struct {
 	ID         int64
+	Revision   int64
+	ChangedAt  time.Time
 	TenantID   int64
 	ReviewID   int64
 	CourseID   int64
@@ -40,4 +45,16 @@ type GradeLockOutbox struct {
 	UpdatedAt  string
 	LeaseToken string
 	LeaseUntil string
+}
+
+// WarningNotification 是原预警行的持久投递租约,不另存预警业务副本。
+type WarningNotification struct {
+	ID         int64
+	TenantID   int64
+	StudentID  int64
+	SemesterID int64
+	GPAText    string
+	TraceID    string
+	CreatedAt  time.Time
+	LeaseToken string
 }

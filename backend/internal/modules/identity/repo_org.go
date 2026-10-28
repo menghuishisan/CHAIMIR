@@ -6,11 +6,23 @@ import (
 
 	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/pgtypex"
+	"chaimir/pkg/apperr"
 )
+
+// lockOrganizationScope 串行化同租户组织变更与档案挂靠,阻止检查后父级被并发软删除。
+func (t *txStore) lockOrganizationScope(ctx context.Context, tenantID int64) error {
+	return t.q.LockOrganizationScope(ctx, tenantID)
+}
 
 // CreateDepartment 创建院系记录。
 func (t *txStore) CreateDepartment(ctx context.Context, tenantID, id int64, req DepartmentRequest) (Department, error) {
+	if err := t.lockOrganizationScope(ctx, tenantID); err != nil {
+		return Department{}, err
+	}
 	row, err := t.q.CreateDepartment(ctx, sqlcgen.CreateDepartmentParams{ID: id, TenantID: tenantID, Name: req.Name, Code: pgtypex.Text(req.Code)})
+	if isNoRows(err) {
+		return Department{}, apperr.ErrIdentityOrgCodeConflict.WithCause(err)
+	}
 	if err != nil {
 		return Department{}, err
 	}
@@ -37,20 +49,53 @@ func (t *txStore) DepartmentExists(ctx context.Context, tenantID, id int64) (boo
 
 // UpdateDepartment 更新院系名称和短码。
 func (t *txStore) UpdateDepartment(ctx context.Context, tenantID, id int64, req DepartmentRequest) (Department, error) {
+	if err := t.lockOrganizationScope(ctx, tenantID); err != nil {
+		return Department{}, err
+	}
+	exists, err := t.DepartmentExists(ctx, tenantID, id)
+	if err != nil {
+		return Department{}, err
+	}
+	if !exists {
+		return Department{}, apperr.ErrNotFound
+	}
 	row, err := t.q.UpdateDepartment(ctx, sqlcgen.UpdateDepartmentParams{ID: id, TenantID: tenantID, Name: req.Name, Code: pgtypex.Text(req.Code)})
+	if isNoRows(err) {
+		return Department{}, apperr.ErrIdentityOrgCodeConflict.WithCause(err)
+	}
 	if err != nil {
 		return Department{}, err
 	}
 	return departmentFromRow(row), nil
 }
 
-// DeleteDepartment 软删除院系记录。
+// DeleteDepartment 在组织锁内拒绝仍被专业或教师档案引用的院系删除。
 func (t *txStore) DeleteDepartment(ctx context.Context, tenantID, id int64) error {
-	return t.q.SoftDeleteDepartment(ctx, sqlcgen.SoftDeleteDepartmentParams{ID: id, TenantID: tenantID})
+	if err := t.lockOrganizationScope(ctx, tenantID); err != nil {
+		return err
+	}
+	exists, err := t.DepartmentExists(ctx, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return apperr.ErrNotFound
+	}
+	affected, err := t.q.SoftDeleteDepartment(ctx, sqlcgen.SoftDeleteDepartmentParams{ID: id, TenantID: tenantID})
+	if err == nil && affected == 0 {
+		return apperr.ErrIdentityOrgInUse
+	}
+	return err
 }
 
 // CreateMajor 创建专业记录。
 func (t *txStore) CreateMajor(ctx context.Context, tenantID, id int64, req MajorRequest) (Major, error) {
+	if err := t.lockOrganizationScope(ctx, tenantID); err != nil {
+		return Major{}, err
+	}
+	if err := validateMajorParent(ctx, t, tenantID, req.DepartmentID.Int64()); err != nil {
+		return Major{}, err
+	}
 	row, err := t.q.CreateMajor(ctx, sqlcgen.CreateMajorParams{ID: id, TenantID: tenantID, DepartmentID: req.DepartmentID.Int64(), Name: req.Name})
 	if err != nil {
 		return Major{}, err
@@ -78,6 +123,12 @@ func (t *txStore) MajorExists(ctx context.Context, tenantID, id int64) (bool, er
 
 // UpdateMajor 更新专业所属院系和名称。
 func (t *txStore) UpdateMajor(ctx context.Context, tenantID, id int64, req MajorRequest) (Major, error) {
+	if err := t.lockOrganizationScope(ctx, tenantID); err != nil {
+		return Major{}, err
+	}
+	if err := validateMajorParent(ctx, t, tenantID, req.DepartmentID.Int64()); err != nil {
+		return Major{}, err
+	}
 	row, err := t.q.UpdateMajor(ctx, sqlcgen.UpdateMajorParams{ID: id, TenantID: tenantID, DepartmentID: req.DepartmentID.Int64(), Name: req.Name})
 	if err != nil {
 		return Major{}, err
@@ -85,13 +136,33 @@ func (t *txStore) UpdateMajor(ctx context.Context, tenantID, id int64, req Major
 	return majorFromRow(row), nil
 }
 
-// DeleteMajor 软删除专业记录。
+// DeleteMajor 在组织锁内拒绝仍有班级引用的专业删除。
 func (t *txStore) DeleteMajor(ctx context.Context, tenantID, id int64) error {
-	return t.q.SoftDeleteMajor(ctx, sqlcgen.SoftDeleteMajorParams{ID: id, TenantID: tenantID})
+	if err := t.lockOrganizationScope(ctx, tenantID); err != nil {
+		return err
+	}
+	exists, err := t.MajorExists(ctx, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return apperr.ErrNotFound
+	}
+	affected, err := t.q.SoftDeleteMajor(ctx, sqlcgen.SoftDeleteMajorParams{ID: id, TenantID: tenantID})
+	if err == nil && affected == 0 {
+		return apperr.ErrIdentityOrgInUse
+	}
+	return err
 }
 
 // CreateClass 创建班级记录。
 func (t *txStore) CreateClass(ctx context.Context, tenantID, id int64, req ClassRequest) (Class, error) {
+	if err := t.lockOrganizationScope(ctx, tenantID); err != nil {
+		return Class{}, err
+	}
+	if err := validateClassParent(ctx, t, tenantID, req.MajorID.Int64()); err != nil {
+		return Class{}, err
+	}
 	row, err := t.q.CreateClass(ctx, sqlcgen.CreateClassParams{ID: id, TenantID: tenantID, MajorID: req.MajorID.Int64(), Name: req.Name, EnrollmentYear: req.EnrollmentYear, Status: req.Status})
 	if err != nil {
 		return Class{}, err
@@ -119,6 +190,12 @@ func (t *txStore) ClassExists(ctx context.Context, tenantID, id int64) (bool, er
 
 // UpdateClass 更新班级所属专业、名称、入学年份和状态。
 func (t *txStore) UpdateClass(ctx context.Context, tenantID, id int64, req ClassRequest) (Class, error) {
+	if err := t.lockOrganizationScope(ctx, tenantID); err != nil {
+		return Class{}, err
+	}
+	if err := validateClassParent(ctx, t, tenantID, req.MajorID.Int64()); err != nil {
+		return Class{}, err
+	}
 	row, err := t.q.UpdateClass(ctx, sqlcgen.UpdateClassParams{ID: id, TenantID: tenantID, MajorID: req.MajorID.Int64(), Name: req.Name, EnrollmentYear: req.EnrollmentYear, Status: req.Status})
 	if err != nil {
 		return Class{}, err
@@ -126,9 +203,23 @@ func (t *txStore) UpdateClass(ctx context.Context, tenantID, id int64, req Class
 	return classFromRow(row), nil
 }
 
-// DeleteClass 软删除班级记录。
+// DeleteClass 在组织锁内拒绝仍被学生档案引用的班级删除。
 func (t *txStore) DeleteClass(ctx context.Context, tenantID, id int64) error {
-	return t.q.SoftDeleteClass(ctx, sqlcgen.SoftDeleteClassParams{ID: id, TenantID: tenantID})
+	if err := t.lockOrganizationScope(ctx, tenantID); err != nil {
+		return err
+	}
+	exists, err := t.ClassExists(ctx, tenantID, id)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return apperr.ErrNotFound
+	}
+	affected, err := t.q.SoftDeleteClass(ctx, sqlcgen.SoftDeleteClassParams{ID: id, TenantID: tenantID})
+	if err == nil && affected == 0 {
+		return apperr.ErrIdentityOrgInUse
+	}
+	return err
 }
 
 // ArchiveClassesByEnrollmentYear 按入学年份归档班级。
@@ -148,6 +239,9 @@ func (t *txStore) RevokeStudentSessionsByEnrollmentYear(ctx context.Context, ten
 
 // PromoteClasses 把明确选择的正常班级更新到目标学年并同步名称中的年份。
 func (t *txStore) PromoteClasses(ctx context.Context, tenantID int64, classIDs []int64, targetYear int16) (int64, error) {
+	if err := t.lockOrganizationScope(ctx, tenantID); err != nil {
+		return 0, err
+	}
 	return t.q.PromoteClasses(ctx, sqlcgen.PromoteClassesParams{TenantID: tenantID, ClassIds: classIDs, TargetYear: targetYear})
 }
 

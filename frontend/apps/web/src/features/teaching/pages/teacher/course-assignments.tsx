@@ -1,5 +1,5 @@
 // 作业管理(课程详情页内区块)。
-// 作业创建与编辑在同一弹层:后端 AssignmentRequest 两者字段一致。
+// 作业创建与编辑在课程内容区使用同一表单,选题时切换为完整分页列表。
 // 题目从 M5 题库选取(按 item_code + item_version 锁版本),不让教师手填题目编号 ——
 // 旧前端「编辑多题作业静默丢弃第 2 题及以后」正是把题目当单值处理造成的。
 
@@ -17,10 +17,10 @@ import {
 import {
   Button,
   Callout,
-	DataPanel,
+  DataPanel,
   Empty,
   FormField,
-	IconButton,
+  IconButton,
   Input,
   Modal,
   ModalBody,
@@ -28,13 +28,13 @@ import {
   ModalDescription,
   ModalFooter,
   ModalHeader,
-	ModalTitle,
-	Menu,
-	MenuContent,
-	MenuItem,
-	MenuTrigger,
-	PageSection,
-	Pagination,
+  ModalTitle,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuTrigger,
+  PageSection,
+  Pagination,
   Select,
   StatusIndicator,
   Table,
@@ -46,6 +46,7 @@ import { toDateTimeInputValue } from '../../../../utils/dateInput'
 import { ResourceState } from '../../../../components/ResourceState'
 import { ContentItemPicker } from '../../../content/components/ContentItemPicker'
 import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDateTime } from '../../../../utils/formatters'
 import {
   assignmentStatusLabel,
@@ -70,7 +71,10 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
-	const assignments = usePagedResource<Assignment>((params) => api.teaching.listCourseAssignments(courseId, params), [courseId])
+  const assignments = usePagedResource<Assignment>(
+    (params) => api.teaching.listCourseAssignments(courseId, params),
+    [courseId]
+  )
 
   /** publishAssignment 发布作业:发布后学生可见,题目与分值不能再改。 */
   const publishAssignment = useCallback(async () => {
@@ -139,6 +143,21 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
     },
   ]
 
+  if (formOpen) {
+    return (
+      <AssignmentForm
+        courseId={courseId}
+        assignment={formOpen.assignment}
+        outline={outline}
+        onClose={() => setFormOpen(undefined)}
+        onSaved={() => {
+          setFormOpen(undefined)
+          assignments.reload()
+        }}
+      />
+    )
+  }
+
   return (
     <PageSection
       title="作业管理"
@@ -174,7 +193,9 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
                 新建作业
               </Button>
             }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+            skeleton={
+              <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
+            }
           >
             {(page) => (
               <Table
@@ -207,20 +228,10 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
         </DataPanel>
       </div>
 
-      {formOpen ? (
-        <AssignmentFormModal
-          courseId={courseId}
-          assignment={formOpen.assignment}
-          outline={outline}
-          onClose={() => setFormOpen(undefined)}
-          onSaved={() => {
-            setFormOpen(undefined)
-            assignments.reload()
-          }}
-        />
-      ) : null}
-
-      <Modal open={publishTarget !== undefined} onOpenChange={(open) => !open && setPublishTarget(undefined)}>
+      <Modal
+        open={publishTarget !== undefined}
+        onOpenChange={(open) => !open && setPublishTarget(undefined)}
+      >
         <ModalContent size="sm">
           <ModalHeader>
             <ModalTitle>确认发布作业</ModalTitle>
@@ -294,7 +305,7 @@ function AssignmentActionMenu({
   )
 }
 
-interface AssignmentFormModalProps {
+interface AssignmentFormProps {
   courseId: string
   assignment?: Assignment
   outline: CourseOutline
@@ -303,15 +314,9 @@ interface AssignmentFormModalProps {
 }
 
 /**
- * AssignmentFormModal 承载作业创建与编辑,含从题库选题。
+ * AssignmentForm 承载课程内容区内的作业创建、编辑与分页选题。
  */
-function AssignmentFormModal({
-  courseId,
-  assignment,
-  outline,
-  onClose,
-  onSaved,
-}: AssignmentFormModalProps) {
+function AssignmentForm({ courseId, assignment, outline, onClose, onSaved }: AssignmentFormProps) {
   const editing = assignment !== undefined
   const [title, setTitle] = useState(assignment?.title ?? '')
   const [chapterId, setChapterId] = useState(assignment?.chapter_id ?? '')
@@ -319,14 +324,22 @@ function AssignmentFormModal({
   const [maxAttempts, setMaxAttempts] = useState(String(assignment?.max_attempts ?? 1))
   const [latePolicy, setLatePolicy] = useState(String(assignment?.late_policy ?? LatePolicy.REJECT))
   const [items, setItems] = useState<AssignmentItemInput[]>([])
+  const [pickerOpen, setPickerOpen] = useState(false)
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+
+  // 必填提示由当前输入计算,与全站表单共用展示规则;请求失败独立保存在formError。
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    title: title.trim() === '' ? '请输入作业标题' : null,
+    dueAt: dueAt === '' ? '请选择截止时间' : null,
+    items: items.length === 0 ? '请至少添加一道题目' : null,
+  }), [dueAt, items.length, title]))
 
   // 编辑已有作业时把题目载入:后端 GetAssignment 回题目清单(含分值与判分方式)
   const detail = useAsyncResource(
     () => (editing ? api.teaching.getAssignment(assignment.id) : Promise.resolve(undefined)),
     [assignment?.id, editing],
-    () => false,
+    () => false
   )
   const loadedItems = detail.data?.items
 
@@ -342,25 +355,14 @@ function AssignmentFormModal({
         seq: item.seq,
         grading_mode: item.grading_mode,
         judger_code: item.judger_code ?? '',
-      })),
+      }))
     )
   }
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (title.trim() === '') {
-        setFormError('请输入作业标题')
-        return
-      }
-      if (dueAt === '') {
-        setFormError('请选择截止时间')
-        return
-      }
-      if (items.length === 0) {
-        setFormError('请至少添加一道题目')
-        return
-      }
+      if (!validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -388,7 +390,19 @@ function AssignmentFormModal({
         setWorking(false)
       }
     },
-    [assignment?.id, chapterId, courseId, dueAt, editing, items, latePolicy, maxAttempts, onSaved, title],
+    [
+      assignment?.id,
+      chapterId,
+      courseId,
+      dueAt,
+      editing,
+      items,
+      latePolicy,
+      maxAttempts,
+      onSaved,
+      title,
+      validate,
+    ]
   )
 
   const chapterOptions = useMemo(
@@ -396,110 +410,143 @@ function AssignmentFormModal({
       { value: '', label: '不归入章节' },
       ...outline.chapters.map((chapter) => ({ value: chapter.id, label: chapter.title })),
     ],
-    [outline.chapters],
+    [outline.chapters]
   )
 
+  if (pickerOpen) {
+    return (
+      <PageSection title="从题库选题" description="选择已发布版本后继续填写作业。">
+        <ContentItemPicker
+          selectedCodes={new Set(items.map((item) => item.item_code))}
+          targetName="作业"
+          onClose={() => setPickerOpen(false)}
+          onPick={(picked) => {
+            setItems((current) => [
+              ...current,
+              ...picked.map((item, index) => ({
+                item_code: item.code,
+                item_version: item.version,
+                score: 10,
+                seq: current.length + index + 1,
+                grading_mode: GradingMode.MANUAL,
+                judger_code: '',
+              })),
+            ])
+            setPickerOpen(false)
+          }}
+        />
+      </PageSection>
+    )
+  }
+
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>{editing ? '编辑作业' : '新建作业'}</ModalTitle>
-          <ModalDescription>
-            从题库选题组成作业。客观题与编程题自动判分,主观题由你批改。
-          </ModalDescription>
-        </ModalHeader>
-        <form onSubmit={submit} noValidate>
-          <ModalBody className="flex flex-col gap-4">
-            <FormField label="作业标题" htmlFor="assignment-title" required>
-              <Input
-                id="assignment-title"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
+    <PageSection
+      title={editing ? '编辑作业' : '新建作业'}
+      description="从题库选题组成作业。客观题与编程题自动判分,主观题由你批改。"
+    >
+      <form onSubmit={submit} noValidate>
+        <div className="flex flex-col gap-4 rounded-xl bg-surface p-5">
+          <FormField label="作业标题" htmlFor="assignment-title" required error={errors.title}>
+            <Input
+              id="assignment-title"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              invalid={Boolean(errors.title)}
+            />
+          </FormField>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField label="所属章节" htmlFor="assignment-chapter">
+              <Select
+                id="assignment-chapter"
+                options={chapterOptions}
+                value={chapterId}
+                onValueChange={setChapterId}
               />
             </FormField>
+            <FormField label="截止时间" htmlFor="assignment-due" required error={errors.dueAt}>
+              <Input
+                id="assignment-due"
+                type="datetime-local"
+                value={dueAt}
+                onChange={(event) => setDueAt(event.target.value)}
+                invalid={Boolean(errors.dueAt)}
+              />
+            </FormField>
+          </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <FormField label="所属章节" htmlFor="assignment-chapter">
-                <Select
-                  id="assignment-chapter"
-                  options={chapterOptions}
-                  value={chapterId}
-                  onValueChange={setChapterId}
-                />
-              </FormField>
-              <FormField label="截止时间" htmlFor="assignment-due" required>
-                <Input
-                  id="assignment-due"
-                  type="datetime-local"
-                  value={dueAt}
-                  onChange={(event) => setDueAt(event.target.value)}
-                />
-              </FormField>
-            </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField
+              label="可提交次数"
+              htmlFor="assignment-attempts"
+              required
+              helper="学生最多能提交几次"
+            >
+              <Input
+                id="assignment-attempts"
+                type="number"
+                min="1"
+                value={maxAttempts}
+                onChange={(event) => setMaxAttempts(event.target.value)}
+              />
+            </FormField>
+            <FormField label="迟交规则" htmlFor="assignment-late" required>
+              <Select
+                id="assignment-late"
+                options={LATE_POLICIES.map((value) => ({
+                  value: String(value),
+                  label: latePolicyLabel(value),
+                }))}
+                value={latePolicy}
+                onValueChange={setLatePolicy}
+              />
+            </FormField>
+          </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
-              <FormField label="可提交次数" htmlFor="assignment-attempts" required helper="学生最多能提交几次">
-                <Input
-                  id="assignment-attempts"
-                  type="number"
-                  min="1"
-                  value={maxAttempts}
-                  onChange={(event) => setMaxAttempts(event.target.value)}
-                />
-              </FormField>
-              <FormField label="迟交规则" htmlFor="assignment-late" required>
-                <Select
-                  id="assignment-late"
-                  options={LATE_POLICIES.map((value) => ({
-                    value: String(value),
-                    label: latePolicyLabel(value),
-                  }))}
-                  value={latePolicy}
-                  onValueChange={setLatePolicy}
-                />
-              </FormField>
-            </div>
+          <AssignmentItemsEditor
+            items={items}
+            onChange={setItems}
+            onOpenPicker={() => setPickerOpen(true)}
+          />
 
-            <AssignmentItemsEditor items={items} onChange={setItems} />
+          {errors.items ? <Callout tone="danger">{errors.items}</Callout> : null}
 
-            {formError ? <Callout tone="danger">{formError}</Callout> : null}
-          </ModalBody>
-          <ModalFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
-              取消
-            </Button>
-            <Button type="submit" variant="primary" loading={working}>
-              {editing ? '保存修改' : '创建作业'}
-            </Button>
-          </ModalFooter>
-        </form>
-      </ModalContent>
-    </Modal>
+          {formError ? <Callout tone="danger">{formError}</Callout> : null}
+        </div>
+        <div className="mt-5 flex flex-wrap justify-end gap-3">
+          <Button type="button" variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <Button type="submit" variant="primary" loading={working}>
+            {editing ? '保存修改' : '创建作业'}
+          </Button>
+        </div>
+      </form>
+    </PageSection>
   )
 }
 
 interface AssignmentItemsEditorProps {
   items: AssignmentItemInput[]
   onChange: (items: AssignmentItemInput[]) => void
+  onOpenPicker: () => void
 }
 
 /**
  * AssignmentItemsEditor 从题库选题并设置每题分值与判分方式。
  * 题目按 code + version 锁定版本(后端要求),题目列表全量保留,不静默丢弃。
  */
-function AssignmentItemsEditor({ items, onChange }: AssignmentItemsEditorProps) {
-  const [pickerOpen, setPickerOpen] = useState(false)
-
+function AssignmentItemsEditor({ items, onChange, onOpenPicker }: AssignmentItemsEditorProps) {
   const updateItem = useCallback(
     (index: number, patch: Partial<AssignmentItemInput>) => {
       onChange(items.map((item, i) => (i === index ? { ...item, ...patch } : item)))
     },
-    [items, onChange],
+    [items, onChange]
   )
 
   const removeItem = useCallback(
     (index: number) => onChange(items.filter((_, i) => i !== index)),
-    [items, onChange],
+    [items, onChange]
   )
 
   const totalScore = items.reduce((sum, item) => sum + item.score, 0)
@@ -510,7 +557,7 @@ function AssignmentItemsEditor({ items, onChange }: AssignmentItemsEditorProps) 
         <div className="text-sm font-medium text-ink">
           题目({items.length} 题 · 合计 {totalScore} 分)
         </div>
-        <Button type="button" variant="outline" size="sm" leftIcon={Plus} onClick={() => setPickerOpen(true)}>
+        <Button type="button" variant="outline" size="sm" leftIcon={Plus} onClick={onOpenPicker}>
           从题库选题
         </Button>
       </div>
@@ -521,7 +568,13 @@ function AssignmentItemsEditor({ items, onChange }: AssignmentItemsEditorProps) 
           title="还没有题目"
           description="从题库选题后设置每题分值。"
           action={
-            <Button type="button" variant="outline" size="sm" leftIcon={Plus} onClick={() => setPickerOpen(true)}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              leftIcon={Plus}
+              onClick={onOpenPicker}
+            >
               从题库选题
             </Button>
           }
@@ -537,7 +590,9 @@ function AssignmentItemsEditor({ items, onChange }: AssignmentItemsEditorProps) 
                 <div className="truncate text-base text-ink">
                   第 {index + 1} 题 · {item.item_code}
                 </div>
-                <div className="truncate font-mono text-xs text-ink-sub">版本 {item.item_version}</div>
+                <div className="truncate font-mono text-xs text-ink-sub">
+                  版本 {item.item_version}
+                </div>
               </div>
               <FormField label="分值" htmlFor={`item-score-${index}`} className="mb-0 w-24">
                 <Input
@@ -545,7 +600,9 @@ function AssignmentItemsEditor({ items, onChange }: AssignmentItemsEditorProps) 
                   type="number"
                   min="1"
                   value={String(item.score)}
-                  onChange={(event) => updateItem(index, { score: Number(event.target.value) || 0 })}
+                  onChange={(event) =>
+                    updateItem(index, { score: Number(event.target.value) || 0 })
+                  }
                 />
               </FormField>
               <FormField label="判分方式" htmlFor={`item-mode-${index}`} className="mb-0 w-36">
@@ -554,7 +611,10 @@ function AssignmentItemsEditor({ items, onChange }: AssignmentItemsEditorProps) 
                   size="sm"
                   options={[
                     { value: String(GradingMode.AUTO), label: gradingModeLabel(GradingMode.AUTO) },
-                    { value: String(GradingMode.MANUAL), label: gradingModeLabel(GradingMode.MANUAL) },
+                    {
+                      value: String(GradingMode.MANUAL),
+                      label: gradingModeLabel(GradingMode.MANUAL),
+                    },
                   ]}
                   value={String(item.grading_mode)}
                   onValueChange={(value) =>
@@ -569,28 +629,6 @@ function AssignmentItemsEditor({ items, onChange }: AssignmentItemsEditorProps) 
           ))}
         </div>
       )}
-
-      {pickerOpen ? (
-        <ContentItemPicker
-          selectedCodes={new Set(items.map((item) => item.item_code))}
-          targetName="作业"
-          onClose={() => setPickerOpen(false)}
-          onPick={(picked) => {
-            onChange([
-              ...items,
-              ...picked.map((item, index) => ({
-                item_code: item.code,
-                item_version: item.version,
-                score: 10,
-                seq: items.length + index + 1,
-                grading_mode: GradingMode.MANUAL,
-                judger_code: '',
-              })),
-            ])
-            setPickerOpen(false)
-          }}
-        />
-      ) : null}
     </div>
   )
 }

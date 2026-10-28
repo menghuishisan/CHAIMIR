@@ -7,6 +7,7 @@
  * 深色面板(沉浸式工作台,§7.1)传 onDark,改用墨底语义令牌 —— 页面不在深色语境里另拼一套配色。
  */
 import * as SelectPrimitive from "@radix-ui/react-select";
+import type { FocusEventHandler } from "react";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Icon } from "../../lib/icon";
@@ -20,6 +21,8 @@ export interface SelectOption {
 export interface SelectProps {
   value?: string;
   onValueChange?: (value: string) => void;
+  /** 实际触发器失焦时执行字段校验。 */
+  onBlur?: FocusEventHandler<HTMLButtonElement>;
   /** 未选择时的占位文案 */
   placeholder?: string;
   options: SelectOption[];
@@ -39,6 +42,7 @@ export interface SelectProps {
 export function Select({
   value,
   onValueChange,
+  onBlur,
   placeholder,
   options,
   disabled,
@@ -55,6 +59,7 @@ export function Select({
       {/* 触发器:与盒式 Input 同视觉,占位态用弱化文字色 */}
       <SelectPrimitive.Trigger
         id={id}
+        onBlur={onBlur}
         aria-label={ariaLabel}
         aria-invalid={invalid || undefined}
         className={cn(

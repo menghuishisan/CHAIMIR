@@ -27,6 +27,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { useSession } from '../../../../components/RoleGuard'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
@@ -86,14 +87,13 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
   const [category, setCategory] = useState(item?.category ?? '')
   const [scale, setScale] = useState<ScaleLimitForm>(() => readScaleLimit(item))
   const [file, setFile] = useState<File>()
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [progress, setProgress] = useState<number>()
   const [submitting, setSubmitting] = useState(false)
 
   const codePrefix = `teacher_${me.account.id}__`
 
-  const validate = useCallback((): boolean => {
+  const { errors, validate } = useFormValidation(useCallback(() => {
     const next: Record<string, string | null> = {
       code: /^[a-z][a-z0-9_]{1,31}__[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/.test(code.trim())
         ? code.trim().startsWith(codePrefix)
@@ -111,9 +111,8 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
           ? null
           : '规模上限三项都要是大于 0 的整数',
     }
-    setErrors(next)
-    return Object.values(next).every((value) => value === null)
-  }, [category, code, codePrefix, file, name, scale, version])
+    return next
+  }, [category, code, codePrefix, file, name, scale, version]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {

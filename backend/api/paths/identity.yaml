@@ -962,6 +962,7 @@
   get:
     tags: [identity]
     summary: 当前账号信息
+    description: 返回账号信息及 enabled_modules（teaching/experiment/contest/sim/grade，按规范顺序）；平台账号返回空数组。模块开关以服务端当前配置为准，不写入 JWT。
     operationId: identityGetMe
     x-chaimir-audience: user
     security:
@@ -1001,6 +1002,38 @@
         $ref: "#/components/responses/Standard"
       default:
         $ref: "#/components/responses/Error"
+/api/v1/import-previews:
+  get:
+    tags: [identity]
+    summary: 分页发现本人未完成的导入预览
+    description: 仅当前租户的当前学校管理员本人。未过期、待提交,按type区分账号和组织;不返回原始导入行或初始密码。
+    operationId: identityListImportPreviews
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: type, in: query, required: true, schema: { type: string, enum: [student, teacher, org] } }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+/api/v1/import-previews/{id}:
+  get:
+    tags: [identity]
+    summary: 恢复本人导入预览
+    description: 返回文件名、目标、有效期、总行数/有效/无效统计与逐行错误,不返回原始导入内容。已提交或过期拒绝。
+    operationId: identityGetImportPreview
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
+  delete:
+    tags: [identity]
+    summary: 明确放弃本人待提交的导入预览
+    description: 清除该预览暂存内容并写审计,不影响已提交批次;普通弹层关闭不调用。
+    operationId: identityDiscardImportPreview
+    x-chaimir-audience: school-admin
+    security: [{ bearerAuth: [] }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/me/sessions:
   get:
     tags: [identity]

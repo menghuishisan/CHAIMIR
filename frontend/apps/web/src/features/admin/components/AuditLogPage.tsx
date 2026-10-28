@@ -75,11 +75,12 @@ export function AuditLogPage({
     [query],
   )
   // 动作分布来自后端聚合契约:facets 与筛选同口径,且是全量分组计数(§6.5.4)
-  const actionFacets = useMemo(() => facetGroup(logs.data?.facets, 'action'), [logs.data])
-  const actionKinds = Object.keys(actionFacets).length
+  const facets = logs.total === undefined ? undefined : logs.data?.facets
+  const actionFacets = useMemo(() => facetGroup(facets, 'action'), [facets])
+  const actionKinds = actionFacets ? Object.keys(actionFacets).length : undefined
   const topAction = useMemo(
-    () => facetTopEntries(logs.data?.facets, 'action', 1)[0],
-    [logs.data],
+    () => facetTopEntries(facets, 'action', 1)?.[0],
+    [facets],
   )
 
 
@@ -190,7 +191,7 @@ export function AuditLogPage({
           {
             label: '最常见动作',
             value: topAction ? auditActionLabel(topAction.value) : '—',
-            hint: topAction ? `共 ${topAction.count} 条` : '暂无记录',
+            hint: topAction ? `共 ${topAction.count} 条` : logs.total === 0 ? '暂无记录' : undefined,
           },
           { label: '每页条数', value: logs.pageSize, hint: `第 ${logs.page} 页` },
         ]}

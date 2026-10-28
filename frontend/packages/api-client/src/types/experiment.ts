@@ -1,7 +1,7 @@
 // ===== M7 Experiment 模块 =====
 
 import type { SnowflakeID } from './common'
-import type { CompositionComponentRef, CompositionLink, CompositionRuntimeRef } from './composition'
+import type { CompositionComponentRef, CompositionInitAsset, CompositionLink, CompositionRuntimeRef } from './composition'
 import type { ContentType } from '../constants/content'
 import type { SandboxAccessProfile } from '../constants/composition'
 import type { JudgeSandboxMode } from '../constants/judge'
@@ -128,6 +128,7 @@ export interface EnvComponentRequest {
   access_profile: SandboxAccessProfile
   resource_profile?: Record<string, string>
   network_profile?: Record<string, unknown>
+  init_assets?: CompositionInitAsset[]
   init_code_ref?: string
   init_script_ref?: string
   keep_alive: boolean

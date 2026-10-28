@@ -57,6 +57,7 @@
   post:
     tags: [grade]
     summary: 提交课程成绩审核
+    description: 同时要求学校开放教学与成绩模块。可省略semester_id；服务端按课程学期名称精确解析本租户学期并保存实际编号。未登记、显式选择不匹配或课程无实际成绩时返回B0002，不创建待审记录；合法零分允许报送。成绩读取失败明确拒绝。
     operationId: gradeSubmitReview
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
@@ -78,10 +79,12 @@
   post:
     tags: [grade]
     summary: 通过成绩审核
+    description: 显式semester_id优先于报送学期；均未给出时按课程学期精确解析。所有来源共用租户和名称校验，不推断近似学期。
     operationId: gradeApproveReview
     x-chaimir-audience: school-admin
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
+    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/grade-center/reviews/{id}/reject:
   post:
@@ -134,6 +137,7 @@
   get:
     tags: [grade]
     summary: 成绩申诉列表
+    description: 教师仅查看本人任教且未删除课程的申诉，学校管理员查看本租户申诉；服务端先限制课程范围，再按状态分页和统计总数。
     operationId: gradeListAppeals
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]

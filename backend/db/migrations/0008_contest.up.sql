@@ -200,6 +200,7 @@ CREATE TABLE IF NOT EXISTS battle_match (
     lease_token VARCHAR(64) NOT NULL DEFAULT '',
     lease_until TIMESTAMPTZ,
     attempt_count INT NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    finalized_at TIMESTAMPTZ,
     UNIQUE (tenant_id, id),
     UNIQUE (tenant_id, source_ref),
     UNIQUE (tenant_id, scope_ref),
@@ -209,6 +210,7 @@ CREATE TABLE IF NOT EXISTS battle_match (
     FOREIGN KEY (tenant_id, entry_b_id) REFERENCES battle_entry(tenant_id, id)
 );
 CREATE INDEX IF NOT EXISTS idx_battle_match_lease ON battle_match(status, lease_until) WHERE status = 2;
+CREATE INDEX IF NOT EXISTS idx_battle_match_finalization ON battle_match(id) WHERE status IN (3, 4) AND finalized_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_contest_archive_lease ON contest(status, archive_lease_until) WHERE status = 5;
 
 CREATE TABLE IF NOT EXISTS ladder_rank (

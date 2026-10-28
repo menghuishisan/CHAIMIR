@@ -78,7 +78,7 @@ func RegisterIdentityModule(deps IdentityModuleDeps) (*identity.Service, error) 
 	return svc, nil
 }
 
-// StartIdentityBackgroundTasks 在下游事件订阅完成后启动 M1 outbox，避免 Core NATS 无订阅时丢失初始化事件。
+// StartIdentityBackgroundTasks 在模块装配完成后启动M1 outbox,持久发布与消费确认统一由eventbus负责。
 func StartIdentityBackgroundTasks(ctx context.Context, cfg config.IdentityConfig, svc *identity.Service) error {
 	if ctx == nil || svc == nil {
 		return fmt.Errorf("identity background task 缺少 context 或 service")

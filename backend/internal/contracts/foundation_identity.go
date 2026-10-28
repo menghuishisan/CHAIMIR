@@ -48,6 +48,10 @@ type AuditLogEntry struct {
 
 // IdentityService 是 identity 模块对外提供的最小只读身份契约。
 type IdentityService interface {
+	// EnabledTenantModules 返回当前租户启用的规范模块集合，供共享引擎过滤混合来源。
+	EnabledTenantModules(ctx context.Context, tenantID int64) ([]string, error)
+	// RequireTenantModules 根据租户当前配置校验所需模块，不返回租户私有配置。
+	RequireTenantModules(ctx context.Context, tenantID int64, modules ...string) error
 	// GetAccount 读取单个账号摘要,供平台鉴权、审计与聚合逻辑复用。
 	GetAccount(ctx context.Context, accountID int64) (AccountInfo, error)
 	// BatchGetAccounts 批量读取账号摘要,避免上层形成 N+1 查询。

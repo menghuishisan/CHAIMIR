@@ -1,4 +1,4 @@
-# 本文件声明 tool/workspace 的学生工作区能力,不承担链运行时或判题能力。
+# 本文件声明工作区文件与终端能力;私有初始化仅由平台独立非学生容器使用同一镜像。
 schema_version: 1
 category: tool
 name: workspace
@@ -15,7 +15,7 @@ labels:
   chaimir.io/scope: sandbox
   chaimir.io/exposure: platform-private
   chaimir.io/source: platform-built
-description: 学生工作区文件、归档和受控终端能力。
+description: 工作区文件、归档、受控终端及独立非学生容器的初始化脚本执行能力。
 source:
   type: platform-built
 upstream:
@@ -26,9 +26,9 @@ upstream:
     - jq=1.8.2-r0
     - curl=8.22.0-r0
     - libcurl=8.22.0-r0
-    - libcrypto3=3.5.8-r0
-    - libexpat=2.8.4-r0
-    - libssl3=3.5.8-r0
+    - libcrypto3=3.5.9-r0
+    - libexpat=2.9.0-r0
+    - libssl3=3.5.9-r0
 data_driven: false
 capabilities:
   provides:

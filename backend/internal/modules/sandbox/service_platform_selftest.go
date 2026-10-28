@@ -3,6 +3,7 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -58,33 +59,66 @@ func (s *Service) RunPlatformSelftest(ctx context.Context, req contracts.Sandbox
 		PrivateSidecars:          privateSidecars,
 	}
 
+	ctx = logging.WithAttrs(ctx, slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace),
+		slog.String("composition_digest", digest), slog.String("exec_target", execTarget))
 	operationCtx, operationCancel := context.WithTimeout(ctx, time.Duration(req.TimeoutSec)*time.Second)
 	defer operationCancel()
-	var runErr error
-	if runErr = s.orchestrator.CreateSandboxResources(operationCtx, plan); runErr == nil {
-		for _, command := range req.Commands {
+	started := time.Now()
+	runErr := s.orchestrator.CreateSandboxResources(operationCtx, plan)
+	if runErr == nil {
+		runErr = operationCtx.Err()
+	}
+	logPlatformSelftestStage(operationCtx, "prepare", started, runErr)
+	if runErr != nil {
+		runErr = fmt.Errorf("平台自检资源准备失败: %w", runErr)
+	} else {
+		for index, command := range req.Commands {
+			if err := operationCtx.Err(); err != nil {
+				runErr = fmt.Errorf("平台自检第%d条命令开始前预算已结束: %w", index+1, err)
+				logPlatformSelftestStage(operationCtx, "execute", time.Now(), runErr, slog.Int("command_index", index+1))
+				break
+			}
+			started = time.Now()
 			_, stderr, commandErr := s.orchestrator.Exec(operationCtx, sb.Namespace, execTarget, command, nil, false)
+			if commandErr == nil {
+				commandErr = operationCtx.Err()
+			}
+			logPlatformSelftestStage(operationCtx, "execute", started, commandErr,
+				slog.Int("command_index", index+1), slog.String("executable", command[0]))
 			if commandErr != nil {
 				runErr = fmt.Errorf("平台自检命令 %q 执行失败: %w: %s", command[0], commandErr, strings.TrimSpace(string(stderr)))
 				break
 			}
 		}
 	}
+	operationCancel()
 
 	cleanupBase := logging.WithAttrs(context.WithoutCancel(ctx), logging.AttrsFromContext(ctx)...)
-	cleanupTimeout := s.cfg.SelftestRecycleTimeoutSeconds
-	if cleanupTimeout <= 0 {
-		cleanupTimeout = int(req.TimeoutSec)
-	}
-	cleanupCtx, cleanupCancel := context.WithTimeout(cleanupBase, time.Duration(cleanupTimeout)*time.Second)
+	cleanupCtx, cleanupCancel := context.WithTimeout(cleanupBase, time.Duration(s.cfg.SelftestRecycleTimeoutSeconds)*time.Second)
 	defer cleanupCancel()
-	if cleanupErr := s.orchestrator.DestroySandboxResources(cleanupCtx, sb); cleanupErr != nil {
-		logging.ErrorContext(cleanupCtx, "platform sandbox selftest cleanup failed", cleanupErr.Error(), slog.Int64("sandbox_id", sb.ID), slog.String("namespace", sb.Namespace))
-		if runErr == nil {
-			runErr = apperr.ErrSandboxSelftestFailed.WithCause(cleanupErr)
-		}
+	started = time.Now()
+	cleanupErr := s.orchestrator.DestroySandboxResources(cleanupCtx, sb)
+	logPlatformSelftestStage(cleanupCtx, "cleanup", started, cleanupErr)
+	if cleanupErr != nil {
+		runErr = errors.Join(runErr, fmt.Errorf("回收平台自检资源失败: %w", cleanupErr))
 	}
-	return runErr
+	if runErr != nil {
+		return apperr.ErrSandboxSelftestFailed.WithCause(runErr)
+	}
+	return nil
+}
+
+// logPlatformSelftestStage 记录阶段和剩余预算，便于区分准备耗时、命令超时与回收失败。
+func logPlatformSelftestStage(ctx context.Context, stage string, started time.Time, err error, attrs ...slog.Attr) {
+	attrs = append(attrs, slog.String("stage", stage), slog.Duration("duration", time.Since(started)))
+	if deadline, ok := ctx.Deadline(); ok {
+		attrs = append(attrs, slog.Duration("remaining", time.Until(deadline)))
+	}
+	if err != nil {
+		logging.ErrorContext(ctx, "platform sandbox selftest stage failed", apperr.ErrSandboxSelftestFailed.WithCause(err).LogString(), attrs...)
+		return
+	}
+	slog.Default().LogAttrs(ctx, slog.LevelInfo, "platform sandbox selftest stage completed", logging.AttrsFromContext(ctx, attrs...)...)
 }
 
 // materializePlatformSelftestExecTarget 将判题器 manifest 的声明式 Pod 名绑定到本次组合实例。
@@ -122,22 +156,30 @@ func (s *Service) runtimePlansForSnapshot(ctx context.Context, snapshot contract
 			if err != nil {
 				return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
 			}
-			if runtime.Code != frozen.Code || runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
-				return apperr.ErrSandboxRuntimeUnavailable
+			if runtime.Code != frozen.Code || runtime.PluginRef != frozen.PluginRef || runtime.Status != RuntimeStatusAvailable || runtime.SelftestStatus != RuntimeSelftestPassed {
+				return apperr.ErrSandboxRuntimeUnavailable.WithCause(fmt.Errorf("平台自检运行时门禁拒绝: runtime_id=%d instance=%s code=%s frozen_code=%s status=%d selftest_status=%d", runtime.ID, frozen.InstanceCode, runtime.Code, frozen.Code, runtime.Status, runtime.SelftestStatus))
 			}
-			if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &runtime.AdapterSpec); err != nil {
+			var frozenAdapter AdapterSpec
+			if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &frozenAdapter); err != nil {
 				return apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
 			}
-			runtime.AdapterSpec = materializeRuntimeTopology(frozen.InstanceCode, runtime.AdapterSpec)
+			runtime.AdapterSpec = materializeRuntimeTopology(frozen.InstanceCode, frozenAdapter)
 			runtime.AdapterLevel = frozen.AdapterLevel
 			runtime.CapabilityImpl = frozen.CapabilityImpl
+			runtime.PluginRef = frozen.PluginRef
 			image, err := tx.GetRuntimeImageByID(ctx, frozen.RuntimeID, frozen.ImageID)
 			if err != nil {
 				return apperr.ErrSandboxRuntimeImageNotFound.WithCause(err)
 			}
+			if image.ImageURL != frozen.ImageURL || image.Version != frozen.ImageVersion {
+				return apperr.ErrSandboxRuntimeUnavailable.WithCause(fmt.Errorf("平台自检镜像与冻结声明不一致: runtime_id=%d image_id=%d composition_digest=%s", runtime.ID, image.ID, snapshot.Digest))
+			}
 			prepull, err := tx.GetCompositionPrepullForUpdate(ctx, image.ID, snapshot.Digest)
-			if err != nil || image.ImageURL != frozen.ImageURL || image.Version != frozen.ImageVersion || prepull.Status != ImagePrepullSucceeded {
-				return apperr.ErrSandboxRuntimeUnavailable
+			if err != nil {
+				return apperr.ErrSandboxRuntimeUnavailable.WithCause(fmt.Errorf("读取平台自检组合预拉取证明失败: runtime_id=%d image_id=%d composition_digest=%s: %w", runtime.ID, image.ID, snapshot.Digest, err))
+			}
+			if prepull.Status != ImagePrepullSucceeded {
+				return apperr.ErrSandboxRuntimeUnavailable.WithCause(fmt.Errorf("平台自检组合预拉取尚未通过: runtime_id=%d image_id=%d composition_digest=%s status=%d", runtime.ID, image.ID, snapshot.Digest, prepull.Status))
 			}
 			runtimePlans = append(runtimePlans, RuntimePlan{InstanceCode: frozen.InstanceCode, Runtime: runtime, Image: image})
 		}

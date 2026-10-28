@@ -63,12 +63,13 @@ export default function StudentExperimentsPage() {
   }, [keyword])
 
   // 协作形态与报告要求取后端 facets:全量分组计数,不用当前页切片去数(§6.5.4)
+  const facets = experiments.total === undefined ? undefined : experiments.data?.facets
   const groupCount = facetCount(
-    experiments.data?.facets,
+    facets,
     'collab_mode',
     ExperimentCollabMode.GROUP,
   )
-  const reportCount = facetCount(experiments.data?.facets, 'require_report', true)
+  const reportCount = facetCount(facets, 'require_report', true)
 
   /**
    * enterExperiment 创建或恢复实例后进入沉浸式工作台。

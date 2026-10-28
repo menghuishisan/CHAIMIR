@@ -3,8 +3,8 @@
 // 删除是不可逆的,故走确认弹层而不是 window.confirm(规范:危险操作需确认且视觉分离)。
 
 import { useCallback, useState } from 'react'
-import { Megaphone, MessageSquare, Pin, Send, Trash2 } from 'lucide-react'
-import type { TeachingAnnouncement, TeachingPost } from '@chaimir/api-client'
+import { Megaphone, Pin, Send } from 'lucide-react'
+import type { TeachingAnnouncement } from '@chaimir/api-client'
 import {
   Badge,
   Button,
@@ -32,8 +32,10 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { usePagedResource } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { CoursePosts } from '../../components/CoursePosts'
 
 export interface CourseBoardProps {
   courseId: string
@@ -46,7 +48,7 @@ export function CourseBoard({ courseId }: CourseBoardProps) {
   return (
     <>
       <CourseAnnouncements courseId={courseId} />
-      <CoursePosts courseId={courseId} />
+      <CoursePosts key={courseId} courseId={courseId} canModerate />
     </>
   )
 }
@@ -57,20 +59,25 @@ export function CourseBoard({ courseId }: CourseBoardProps) {
 function CourseAnnouncements({ courseId }: CourseBoardProps) {
   const [composeOpen, setComposeOpen] = useState(false)
   const [actionError, setActionError] = useState<string>()
+  const [pendingPin, setPendingPin] = useState<string>()
 
 	const announcements = usePagedResource<TeachingAnnouncement>((params) => api.teaching.listAnnouncements(courseId, params), [courseId])
 
   const togglePin = useCallback(
     async (announcement: TeachingAnnouncement) => {
+      if (pendingPin) return
+      setPendingPin(announcement.id)
       setActionError(undefined)
       try {
-        await api.teaching.pinAnnouncement(announcement.id)
+        await api.teaching.pinAnnouncement(announcement.id, !announcement.is_pinned)
         announcements.reload()
       } catch (error) {
         setActionError(userFacingErrorMessage(error, '操作没有完成,请稍后重试。'))
+      } finally {
+        setPendingPin(undefined)
       }
     },
-    [announcements],
+    [announcements, pendingPin],
   )
 
   return (
@@ -116,6 +123,7 @@ function CourseAnnouncements({ courseId }: CourseBoardProps) {
                         size="sm"
                         icon={Pin}
                         aria-label={announcement.is_pinned ? '取消置顶公告' : '置顶公告'}
+                        disabled={Boolean(pendingPin)}
                         onClick={() => void togglePin(announcement)}
                       />
                     }
@@ -162,14 +170,15 @@ function AnnouncementComposeModal({ courseId, onClose, onPosted }: AnnouncementC
   const [pinned, setPinned] = useState(false)
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(() => ({
+    title: title.trim() ? null : '请输入公告标题',
+    content: content.trim() ? null : '请输入公告内容',
+  }))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (title.trim() === '' || content.trim() === '') {
-        setFormError('标题和内容都要填写')
-        return
-      }
+      if (working || !validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -186,7 +195,7 @@ function AnnouncementComposeModal({ courseId, onClose, onPosted }: AnnouncementC
         setWorking(false)
       }
     },
-    [content, courseId, onPosted, pinned, title],
+    [content, courseId, onPosted, pinned, title, validate, working],
   )
 
   return (
@@ -198,17 +207,21 @@ function AnnouncementComposeModal({ courseId, onClose, onPosted }: AnnouncementC
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <FormField label="公告标题" htmlFor="announcement-title" required>
+            <FormField label="公告标题" htmlFor="announcement-title" required error={errors.title}>
               <Input
                 id="announcement-title"
                 value={title}
+                invalid={Boolean(errors.title)}
+                onBlur={() => validate(['title'])}
                 onChange={(event) => setTitle(event.target.value)}
               />
             </FormField>
-            <FormField label="公告内容" htmlFor="announcement-content" required>
+            <FormField label="公告内容" htmlFor="announcement-content" required error={errors.content}>
               <Textarea
                 id="announcement-content"
                 value={content}
+                invalid={Boolean(errors.content)}
+                onBlur={() => validate(['content'])}
                 rows={6}
                 onChange={(event) => setContent(event.target.value)}
               />
@@ -231,129 +244,5 @@ function AnnouncementComposeModal({ courseId, onClose, onPosted }: AnnouncementC
         </form>
       </ModalContent>
     </Modal>
-  )
-}
-
-/**
- * CoursePosts 管理讨论帖:置顶与删除违规内容。
- */
-function CoursePosts({ courseId }: CourseBoardProps) {
-  const [deleteTarget, setDeleteTarget] = useState<TeachingPost>()
-  const [working, setWorking] = useState(false)
-  const [actionError, setActionError] = useState<string>()
-
-  const posts = usePagedResource<TeachingPost>(
-    (params) => api.teaching.listPosts(courseId, params),
-    [courseId],
-  )
-
-  const togglePin = useCallback(
-    async (post: TeachingPost) => {
-      setActionError(undefined)
-      try {
-        await api.teaching.pinPost(post.id)
-        posts.reload()
-      } catch (error) {
-        setActionError(userFacingErrorMessage(error, '操作没有完成,请稍后重试。'))
-      }
-    },
-    [posts],
-  )
-
-  const deletePost = useCallback(async () => {
-    if (!deleteTarget) return
-    setWorking(true)
-    setActionError(undefined)
-    try {
-      await api.teaching.deletePost(deleteTarget.id)
-      toast.success('已删除')
-      setDeleteTarget(undefined)
-      posts.reload()
-    } catch (error) {
-      setActionError(userFacingErrorMessage(error, '删除没有成功,请稍后重试。'))
-    } finally {
-      setWorking(false)
-    }
-  }, [deleteTarget, posts])
-
-  return (
-    <PageSection title="课程讨论" description={`共 ${posts.total} 条。可以置顶重要讨论、删除违规内容。`}>
-      <div className="flex flex-col gap-4">
-        {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
-        <ResourceState
-          resource={posts}
-          emptyIcon={MessageSquare}
-          emptyTitle="还没有讨论"
-          emptyDescription="学生在课程里提问后会显示在这里。"
-          skeleton={<Skeleton variant="line" lines={4} />}
-        >
-          {(page) => (
-            <>
-              <div className="flex flex-col gap-3">
-                {page.list.map((post) => (
-                  <Card key={post.id}>
-                    <CardBody className="flex flex-col gap-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          {post.is_pinned ? <Badge tone="jade">置顶</Badge> : null}
-                          <span className="font-mono text-xs tabular-nums text-ink-faint">
-                            {formatShortDateTime(post.created_at)}
-                          </span>
-                          <span className="text-xs text-ink-sub">{post.like_count} 人觉得有帮助</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <IconButton
-                            variant="ghost"
-                            size="sm"
-                            icon={Pin}
-                            aria-label={post.is_pinned ? '取消置顶讨论' : '置顶讨论'}
-                            onClick={() => void togglePin(post)}
-                          />
-                          <IconButton
-                            variant="ghost"
-                            size="sm"
-                            icon={Trash2}
-                            aria-label="删除这条讨论"
-                            onClick={() => setDeleteTarget(post)}
-                          />
-                        </div>
-                      </div>
-                      <p className="whitespace-pre-wrap text-base text-ink">{post.content}</p>
-                    </CardBody>
-                  </Card>
-                ))}
-              </div>
-              <Pagination
-                page={posts.page}
-                pageSize={posts.pageSize}
-                total={posts.total}
-                onPageChange={posts.setPage}
-              />
-            </>
-          )}
-        </ResourceState>
-      </div>
-
-      <Modal open={deleteTarget !== undefined} onOpenChange={(open) => !open && setDeleteTarget(undefined)}>
-        <ModalContent size="sm">
-          <ModalHeader>
-            <ModalTitle>确认删除这条讨论</ModalTitle>
-            <ModalDescription>删除后学生看不到这条内容,操作不可撤销。</ModalDescription>
-          </ModalHeader>
-          <ModalBody>
-            <p className="line-clamp-4 text-base text-ink">{deleteTarget?.content}</p>
-          </ModalBody>
-          <ModalFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(undefined)}>
-              取消
-            </Button>
-            <Button variant="danger" loading={working} onClick={() => void deletePost()}>
-              确认删除
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
-    </PageSection>
   )
 }

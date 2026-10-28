@@ -52,6 +52,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
@@ -78,15 +79,15 @@ export default function PlatformSettingsPage() {
     (value) => value.length === 0,
   )
 
-  const list = useMemo(() => configs.data ?? [], [configs.data])
-
-  const stats = useMemo(
-    () => ({
+  const stats = useMemo(() => {
+    if ((configs.status !== 'success' && configs.status !== 'empty') || !configs.data) return undefined
+    const list = configs.data
+    return {
+      total: list.length,
       registered: list.filter((item) => configKeyDescription(item.key) !== undefined).length,
       withCredentials: list.filter((item) => credentialKeysOf(item.value).length > 0).length,
-    }),
-    [list],
-  )
+    }
+  }, [configs.data, configs.status])
 
   return (
     <PageScaffold>
@@ -106,15 +107,15 @@ export default function PlatformSettingsPage() {
         label="平台配置摘要"
         className="mb-5"
         items={[
-          { label: '配置项', value: list.length, hint: '平台级运行参数' },
+          { label: '配置项', value: stats?.total, hint: '平台级运行参数' },
           {
             label: '已登记说明',
-            value: stats.registered,
+            value: stats?.registered,
             hint: '其余是使用方自定义的键',
           },
           {
             label: '含凭据字段',
-            value: stats.withCredentials,
+            value: stats?.withCredentials,
             hint: '保存时需要重新填写',
           },
         ]}
@@ -235,30 +236,29 @@ function ConfigEditModal({ config, onClose, onSaved }: ConfigEditModalProps) {
   const [credentials, setCredentials] = useState<Record<string, string>>(() =>
     Object.fromEntries(credentialKeys.map((key) => [key, ''])),
   )
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
   const parsed = useMemo(() => parseValue(valueText), [valueText])
 
+  const { errors, validate } = useFormValidation(useCallback(() => {
+    const next: Record<string, string | null> = { value: parsed.error ?? null }
+    for (const key of credentialKeys) {
+      const filled = credentials[key]?.trim() ?? ''
+      next[`credential:${key}`] =
+        filled === ''
+          ? '现有值不会显示,保存时必须重新填入完整的值'
+          : filled === MASKED_VALUE
+            ? '这是占位文案,不是真实值,请填入真实内容'
+            : null
+    }
+    return next
+  }, [credentialKeys, credentials, parsed.error]))
+
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const next: Record<string, string | null> = { value: parsed.error ?? null }
-      for (const key of credentialKeys) {
-        const filled = credentials[key]?.trim() ?? ''
-        next[`credential:${key}`] =
-          filled === ''
-            ? '现有值不会显示,保存时必须重新填入完整的值'
-            : filled === MASKED_VALUE
-              ? '这是占位文案,不是真实值,请填入真实内容'
-              : null
-      }
-      setErrors(next)
-      if (Object.values(next).some((item) => item !== null)) {
-        setFormError('有几项还不能提交,按提示改一下。')
-        return
-      }
+      if (!validate()) return
 
       setFormError(undefined)
       setWorking(true)
@@ -284,7 +284,7 @@ function ConfigEditModal({ config, onClose, onSaved }: ConfigEditModalProps) {
         setWorking(false)
       }
     },
-    [config.key, config.version, credentialKeys, credentials, onSaved, parsed],
+    [config.key, config.version, credentialKeys, credentials, onSaved, parsed, validate],
   )
 
   return (

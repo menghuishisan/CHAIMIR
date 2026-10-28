@@ -64,12 +64,15 @@ capabilities:
       - lookback_blocks
     properties:
       contract_address:
+        title: 监听合约地址
         type: string
         x-chaimir-env: infra/CHAIMIR_EVENT_CONTRACT_ADDRESS
       event_topic:
+        title: 事件主题
         type: string
         x-chaimir-env: infra/CHAIMIR_EVENT_TOPIC
       lookback_blocks:
+        title: 回查区块数
         type: integer
         x-chaimir-env: infra/CHAIMIR_EVENT_LOOKBACK_BLOCKS
   student_access: private

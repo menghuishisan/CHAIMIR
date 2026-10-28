@@ -15,9 +15,9 @@ import {
   passwordRequiredError,
   phoneError,
   requiredError,
-  useFieldErrors,
   useSmsCooldown,
 } from '../../authForm'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { clearPendingTenantLogin, setPendingTenantLogin } from './pendingLogin'
 
 /** LoginView 登录方式:手机号、校内账号、学校统一认证 */
@@ -87,7 +87,13 @@ export function useLoginController(): LoginController {
   const [submitting, setSubmitting] = useState(false)
   const [sendingSms, setSendingSms] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
-  const { errors, setError, clearErrors } = useFieldErrors()
+  const { errors, validate, reset: resetValidation } = useFormValidation(() => ({
+    phone: phoneError(phone, '手机号'),
+    password: passwordRequiredError(password, '请输入密码'),
+    smsCode: requiredError(smsCode, '请输入验证码'),
+    tenantCode: requiredError(tenantCode, '请输入学校代号'),
+    accountNo: requiredError(accountNo, '请输入学号或工号'),
+  }), `${view}:${phoneMethod}`)
   const { seconds: smsCooldown, start: startSmsCooldown } = useSmsCooldown()
 
   // 进入登录页即清除上一轮多校选择暂存的凭证
@@ -96,24 +102,24 @@ export function useLoginController(): LoginController {
   }, [])
 
   const blurPhone = useCallback(() => {
-    setError('phone', phoneError(phone, '手机号'))
-  }, [phone, setError])
+    validate(['phone'])
+  }, [validate])
 
   const blurPassword = useCallback(() => {
-    setError('password', passwordRequiredError(password, '请输入密码'))
-  }, [password, setError])
+    validate(['password'])
+  }, [validate])
 
   const blurSmsCode = useCallback(() => {
-    setError('smsCode', requiredError(smsCode, '请输入验证码'))
-  }, [setError, smsCode])
+    validate(['smsCode'])
+  }, [validate])
 
   const blurTenantCode = useCallback(() => {
-    setError('tenantCode', requiredError(tenantCode, '请输入学校代号'))
-  }, [setError, tenantCode])
+    validate(['tenantCode'])
+  }, [validate])
 
   const blurAccountNo = useCallback(() => {
-    setError('accountNo', requiredError(accountNo, '请输入学号或工号'))
-  }, [accountNo, setError])
+    validate(['accountNo'])
+  }, [validate])
 
   /** completeLogin 持久化会话并按服务端改密要求或角色决定落点 */
   const completeLogin = useCallback(
@@ -136,7 +142,7 @@ export function useLoginController(): LoginController {
 
   /** sendSms 发送登录验证码并启动重发倒计时 */
   const sendSms = useCallback(async () => {
-    if (!setError('phone', phoneError(phone, '手机号'))) return
+    if (!validate(['phone'])) return
     setSendingSms(true)
     setFormError(null)
     try {
@@ -147,18 +153,13 @@ export function useLoginController(): LoginController {
     } finally {
       setSendingSms(false)
     }
-  }, [phone, setError, startSmsCooldown])
+  }, [phone, startSmsCooldown, validate])
 
   /** submitPhone 手机号登录(密码或验证码两种凭据);一号多校时转入选校页 */
   const submitPhone = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const phoneOk = setError('phone', phoneError(phone, '手机号'))
-      const credentialOk =
-        phoneMethod === 'password'
-          ? setError('password', passwordRequiredError(password, '请输入密码'))
-          : setError('smsCode', requiredError(smsCode, '请输入验证码'))
-      if (!phoneOk || !credentialOk) return
+      if (!validate(['phone', phoneMethod === 'password' ? 'password' : 'smsCode'])) return
 
       setSubmitting(true)
       setFormError(null)
@@ -189,17 +190,14 @@ export function useLoginController(): LoginController {
         setSubmitting(false)
       }
     },
-    [completeLogin, enterTenantSelect, password, phone, phoneMethod, remember, setError, smsCode],
+    [completeLogin, enterTenantSelect, password, phone, phoneMethod, remember, smsCode, validate],
   )
 
   /** submitAccount 学校代号 + 学号/工号登录(学校已定,不存在选校分支) */
   const submitAccount = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const tenantOk = setError('tenantCode', requiredError(tenantCode, '请输入学校代号'))
-      const noOk = setError('accountNo', requiredError(accountNo, '请输入学号或工号'))
-      const passwordOk = setError('password', passwordRequiredError(password, '请输入密码'))
-      if (!tenantOk || !noOk || !passwordOk) return
+      if (!validate(['tenantCode', 'accountNo', 'password'])) return
 
       setSubmitting(true)
       setFormError(null)
@@ -217,17 +215,17 @@ export function useLoginController(): LoginController {
         setSubmitting(false)
       }
     },
-    [accountNo, completeLogin, password, remember, setError, tenantCode],
+    [accountNo, completeLogin, password, remember, tenantCode, validate],
   )
 
   /** submitSso 进入该学校的统一认证中转页(认证由学校侧完成) */
   const submitSso = useCallback(
     (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (!setError('tenantCode', requiredError(tenantCode, '请输入学校代号'))) return
+      if (!validate(['tenantCode'])) return
       navigate(`/auth/sso/${encodeURIComponent(tenantCode.trim())}`)
     },
-    [navigate, setError, tenantCode],
+    [navigate, tenantCode, validate],
   )
 
   /** switchView 切换登录方式表单,清空上一种方式留下的错误 */
@@ -235,9 +233,9 @@ export function useLoginController(): LoginController {
     (next: LoginView) => {
       setView(next)
       setFormError(null)
-      clearErrors()
+      resetValidation()
     },
-    [clearErrors],
+    [resetValidation],
   )
 
   return {

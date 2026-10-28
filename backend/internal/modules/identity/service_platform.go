@@ -3,6 +3,7 @@ package identity
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -14,6 +15,8 @@ import (
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	"chaimir/pkg/crypto"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // CreateApplication 提交学校入驻申请,这是申请流程而非自助注册。
@@ -260,6 +263,9 @@ func (s *Service) GetTenantByPlatform(ctx context.Context, tenantID int64) (Tena
 		row = item
 		return nil
 	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return TenantDTO{}, apperr.ErrNotFound.WithCause(err)
+		}
 		return TenantDTO{}, apperr.ErrInternal.WithCause(err)
 	}
 	return ToTenantDTO(row)

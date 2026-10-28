@@ -67,6 +67,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import type { PagedResourceState } from '../../../../hooks/usePagedResource'
 import { formatDateTime } from '../../../../utils/formatters'
 import { experimentCollabModeLabel, experimentReportStatusLabel } from '../../../../utils/labels/experiment'
@@ -121,6 +122,7 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
   const totalCount = useResourceTotal(
     (params) => api.experiment.listReports(experiment.id, params),
     [experiment.id],
+    reports.refreshVersion,
   )
   const pendingCount = useResourceTotal(
     (params) =>
@@ -129,6 +131,7 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
         ...params,
       }),
     [experiment.id],
+    reports.refreshVersion,
   )
   const gradedCount = useResourceTotal(
     (params) =>
@@ -137,6 +140,7 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
         ...params,
       }),
     [experiment.id],
+    reports.refreshVersion,
   )
 
   /** downloadReport 经业务授权和统一文件服务下载报告,不暴露对象存储地址。 */
@@ -295,7 +299,7 @@ function ReportsQueue({
               返回队列
             </Button>
             <span className="text-sm text-ink-sub tabular-nums">
-              第 {selectedIndex + 1} 份 / 共 {reports.total} 份
+              第 {selectedIndex + 1} 份 / 共 {reports.total ?? '—'} 份
             </span>
           </div>
         ) : undefined
@@ -425,21 +429,19 @@ interface ReportGradePaneProps {
  * key 由调用方按报告编号给出:切换条目时表单重建,上一份的草稿不会串到下一份。
  */
 function ReportGradePane({ report, onDownload, onSaved }: ReportGradePaneProps) {
-  const [score, setScore] = useState(String(report.manual_score || ''))
+  const [score, setScore] = useState(String(report.manual_score ?? ''))
   const [comment, setComment] = useState(report.comment ?? '')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    score: score.trim() === '' || !Number.isFinite(Number(score)) || Number(score) < 0
+      ? '分数需要是 0 或更大的数字' : null,
+    comment: comment.trim() === '' ? '请写下批改意见,让学生知道得分依据' : null,
+  }), [comment, score]))
 
   const submit = useCallback(async () => {
+    if (!validate()) return
     const value = Number(score)
-    if (!Number.isFinite(value) || value < 0) {
-      setFormError('分数需要是 0 或更大的数字')
-      return
-    }
-    if (comment.trim() === '') {
-      setFormError('请写下批改意见,让学生知道得分依据')
-      return
-    }
     setFormError(undefined)
     setWorking(true)
     try {
@@ -451,7 +453,7 @@ function ReportGradePane({ report, onDownload, onSaved }: ReportGradePaneProps) 
     } finally {
       setWorking(false)
     }
-  }, [comment, onSaved, report.id, score])
+  }, [comment, onSaved, report.id, score, validate])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg bg-surface p-5 shadow-xs">
@@ -475,13 +477,15 @@ function ReportGradePane({ report, onDownload, onSaved }: ReportGradePaneProps) 
         </Button>
       </div>
 
-      <FormField label="报告得分" htmlFor="report-score" required>
+      <FormField label="报告得分" htmlFor="report-score" required error={errors.score}>
         <Input
           id="report-score"
           type="number"
           min="0"
           step="0.5"
           value={score}
+          invalid={Boolean(errors.score)}
+          onBlur={() => validate(['score'])}
           onChange={(event) => setScore(event.target.value)}
         />
       </FormField>
@@ -490,17 +494,20 @@ function ReportGradePane({ report, onDownload, onSaved }: ReportGradePaneProps) 
         label="批改意见"
         htmlFor="report-comment"
         required
-        error={formError}
+        error={errors.comment}
         helper="说清楚得分依据与改进方向,学生会在实验详情里看到"
       >
         <Textarea
           id="report-comment"
           value={comment}
           rows={6}
-          invalid={Boolean(formError)}
+          invalid={Boolean(errors.comment)}
+          onBlur={() => validate(['comment'])}
           onChange={(event) => setComment(event.target.value)}
         />
       </FormField>
+
+      {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
       {/* 动作条贴详情片底边;<lg 由 QueueDetailLayout 钉到屏幕底部 */}
       <div className="mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
@@ -745,14 +752,14 @@ function CreateGroupModal({ experimentId, onClose, onCreated }: CreateGroupModal
   const [name, setName] = useState('')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    name: name.trim() === '' ? '请给小组起一个名字' : null,
+  }), [name]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (name.trim() === '') {
-        setFormError('请给小组起一个名字')
-        return
-      }
+      if (!validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -765,7 +772,7 @@ function CreateGroupModal({ experimentId, onClose, onCreated }: CreateGroupModal
         setWorking(false)
       }
     },
-    [experimentId, name, onCreated],
+    [experimentId, name, onCreated, validate],
   )
 
   return (
@@ -777,15 +784,17 @@ function CreateGroupModal({ experimentId, onClose, onCreated }: CreateGroupModal
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody>
-            <FormField label="小组名称" htmlFor="group-name" required error={formError}>
+            <FormField label="小组名称" htmlFor="group-name" required error={errors.name}>
               <Input
                 id="group-name"
                 value={name}
                 placeholder="例如 第一组"
-                invalid={Boolean(formError)}
+                invalid={Boolean(errors.name)}
+                onBlur={() => validate(['name'])}
                 onChange={(event) => setName(event.target.value)}
               />
             </FormField>
+            {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </ModalBody>
           <ModalFooter>
             <Button type="button" variant="outline" onClick={onClose}>
@@ -820,6 +829,11 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
   const [role, setRole] = useState(roles[0] ?? '')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    classId: classId === '' ? '请选择学生所在的班级' : null,
+    studentId: studentId === '' ? '请选择要加入的学生' : null,
+    role: role.trim() === '' ? '请填写这名学生在组内的角色' : null,
+  }), [classId, role, studentId]))
 
   const classes = useAsyncResource(() => api.identity.listClasses(), [], () => false)
 
@@ -859,14 +873,7 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (studentId === '') {
-        setFormError('请选择要加入的学生')
-        return
-      }
-      if (role.trim() === '') {
-        setFormError('请填写这名学生在组内的角色')
-        return
-      }
+      if (!validate()) return
       setFormError(undefined)
       setWorking(true)
       try {
@@ -882,7 +889,7 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
         setWorking(false)
       }
     },
-    [group.id, onSaved, role, studentId],
+    [group.id, onSaved, role, studentId, validate],
   )
 
   return (
@@ -903,11 +910,13 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
               emptyDescription="请联系学校管理员在组织架构里创建班级。"
             >
               {() => (
-                <FormField label="班级" htmlFor="member-class" required>
+                <FormField label="班级" htmlFor="member-class" required error={errors.classId}>
                   <Select
                     id="member-class"
                     options={classOptions}
                     value={classId}
+                    invalid={Boolean(errors.classId)}
+                    onBlur={() => validate(['classId'])}
                     placeholder="选择班级"
                     onValueChange={(value) => {
                       setClassId(value)
@@ -928,11 +937,13 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
                 emptyDescription="换一个班级,或联系学校管理员核对班级名单。"
               >
                 {() => (
-                  <FormField label="学生" htmlFor="member-student" required>
+                  <FormField label="学生" htmlFor="member-student" required error={errors.studentId}>
                     <Select
                       id="member-student"
                       options={studentOptions}
                       value={studentId}
+                      invalid={Boolean(errors.studentId)}
+                      onBlur={() => validate(['studentId'])}
                       placeholder="选择学生"
                       onValueChange={setStudentId}
                     />
@@ -942,11 +953,13 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
             )}
 
             {roles.length > 0 ? (
-              <FormField label="组内角色" htmlFor="member-role" required helper="只能选实验定义的角色">
+              <FormField label="组内角色" htmlFor="member-role" required helper="只能选实验定义的角色" error={errors.role}>
                 <Select
                   id="member-role"
                   options={roles.map((item) => ({ value: item, label: item }))}
                   value={role}
+                  invalid={Boolean(errors.role)}
+                  onBlur={() => validate(['role'])}
                   placeholder="选择角色"
                   onValueChange={setRole}
                 />
@@ -957,10 +970,13 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
                 htmlFor="member-role-free"
                 required
                 helper="实验没有限定角色,填一个便于识别的名字"
+                error={errors.role}
               >
                 <Input
                   id="member-role-free"
                   value={role}
+                  invalid={Boolean(errors.role)}
+                  onBlur={() => validate(['role'])}
                   placeholder="例如 攻击方"
                   onChange={(event) => setRole(event.target.value)}
                 />

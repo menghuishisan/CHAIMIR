@@ -28,13 +28,15 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	}
 	api := teachingAPI{svc: svc, authn: authn}
 	g := r.Group("/api/v1/teaching")
-	all := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
-	teacher := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
-	student := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent))
+	all := g.Group("", authn.Middleware(contracts.TenantModuleTeaching), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
+	teacher := g.Group("", authn.Middleware(contracts.TenantModuleTeaching), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
+	student := g.Group("", authn.Middleware(contracts.TenantModuleTeaching), auth.RequireTenantAnyRole(roles, contracts.RoleStudent))
+	grades := g.Group("", authn.Middleware(contracts.TenantModuleTeaching, contracts.TenantModuleGrade), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
 	internal := g.Group("/internal", authn.ServiceMiddleware())
 	api.registerSharedRoutes(all)
 	api.registerTeacherRoutes(teacher)
 	api.registerStudentRoutes(student)
+	api.registerGradeRoutes(grades)
 	api.registerInternalRoutes(internal)
 	return nil
 }
@@ -65,6 +67,7 @@ func (a teachingAPI) registerSharedRoutes(g gin.IRouter) {
 
 // registerTeacherRoutes 注册授课教师和学校管理员管理接口。
 func (a teachingAPI) registerTeacherRoutes(g gin.IRouter) {
+	g.GET("/courses/shared", a.listSharedCourses)
 	g.POST("/courses", a.createCourse)
 	// 封面上传不绑课程 id:新建课程时还没有 id,先传图拿 object_ref 再随创建请求提交,
 	// 编辑时同样,故创建与修改共用这一条路径。
@@ -75,6 +78,7 @@ func (a teachingAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/courses/:id/archive", a.archiveCourse)
 	g.POST("/courses/:id/clone", a.cloneCourse)
 	g.POST("/courses/:id/share", a.shareCourse)
+	g.DELETE("/courses/:id/share", a.unshareCourse)
 	g.POST("/courses/:id/invite-code/refresh", a.refreshInviteCode)
 	g.POST("/courses/:id/chapters", a.createChapter)
 	g.PATCH("/courses/:id/chapters/:cid", a.updateChapter)
@@ -95,7 +99,12 @@ func (a teachingAPI) registerTeacherRoutes(g gin.IRouter) {
 	g.POST("/courses/:id/announcements", a.createAnnouncement)
 	g.POST("/announcements/:id/pin", a.pinAnnouncement)
 	g.GET("/courses/:id/progress-stats", a.progressStats)
+}
+
+// registerGradeRoutes 对课程总评同时要求教学与成绩功能，避免从课程入口绕过开关。
+func (a teachingAPI) registerGradeRoutes(g gin.IRouter) {
 	g.GET("/courses/:id/grade-weights", a.listGradeWeights)
+	g.GET("/courses/:id/grade-sources", a.listGradeSources)
 	g.PUT("/courses/:id/grade-weights", a.setGradeWeights)
 	g.POST("/courses/:id/grades/compute", a.computeGrades)
 	g.GET("/courses/:id/grades", a.listGrades)
@@ -112,6 +121,7 @@ func (a teachingAPI) registerStudentRoutes(g gin.IRouter) {
 	g.POST("/assignments/:id/draft", a.saveDraft)
 	g.POST("/assignments/:id/submit", a.submitAssignment)
 	g.POST("/courses/:id/review", a.reviewCourse)
+	g.GET("/courses/:id/review", a.getMyCourseReview)
 }
 
 // registerInternalRoutes 注册内部服务只读契约 HTTP 入口。
@@ -135,6 +145,16 @@ func (a teachingAPI) listCourses(c *gin.Context) {
 		return
 	}
 	out, total, p, s, err := a.svc.ListCourses(c.Request.Context(), CourseListFilter{Role: c.Query("role"), Status: status, IsShared: isShared, Page: page, Size: size})
+	httpx.WritePage(c, out, total, p, s, err)
+}
+
+// listSharedCourses只接受目录关键词与分页，不接受调用方指定租户范围。
+func (a teachingAPI) listSharedCourses(c *gin.Context) {
+	page, size, ok := httpx.Page(c)
+	if !ok {
+		return
+	}
+	out, total, p, s, err := a.svc.ListSharedCourses(c.Request.Context(), CourseListFilter{Keyword: c.Query("keyword"), Page: page, Size: size})
 	httpx.WritePage(c, out, total, p, s, err)
 }
 
@@ -194,6 +214,11 @@ func (a teachingAPI) cloneCourse(c *gin.Context) {
 // shareCourse 共享课程到课程库。
 func (a teachingAPI) shareCourse(c *gin.Context) {
 	a.writeCourseAction(c, a.svc.ShareCourse)
+}
+
+// unshareCourse 取消本人课程的共享,保留课程及其已有业务记录。
+func (a teachingAPI) unshareCourse(c *gin.Context) {
+	a.writeCourseAction(c, a.svc.UnshareCourse)
 }
 
 // refreshInviteCode 刷新课程邀请码。
@@ -697,7 +722,11 @@ func (a teachingAPI) pinPost(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.PinPost(c.Request.Context(), id, true)
+	var req PinRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingDiscussionInvalid) {
+		return
+	}
+	out, err := a.svc.PinPost(c.Request.Context(), id, *req.IsPinned)
 	httpx.Write(c, out, err)
 }
 
@@ -744,7 +773,21 @@ func (a teachingAPI) pinAnnouncement(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, err := a.svc.PinAnnouncement(c.Request.Context(), id, true)
+	var req PinRequest
+	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingDiscussionInvalid) {
+		return
+	}
+	out, err := a.svc.PinAnnouncement(c.Request.Context(), id, *req.IsPinned)
+	httpx.Write(c, out, err)
+}
+
+// getMyCourseReview读取当前学生的评价,不接受客户端提供学生身份。
+func (a teachingAPI) getMyCourseReview(c *gin.Context) {
+	courseID, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetMyCourseReview(c.Request.Context(), courseID)
 	httpx.Write(c, out, err)
 }
 
@@ -773,6 +816,16 @@ func (a teachingAPI) setGradeWeights(c *gin.Context) {
 		return
 	}
 	out, err := a.svc.SetGradeWeights(c.Request.Context(), courseID, req)
+	httpx.Write(c, out, err)
+}
+
+// listGradeSources 查询授课教师可用的完整成绩来源。
+func (a teachingAPI) listGradeSources(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.ListGradeSources(c.Request.Context(), id)
 	httpx.Write(c, out, err)
 }
 

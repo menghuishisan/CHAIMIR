@@ -3,9 +3,12 @@ package sandbox
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/storage"
 	"chaimir/pkg/apperr"
 )
@@ -67,10 +70,14 @@ func (s *Service) UpdateSandboxAuthorizedAccounts(ctx context.Context, req contr
 	}); err != nil {
 		return err
 	}
+	var closeErrs []error
 	for _, accountID := range revoked {
 		if err := s.closeSandboxSessions(req.TenantID, accountID, req.SandboxID); err != nil {
-			return apperr.ErrSandboxToolProxyUnavailable.WithCause(err)
+			closeErrs = append(closeErrs, fmt.Errorf("关闭已撤销沙箱成员连接失败: tenant_id=%d sandbox_id=%d account_id=%d: %w", req.TenantID, req.SandboxID, accountID, err))
 		}
+	}
+	if err := errors.Join(closeErrs...); err != nil {
+		return apperr.ErrSandboxToolProxyUnavailable.WithCause(err)
 	}
 	return nil
 }
@@ -88,6 +95,32 @@ func (s *Service) GetSandboxWorkspaceArchive(ctx context.Context, tenantID, sand
 	}); err != nil {
 		return "", apperr.ErrSandboxNotFound.WithCause(err)
 	}
+	return s.sandboxWorkspaceArchiveRef(sb)
+}
+
+// FindSavedSandboxWorkspaceArchiveBySourceRef 在每次显式重建时重取持久化指针，不依赖前一请求内存。
+func (s *Service) FindSavedSandboxWorkspaceArchiveBySourceRef(ctx context.Context, tenantID int64, sourceRef string) (string, error) {
+	sourceRef = strings.TrimSpace(sourceRef)
+	if tenantID <= 0 || !auth.ValidSourceRef(sourceRef) {
+		return "", apperr.ErrSandboxContractRequestInvalid
+	}
+	var sb Sandbox
+	err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		sb, err = tx.GetSavedSandboxBySourceRef(ctx, tenantID, sourceRef)
+		return err
+	})
+	if errors.Is(err, apperr.ErrSandboxNotFound) {
+		return "", nil
+	}
+	if err != nil {
+		return "", apperr.ErrSandboxFilePersistFailed.WithCause(err)
+	}
+	return s.sandboxWorkspaceArchiveRef(sb)
+}
+
+// sandboxWorkspaceArchiveRef 统一构造已保存公开归档引用，不返回初始化私有材料。
+func (s *Service) sandboxWorkspaceArchiveRef(sb Sandbox) (string, error) {
 	if strings.TrimSpace(sb.CodeHash) == "" || strings.TrimSpace(sb.CodeStorageKey) == "" {
 		return "", nil
 	}

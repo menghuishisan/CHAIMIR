@@ -15,9 +15,9 @@ import {
   passwordRuleError,
   phoneError,
   requiredError,
-  useFieldErrors,
   useSmsCooldown,
 } from '../../authForm'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import {
   AuthFormError,
   AuthHeading,
@@ -39,7 +39,12 @@ export default function ForgotPasswordPage() {
   const [smsCode, setSmsCode] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const { errors, setError } = useFieldErrors()
+  const { errors, validate } = useFormValidation(() => ({
+    phone: phoneError(phone, '手机号'),
+    smsCode: requiredError(smsCode, '请输入验证码'),
+    new: passwordRuleError(newPassword, '新密码'),
+    confirm: confirmPasswordError(confirmPassword, newPassword, '新密码'),
+  }))
   const [formError, setFormError] = useState<string | null>(null)
   const [sendingSms, setSendingSms] = useState(false)
   const { seconds: smsCooldown, start: startSmsCooldown } = useSmsCooldown()
@@ -48,7 +53,7 @@ export default function ForgotPasswordPage() {
 
   /** handleSendSms 发送重置场景验证码并启动重发倒计时 */
   const handleSendSms = useCallback(async () => {
-    if (!setError('phone', phoneError(phone, '手机号'))) return
+    if (!validate(['phone'])) return
     setSendingSms(true)
     setFormError(null)
     try {
@@ -59,17 +64,13 @@ export default function ForgotPasswordPage() {
     } finally {
       setSendingSms(false)
     }
-  }, [phone, setError, startSmsCooldown])
+  }, [phone, startSmsCooldown, validate])
 
   /** handleSubmit 提交重置;成功后引导重新登录(服务端已吊销该账号全部会话) */
   const handleSubmit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const phoneOk = setError('phone', phoneError(phone, '手机号'))
-      const codeOk = setError('smsCode', requiredError(smsCode, '请输入验证码'))
-      const passwordOk = setError('new', passwordRuleError(newPassword, '新密码'))
-      const confirmOk = setError('confirm', confirmPasswordError(confirmPassword, newPassword, '新密码'))
-      if (!phoneOk || !codeOk || !passwordOk || !confirmOk) return
+      if (!validate()) return
 
       setSubmitting(true)
       setFormError(null)
@@ -86,7 +87,7 @@ export default function ForgotPasswordPage() {
         setSubmitting(false)
       }
     },
-    [confirmPassword, newPassword, phone, setError, smsCode],
+    [newPassword, phone, smsCode, validate],
   )
 
   if (done) {
@@ -116,7 +117,7 @@ export default function ForgotPasswordPage() {
           value={phone}
           error={errors.phone}
           onValueChange={setPhone}
-          onBlur={() => setError('phone', phoneError(phone, '手机号'))}
+          onBlur={() => validate(['phone'])}
         />
 
         <AuthSmsField
@@ -124,7 +125,7 @@ export default function ForgotPasswordPage() {
           value={smsCode}
           error={errors.smsCode}
           onValueChange={setSmsCode}
-          onBlur={() => setError('smsCode', requiredError(smsCode, '请输入验证码'))}
+          onBlur={() => validate(['smsCode'])}
           cooldownSeconds={smsCooldown}
           sending={sendingSms}
           onSend={handleSendSms}
@@ -138,7 +139,7 @@ export default function ForgotPasswordPage() {
           value={newPassword}
           error={errors.new}
           onValueChange={setNewPassword}
-          onBlur={() => setError('new', passwordRuleError(newPassword, '新密码'))}
+          onBlur={() => validate(['new'])}
         />
 
         <AuthTextField
@@ -149,7 +150,7 @@ export default function ForgotPasswordPage() {
           value={confirmPassword}
           error={errors.confirm}
           onValueChange={setConfirmPassword}
-          onBlur={() => setError('confirm', confirmPasswordError(confirmPassword, newPassword, '新密码'))}
+          onBlur={() => validate(['confirm'])}
         />
 
         <AuthFormError message={formError} />

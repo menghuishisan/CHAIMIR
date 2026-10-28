@@ -64,7 +64,7 @@ func (s *Service) validateTenantAccessSession(ctx context.Context, id auth.Sessi
 	if account.MustChangePwd && !passwordChangeAllowed(id) {
 		return apperr.ErrIdentityMustChangePassword
 	}
-	return nil
+	return requireTenantModules(tenant, id.RequiredModules...)
 }
 
 // validatePlatformAccessSession 检查平台管理员会话的归属、状态和有效期。

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
 	"chaimir/internal/platform/db"
 
@@ -16,6 +17,8 @@ import (
 type Store interface {
 	// TenantTx 在注入 RLS 租户变量后访问 M6 租户表。
 	TenantTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
+	// TenantReadTx 只用于只读契约,可复用基础层已校验的同租户应用事务。
+	TenantReadTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error
 	// PrivilegedTx 在受控模块事务中读取共享课程并写入目标租户克隆。
 	PrivilegedTx(ctx context.Context, fn func(context.Context, TxStore) error) error
 }
@@ -27,7 +30,9 @@ type TxStore interface {
 	GetCloneableCourse(context.Context, int64, int64) (Course, error)
 	GetCourseByInviteCode(context.Context, string) (Course, error)
 	ListTeacherCourses(context.Context, int64, int64, CourseListFilter) ([]Course, int64, error)
+	ListTeacherCourseIDs(context.Context, int64, int64) ([]int64, error)
 	ListStudentCourses(context.Context, int64, int64, CourseListFilter) ([]Course, int64, error)
+	ListSharedCourses(context.Context, int64, CourseListFilter) ([]Course, int64, error)
 	UpdateCourse(context.Context, Course) (Course, error)
 	SetCourseStatus(context.Context, int64, int64, int16) (Course, error)
 	SetCourseVisibility(context.Context, int64, int64, int16) (Course, error)
@@ -93,15 +98,23 @@ type TxStore interface {
 	ListAnnouncements(context.Context, int64, int64, int, int) ([]Announcement, int64, error)
 	PinAnnouncement(context.Context, int64, int64, bool) (Announcement, error)
 	UpsertReview(context.Context, CourseReview) (CourseReview, error)
+	GetReview(context.Context, int64, int64, int64) (CourseReview, error)
 	ReplaceGradeWeights(context.Context, int64, int64, []GradeWeight) ([]GradeWeight, error)
 	ListGradeWeights(context.Context, int64, int64) ([]GradeWeight, error)
+	ListCourseGradeSources(context.Context, int64, int64) ([]CourseGradeSource, error)
+	ListGradeSourceScores(context.Context, int64, int64, int16) ([]GradeSourceScore, error)
+	UpsertCourseExperimentSource(context.Context, contracts.ExperimentCourseSourceChangedEvent) error
+	UpsertCourseExperimentScore(context.Context, contracts.ExperimentScoredEvent, int64) error
+	GetCourseExperimentScoreRevision(context.Context, int64, int64) (int64, error)
+	DeleteCourseExperimentScoresBeforeRevision(context.Context, int64, int64, int64) error
 	UpsertCourseGrade(context.Context, CourseGrade) (CourseGrade, error)
 	GetCourseGrade(context.Context, int64, int64, int64) (CourseGrade, error)
 	ListCourseGrades(context.Context, int64, int64, int32, int32) ([]CourseGrade, error)
 	CountCourseGrades(context.Context, int64, int64) (int64, error)
 	ListStudentGrades(context.Context, int64, int64, string, int, int) ([]CourseGrade, int64, error)
 	OverrideCourseGrade(context.Context, int64, int64, int64, float64) (CourseGrade, error)
-	SetCourseGradesLock(context.Context, int64, int64, bool) error
+	EnsureCourseGradesWritable(context.Context, int64, int64) error
+	SetCourseGradesLock(context.Context, int64, int64, bool, int64) error
 	CreateCourseGradeExportRequest(context.Context, CourseGradeExportRequest) (CourseGradeExportRequest, error)
 	ListDueCourseGradeExportRequests(context.Context, time.Time, int32) ([]CourseGradeExportRequest, error)
 	SetCourseGradeExportRequestNextCheck(context.Context, int64, int64, time.Time) (CourseGradeExportRequest, error)
@@ -145,6 +158,16 @@ func (s *store) TenantTx(ctx context.Context, tenantID int64, fn func(context.Co
 		return fmt.Errorf("teaching store 未初始化")
 	}
 	return s.database.WithTenantTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
+	})
+}
+
+// TenantReadTx 由M6仓储执行自己的只读查询,不暴露底层事务给调用模块。
+func (s *store) TenantReadTx(ctx context.Context, tenantID int64, fn func(context.Context, TxStore) error) error {
+	if s == nil || s.database == nil {
+		return fmt.Errorf("teaching store 未初始化")
+	}
+	return s.database.WithTenantReadTxID(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		return fn(ctx, &txStore{q: sqlcgen.New(tx)})
 	})
 }

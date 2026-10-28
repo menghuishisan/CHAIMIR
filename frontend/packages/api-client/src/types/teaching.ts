@@ -39,6 +39,12 @@ export interface Course {
   updated_at: string
 }
 
+/** 跨租户课程目录的有限投影，不包含邀请码及学生业务数据。 */
+export type SharedCourse = Pick<
+  Course,
+  'id' | 'name' | 'description' | 'type' | 'difficulty' | 'semester' | 'credits' | 'updated_at'
+>
+
 export interface CourseRequest {
   name: string
   description: string
@@ -276,6 +282,8 @@ export interface TeachingPost {
   id: SnowflakeID
   course_id: SnowflakeID
   parent_id?: SnowflakeID
+  /** 读取时可见的父帖正文;被删除或不可见时不返回。 */
+  parent_content?: string
   author_id: SnowflakeID
   content: string
   is_pinned: boolean
@@ -312,12 +320,25 @@ export interface TeachingReview {
   created_at: string
 }
 
+/** 本人课程评价读取结果,未评价明确为null。 */
+export interface MyCourseReview {
+  review: TeachingReview | null
+}
+
 export interface ProgressStats {
   course_id: SnowflakeID
   member_count: number
   lesson_count: number
   completed_count: number
   learning_duration_sec: number
+}
+
+/** 课程全部有效成绩来源，由服务端校验归属、发布状态和权威满分。 */
+export interface CourseGradeSource {
+  source_type: GradeSource
+  source_ref: SnowflakeID
+  title: string
+  max_score: number
 }
 
 export interface GradeWeightRequest {

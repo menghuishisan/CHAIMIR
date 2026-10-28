@@ -55,6 +55,7 @@ capabilities:
       - allowed_domains
     properties:
       allowed_domains:
+        title: 允许的网站域名（逗号分隔）
         type: string
         x-chaimir-env: infra/CHAIMIR_WALLET_ALLOWED_DOMAINS
   student_access: private

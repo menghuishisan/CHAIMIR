@@ -22,7 +22,13 @@ func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, e
 	if svc == nil {
 		return nil, apperr.ErrEventServiceMissing
 	}
-	subs := make([]eventbus.Subscription, 0, 3)
+	subs := make([]eventbus.Subscription, 0, 5)
+	if err := subscribeTeachingEvent(bus, &subs, contracts.SubjectExperimentCourseSourceChanged, handleExperimentSourceChangedEvent(svc)); err != nil {
+		return nil, err
+	}
+	if err := subscribeTeachingEvent(bus, &subs, contracts.SubjectExperimentScored, handleExperimentScoredEvent(svc)); err != nil {
+		return nil, err
+	}
 	if err := subscribeTeachingEvent(bus, &subs, contracts.SubjectJudgeCompleted, handleJudgeCompletedEvent(svc)); err != nil {
 		return nil, err
 	}
@@ -33,6 +39,28 @@ func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, e
 		return nil, err
 	}
 	return subs, nil
+}
+
+// handleExperimentSourceChangedEvent 解码 M7 的课程来源快照。
+func handleExperimentSourceChangedEvent(svc *Service) eventbus.Handler {
+	return func(ctx context.Context, data []byte) error {
+		var event contracts.ExperimentCourseSourceChangedEvent
+		if err := eventbus.Decode(data, &event, apperr.ErrTeachingGradeInvalid); err != nil {
+			return err
+		}
+		return svc.HandleExperimentSourceChanged(ctx, event)
+	}
+}
+
+// handleExperimentScoredEvent 解码 M7 的实际成员得分快照。
+func handleExperimentScoredEvent(svc *Service) eventbus.Handler {
+	return func(ctx context.Context, data []byte) error {
+		var event contracts.ExperimentScoredEvent
+		if err := eventbus.Decode(data, &event, apperr.ErrTeachingGradeInvalid); err != nil {
+			return err
+		}
+		return svc.HandleExperimentScored(ctx, event)
+	}
 }
 
 // subscribeTeachingEvent 注册单个主题并保留订阅句柄。

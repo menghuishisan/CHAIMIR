@@ -58,6 +58,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { usePagedResource, useResourceTotal } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDateTime } from '../../../../utils/formatters'
 import {
   simCategoryLabel,
@@ -137,15 +138,18 @@ export default function PlatformSimulationsPage() {
   // 平台身份调用必然被拒(见文件头);拿不到的数不摆卡,更不用别的口径顶替。
   const pendingCount = useResourceTotal(
     (params) => api.sim.getReviews({ result: SIM_REVIEW_RESULT.PENDING, ...params }),
-    []
+    [],
+    reviews.refreshVersion
   )
   const approvedCount = useResourceTotal(
     (params) => api.sim.getReviews({ result: SIM_REVIEW_RESULT.APPROVED, ...params }),
-    []
+    [],
+    reviews.refreshVersion
   )
   const rejectedCount = useResourceTotal(
     (params) => api.sim.getReviews({ result: SIM_REVIEW_RESULT.REJECTED, ...params }),
-    []
+    [],
+    reviews.refreshVersion
   )
 
   return (
@@ -384,12 +388,13 @@ function GovernanceModal({ review, action, onClose, onDone }: GovernanceModalPro
 
   const copy = ACTION_COPY[action]
   const pkg = review.package
+  const { errors, validate } = useFormValidation(() => ({
+    comment: copy.needsComment && comment.trim() === ''
+      ? '请写下退回原因,作者需要知道该改什么' : null,
+  }))
 
   const submit = useCallback(async () => {
-    if (copy.needsComment && comment.trim() === '') {
-      setFormError('请写下退回原因,作者需要知道该改什么')
-      return
-    }
+    if (working || !validate()) return
     setFormError(undefined)
     setWorking(true)
     try {
@@ -417,7 +422,7 @@ function GovernanceModal({ review, action, onClose, onDone }: GovernanceModalPro
     } finally {
       setWorking(false)
     }
-  }, [action, comment, copy.needsComment, onDone, review.id, review.package_id])
+  }, [action, comment, onDone, review.id, review.package_id, validate, working])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -441,20 +446,21 @@ function GovernanceModal({ review, action, onClose, onDone }: GovernanceModalPro
               label="退回说明"
               htmlFor="sim-review-comment"
               required
-              error={formError}
+              error={errors.comment}
               helper="写清需要修改什么,作者会看到这段话"
             >
               <Textarea
                 id="sim-review-comment"
                 value={comment}
                 rows={4}
-                invalid={Boolean(formError)}
+                invalid={Boolean(errors.comment)}
+                onBlur={() => validate(['comment'])}
                 onChange={(event) => setComment(event.target.value)}
               />
             </FormField>
-          ) : formError ? (
-            <Callout tone="danger">{formError}</Callout>
           ) : null}
+
+          {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
           {action === 'archive' ? (
             <Callout tone="warning">

@@ -81,6 +81,22 @@ func Int4Value(v pgtype.Int4) int32 {
 	return v.Int32
 }
 
+// Int4Ptr 从可选数值构造 PostgreSQL int4,保留 nil 与合法零分的区别。
+func Int4Ptr(v *int32) pgtype.Int4 {
+	if v == nil {
+		return pgtype.Int4{}
+	}
+	return Int4(*v)
+}
+
+// Int4PtrValue 读取可空 int4 指针,数据库 NULL 不得转换为已评分的零值。
+func Int4PtrValue(v pgtype.Int4) *int32 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int32
+}
+
 // BoolPtr 从可选指针构造可空 bool。
 func BoolPtr(v *bool) pgtype.Bool {
 	if v == nil {

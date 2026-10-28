@@ -4,6 +4,7 @@
 import { ApiClient, encodePathSegment } from '../client'
 import { API_BASE_PATH } from '../constants'
 import type { IdentityApi } from './identity'
+import type { CompositionPreviewRequest, CompositionPreviewResponse } from '../types/composition'
 import type {
   SandboxChainRequest,
   SandboxChainResponse,
@@ -45,6 +46,11 @@ export class SandboxApi {
    */
   async getOrchestrationCatalog(): Promise<SandboxOrchestrationCatalog> {
     return this.client.get('/sandbox/catalog')
+  }
+
+  /** previewComposition 复用M2目录解析依赖与连接,不创建快照或沙箱。 */
+  async previewComposition(request: CompositionPreviewRequest): Promise<CompositionPreviewResponse> {
+    return this.client.post('/sandbox/catalog/composition-preview', request)
   }
 
   /**
@@ -126,7 +132,7 @@ export class SandboxApi {
     imageId: string,
     compositionDigest: string
   ): Promise<SandboxPrepullStatus> {
-    return this.client.post(
+    return this.client.postBackground(
       `/sandbox/runtimes/${encodePathSegment(runtimeId)}/images/${encodePathSegment(imageId)}/prepull`,
       { composition_digest: compositionDigest }
     )

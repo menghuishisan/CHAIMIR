@@ -45,17 +45,10 @@ import { contestStatusLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { ContestIdentityCell, ContestScheduleCell } from '../../components/ContestTableCells'
 import { ContestFormModal } from '../../components/ContestFormModal'
-import { contestStatusTone } from '../../statusPresentation'
+import { contestStatusFilterOptions, contestStatusTone } from '../../statusPresentation'
 
-/** 状态筛选项:值为空串表示不过滤。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(ContestStatus.DRAFT), label: '草稿' },
-  { value: String(ContestStatus.SIGNUP), label: '报名中' },
-  { value: String(ContestStatus.RUNNING), label: '进行中' },
-  { value: String(ContestStatus.ENDED), label: '已结束' },
-  { value: String(ContestStatus.ARCHIVED), label: '已归档' },
-] as const
+/** 教师可筛选包含草稿的全部赛事状态。 */
+const STATUS_FILTERS = contestStatusFilterOptions(true)
 
 /** 可执行的状态流转动作。 */
 type LifecycleAction = 'publish' | 'start' | 'freeze' | 'end' | 'archive'
@@ -142,22 +135,26 @@ export default function TeacherContestsPage() {
 
   // 指标带取服务端全量口径,不随下方状态筛选变化。
   // 「进行中」在后端是两个状态(进行中/封榜中),分别取总数后相加 —— 状态互斥,相加精确。
-  const totalCount = useResourceTotal((params) => api.contest.getContests(params), [])
+  const totalCount = useResourceTotal((params) => api.contest.getContests(params), [], contests.refreshVersion)
   const signupCount = useResourceTotal(
     (params) => api.contest.getContests({ status: ContestStatus.SIGNUP, ...params }),
-    []
+    [],
+    contests.refreshVersion
   )
   const runningOnlyCount = useResourceTotal(
     (params) => api.contest.getContests({ status: ContestStatus.RUNNING, ...params }),
-    []
+    [],
+    contests.refreshVersion
   )
   const frozenCount = useResourceTotal(
     (params) => api.contest.getContests({ status: ContestStatus.FROZEN, ...params }),
-    []
+    [],
+    contests.refreshVersion
   )
   const draftCount = useResourceTotal(
     (params) => api.contest.getContests({ status: ContestStatus.DRAFT, ...params }),
-    []
+    [],
+    contests.refreshVersion
   )
   const runningCount =
     runningOnlyCount === undefined || frozenCount === undefined
@@ -283,7 +280,7 @@ export default function TeacherContestsPage() {
               <SegmentedControl
                 aria-label="按赛事状态筛选"
                 size="sm"
-                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                options={STATUS_FILTERS}
                 value={statusFilter}
                 onValueChange={setStatusFilter}
               />

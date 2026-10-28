@@ -1,9 +1,10 @@
-// navigation 定义 MainLayout 壳层的导航契约(只有类型,不含任何角色的导航数据)。
+// navigation 定义 MainLayout 导航契约和模块过滤，不含任何角色的导航数据。
 // 铁律 2(目录设计 §4):普通用户不得下载其他角色、尤其是管理后台的路由结构,
 // 因此导航数据按角色分文件放在 routes/sections/,随该角色区的懒加载壳一起加载。
-// 类型在编译期擦除、不产生运行时代码,所以壳层与各区共享本文件不会把路径清单带进入口包。
+// 各区只把自己的配置传入公共过滤函数，不会把其它角色路径清单带进入口包。
 
 import type { LucideIcon } from 'lucide-react'
+import type { TenantModule } from '@chaimir/api-client'
 import type { RoleRouteConfig } from '../../utils/roleRouting'
 
 export interface RoleNavigationItem {
@@ -14,6 +15,8 @@ export interface RoleNavigationItem {
   name: string
   path: string
   icon: LucideIcon
+  /** 对应租户业务开关；未声明的身份和共享资源入口不受五类开关控制。 */
+  module?: TenantModule
 }
 
 interface RoleNavigationGroup {
@@ -32,4 +35,34 @@ export interface RoleNavigationConfig extends RoleRouteConfig {
    */
   hasNotificationInbox: boolean
   groups: RoleNavigationGroup[]
+  /** 没有独立侧栏项的深页，仍声明模块归属；路径只随本角色块加载。 */
+  modulePaths?: { path: string; module: TenantModule }[]
+}
+
+/** requiredNavigationModule 按完整路径段匹配列表、详情和沉浸工作台的同一归属。 */
+export function requiredNavigationModule(
+  config: RoleNavigationConfig,
+  pathname: string
+): TenantModule | undefined {
+  const paths = [...config.groups.flatMap((group) => group.items), ...(config.modulePaths ?? [])]
+  return paths.find((item) => pathname === item.path || pathname.startsWith(`${item.path}/`))
+    ?.module
+}
+
+/** availableRoleNavigation 只使用 /me 的授权结果，隐藏关闭入口及空组并选择可用首页。 */
+export function availableRoleNavigation(
+  config: RoleNavigationConfig,
+  enabled: TenantModule[]
+): RoleNavigationConfig {
+  const groups = config.groups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => !item.module || enabled.includes(item.module)),
+    }))
+    .filter((group) => group.items.length > 0)
+  return {
+    ...config,
+    groups,
+    homePath: groups[0]?.items[0]?.path ?? `${config.pathPrefix}/profile`,
+  }
 }

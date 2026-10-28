@@ -7,7 +7,8 @@ import React, { useCallback, useId, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { api } from '../../../../app/api'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { confirmPasswordError, passwordRuleError, requiredError, useFieldErrors } from '../../authForm'
+import { confirmPasswordError, passwordRuleError, requiredError } from '../../authForm'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import {
   AuthFormError,
   AuthHeading,
@@ -27,7 +28,11 @@ export default function ActivatePage() {
   const [activationCode, setActivationCode] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const { errors, setError } = useFieldErrors()
+  const { errors, validate } = useFormValidation(() => ({
+    code: requiredError(activationCode, '请输入激活码'),
+    password: passwordRuleError(password, '密码'),
+    confirm: confirmPasswordError(confirmPassword, password, '密码'),
+  }))
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
@@ -36,10 +41,7 @@ export default function ActivatePage() {
   const handleSubmit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const codeOk = setError('code', requiredError(activationCode, '请输入激活码'))
-      const passwordOk = setError('password', passwordRuleError(password, '密码'))
-      const confirmOk = setError('confirm', confirmPasswordError(confirmPassword, password, '密码'))
-      if (!codeOk || !passwordOk || !confirmOk) return
+      if (!validate()) return
 
       setSubmitting(true)
       setFormError(null)
@@ -52,7 +54,7 @@ export default function ActivatePage() {
         setSubmitting(false)
       }
     },
-    [activationCode, confirmPassword, password, setError],
+    [activationCode, password, validate],
   )
 
   if (done) {
@@ -77,7 +79,7 @@ export default function ActivatePage() {
           value={activationCode}
           error={errors.code}
           onValueChange={setActivationCode}
-          onBlur={() => setError('code', requiredError(activationCode, '请输入激活码'))}
+          onBlur={() => validate(['code'])}
         />
 
         <AuthTextField
@@ -88,7 +90,7 @@ export default function ActivatePage() {
           value={password}
           error={errors.password}
           onValueChange={setPassword}
-          onBlur={() => setError('password', passwordRuleError(password, '密码'))}
+          onBlur={() => validate(['password'])}
         />
 
         <AuthTextField
@@ -99,7 +101,7 @@ export default function ActivatePage() {
           value={confirmPassword}
           error={errors.confirm}
           onValueChange={setConfirmPassword}
-          onBlur={() => setError('confirm', confirmPasswordError(confirmPassword, password, '密码'))}
+          onBlur={() => validate(['confirm'])}
         />
 
         <AuthFormError message={formError} />

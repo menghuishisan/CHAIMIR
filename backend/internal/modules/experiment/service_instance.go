@@ -6,19 +6,15 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash/fnv"
-	"log/slog"
 	"strings"
-	"time"
 
 	"chaimir/internal/contracts"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
 	"chaimir/internal/platform/intx"
 	"chaimir/internal/platform/pagex"
-	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
-	"chaimir/pkg/logging"
 )
 
 // CreateInstance 发起实验实例并并发编排 M2 沙箱与 M4 仿真资源。
@@ -29,6 +25,7 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 	}
 	var exp Experiment
 	var inst ExperimentInstance
+	var created bool
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		exp, err = tx.GetExperiment(ctx, id.TenantID, experimentID)
@@ -73,11 +70,13 @@ func (s *Service) CreateInstance(ctx context.Context, experimentID int64, req Cr
 		instanceID := s.ids.Generate()
 		sourceRef := sourceRefForInstance(instanceID, timex.Now())
 		inst, err = tx.CreateInstance(ctx, ExperimentInstance{ID: instanceID, TenantID: id.TenantID, ExperimentID: experimentID, OwnerAccountID: id.AccountID, GroupID: req.GroupID.Int64(), SourceRef: sourceRef, ScopeRef: scopeRefForInstanceGeneration(sourceRef, instanceID)})
+		created = err == nil
 		return err
 	}); err != nil {
 		return InstanceDTO{}, err
 	}
-	if inst.Status != InstanceStatusCreating {
+	// 只有本次新建实例的请求负责资源编排;已有 creating 也必须复用,避免重复创建引擎资源。
+	if !created {
 		if shouldReconcileReleasedInstance(inst.Status) {
 			released, err := s.reconcileReleasedInstance(ctx, inst)
 			if err != nil {
@@ -135,25 +134,38 @@ func shouldReconcileReleasedInstance(status int16) bool {
 // reconcileReleasedInstance 将实例记录与 M2 沙箱状态对齐,让已销毁资源进入正式 released 状态。
 // 仅在全部引用沙箱都已销毁时变更状态,避免单个阶段资源回收误伤仍在运行的实例。
 func (s *Service) reconcileReleasedInstance(ctx context.Context, inst ExperimentInstance) (ExperimentInstance, error) {
-	if !shouldReconcileReleasedInstance(inst.Status) || len(inst.SandboxRefs) == 0 || s.sandbox == nil {
+	if !shouldReconcileReleasedInstance(inst.Status) || len(inst.SandboxRefs) == 0 {
 		return inst, nil
 	}
-	allDestroyed, err := s.allInstanceSandboxesDestroyed(ctx, inst)
-	if err != nil || !allDestroyed {
-		return inst, err
-	}
+	var updated ExperimentInstance
 	if err := s.store.TenantTx(ctx, inst.TenantID, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.SetInstanceStatus(ctx, inst.TenantID, inst.ID, InstanceStatusReleased)
+		current, err := tx.GetInstanceForUpdate(ctx, inst.TenantID, inst.ID)
+		if err != nil {
+			return err
+		}
+		updated = current
+		// 外部读取可能已过期,不能把新运行代次或已完成的实例改回释放态。
+		if current.ScopeRef != inst.ScopeRef || !shouldReconcileReleasedInstance(current.Status) || len(current.SandboxRefs) == 0 {
+			return nil
+		}
+		allDestroyed, err := s.allInstanceSandboxesDestroyed(ctx, current)
+		if err != nil || !allDestroyed {
+			return err
+		}
+		updated, err = tx.SetInstanceStatus(ctx, current.TenantID, current.ID, InstanceStatusReleased)
 		return err
 	}); err != nil {
 		return ExperimentInstance{}, err
 	}
-	inst.Status = InstanceStatusReleased
-	return inst, nil
+	return updated, nil
 }
 
 // instanceCreationLockKey 为同一租户、实验和协作主体生成事务级互斥键,避免并发请求同时看不到实例而重复创建资源。
 func instanceCreationLockKey(tenantID, experimentID, ownerID, groupID int64) int64 {
+	// 小组实例按协作主体共享锁,不同组员不能因账号不同绕过同一实例的创建检查。
+	if groupID > 0 {
+		ownerID = 0
+	}
 	h := fnv.New64a()
 	var data [32]byte
 	for i, value := range [...]int64{tenantID, experimentID, ownerID, groupID} {
@@ -216,7 +228,7 @@ func (s *Service) GetInstance(ctx context.Context, instanceID int64) (InstanceDT
 	return instanceDTOFromModel(inst, checkpointDefaults(exp, checkpoints), stageDTOs(exp, inst, checkpoints)), nil
 }
 
-// reconcileSandboxFailure 按 M2 权威状态对账实例阶段一启动失败。
+// reconcileSandboxFailure 按 M2 权威状态对账实例启动或个性化初始化失败。
 // 事件用于及时推进状态,读取路径负责覆盖事件投递与业务引用落库之间的短暂时间差。
 func (s *Service) reconcileSandboxFailure(ctx context.Context, inst ExperimentInstance) (ExperimentInstance, error) {
 	if !instanceCanReconcileSandboxFailure(inst.Status) || len(inst.SandboxRefs) == 0 || s.sandbox == nil {
@@ -230,7 +242,7 @@ func (s *Service) reconcileSandboxFailure(ctx context.Context, inst ExperimentIn
 		if info.Status != contracts.SandboxStatusFailed {
 			continue
 		}
-		if err := s.compensateRecycle(ctx, inst, "sandbox_start_failed"); err != nil {
+		if err := s.compensateRecycle(ctx, inst, "sandbox_startup_failed"); err != nil {
 			return ExperimentInstance{}, err
 		}
 		return s.markSandboxFailure(ctx, inst)
@@ -461,7 +473,7 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 		if err != nil {
 			return err
 		}
-		return s.enqueueExperimentScoreOutbox(ctx, tx, inst)
+		return s.enqueueExperimentEventOutbox(ctx, tx, inst)
 	}); err != nil {
 		return InstanceDTO{}, err
 	}
@@ -469,7 +481,7 @@ func (s *Service) FinishInstance(ctx context.Context, instanceID int64) (Instanc
 		return instanceDTOFromModel(inst, nil), nil
 	}
 	if action == instanceFinishPrepare {
-		s.drainExperimentScoreOutboxBestEffort(ctx)
+		s.drainExperimentEventOutboxBestEffort(ctx)
 	}
 	if err := s.recycleEngines(ctx, inst, "finished"); err != nil {
 		return InstanceDTO{}, err
@@ -621,7 +633,7 @@ func (s *Service) compensateRecycle(ctx context.Context, inst ExperimentInstance
 	return nil
 }
 
-// HandleSandboxFailed 消费 M2 阶段一启动失败事件,先补偿作用域资源再写实例错误态。
+// HandleSandboxFailed 消费 M2 启动或个性化初始化失败事件,先补偿作用域资源再写实例错误态。
 func (s *Service) HandleSandboxFailed(ctx context.Context, event contracts.SandboxFailedEvent) error {
 	if event.TenantID <= 0 || event.SandboxID <= 0 || !validExperimentSourceRef(event.SourceRef) || !auth.ValidScopeRef(event.ScopeRef) {
 		return apperr.ErrExperimentSourceRefInvalid
@@ -640,7 +652,7 @@ func (s *Service) HandleSandboxFailed(ctx context.Context, event contracts.Sandb
 	if inst.ID == 0 || inst.ScopeRef != event.ScopeRef || !instanceCanReconcileSandboxFailure(inst.Status) {
 		return nil
 	}
-	if err := s.compensateRecycle(ctx, inst, "sandbox_start_failed"); err != nil {
+	if err := s.compensateRecycle(ctx, inst, "sandbox_startup_failed"); err != nil {
 		return err
 	}
 	_, err := s.markSandboxFailure(ctx, inst)
@@ -693,128 +705,48 @@ func checkpointDefaults(exp Experiment, existing []CheckpointResult) []Checkpoin
 	return out
 }
 
-// enqueueExperimentScoreOutbox 在实例得分写入同一事务内保存实验得分事件。
-func (s *Service) enqueueExperimentScoreOutbox(ctx context.Context, tx TxStore, inst ExperimentInstance) error {
-	traceID := strings.TrimSpace(response.TraceFromContext(ctx))
-	if inst.TenantID <= 0 || inst.ExperimentID <= 0 || inst.ID <= 0 || inst.OwnerAccountID <= 0 || traceID == "" {
-		return apperr.ErrExperimentEventFailed
-	}
-	if _, err := tx.CreateExperimentScoreOutbox(ctx, s.ids.Generate(), inst, traceID, timex.Now()); err != nil {
-		return apperr.ErrExperimentEventFailed.WithCause(err)
-	}
-	return nil
-}
-
-// RunExperimentScoreOutboxOnce 领取并发布 M7 实验得分事件。
-func (s *Service) RunExperimentScoreOutboxOnce(ctx context.Context) error {
-	limit, ok := intx.Int32(s.cfg.ScoreOutboxBatchSize)
-	if !ok || limit <= 0 {
-		return apperr.ErrExperimentEventFailed
-	}
-	now := timex.Now()
-	staleBefore := now
-	leaseUntil := now.Add(time.Duration(s.cfg.ScoreOutboxStaleMs) * time.Millisecond)
-	var items []ExperimentScoreOutbox
-	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		var err error
-		maxAttempts, ok := intx.Int32(s.cfg.ScoreOutboxMaxAttempts)
-		if !ok || maxAttempts <= 0 {
-			return apperr.ErrExperimentEventFailed
-		}
-		items, err = tx.ClaimPendingExperimentScoreOutbox(ctx, limit, maxAttempts, staleBefore, leaseUntil)
-		if err != nil {
-			return apperr.ErrExperimentEventFailed.WithCause(err)
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	for _, item := range items {
-		if err := s.publishScoreOutboxItem(ctx, item); err != nil {
-			logging.ErrorContext(ctx, "experiment score outbox publish failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("instance_id", item.InstanceID), slog.Int64("outbox_id", item.ID))
-		}
-	}
-	return nil
-}
-
-// publishScoreOutboxItem 发布单条得分事件并按结果回写 outbox 状态。
-func (s *Service) publishScoreOutboxItem(ctx context.Context, item ExperimentScoreOutbox) error {
-	eventCtx := response.WithTrace(ctx, item.TraceID)
-	experimentName, err := s.experimentNameForScoreEvent(eventCtx, item)
-	if err != nil {
-		s.recordExperimentScoreOutboxFailure(eventCtx, item, err)
-		return apperr.ErrExperimentEventFailed.WithCause(err)
-	}
-	payload := contracts.ExperimentScoredEvent{EventID: ids.Format(item.ID), TenantID: item.TenantID, TraceID: item.TraceID, ExperimentID: item.ExperimentID, ExperimentName: experimentName, InstanceID: item.InstanceID, StudentID: item.StudentID, Score: item.Score, ScoredAt: item.ScoredAt}
-	if err := s.bus.Publish(eventCtx, contracts.SubjectExperimentScored, payload); err != nil {
-		s.recordExperimentScoreOutboxFailure(eventCtx, item, err)
-		return apperr.ErrExperimentEventFailed.WithCause(err)
-	}
-	return s.markExperimentScoreOutboxPublished(eventCtx, item)
-}
-
-// experimentNameForScoreEvent 读取通知展示所需的最小实验名称,不把 M7 内部组件配置带入事件。
-func (s *Service) experimentNameForScoreEvent(ctx context.Context, item ExperimentScoreOutbox) (string, error) {
-	var exp Experiment
-	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		var err error
-		exp, err = tx.GetExperiment(ctx, item.TenantID, item.ExperimentID)
-		return err
-	}); err != nil {
-		return "", err
-	}
-	return exp.Name, nil
-}
-
-// markExperimentScoreOutboxPublished 标记实验得分事件发布成功。
-func (s *Service) markExperimentScoreOutboxPublished(ctx context.Context, item ExperimentScoreOutbox) error {
-	return s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.MarkExperimentScoreOutboxPublished(ctx, item.TenantID, item.ID, item.LeaseToken)
-		if err != nil {
-			return apperr.ErrExperimentEventFailed.WithCause(err)
-		}
-		return nil
-	})
-}
-
-// recordExperimentScoreOutboxFailure 记录得分事件发布失败并等待后台重试。
-func (s *Service) recordExperimentScoreOutboxFailure(ctx context.Context, item ExperimentScoreOutbox, cause error) {
-	if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
-		_, err := tx.MarkExperimentScoreOutboxFailed(ctx, item.TenantID, item.ID, logging.SanitizeError(cause.Error()), item.LeaseToken)
-		return err
-	}); err != nil {
-		logging.ErrorContext(ctx, "experiment score outbox failure mark failed", err.Error(), slog.Int64("tenant_id", item.TenantID), slog.Int64("instance_id", item.InstanceID), slog.Int64("outbox_id", item.ID))
-	}
-}
-
-// drainExperimentScoreOutboxBestEffort 在请求提交后尽快投递,失败交给后台任务补偿。
-func (s *Service) drainExperimentScoreOutboxBestEffort(ctx context.Context) {
-	if err := s.RunExperimentScoreOutboxOnce(ctx); err != nil {
-		logging.ErrorContext(ctx, "experiment score outbox drain failed", err.Error())
-	}
-}
-
 // HandleSandboxRecycled 消费 M2 回收事件,同步进行中实例或续跑已完成实例的整体回收。
 func (s *Service) HandleSandboxRecycled(ctx context.Context, event contracts.SandboxRecycledEvent) error {
 	if event.TenantID <= 0 || !validExperimentSourceRef(event.SourceRef) {
 		return apperr.ErrExperimentSourceRefInvalid
 	}
 	var inst ExperimentInstance
+	var finishRecovery bool
 	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		inst, err = tx.GetInstanceBySourceRef(ctx, event.TenantID, event.SourceRef)
 		if err != nil {
 			return err
 		}
+		inst, err = tx.GetInstanceForUpdate(ctx, event.TenantID, inst.ID)
+		if err != nil {
+			return err
+		}
+		// source_ref 跨重建保持稳定,只有当前引用的沙箱回收事件才能推进本代实例。
+		belongs := false
+		for _, ref := range inst.SandboxRefs {
+			if ref.SandboxID.Int64() == event.SandboxID {
+				belongs = true
+				break
+			}
+		}
+		if !belongs {
+			return nil
+		}
 		if inst.Status == InstanceStatusRunning || inst.Status == InstanceStatusPaused || inst.Status == InstanceStatusCreating {
+			allDestroyed, err := s.allInstanceSandboxesDestroyed(ctx, inst)
+			if err != nil || !allDestroyed {
+				return err
+			}
 			_, err = tx.SetInstanceStatus(ctx, event.TenantID, inst.ID, InstanceStatusReleased)
 			return err
 		}
+		finishRecovery = inst.Status == InstanceStatusFinished
 		return nil
 	}); err != nil {
 		return err
 	}
-	if inst.Status != InstanceStatusFinished {
+	if !finishRecovery {
 		return nil
 	}
 	allDestroyed, err := s.allInstanceSandboxesDestroyed(ctx, inst)
@@ -832,7 +764,7 @@ func (s *Service) HandleSandboxRecycled(ctx context.Context, event contracts.San
 		if err != nil {
 			return err
 		}
-		if current.Status != InstanceStatusFinished {
+		if current.Status != InstanceStatusFinished || current.ScopeRef != inst.ScopeRef {
 			return nil
 		}
 		_, err = tx.SetInstanceStatus(ctx, event.TenantID, inst.ID, InstanceStatusRecycled)

@@ -878,6 +878,104 @@ func (q *Queries) GetSandbox(ctx context.Context, arg GetSandboxParams) (Sandbox
 	return i, err
 }
 
+const getSandboxForUpdate = `-- name: GetSandboxForUpdate :one
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+FROM sandbox
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type GetSandboxForUpdateParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+// 沙箱生命周期、公开文件和归档共用权威行锁，跨副本串行化状态与版本写入。
+func (q *Queries) GetSandboxForUpdate(ctx context.Context, arg GetSandboxForUpdateParams) (Sandbox, error) {
+	row := q.db.QueryRow(ctx, getSandboxForUpdate, arg.TenantID, arg.ID)
+	var i Sandbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Namespace,
+		&i.SourceRef,
+		&i.ScopeRef,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.AccessProfile,
+		&i.OwnerAccountID,
+		&i.SharedAccountIds,
+		&i.Phase,
+		&i.Status,
+		&i.KeepAlive,
+		&i.SnapshotEnabled,
+		&i.CodeStorageKey,
+		&i.CodeHash,
+		&i.WorkspaceRevision,
+		&i.InitCodeRef,
+		&i.InitScriptRef,
+		&i.SnapshotRef,
+		&i.SnapshotDomains,
+		&i.SnapshotCreatedAt,
+		&i.SnapshotExpireAt,
+		&i.KeepAliveUntil,
+		&i.LastActiveAt,
+		&i.ExpireAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSavedSandboxBySourceRef = `-- name: GetSavedSandboxBySourceRef :one
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+FROM sandbox
+WHERE tenant_id = $1 AND source_ref = $2 AND code_storage_key IS NOT NULL AND code_storage_key <> '' AND code_hash IS NOT NULL AND code_hash <> ''
+ORDER BY created_at DESC, id DESC LIMIT 1
+`
+
+type GetSavedSandboxBySourceRefParams struct {
+	TenantID  int64  `json:"tenant_id"`
+	SourceRef string `json:"source_ref"`
+}
+
+// 回收保留持久化代码指针，重建中断后仍可从同一稳定来源恢复。
+func (q *Queries) GetSavedSandboxBySourceRef(ctx context.Context, arg GetSavedSandboxBySourceRefParams) (Sandbox, error) {
+	row := q.db.QueryRow(ctx, getSavedSandboxBySourceRef, arg.TenantID, arg.SourceRef)
+	var i Sandbox
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Namespace,
+		&i.SourceRef,
+		&i.ScopeRef,
+		&i.CompositionDigest,
+		&i.CompositionSnapshot,
+		&i.AccessProfile,
+		&i.OwnerAccountID,
+		&i.SharedAccountIds,
+		&i.Phase,
+		&i.Status,
+		&i.KeepAlive,
+		&i.SnapshotEnabled,
+		&i.CodeStorageKey,
+		&i.CodeHash,
+		&i.WorkspaceRevision,
+		&i.InitCodeRef,
+		&i.InitScriptRef,
+		&i.SnapshotRef,
+		&i.SnapshotDomains,
+		&i.SnapshotCreatedAt,
+		&i.SnapshotExpireAt,
+		&i.KeepAliveUntil,
+		&i.LastActiveAt,
+		&i.ExpireAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getTenantQuota = `-- name: GetTenantQuota :one
 SELECT tenant_id, max_concurrent_sandbox, max_cpu, max_memory_mb, idle_timeout_min, max_lifetime_min, max_keepalive_min, max_snapshot_retention_min, updated_at
 FROM tenant_quota

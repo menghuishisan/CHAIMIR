@@ -55,12 +55,15 @@ func (s *Service) ServeBackendStream(ctx context.Context, conn *ws.Conn, tenantI
 		if !sessionAccountAuthorized(session.Session, accountID) {
 			return apperr.ErrForbidden
 		}
+		if err := s.requireSessionModules(ctx, tenantID, session.SourceRef); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		return err
 	}
 	if s.wsHub != nil {
-		if err := conn.BindSession(ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: simSessionSessionScope(sessionID)}); err != nil {
+		if err := conn.BindSession(ctx, ws.SessionKey{TenantID: tenantID, AccountID: accountID, Scope: simSessionSessionScope(sessionID)}); err != nil {
 			return apperr.ErrSimBackendComputeUnavailable.WithCause(err)
 		}
 	}

@@ -3,16 +3,28 @@
 set -eu
 
 : "${CHAIMIR_SUBMISSION_DIR:?CHAIMIR_SUBMISSION_DIR is required}"
+: "${HOME:?HOME is required}"
+export FOUNDRY_OFFLINE=true
 if [ -z "${CHAIMIR_SOLIDITY_VERSION:-}" ]; then
   echo "必须由组合配置声明 CHAIMIR_SOLIDITY_VERSION" >&2
   exit 64
 fi
 
+# Foundry项目按自身版本选编译器;缓存链接只读镜像,不要求工作卷允许执行。
+for version in 0.8.20 0.8.24 0.8.26; do
+  compiler="/usr/local/bin/solc-${version}"
+  target="${HOME}/.svm/${version}/solc-${version}"
+  test -x "${compiler}"
+  mkdir -p "${HOME}/.svm/${version}"
+  rm -f "${target}"
+  ln -s "${compiler}" "${target}"
+done
+
 # 私有归档只读挂载;静态扫描缓存和结果必须落在 judger 自有工作目录。
 test -d "${CHAIMIR_SUBMISSION_DIR}"
 rm -rf /judge/input
 mkdir -p /judge/input
-cp -a "${CHAIMIR_SUBMISSION_DIR}/." /judge/input/
+cp -R "${CHAIMIR_SUBMISSION_DIR}/." /judge/input/
 CHAIMIR_WORK_DIR=/judge/input
 
 case "${CHAIMIR_SOLIDITY_VERSION}" in

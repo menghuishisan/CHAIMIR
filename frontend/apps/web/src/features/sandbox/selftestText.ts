@@ -18,6 +18,10 @@ const RESULT_TEXT: Record<string, string> = {
 /** 自检停在哪一步,与后端写入的 stage 一致。 */
 const STAGE_TEXT: Record<string, string> = {
   selftest: '平台自检',
+  prepare: '准备环境',
+  workspace: '准备初始工作区',
+  toolchain: '检查运行工具',
+  capability: '检查链上操作',
   start: '启动环境',
   init: '初始化环境',
   create_audit: '记录操作审计',

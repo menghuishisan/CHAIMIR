@@ -204,12 +204,12 @@ func (a contentAPI) unshareItem(c *gin.Context) {
 func (a contentAPI) uploadAttachment(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		response.Fail(c, apperr.ErrContentAttachmentInvalid)
+		response.Fail(c, apperr.ErrContentAttachmentUploadInvalid.WithCause(err))
 		return
 	}
 	maxBytes := a.svc.contentAttachmentMaxBytes
 	if file.Size > maxBytes {
-		response.Fail(c, apperr.ErrContentAttachmentInvalid)
+		response.Fail(c, apperr.ErrContentAttachmentUploadInvalid)
 		return
 	}
 	opened, err := file.Open()
@@ -224,7 +224,7 @@ func (a contentAPI) uploadAttachment(c *gin.Context) {
 		return
 	}
 	if result != upload.SizeOK {
-		response.Fail(c, apperr.ErrContentAttachmentInvalid)
+		response.Fail(c, apperr.ErrContentAttachmentUploadInvalid)
 		return
 	}
 	out, err := a.svc.UploadAttachment(c.Request.Context(), UploadAttachmentRequest{ResourceID: c.PostForm("resource_id"), FileName: file.Filename, ContentType: file.Header.Get("Content-Type"), Content: data})

@@ -38,6 +38,8 @@ type TeachingStats struct {
 type TeachingReadService interface {
 	// GetCourse 读取课程归属摘要,供 M11 审核和申诉流程校验课程边界。
 	GetCourse(ctx context.Context, tenantID, courseID int64) (TeachingCourseInfo, error)
+	// ListTeacherCourseIDs 读取教师全部未删除课程编号,供 M11 在申诉分页前限制授课范围。
+	ListTeacherCourseIDs(ctx context.Context, tenantID, teacherID int64) ([]int64, error)
 	// GetCourseGrade 读取单个学生在单课程的成绩,供 M11 申诉校验成绩存在性。
 	GetCourseGrade(ctx context.Context, tenantID, courseID, studentID int64) (TeachingCourseGrade, error)
 	// IsCourseMember 判断学生是否属于课程,供 M11 防止跨课程申诉。

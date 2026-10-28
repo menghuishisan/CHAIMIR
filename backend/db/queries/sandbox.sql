@@ -260,6 +260,13 @@ WHERE tenant_id = $1 AND id = $2
   AND workspace_revision = sqlc.arg(expected_revision)::bigint
 RETURNING workspace_revision;
 
+-- name: GetSandboxForUpdate :one
+-- 沙箱生命周期、公开文件和归档共用权威行锁，跨副本串行化状态与版本写入。
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+FROM sandbox
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE;
+
 -- name: LockSandboxChain :exec
 -- 沙箱 ID 是全局雪花 ID;事务级 advisory lock 贯穿真实链能力调用,跨副本串行化 deploy/tx/reset。
 SELECT pg_advisory_xact_lock($1::bigint);
@@ -269,6 +276,13 @@ SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, comp
 FROM sandbox
 WHERE tenant_id = $1 AND source_ref = $2 AND status <> 5
 ORDER BY created_at DESC, id DESC;
+
+-- name: GetSavedSandboxBySourceRef :one
+-- 回收保留持久化代码指针，重建中断后仍可从同一稳定来源恢复。
+SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at
+FROM sandbox
+WHERE tenant_id = $1 AND source_ref = $2 AND code_storage_key IS NOT NULL AND code_storage_key <> '' AND code_hash IS NOT NULL AND code_hash <> ''
+ORDER BY created_at DESC, id DESC LIMIT 1;
 
 -- name: ListSandboxesByScopeRef :many
 SELECT id, tenant_id, namespace, source_ref, scope_ref, composition_digest, composition_snapshot, access_profile, owner_account_id, shared_account_ids, phase, status, keep_alive, snapshot_enabled, code_storage_key, code_hash, workspace_revision, init_code_ref, init_script_ref, snapshot_ref, snapshot_domains, snapshot_created_at, snapshot_expire_at, keep_alive_until, last_active_at, expire_at, created_at, updated_at

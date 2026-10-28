@@ -12,21 +12,22 @@ import { AuditLogPage } from '../../components/AuditLogPage'
 /** 平台审计可筛选的对象类型。 */
 const TARGET_TYPE_OPTIONS = [
   { value: '', label: '全部对象' },
-  { value: 'tenant', label: '学校' },
-  { value: 'account', label: '账号' },
-  { value: 'config', label: '系统配置' },
+  { value: 'identity.tenant', label: '学校' },
+  { value: 'identity.account', label: '账号' },
+  { value: 'system_config', label: '系统配置' },
   { value: 'alert', label: '告警' },
   { value: 'sim.package', label: '仿真场景包' },
-  { value: 'session', label: '登录会话' },
+  { value: 'identity.auth_session', label: '登录会话' },
+  { value: 'identity.platform_auth_session', label: '平台登录会话' },
 ] as const
 
 /** 平台审计常用动作。 */
 const ACTION_OPTIONS = [
   { value: '', label: '全部动作' },
   { value: 'auth.login', label: '登录' },
-  { value: 'platform.application.approve', label: '通过入驻申请' },
-  { value: 'platform.application.reject', label: '驳回入驻申请' },
-  { value: 'platform.tenant.update', label: '修改学校信息' },
+  { value: 'tenant.application.approve', label: '通过入驻申请' },
+  { value: 'tenant.application.reject', label: '驳回入驻申请' },
+  { value: 'tenant.status.update', label: '更新学校状态' },
   { value: 'admin.config.update', label: '修改系统配置' },
   { value: 'admin.config.rollback', label: '回滚系统配置' },
   { value: 'admin.alert.handle', label: '处理告警' },

@@ -26,12 +26,12 @@ export function ImportActionFooter({
 }: ImportActionFooterProps) {
   return (
     <ModalFooter>
-      <Button variant="outline" onClick={onClose}>
+      <Button variant="outline" disabled={working} onClick={onClose}>
         取消
       </Button>
       {preview ? (
         <>
-          <Button variant="outline" leftIcon={Upload} onClick={onReset}>
+          <Button variant="outline" leftIcon={Upload} disabled={working} onClick={onReset}>
             换个文件
           </Button>
           <Button

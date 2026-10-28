@@ -69,10 +69,12 @@ export default function StudentSimulationsPage() {
   )
 
   // 分类分布取后端 facets.category:与当前筛选同口径的全量分组计数,不用当前页切片去数(§6.5.4)
-  const categoryKinds = Object.keys(facetGroup(packages.data?.facets, 'category')).length
+  const facets = packages.total === undefined ? undefined : packages.data?.facets
+  const categories = facetGroup(facets, 'category')
+  const categoryKinds = categories ? Object.keys(categories).length : undefined
   const topCategory = useMemo(
-    () => facetTopEntries(packages.data?.facets, 'category', 1)[0],
-    [packages.data],
+    () => facetTopEntries(facets, 'category', 1)?.[0],
+    [facets],
   )
 
   // FilterBar 自己是 form 并接住回车,故这里只需要提交动作本身
@@ -159,7 +161,7 @@ export default function StudentSimulationsPage() {
           {
             label: '最多的分类',
             value: topCategory ? simCategoryLabel(topCategory.value) : '—',
-            hint: topCategory ? `共 ${topCategory.count} 个场景` : '暂无场景',
+            hint: topCategory ? `共 ${topCategory.count} 个场景` : packages.total === 0 ? '暂无场景' : undefined,
           },
         ]}
       />

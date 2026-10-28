@@ -45,11 +45,11 @@ func SubscribeEvents(bus eventbus.Bus, svc *Service) ([]eventbus.Subscription, e
 		if err := eventbus.Decode(data, &evt, apperr.ErrNotifyRequestInvalid); err != nil {
 			return err
 		}
-		if _, ok := ids.Parse(strings.TrimSpace(evt.EventID)); !ok || strings.TrimSpace(evt.ExperimentName) == "" || evt.StudentID <= 0 || evt.ScoredAt.IsZero() {
+		if _, ok := ids.Parse(strings.TrimSpace(evt.EventID)); !ok || evt.TenantID <= 0 || evt.ExperimentID <= 0 || strings.TrimSpace(evt.ExperimentName) == "" || evt.StudentID <= 0 || evt.ScoredAt.IsZero() {
 			return apperr.ErrNotifyRequestInvalid
 		}
 		requestID := fmt.Sprintf("experiment:%04d:score:%s", evt.ScoredAt.Year(), evt.EventID)
-		return svc.Send(ctx, contracts.NotifySendRequest{RequestID: requestID, TenantID: evt.TenantID, Type: "experiment.completed", Receivers: []int64{evt.StudentID}, Params: map[string]string{"experiment": evt.ExperimentName}, Link: "/student/experiment-detail?id=" + ids.Format(evt.ExperimentID)})
+		return svc.Send(ctx, contracts.NotifySendRequest{RequestID: requestID, TenantID: evt.TenantID, Type: "experiment.completed", Receivers: []int64{evt.StudentID}, Params: map[string]string{"experiment": evt.ExperimentName}, Link: "/student/experiments/" + ids.Format(evt.ExperimentID)})
 	})
 	if err != nil {
 		return nil, apperr.ErrNotifyChannelUnavailable.WithCause(err)

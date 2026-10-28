@@ -31,6 +31,13 @@ SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_st
 FROM contest
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 
+-- name: GetContestForUpdate :one
+-- 编排保存和人工状态流转共用赛事父行锁,读取等待后的最新状态。
+SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
+FROM contest
+WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+FOR UPDATE;
+
 -- name: FindPublishedContestTenant :one
 -- 学生入口允许跨校发现已发布竞赛,但只返回竞赛所属租户;后续读写仍必须进入该租户事务。
 SELECT tenant_id
@@ -107,7 +114,8 @@ RETURNING id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup
 SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 FROM contest
 WHERE deleted_at IS NULL AND status = 2 AND start_at <= $1 AND end_at > $1
-ORDER BY start_at ASC, id ASC;
+ORDER BY start_at ASC, id ASC
+FOR UPDATE SKIP LOCKED;
 
 -- name: ListContestsDueToFreeze :many
 -- 封榜窗口由服务端按 freeze_minutes 计算,不接受前端自行推进状态。
@@ -116,14 +124,16 @@ FROM contest
 WHERE deleted_at IS NULL AND status = 3 AND freeze_minutes > 0
   AND end_at > $1
   AND end_at - (freeze_minutes * INTERVAL '1 minute') <= $1
-ORDER BY end_at ASC, id ASC;
+ORDER BY end_at ASC, id ASC
+FOR UPDATE SKIP LOCKED;
 
 -- name: ListContestsDueToEnd :many
 -- 报名中、进行中和封榜中的赛事过了结束时间都必须进入结束态,避免学生入口长期显示报名中。
 SELECT id, tenant_id, organizer_id, name, mode, match_mode, team_mode, signup_start, signup_end, start_at, end_at, freeze_minutes, rules, status, archive_lease_token, archive_lease_until, created_at, updated_at, deleted_at
 FROM contest
 WHERE deleted_at IS NULL AND status IN (2, 3, 4) AND end_at <= $1
-ORDER BY end_at ASC, id ASC;
+ORDER BY end_at ASC, id ASC
+FOR UPDATE SKIP LOCKED;
 
 -- name: UpsertContestProblem :one
 INSERT INTO contest_problem (id, tenant_id, contest_id, item_code, item_version, score, dynamic_score, battle_config, battle_rule, seq, composition_digest, composition_snapshot)
@@ -218,12 +228,18 @@ FROM contest_access_grant
 WHERE sandbox_id = $1 AND member_tenant_id = $2 AND member_account_id = $3;
 
 -- name: UpsertContestAccessGrant :one
+-- 重复准备环境复用未变化的授权版本;权限、来源、状态或有效期变化才使旧主体失效。
 INSERT INTO contest_access_grant (id, tenant_id, contest_id, team_id, sandbox_id, member_tenant_id, member_account_id, capabilities, source_ref, grant_version, status, expires_at, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, 1, $10, now(), now())
 ON CONFLICT (tenant_id, sandbox_id, member_tenant_id, member_account_id) DO UPDATE
 SET capabilities = EXCLUDED.capabilities,
     source_ref = EXCLUDED.source_ref,
-    grant_version = contest_access_grant.grant_version + 1,
+    grant_version = CASE
+        WHEN (contest_access_grant.capabilities, contest_access_grant.source_ref, contest_access_grant.status, contest_access_grant.expires_at)
+            IS DISTINCT FROM (EXCLUDED.capabilities, EXCLUDED.source_ref, EXCLUDED.status, EXCLUDED.expires_at)
+        THEN contest_access_grant.grant_version + 1
+        ELSE contest_access_grant.grant_version
+    END,
     status = 1,
     expires_at = EXCLUDED.expires_at,
     updated_at = now()
@@ -443,7 +459,7 @@ WHERE EXISTS (
     SELECT 1 FROM contest c
     WHERE c.tenant_id = $2 AND c.id = $3 AND c.status IN (3, 4) AND c.end_at > now()
 )
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count;
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count, finalized_at;
 
 -- name: ExhaustUnstartedBattleMatches :many
 -- 仅处理尚未提交 M3 的启动租约;已持有 judge_task_ref 的对局由 M3 生命周期收敛。
@@ -452,7 +468,7 @@ SET status = 4, finished_at = now(), lease_token = '', lease_until = NULL
 WHERE status = 2 AND COALESCE(judge_task_ref, '') = ''
   AND lease_until <= sqlc.arg(stale_before)::timestamptz
   AND attempt_count >= sqlc.arg(max_attempts)::int
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count;
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count, finalized_at;
 
 -- name: ClaimPendingBattleMatchesAcrossTenants :many
 WITH candidates AS (
@@ -473,24 +489,42 @@ SET status = 2,
     attempt_count = m.attempt_count + 1
 FROM candidates c
 WHERE m.id = c.id
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count;
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at;
 
 -- name: GetBattleMatch :one
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count, finalized_at
 FROM battle_match
 WHERE tenant_id = $1 AND id = $2;
 
--- name: GetBattleMatchByJudgeTask :one
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
-FROM battle_match
-WHERE tenant_id = $1 AND judge_task_ref = $2;
+-- name: LockBattleMatchByJudgeTask :one
+-- 结算统一锁赛事和对局,同一赛事的 ELO 读取与回写串行完成。
+SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at
+FROM contest c
+JOIN battle_match m ON m.tenant_id = c.tenant_id AND m.contest_id = c.id
+WHERE m.tenant_id = $1 AND m.judge_task_ref = $2
+FOR UPDATE OF c, m;
 
--- name: ListRunningBattleMatchesWithJudgeTask :many
-SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count
+-- name: ListBattleMatchesToReconcile :many
+SELECT id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count, finalized_at
 FROM battle_match
-WHERE status = 2 AND COALESCE(judge_task_ref, '') <> ''
-ORDER BY matched_at ASC, id ASC
-LIMIT $1;
+WHERE ((status = 2 AND COALESCE(judge_task_ref, '') <> '')
+       OR (status IN (3, 4) AND finalized_at IS NULL))
+  AND id > sqlc.arg(after_id)::bigint
+  AND matched_at <= sqlc.arg(matched_before)::timestamptz
+ORDER BY id ASC
+LIMIT sqlc.arg(page_limit)::int;
+
+-- name: ClaimBattleMatchFinalization :execrows
+UPDATE battle_match
+SET lease_token = sqlc.arg(lease_token), lease_until = sqlc.arg(lease_until)::timestamptz
+WHERE tenant_id = $1 AND id = $2 AND status IN (3, 4) AND finalized_at IS NULL
+  AND (lease_token = '' OR lease_until <= now());
+
+-- name: CompleteBattleMatchFinalization :execrows
+UPDATE battle_match
+SET finalized_at = now(), lease_token = '', lease_until = NULL
+WHERE tenant_id = $1 AND id = $2 AND status IN (3, 4) AND finalized_at IS NULL
+  AND lease_token = $3 AND lease_until > now();
 
 -- name: StartBattleMatch :one
 UPDATE battle_match AS m
@@ -500,7 +534,7 @@ SET sandbox_ref = $3,
     lease_token = '',
     lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $5 AND lease_until > now()
-RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count;
+RETURNING id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at, lease_token, lease_until, attempt_count, finalized_at;
 
 -- name: RenewBattleMatchStartLease :execrows
 -- 启动沙箱和提交判题期间仅由当前 token 续租,避免长时准备被其他 worker 重领。
@@ -516,7 +550,7 @@ WHERE tenant_id = $1
 -- name: ListBattleMatchesForTeam :many
 -- 师生同一查询按视角过滤:传 team_id 只回该队参与的对局(学生视角),
 -- 传 0 回本赛事全部对局(组织者监控视角)。不为教师另开一条同义查询。
-SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count
+SELECT m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at
 FROM battle_match m
 JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
@@ -644,14 +678,14 @@ WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.judge_task_ref = $4
       WHERE c.tenant_id = m.tenant_id AND c.id = m.contest_id
         AND (c.status IN (3, 4) OR (c.status = 5 AND c.archive_lease_token = ''))
   )
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count;
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at;
 
 -- name: FailBattleMatchStart :one
 UPDATE battle_match AS m
 SET status = 4, finished_at = now(), lease_token = '', lease_until = NULL
 WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.lease_token = $3 AND m.lease_until > now()
   AND COALESCE(m.judge_task_ref, '') = ''
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count;
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at;
 
 -- name: FailBattleMatchByJudgeTask :one
 UPDATE battle_match AS m
@@ -662,7 +696,7 @@ WHERE m.tenant_id = $1 AND m.id = $2 AND m.status = 2 AND m.judge_task_ref = $3
       WHERE c.tenant_id = m.tenant_id AND c.id = m.contest_id
         AND (c.status IN (3, 4) OR (c.status = 5 AND c.archive_lease_token = ''))
   )
-RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count;
+RETURNING m.id, m.tenant_id, m.contest_id, m.problem_id, m.entry_a_id, m.entry_b_id, m.source_ref, m.scope_ref, m.sandbox_ref, m.judge_task_ref, m.result, m.score_delta, m.replay_ref, m.status, m.matched_at, m.finished_at, m.lease_token, m.lease_until, m.attempt_count, m.finalized_at;
 
 -- name: UpsertLadderSnapshot :one
 INSERT INTO contest_ladder_snapshot (id, tenant_id, contest_id, snapshot_status, ranking, generated_at)
@@ -716,13 +750,14 @@ WHERE tenant_id = $1 AND contest_id = $2;
 -- name: UpsertVulnSource :one
 INSERT INTO vuln_source (id, tenant_id, type, name, config, default_level, enabled, last_sync_at, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, now(), now())
-ON CONFLICT (tenant_id, id) DO UPDATE
+ON CONFLICT (id) DO UPDATE
 SET type = EXCLUDED.type,
     name = EXCLUDED.name,
     config = EXCLUDED.config,
     default_level = EXCLUDED.default_level,
     enabled = EXCLUDED.enabled,
     updated_at = now()
+WHERE vuln_source.tenant_id IS NOT DISTINCT FROM EXCLUDED.tenant_id
 RETURNING id, tenant_id, type, name, config, default_level, enabled, last_sync_at, created_at, updated_at;
 
 -- name: ListVulnSources :many

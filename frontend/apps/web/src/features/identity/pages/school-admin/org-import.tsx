@@ -22,10 +22,12 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { ImportActionFooter } from '../../components/ImportActionFooter'
 import { ImportPreviewPanel } from '../../components/ImportPreviewPanel'
+import { ImportPreviewRecovery } from '../../components/ImportPreviewRecovery'
 
 export interface OrgImportModalProps {
   onClose: () => void
@@ -41,6 +43,9 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
   const [preview, setPreview] = useState<ImportPreviewResponse>()
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(() => ({
+    file: file ? null : '请选择要导入的文件',
+  }))
 
   const downloadTemplate = useCallback(async () => {
     setFormError(undefined)
@@ -53,10 +58,7 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
   }, [])
 
   const runPreview = useCallback(async () => {
-    if (!file) {
-      setFormError('请选择要导入的文件')
-      return
-    }
+    if (working || !validate() || !file) return
     setFormError(undefined)
     setWorking(true)
     try {
@@ -68,7 +70,7 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
       setWorking(false)
       setUploadProgress(undefined)
     }
-  }, [file])
+  }, [file, validate, working])
 
   const commit = useCallback(async () => {
     if (!preview) return
@@ -86,7 +88,7 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
   }, [onCommitted, preview])
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
+    <Modal open onOpenChange={(open) => !open && !working && onClose()}>
       <ModalContent size="xl">
         <ModalHeader>
           <ModalTitle>批量导入组织架构</ModalTitle>
@@ -118,14 +120,20 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
             label="导入文件"
             htmlFor="org-import-file"
             required
+            error={errors.file}
             helper="支持模板导出的 Excel 或 CSV 文件"
           >
             <Input
               id="org-import-file"
+              disabled={working}
               type="file"
               accept=".xlsx,.csv"
+              invalid={Boolean(errors.file)}
+              onBlur={() => validate(['file'])}
               onChange={(event) => {
-                setFile(event.target.files?.[0])
+                const selected = event.target.files?.[0]
+                if (!selected) return
+                setFile(selected)
                 setPreview(undefined)
               }}
             />
@@ -134,6 +142,8 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
           {uploadProgress !== undefined ? (
             <Progress value={uploadProgress} label="正在上传文件" />
           ) : null}
+
+          {!preview ? <ImportPreviewRecovery target="org" disabled={working} onRestore={setPreview} /> : null}
 
           <ImportPreviewPanel
             preview={preview}

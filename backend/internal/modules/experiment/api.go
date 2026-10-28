@@ -30,9 +30,9 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	}
 	api := experimentAPI{svc: svc}
 	g := r.Group("/api/v1/experiment")
-	teacher := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
-	student := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent))
-	all := g.Group("", authn.Middleware(), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
+	teacher := g.Group("", authn.Middleware(contracts.TenantModuleExperiment), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
+	student := g.Group("", authn.Middleware(contracts.TenantModuleExperiment), auth.RequireTenantAnyRole(roles, contracts.RoleStudent))
+	all := g.Group("", authn.Middleware(contracts.TenantModuleExperiment), auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
 	internal := g.Group("/internal", authn.ServiceMiddleware())
 	api.registerTeacherRoutes(teacher)
 	api.registerStudentRoutes(student)

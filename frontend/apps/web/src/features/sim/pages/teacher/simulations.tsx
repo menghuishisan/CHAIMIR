@@ -98,21 +98,25 @@ export default function TeacherSimulationsPage() {
   const mineTotalCount = useResourceTotal(
     (params) => api.sim.getPackages({ mine: true, ...params }),
     [],
+    packages.refreshVersion,
   )
   const minePublishedCount = useResourceTotal(
     (params) =>
       api.sim.getPackages({ mine: true, status: SIM_PACKAGE_STATUS.PUBLISHED, ...params }),
     [],
+    packages.refreshVersion,
   )
   const mineReviewingCount = useResourceTotal(
     (params) =>
       api.sim.getPackages({ mine: true, status: SIM_PACKAGE_STATUS.REVIEWING, ...params }),
     [],
+    packages.refreshVersion,
   )
   const mineRejectedCount = useResourceTotal(
     (params) =>
       api.sim.getPackages({ mine: true, status: SIM_PACKAGE_STATUS.REJECTED, ...params }),
     [],
+    packages.refreshVersion,
   )
 
   const columns: TableColumn<SimPackageMeta>[] = [

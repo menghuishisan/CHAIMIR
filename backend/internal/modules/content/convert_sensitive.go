@@ -10,6 +10,7 @@ import (
 var defaultSensitivePaths = []string{
 	"answer",
 	"answers",
+	"explanation",
 	"correct_answer",
 	"solution",
 	"analysis.answer",

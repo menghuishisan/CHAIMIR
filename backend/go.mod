@@ -17,6 +17,7 @@ require (
 	github.com/minio/minio-go/v7 v7.2.0
 	github.com/nats-io/nats.go v1.52.0
 	github.com/redis/go-redis/v9 v9.20.0
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/xuri/excelize/v2 v2.11.0
 	golang.org/x/crypto v0.55.0
 	k8s.io/api v0.35.3

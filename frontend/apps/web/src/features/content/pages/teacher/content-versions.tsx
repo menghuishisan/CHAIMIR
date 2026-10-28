@@ -37,6 +37,7 @@ import {
   contentVisibilityLabel,
 } from '../../../../utils/labels/content'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 
 export interface ContentVersionsModalProps {
   item: ContentItem
@@ -194,22 +195,20 @@ function NewVersionForm({ item, versions, onDone }: NewVersionFormProps) {
   const [working, setWorking] = useState(false)
 
   const existingVersions = useMemo(() => new Set(versions.map((one) => one.version)), [versions])
+  const { errors, validate } = useFormValidation(() => ({
+    source: sourceVersion.trim() ? null : '请输入原版本号',
+    target: !/^\d+\.\d+\.\d+$/.test(newVersion.trim()) ? '版本号形如 1.0.1'
+      : existingVersions.has(newVersion.trim()) ? '这个版本号已存在,请换一个' : null,
+  }))
 
   const submit = useCallback(async () => {
+    if (working || !validate()) return
     const target = newVersion.trim()
-    if (!/^\d+\.\d+\.\d+$/.test(target)) {
-      setFormError('版本号形如 1.0.1')
-      return
-    }
-    if (existingVersions.has(target)) {
-      setFormError('这个版本号已存在,请换一个')
-      return
-    }
     setFormError(undefined)
     setWorking(true)
     try {
       await api.content.createNewVersion(item.code, {
-        source_version: sourceVersion,
+        source_version: sourceVersion.trim(),
         new_version: target,
       })
       toast.success(`已创建版本 ${target}`)
@@ -219,7 +218,7 @@ function NewVersionForm({ item, versions, onDone }: NewVersionFormProps) {
     } finally {
       setWorking(false)
     }
-  }, [existingVersions, item.code, newVersion, onDone, sourceVersion])
+  }, [item.code, newVersion, onDone, sourceVersion, validate, working])
 
   return (
     <div className="flex flex-col gap-4">
@@ -229,10 +228,12 @@ function NewVersionForm({ item, versions, onDone }: NewVersionFormProps) {
       </Callout>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <FormField label="基于哪个版本" htmlFor="new-version-source" required>
+        <FormField label="基于哪个版本" htmlFor="new-version-source" required error={errors.source}>
           <Input
             id="new-version-source"
             value={sourceVersion}
+            invalid={Boolean(errors.source)}
+            onBlur={() => validate(['source'])}
             onChange={(event) => setSourceVersion(event.target.value)}
           />
         </FormField>
@@ -240,18 +241,20 @@ function NewVersionForm({ item, versions, onDone }: NewVersionFormProps) {
           label="新版本号"
           htmlFor="new-version-target"
           required
-          error={formError}
+          error={errors.target}
           helper="形如 1.0.1"
         >
           <Input
             id="new-version-target"
             value={newVersion}
-            invalid={Boolean(formError)}
+            invalid={Boolean(errors.target)}
+            onBlur={() => validate(['target'])}
             onChange={(event) => setNewVersion(event.target.value)}
           />
         </FormField>
       </div>
 
+      {formError ? <Callout tone="danger">{formError}</Callout> : null}
       <Button variant="primary" leftIcon={GitBranch} loading={working} onClick={() => void submit()}>
         创建新版本
       </Button>
@@ -274,17 +277,14 @@ function CloneForm({ item, onDone }: CloneFormProps) {
   const [newVersion, setNewVersion] = useState('1.0.0')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(() => ({
+    code: /^[a-z0-9-]{3,}$/.test(newCode.trim()) ? null : '编号用小写字母、数字与连字符,至少 3 位',
+    version: /^\d+\.\d+\.\d+$/.test(newVersion.trim()) ? null : '版本号形如 1.0.0',
+  }))
 
   const submit = useCallback(async () => {
+    if (working || !validate()) return
     const code = newCode.trim()
-    if (!/^[a-z0-9-]{3,}$/.test(code)) {
-      setFormError('编号用小写字母、数字与连字符,至少 3 位')
-      return
-    }
-    if (!/^\d+\.\d+\.\d+$/.test(newVersion.trim())) {
-      setFormError('版本号形如 1.0.0')
-      return
-    }
     setFormError(undefined)
     setWorking(true)
     try {
@@ -299,7 +299,7 @@ function CloneForm({ item, onDone }: CloneFormProps) {
     } finally {
       setWorking(false)
     }
-  }, [item.code, item.version, newCode, newVersion, onDone])
+  }, [item.code, item.version, newCode, newVersion, onDone, validate, working])
 
   return (
     <div className="flex flex-col gap-4">
@@ -309,18 +309,21 @@ function CloneForm({ item, onDone }: CloneFormProps) {
       </Callout>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <FormField label="新题目编号" htmlFor="clone-code" required error={formError}>
+        <FormField label="新题目编号" htmlFor="clone-code" required error={errors.code}>
           <Input
             id="clone-code"
             value={newCode}
-            invalid={Boolean(formError)}
+            invalid={Boolean(errors.code)}
+            onBlur={() => validate(['code'])}
             onChange={(event) => setNewCode(event.target.value)}
           />
         </FormField>
-        <FormField label="新题目版本" htmlFor="clone-version" required>
+        <FormField label="新题目版本" htmlFor="clone-version" required error={errors.version}>
           <Input
             id="clone-version"
             value={newVersion}
+            invalid={Boolean(errors.version)}
+            onBlur={() => validate(['version'])}
             onChange={(event) => setNewVersion(event.target.value)}
           />
         </FormField>
@@ -332,6 +335,7 @@ function CloneForm({ item, onDone }: CloneFormProps) {
         </Callout>
       ) : null}
 
+      {formError ? <Callout tone="danger">{formError}</Callout> : null}
       <Button variant="primary" leftIcon={Copy} loading={working} onClick={() => void submit()}>
         克隆为新题目
       </Button>

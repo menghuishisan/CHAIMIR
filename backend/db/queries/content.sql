@@ -220,7 +220,8 @@ SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags,
 FROM content_item
 WHERE tenant_id = $1 AND deleted_at IS NULL AND status = 2
   AND ($2::smallint = 0 OR type = $2)
-  AND (cardinality($3::smallint[]) = 0 OR difficulty = ANY($3::smallint[]))
-  AND (cardinality($4::text[]) = 0 OR knowledge_points && $4::text[])
+  AND (COALESCE(cardinality($3::smallint[]), 0) = 0 OR difficulty = ANY($3::smallint[]))
+  AND (COALESCE(cardinality($4::text[]), 0) = 0 OR knowledge_points && $4::text[])
+  AND (visibility <> 1 OR author_id = sqlc.arg(viewer_id))
 ORDER BY random()
 LIMIT $5;

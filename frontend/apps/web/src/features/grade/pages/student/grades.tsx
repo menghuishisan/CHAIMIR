@@ -9,6 +9,7 @@
 // grade 模块也不发申诉状态通知,故学生侧不建申诉列表(对齐清单 §6.6)。
 
 import { useCallback, useMemo, useState } from 'react'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { Download, FileText, GraduationCap, Layers, MessageSquareWarning } from 'lucide-react'
 import {
   PAGINATION_DEFAULT_SIZE,
@@ -203,7 +204,7 @@ function GradeContent({
           hint={semesterId ? '所选学期' : '全部学期'}
         />
         <Stat label="累计绩点" value={formatGpa(summary.cumulative_gpa)} icon={GraduationCap} hint="全部学期加权" />
-        <Stat label="已修学分" value={summary.total_credits} icon={Layers} hint="仅计已通过课程" />
+        <Stat label="本范围学分" value={summary.total_credits} icon={Layers} hint="用于绩点加权，含未通过课程" />
         <Stat label="课程数" value={summary.total} icon={FileText} hint="本范围内" />
       </div>
 
@@ -341,13 +342,13 @@ function TranscriptCard({ studentId, semesters }: TranscriptCardProps) {
   const [actionError, setActionError] = useState<string>()
 
   const needsSemester = Number(scope) === TranscriptScope.SEMESTER
+  const { errors, validate } = useFormValidation(() => ({
+    semesterId: needsSemester && !semesterId ? '请选择要生成的学期' : null,
+  }))
 
   /** generateAndDownload 生成成绩单后立即取件,用户只需点一次。 */
   const generateAndDownload = useCallback(async () => {
-    if (needsSemester && !semesterId) {
-      setActionError('请选择要生成的学期')
-      return
-    }
+    if (!validate()) return
     setWorking(true)
     setActionError(undefined)
     try {
@@ -365,7 +366,7 @@ function TranscriptCard({ studentId, semesters }: TranscriptCardProps) {
     } finally {
       setWorking(false)
     }
-  }, [needsSemester, scope, semesterId, studentId])
+  }, [needsSemester, scope, semesterId, studentId, validate])
 
   return (
     <Card>
@@ -386,20 +387,20 @@ function TranscriptCard({ studentId, semesters }: TranscriptCardProps) {
               },
             ]}
             value={scope}
-            onValueChange={(value) => {
-              setScope(value)
-              setActionError(undefined)
-            }}
+            onValueChange={setScope}
           />
         </FormField>
 
         {needsSemester ? (
-          <FormField label="学期" required>
+          <FormField label="学期" htmlFor="student-transcript-semester" required error={errors.semesterId}>
             <Select
+              id="student-transcript-semester"
               options={semesters.map((semester) => ({ value: semester.id, label: semester.name }))}
               value={semesterId}
               placeholder="选择学期"
               onValueChange={setSemesterId}
+              invalid={Boolean(errors.semesterId)}
+              onBlur={() => validate(['semesterId'])}
             />
           </FormField>
         ) : null}
@@ -433,9 +434,13 @@ interface AppealCardProps {
 function AppealCard({ grades, courses }: AppealCardProps) {
   const [courseId, setCourseId] = useState<string>('')
   const [reason, setReason] = useState('')
-  const [fieldError, setFieldError] = useState<string>()
+  const [submitError, setSubmitError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const { errors, validate } = useFormValidation(() => ({
+    courseId: !courseId ? '请选择要申诉的课程' : null,
+    reason: !reason.trim() ? '请说明申诉理由' : null,
+  }))
 
   const courseOptions = useMemo(
     () =>
@@ -454,27 +459,20 @@ function AppealCard({ grades, courses }: AppealCardProps) {
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (!courseId) {
-        setFieldError('请选择要申诉的课程')
-        return
-      }
-      if (reason.trim() === '') {
-        setFieldError('请说明申诉理由')
-        return
-      }
-      setFieldError(undefined)
+      if (!validate()) return
+      setSubmitError(undefined)
       setSubmitting(true)
       try {
         await api.grade.submitAppeal({ course_id: courseId, reason: reason.trim() })
         setSubmitted(true)
         toast.success('申诉已提交')
       } catch (error) {
-        setFieldError(userFacingErrorMessage(error, '申诉提交失败,请稍后重试。'))
+        setSubmitError(userFacingErrorMessage(error, '申诉提交失败,请稍后重试。'))
       } finally {
         setSubmitting(false)
       }
     },
-    [courseId, reason]
+    [courseId, reason, validate]
   )
 
   if (submitted) {
@@ -495,30 +493,37 @@ function AppealCard({ grades, courses }: AppealCardProps) {
       <CardHeader title="成绩申诉" description="对成绩有疑问可以提出申诉,由任课老师核查。" />
       <CardBody>
         <form onSubmit={submit} noValidate>
-          <FormField label="申诉课程" required>
+          <FormField label="申诉课程" htmlFor="appeal-course" required error={errors.courseId}>
             <Select
+              id="appeal-course"
               options={courseOptions}
               value={courseId}
               placeholder={courseOptions.length > 0 ? '选择课程' : '暂无可申诉的课程'}
               disabled={courseOptions.length === 0}
               onValueChange={setCourseId}
+              invalid={Boolean(errors.courseId)}
+              onBlur={() => validate(['courseId'])}
             />
           </FormField>
           <FormField
             label="申诉理由"
+            htmlFor="appeal-reason"
             required
-            error={fieldError}
+            error={errors.reason}
             helper="说清楚你认为哪部分成绩有问题、依据是什么"
             className="mt-4"
           >
             <Textarea
+              id="appeal-reason"
               value={reason}
               rows={4}
               placeholder="请具体说明"
-              invalid={Boolean(fieldError)}
+              invalid={Boolean(errors.reason)}
               onChange={(event) => setReason(event.target.value)}
+              onBlur={() => validate(['reason'])}
             />
           </FormField>
+          {submitError ? <Callout tone="danger" className="mt-4">{submitError}</Callout> : null}
           <Button
             type="submit"
             variant="primary"

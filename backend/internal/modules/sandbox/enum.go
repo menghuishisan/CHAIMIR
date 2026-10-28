@@ -163,8 +163,6 @@ const (
 	WorkspacePlaceholderRoot = "{{workspace}}"
 	// WorkspacePlaceholderPath 表示工作区内相对路径拼接后的目标模板变量。
 	WorkspacePlaceholderPath = "{{path}}"
-	// WorkspacePlaceholderScript 表示初始化脚本临时路径模板变量。
-	WorkspacePlaceholderScript = "{{script}}"
 	// WorkspacePlaceholderDomain 表示私有卷安全域的绝对挂载路径模板变量。
 	WorkspacePlaceholderDomain = "{{domain}}"
 )

@@ -13,12 +13,14 @@ const (
 	SubjectJudgeFailed = "judge.failed"
 	// SubjectSandboxRecycled 表示沙箱回收完成事件,由 M2 发布供来源模块订阅。
 	SubjectSandboxRecycled = "sandbox.recycled"
-	// SubjectSandboxFailed 表示沙箱阶段一启动失败事件,由 M2 发布供来源模块完成实例对账。
+	// SubjectSandboxFailed 表示沙箱启动或个性化初始化失败事件,由 M2 发布供来源模块完成实例对账。
 	SubjectSandboxFailed = "sandbox.failed"
 	// SubjectSandboxRuntimeSelftestCompleted 表示平台运行时自检状态已落库,由 M3 刷新依赖判题器目录。
 	SubjectSandboxRuntimeSelftestCompleted = "sandbox.runtime.selftest.completed"
 	// SubjectExperimentScored 表示实验得分落定事件,由 M7 发布供上层流程消费。
 	SubjectExperimentScored = "experiment.scored"
+	// SubjectExperimentCourseSourceChanged 表示实验课程归属或可选状态已持久化。
+	SubjectExperimentCourseSourceChanged = "experiment.course-source.changed"
 	// SubjectTeachingCourseEnded 表示课程已结束或归档,由 M6 发布供 M7 级联回收课内实验实例。
 	SubjectTeachingCourseEnded = "teaching.course.ended"
 	// SubjectTeachingGradeUpdated 表示单课程成绩更新事件,由 M6 发布供 M11 重算。
@@ -74,7 +76,7 @@ type SandboxRecycledEvent struct {
 	RecycledAt time.Time `json:"recycled_at"`
 }
 
-// SandboxFailedEvent 是沙箱阶段一启动失败事件载荷。
+// SandboxFailedEvent 是沙箱启动或个性化初始化失败事件载荷。
 //
 // 来源模块据此把仍处于创建或运行态的业务实例推进到错误态并补偿回收;
 // 失败原因只进入 M2 结构化日志和 sandbox_event,不跨模块传播内部细节。
@@ -98,7 +100,7 @@ type SandboxRuntimeSelftestCompletedEvent struct {
 	FinishedAt     time.Time `json:"finished_at"`
 }
 
-// ExperimentScoredEvent 是实验实例得分落定后的事件载荷。
+// ExperimentScoredEvent 是实验实例得分落定后的事件载荷,修订号来自同一持久化 outbox。
 type ExperimentScoredEvent struct {
 	EventID        string    `json:"event_id"`
 	TenantID       int64     `json:"tenant_id"`
@@ -108,7 +110,28 @@ type ExperimentScoredEvent struct {
 	InstanceID     int64     `json:"instance_id"`
 	StudentID      int64     `json:"student_id"`
 	Score          float64   `json:"score"`
+	ScoreRevision  int64     `json:"score_revision"`
 	ScoredAt       time.Time `json:"scored_at"`
+	CourseID       int64     `json:"course_id"`
+	SourceRevision int64     `json:"source_revision"`
+	Available      bool      `json:"available"`
+	SourceMaxScore float64   `json:"source_max_score"`
+	MaxScore       float64   `json:"max_score"`
+	StudentIDs     []int64   `json:"student_ids"`
+	Pending        bool      `json:"pending"`
+}
+
+// ExperimentCourseSourceChangedEvent 是M7权威定义在M6中的最小课程成绩来源投影。
+type ExperimentCourseSourceChangedEvent struct {
+	EventID        string  `json:"event_id"`
+	TenantID       int64   `json:"tenant_id"`
+	TraceID        string  `json:"trace_id"`
+	ExperimentID   int64   `json:"experiment_id"`
+	ExperimentName string  `json:"experiment_name"`
+	CourseID       int64   `json:"course_id"`
+	SourceRevision int64   `json:"source_revision"`
+	Available      bool    `json:"available"`
+	MaxScore       float64 `json:"max_score"`
 }
 
 // TeachingCourseEndedEvent 是课程结束或归档后的事件载荷。
@@ -125,11 +148,13 @@ type TeachingCourseEndedEvent struct {
 
 // TeachingGradeUpdatedEvent 是单课程成绩调整后的事件载荷。
 type TeachingGradeUpdatedEvent struct {
-	TenantID  int64     `json:"tenant_id"`
-	TraceID   string    `json:"trace_id"`
-	CourseID  int64     `json:"course_id"`
-	StudentID int64     `json:"student_id"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Revision     int64     `json:"revision"`
+	LockRevision int64     `json:"lock_revision"`
+	TenantID     int64     `json:"tenant_id"`
+	TraceID      string    `json:"trace_id"`
+	CourseID     int64     `json:"course_id"`
+	StudentID    int64     `json:"student_id"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // GradeReviewLockChangedEvent 是 M11 驱动 M6 同步单课程写保护投影时使用的事件载荷。
@@ -139,6 +164,7 @@ type GradeReviewLockChangedEvent struct {
 	ReviewID  int64     `json:"review_id"`
 	CourseID  int64     `json:"course_id"`
 	Locked    bool      `json:"locked"`
+	Revision  int64     `json:"revision"`
 	Reason    string    `json:"reason"`
 	ChangedAt time.Time `json:"changed_at"`
 }

@@ -144,14 +144,16 @@ export default function TeacherVulnWorkshopPage() {
 
   // 指标带取服务端全量口径,不随下方筛选变化(§6.5.4)。
   // 预验证状态现在也走服务端 prevalidate_status 参数,不再用当前页切片数 —— 那是错数。
-  const totalCount = useResourceTotal((params) => api.contest.listVulnProblems(params), [])
+  const totalCount = useResourceTotal((params) => api.contest.listVulnProblems(params), [], problems.refreshVersion)
   const draftCount = useResourceTotal(
     (params) => api.contest.listVulnProblems({ status: VulnProblemStatus.DRAFT, ...params }),
     [],
+    problems.refreshVersion,
   )
   const finalizedCount = useResourceTotal(
     (params) => api.contest.listVulnProblems({ status: VulnProblemStatus.FINALIZED, ...params }),
     [],
+    problems.refreshVersion,
   )
   const passedCount = useResourceTotal(
     (params) =>
@@ -160,6 +162,7 @@ export default function TeacherVulnWorkshopPage() {
         ...params,
       }),
     [],
+    problems.refreshVersion,
   )
   const unvalidatedCount = useResourceTotal(
     (params) =>
@@ -168,6 +171,7 @@ export default function TeacherVulnWorkshopPage() {
         ...params,
       }),
     [],
+    problems.refreshVersion,
   )
 
   const columns: TableColumn<VulnProblem>[] = [

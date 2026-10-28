@@ -724,7 +724,7 @@ func validateWorkspacePath(relativePath string) (string, error) {
 		}
 	}
 	out := path.Clean(cleanInput)
-	if out == "." || out == ".." || strings.HasPrefix(out, "../") || strings.Contains(out, "/../") {
+	if out == "." || out == ".." || strings.HasPrefix(out, "../") || strings.Contains(out, "/../") || workload.IsPrivateWorkspacePath(out) {
 		return "", apperr.ErrSandboxFileInvalid
 	}
 	return out, nil
@@ -1442,12 +1442,13 @@ func digestFromImageURL(imageURL string) string {
 	return parts[1]
 }
 
-// validateWorkspaceOps 校验运行时声明了文件、归档、脚本、自检和终端所需的受控命令。
+// validateWorkspaceOps 校验文件、归档、私有脚本、开放前清理、自检和终端的受控命令。
 func validateWorkspaceOps(ops WorkspaceOps) error {
-	if !explicitExecTarget(ops.ExecTarget) {
+	if !explicitExecTarget(ops.ExecTarget) || !explicitExecTarget(ops.ScriptExecTarget) {
 		return apperr.ErrSandboxWorkspaceOpsInvalid
 	}
 	helperCommands := [][]string{
+		ops.CleanWorkspace,
 		ops.ReadFile,
 		ops.WriteFile,
 		ops.ListFiles,
@@ -1533,6 +1534,9 @@ func validateAdapterExecTargets(spec *AdapterSpec) error {
 	workspaceContainer, ok := containers[strings.TrimSpace(spec.WorkspaceOps.ExecTarget)]
 	if !ok || !studentAccessibleContainer(workspaceContainer) || !shouldMountWorkspace(workspaceContainer) {
 		return apperr.ErrSandboxWorkspaceOpsInvalid
+	}
+	if _, err := initScriptExecTarget(*spec); err != nil {
+		return err
 	}
 	commands := []CapabilityCommandSpec{
 		spec.CapabilityCommands.Deploy,

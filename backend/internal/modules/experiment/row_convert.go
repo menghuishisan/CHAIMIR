@@ -144,13 +144,9 @@ func reportFromListRow(row sqlcgen.ListExperimentReportsRow) ExperimentReport {
 	return ExperimentReport{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, StudentID: row.StudentID, ContentRef: row.ContentRef, ManualScore: row.ManualScore, Comment: pgtypex.TextValue(row.Comment), Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}
 }
 
-// experimentScoreOutbox 转换实验得分事件 outbox 行。
-func experimentScoreOutbox(row sqlcgen.ExperimentScoreOutbox) (ExperimentScoreOutbox, error) {
-	score, err := pgtypex.NumericValue(row.Score)
-	if err != nil {
-		return ExperimentScoreOutbox{}, apperr.ErrExperimentEventFailed.WithCause(err)
-	}
-	return ExperimentScoreOutbox{ID: row.ID, TenantID: row.TenantID, ExperimentID: row.ExperimentID, InstanceID: row.InstanceID, StudentID: row.StudentID, Score: score, ScoreRevision: row.ScoreRevision, TraceID: row.TraceID, ScoredAt: timex.FromTimestamptz(row.ScoredAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt), LeaseToken: row.LeaseToken, LeaseUntil: timex.FromTimestamptz(row.LeaseUntil)}, nil
+// experimentEventOutbox 只转换持久化事件元数据，载荷由生产事务固化。
+func experimentEventOutbox(row sqlcgen.ExperimentEventOutbox) (ExperimentEventOutbox, error) {
+	return ExperimentEventOutbox{ID: row.ID, TenantID: row.TenantID, ExperimentID: row.ExperimentID, AggregateID: row.AggregateID, EventRevision: row.EventRevision, Subject: row.Subject, Payload: row.Payload, TraceID: row.TraceID, OccurredAt: timex.FromTimestamptz(row.OccurredAt), Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.FromTimestamptz(row.CreatedAt), UpdatedAt: timex.FromTimestamptz(row.UpdatedAt), LeaseToken: row.LeaseToken, LeaseUntil: timex.FromTimestamptz(row.LeaseUntil)}, nil
 }
 
 // decodeComponentConfig 解析组件 JSON,空值按空组件处理。

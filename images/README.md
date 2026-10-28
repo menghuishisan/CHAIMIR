@@ -62,7 +62,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/build-images.ps1 `
   -Platform linux/amd64
 ```
 
-脚本固定使用 `docker buildx build --push` 将镜像直接推入 `registry.chaimir.io`,并把 Registry 解析出的 digest 写入 `-DigestLockOut`。`-DigestLock` 同时作为构建依赖输入:例如 `base/judge-min` 依赖 `base/go-builder` 时,必须先让 `base/go-builder` 写入同一候选锁,后续镜像才能按 `registry.chaimir.io/base/go-builder@sha256:...` 构建。
+脚本固定使用 `docker buildx build --push` 将镜像直接推入 `registry.chaimir.io`,并把 Registry 解析出的 digest 写入 `-DigestLockOut`。构建或推送失败只按既定次数重试同一 builder 的完整命令;即使日志已出现导出 manifest,也不得推送本机同名 tag 来替代本次产物。只有该命令退出0才可读取 Registry digest并写入本镜像候选条目,重试耗尽必须阻断。`-DigestLock` 同时作为构建依赖输入:例如 `base/judge-min` 依赖 `base/go-builder` 时,必须先让 `base/go-builder` 写入同一候选锁,后续镜像才能按 `registry.chaimir.io/base/go-builder@sha256:...` 构建。
 
 构建脚本会根据 Dockerfile 中的受控镜像参数做内部依赖拓扑排序。网络代理或 registry mirror 只能配置在 Docker Desktop、BuildKit 或 CI runner 传输层,脚本和仓库配置不维护专用镜像源。
 
@@ -84,11 +84,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File images/pull-images.ps1 `
 - `frontend/**`、`images/service/frontend/**` 或 `base/node-builder` digest 变化: `-Images service/frontend`。
 - `backend/**`: `-Images service/backend,service/migrate,service/cron`,因为三个服务镜像都复制后端源码。
 - 仅修改某个 `images/service/<name>` Dockerfile 或 manifest: 只选择对应的 `service/<name>`。
+- `images/tool`、`images/infra`、`images/runtime` 或 `images/judger` 中的 `manifest.yaml` 变化: 同时选择 `service/migrate`,因为它把这四类目录声明复制到 `/app/images`。声明所属镜像仍按自身实际变更参与构建,不得只更新声明却继续发布携带旧目录的迁移镜像。
 - `base/go-builder`、`base/runtime-min`、`middleware/postgres` 变化: 根据 Dockerfile 的真实 `FROM` 依赖扩展到实际消费者,不受影响镜像不重复处理。
 
 前端镜像的日常构建还复用正式 BuildKit builder 上的两级缓存:依赖层使用 pnpm store cache,任务层使用挂载到 `/src/frontend/.turbo` 的 Turbo cache。`frontend/turbo.json` 只缓存各工作区真实产物 `dist/**`,并把构建期 `VITE_*` 配置纳入任务摘要;因此源码改动不会重新安装未变化的依赖,环境配置变化也不会恢复错误的旧静态资源。正式流水线必须复用持久化的项目 BuildKit builder,不得把缓存导出为运行镜像、临时 tag 或宿主机替代镜像;首次冷构建仍需完整执行 Vite 打包。
 
-构建资源必须与验收集群隔离:正式流水线使用独立的 Linux BuildKit runner 或独立 builder 节点,持久化 builder 本身的缓存和受控生命周期,不得让冷 Vite 打包与 Kind/Cilium 节点共享受限的 WSL 内存。Windows 宿主机仅用于复现项目入口和缓存命中,不能把暂停节点、临时提高 WSL 配额或宿主机工具链当作生产构建依赖;资源不足时应把同一不可变 Dockerfile 和 digest 锁交给正式 runner,不改变镜像来源或部署输入。
+开发测试阶段直接使用当前项目的 Docker BuildKit builder 构建并更新所选镜像，不以缺少独立 runner 阻断修复。构建使用同一 Dockerfile、依赖锁和持久化缓存，按镜像顺序执行以限制并行资源占用；仍须确认本次构建成功并使用新 digest 部署后执行完整端到端回归。生产 CI 可使用独立 Linux runner，但不形成另一套镜像或数据契约。
 
 选择性证明命令必须带 `-Images`、`-NoEnvWrite` 和 `-DigestFragmentsDir`;脚本只有在选定集合全部通过时才生成 `verified-images.lock`。再用 `images/sync-image-metadata.ps1 -FragmentsPath` 增量晋升正式锁、`deploy/base` 与资源所属 component 的镜像引用、`deploy/config/chaimir.env` 和存在时的环境 `backend/.env` 准入证明。未选镜像继续使用正式锁中的原 digest,不重复构建、拉取、扫描或签名。完成晋升后执行 `make dev-refresh`,检查只有受影响的工作负载滚动更新。
 

@@ -55,11 +55,11 @@ func (s *Service) CreatePaper(ctx context.Context, req CreatePaperRequest) (Pape
 		if err != nil {
 			return err
 		}
-		items, err := s.buildPaperItems(ctx, tx, id.TenantID, created.ID, req)
+		items, err := s.buildPaperItems(ctx, tx, id.TenantID, id.AccountID, created.ID, req)
 		if err != nil {
 			return err
 		}
-		detail, err = s.paperDetailFromItems(ctx, tx, id.TenantID, created, items)
+		detail, err = s.paperDetailFromItems(ctx, tx, id.TenantID, id.AccountID, created, items)
 		return err
 	}); err != nil {
 		return PaperDetailDTO{}, err
@@ -86,7 +86,7 @@ func (s *Service) GetPaperDetail(ctx context.Context, paperID int64) (PaperDetai
 		if err != nil {
 			return err
 		}
-		detail, err = s.paperDetailFromItems(ctx, tx, id.TenantID, paper, items)
+		detail, err = s.paperDetailFromItems(ctx, tx, id.TenantID, id.AccountID, paper, items)
 		return err
 	}); err != nil {
 		return PaperDetailDTO{}, err
@@ -106,15 +106,18 @@ func (s *Service) RegeneratePaper(ctx context.Context, paperID int64) (PaperDeta
 		if err != nil {
 			return mapPaperError(err)
 		}
+		if paper.AuthorID != id.AccountID {
+			return apperr.ErrPaperNotFound
+		}
 		if paper.GenMode != PaperModeRandom {
 			return apperr.ErrPaperRegenerateFailed
 		}
 		req := CreatePaperRequest{Name: paper.Name, GenMode: paper.GenMode, GenCriteria: paper.GenCriteria}
-		items, err := s.buildPaperItems(ctx, tx, id.TenantID, paper.ID, req)
+		items, err := s.buildPaperItems(ctx, tx, id.TenantID, id.AccountID, paper.ID, req)
 		if err != nil {
 			return err
 		}
-		detail, err = s.paperDetailFromItems(ctx, tx, id.TenantID, paper, items)
+		detail, err = s.paperDetailFromItems(ctx, tx, id.TenantID, id.AccountID, paper, items)
 		return err
 	}); err != nil {
 		return PaperDetailDTO{}, err
@@ -125,8 +128,8 @@ func (s *Service) RegeneratePaper(ctx context.Context, paperID int64) (PaperDeta
 	return paperDetailDTO(detail)
 }
 
-// buildPaperItems 生成手动或随机组卷题目集合。
-func (s *Service) buildPaperItems(ctx context.Context, tx TxStore, tenantID, paperID int64, req CreatePaperRequest) ([]PaperItem, error) {
+// buildPaperItems 按当前教师可见范围生成手动或随机组卷题目集合。
+func (s *Service) buildPaperItems(ctx context.Context, tx TxStore, tenantID, viewerID, paperID int64, req CreatePaperRequest) ([]PaperItem, error) {
 	if req.GenMode == PaperModeManual {
 		items := make([]PaperItem, 0, len(req.Items))
 		for i, input := range req.Items {
@@ -136,6 +139,9 @@ func (s *Service) buildPaperItems(ctx context.Context, tx TxStore, tenantID, pap
 			}
 			if item.TenantID != tenantID {
 				return nil, apperr.ErrContentSharedNotFound
+			}
+			if item.Visibility == VisibilityPrivate && item.AuthorID != viewerID {
+				return nil, apperr.ErrContentNotFound
 			}
 			if item.Status != StatusPublished {
 				return nil, apperr.ErrContentVersionNotPublished
@@ -148,7 +154,7 @@ func (s *Service) buildPaperItems(ctx context.Context, tx TxStore, tenantID, pap
 		}
 		return tx.ReplacePaperItems(ctx, tenantID, paperID, items)
 	}
-	picked, err := tx.RandomPickItems(ctx, tenantID, req.GenCriteria)
+	picked, err := tx.RandomPickItems(ctx, tenantID, viewerID, req.GenCriteria)
 	if err != nil {
 		return nil, apperr.ErrPaperGenerateFailed.WithCause(err)
 	}
@@ -167,13 +173,16 @@ func (s *Service) buildPaperItems(ctx context.Context, tx TxStore, tenantID, pap
 	return tx.ReplacePaperItems(ctx, tenantID, paperID, items)
 }
 
-// paperDetailFromItems 展开试卷题面快照。
-func (s *Service) paperDetailFromItems(ctx context.Context, tx TxStore, tenantID int64, paper Paper, items []PaperItem) (PaperWithItems, error) {
+// paperDetailFromItems 按当前教师可见范围展开题面,历史版本引用不绕过私有题归属。
+func (s *Service) paperDetailFromItems(ctx context.Context, tx TxStore, tenantID, viewerID int64, paper Paper, items []PaperItem) (PaperWithItems, error) {
 	out := PaperWithItems{Paper: paper, Items: make([]PaperItemFace, 0, len(items))}
 	for _, item := range items {
 		snapshot, err := tx.GetItemWithBodyByRef(ctx, tenantID, item.ItemCode, item.ItemVersion)
 		if err != nil {
 			return PaperWithItems{}, mapContentReadError(err)
+		}
+		if snapshot.Visibility == VisibilityPrivate && snapshot.AuthorID != viewerID {
+			return PaperWithItems{}, apperr.ErrContentNotFound
 		}
 		face, err := faceSnapshot(snapshot)
 		if err != nil {

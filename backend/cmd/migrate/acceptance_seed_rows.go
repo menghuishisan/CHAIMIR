@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"chaimir/internal/contracts"
+	"chaimir/internal/modules/contest"
 	"chaimir/internal/modules/experiment"
 	"chaimir/internal/modules/sandbox"
 	"chaimir/internal/platform/ids"
@@ -773,7 +774,7 @@ ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, sort=EXCLUDED.sort, deleted_a
 	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentVuln, "VULN-910000000000008042", "1.0.0", 2, "Vault withdraw 可重入漏洞", 1, bodyVuln, []string{"judge_config"}); err != nil {
 		return err
 	}
-	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentTheory, "quiz-bft-safety-liveness", "1.0.0", 3, "BFT 安全性与活性理解题", 2, bodyTheory, []string{"answer"}); err != nil {
+	if err := upsertContentItem(ctx, tx, acceptanceIDs.ContentTheory, "quiz-bft-safety-liveness", "1.0.0", 3, "BFT 安全性与活性理解题", 2, bodyTheory, []string{"answer", "explanation"}); err != nil {
 		return err
 	}
 	criteria, err := jsonb(map[string]any{})
@@ -1014,9 +1015,9 @@ ON CONFLICT (id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, course_id=EXCLUDED.
 		return err
 	}
 	return execJSON(ctx, tx, `
-INSERT INTO course_grade (id, tenant_id, course_id, student_id, auto_total, override_total, is_overridden, is_locked)
-VALUES ($1,$2,$3,$4,92.00,NULL,false,false)
-ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE SET auto_total=EXCLUDED.auto_total, override_total=EXCLUDED.override_total, is_overridden=EXCLUDED.is_overridden, is_locked=EXCLUDED.is_locked, updated_at=now()`,
+INSERT INTO course_grade (id, tenant_id, course_id, student_id, auto_total, override_total, is_overridden)
+VALUES ($1,$2,$3,$4,92.00,NULL,false)
+ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE SET auto_total=EXCLUDED.auto_total, override_total=EXCLUDED.override_total, is_overridden=EXCLUDED.is_overridden, updated_at=now()`,
 		acceptanceIDs.CourseGradeA, acceptanceIDs.TenantID, acceptanceIDs.Course, acceptanceIDs.StudentA)
 }
 
@@ -1068,6 +1069,7 @@ func acceptanceVulnerabilityDraftBody(composition contracts.SandboxCompositionSp
 	}
 	return map[string]any{
 		"scenario":        "在受控 EVM runtime 中验证可重入漏洞修复前后的链上行为。",
+		"statement":       "阅读 src/ReentrancyVault.sol 与 src/ReentrancyProbe.sol,在受控实验环境中复现先转账后更新余额导致的重入漏洞。初始化将部署金库并注入 2 ETH,再部署攻击探针。正向用例向探针投入 1 ETH 并调用 attack(),预期重入计数为 2;反向用例不执行攻击,计数应为 0。根据链上断言与交易回放确认两种状态,再按检查、更新状态、外部交互的顺序修复金库并重新验证。",
 		"contract":        "src/ReentrancyVault.sol",
 		"weakness":        "external call before balance update",
 		"composition":     composition,
@@ -1110,7 +1112,7 @@ func acceptanceVulnerabilityPrevalidateDetail() map[string]any {
 				"case":           "攻击应触发两次重入回调",
 				"passed":         true,
 				"expected_label": "重入计数应为 2",
-				"actual":         "1",
+				"actual":         "0",
 				"hint":           "",
 			}},
 		},
@@ -1135,9 +1137,9 @@ func acceptanceBattleJudgeExpectation() map[string]any {
 // acceptanceBattleChainSteps 构造由 M3 在对局沙箱中真实执行的完整攻防序列。
 func acceptanceBattleChainSteps() []map[string]any {
 	return []map[string]any{
-		{"op": "deploy", "payload": map[string]any{"contract_ref": "defense", "compile": true, "project_dir": "/workspace/battle/entry_b", "artifact": "out/VaultDefense.sol/VaultDefense.json"}},
+		{"op": "deploy", "payload": map[string]any{"contract_ref": "defense", "compile": true, "project_dir": "/workspace/battle/defense", "artifact": "out/VaultDefense.sol/VaultDefense.json"}},
 		{"op": "tx", "payload": map[string]any{"target_ref": "defense", "data": "0xd0e30db0", "value": "1000000000000000000"}},
-		{"op": "deploy", "payload": map[string]any{"contract_ref": "attack", "compile": true, "project_dir": "/workspace/battle/entry_a", "artifact": "out/ReentrancyAttack.sol/ReentrancyAttack.json", "constructor_args": []map[string]any{{"type": "address", "target_ref": "defense"}}}},
+		{"op": "deploy", "payload": map[string]any{"contract_ref": "attack", "compile": true, "project_dir": "/workspace/battle/attack", "artifact": "out/ReentrancyAttack.sol/ReentrancyAttack.json", "constructor_args": []map[string]any{{"type": "address", "target_ref": "defense"}}}},
 		{"op": "tx", "payload": map[string]any{"target_ref": "attack", "data": "0x9e5faafc", "value": "1000000000000000000"}},
 		{"op": "tx", "payload": map[string]any{"target_ref": "defense", "data": "0x3ccfd60b"}},
 	}
@@ -1256,10 +1258,23 @@ ON CONFLICT (tenant_id, instance_id, student_id) DO UPDATE SET content_ref=EXCLU
 		return err
 	}
 	return execJSON(ctx, tx, `
-INSERT INTO experiment_score_outbox (id, tenant_id, experiment_id, instance_id, student_id, score, score_revision, trace_id, scored_at, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
-VALUES ($1,$2,$3,$4,$5,128.50,1,'trace-acceptance-experiment-score',now(),3,0,NULL,now(),now(),'',NULL)
-ON CONFLICT (tenant_id, instance_id, score_revision) DO UPDATE SET experiment_id=EXCLUDED.experiment_id, student_id=EXCLUDED.student_id, score=EXCLUDED.score, trace_id=EXCLUDED.trace_id, scored_at=EXCLUDED.scored_at, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, last_error=NULL, updated_at=now(), lease_token='', lease_until=NULL`,
-		acceptanceIDs.ExperimentScoreOutbox, acceptanceIDs.TenantID, acceptanceIDs.Experiment, acceptanceIDs.ExperimentInstance, acceptanceIDs.StudentA)
+INSERT INTO experiment_event_outbox (id,tenant_id,experiment_id,aggregate_id,event_revision,trace_id,occurred_at,subject,payload)
+SELECT $1,e.tenant_id,e.id,i.id,1,'trace-acceptance-experiment-score',i.finished_at,'experiment.scored',
+    jsonb_build_object('event_id',$1::bigint::text,'tenant_id',e.tenant_id,'trace_id','trace-acceptance-experiment-score',
+        'experiment_id',e.id,'experiment_name',e.name,'course_id',COALESCE(e.course_id,0),
+        'source_revision',(extract(epoch FROM e.updated_at)*1000000)::bigint,'available',e.status=2 AND e.deleted_at IS NULL,
+        'instance_id',i.id,'student_id',i.owner_account_id,
+        'student_ids',CASE WHEN i.group_id IS NULL THEN jsonb_build_array(i.owner_account_id)
+            ELSE (SELECT jsonb_agg(g.student_id ORDER BY g.student_id) FROM group_member g WHERE g.tenant_id=i.tenant_id AND g.group_id=i.group_id) END,
+        'score',i.score,'score_revision',1,'scored_at',i.finished_at,
+        'source_max_score',COALESCE((SELECT sum((cp->>'score')::numeric) FROM jsonb_array_elements(e.components->'checkpoints') cp),0)+CASE WHEN e.require_report THEN 100 ELSE 0 END,
+        'max_score',COALESCE((SELECT sum((cp->>'score')::numeric) FROM jsonb_array_elements(e.components->'checkpoints') cp),0)
+            +CASE WHEN e.require_report THEN 100*CASE WHEN i.group_id IS NULL THEN 1 ELSE (SELECT count(*) FROM group_member g WHERE g.tenant_id=i.tenant_id AND g.group_id=i.group_id) END ELSE 0 END,
+        'pending',EXISTS(SELECT 1 FROM experiment_report r WHERE r.tenant_id=i.tenant_id AND r.instance_id=i.id AND r.status=1))
+FROM experiment e JOIN experiment_instance i ON i.tenant_id=e.tenant_id AND i.experiment_id=e.id
+WHERE e.tenant_id=$2 AND e.id=$3 AND i.id=$4
+ON CONFLICT DO NOTHING`,
+		acceptanceIDs.ExperimentEventOutbox, acceptanceIDs.TenantID, acceptanceIDs.Experiment, acceptanceIDs.ExperimentInstance)
 }
 
 // seedSimRows 写入验收用的仿真会话、动作、检查点和分享码。
@@ -1510,33 +1525,36 @@ INSERT INTO battle_entry (id, tenant_id, contest_id, problem_id, team_id, role, 
 		acceptanceIDs.BattleEntryB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleTeamB, refs.BattleEntryBRef, battleEntryBHash); err != nil {
 		return err
 	}
-	scoreDelta, err := jsonb(map[string]any{
-		"team_a": ids.Format(acceptanceIDs.BattleTeamA), "team_b": ids.Format(acceptanceIDs.BattleTeamB),
-		"rating_a_before": 1200, "rating_b_before": 1200, "rating_a_after": 1184, "rating_b_after": 1216,
-		"delta_a": -16, "delta_b": 16, "k_factor": 32, "result": 2,
-	})
+	// 历史夹具固定为 A 攻方胜;胜负、积分变化和榜单共用这一份历史结果。
+	// 这些数值描述该历史对局,不替代正式撮合读取的环境配置或真实比赛验收。
+	outcome := contest.BattleScoreDeltaDTO{
+		TeamAID: ids.ID(acceptanceIDs.BattleTeamA), TeamBID: ids.ID(acceptanceIDs.BattleTeamB),
+		RatingABefore: 1200, RatingBBefore: 1200, RatingAAfter: 1216, RatingBAfter: 1184,
+		DeltaA: 16, DeltaB: -16, KFactor: 32, Result: contest.BattleResultAWin,
+	}
+	scoreDelta, err := jsonb(outcome)
 	if err != nil {
 		return fmt.Errorf("编码对局积分变更失败: %w", err)
 	}
 	if err := execJSON(ctx, tx, `
 	INSERT INTO battle_match (id, tenant_id, contest_id, problem_id, entry_a_id, entry_b_id, source_ref, scope_ref, sandbox_ref, judge_task_ref, result, score_delta, replay_ref, status, matched_at, finished_at)
-		VALUES ($1,$2,$3,$4,$5,$6,'contest:2026:battle:acceptance-001','contest:2026:battle:acceptance-001','910000000000001041',$8,2,$7,NULL,3,now() - interval '18 minutes',now() - interval '10 minutes')
+		VALUES ($1,$2,$3,$4,$5,$6,'contest:2026:battle:acceptance-001','contest:2026:battle:acceptance-001','910000000000001041',$8,$9,$7,NULL,3,now() - interval '18 minutes',now() - interval '10 minutes')
 	ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, problem_id=EXCLUDED.problem_id, entry_a_id=EXCLUDED.entry_a_id, entry_b_id=EXCLUDED.entry_b_id, scope_ref=EXCLUDED.scope_ref, sandbox_ref=EXCLUDED.sandbox_ref, judge_task_ref=EXCLUDED.judge_task_ref, result=EXCLUDED.result, score_delta=EXCLUDED.score_delta, status=EXCLUDED.status, matched_at=EXCLUDED.matched_at, finished_at=EXCLUDED.finished_at`,
-		acceptanceIDs.BattleMatch, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleEntryA, acceptanceIDs.BattleEntryB, scoreDelta, ids.Format(acceptanceIDs.BattleJudgeTask)); err != nil {
+		acceptanceIDs.BattleMatch, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleContestProblem, acceptanceIDs.BattleEntryA, acceptanceIDs.BattleEntryB, scoreDelta, ids.Format(acceptanceIDs.BattleJudgeTask), outcome.Result); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO ladder_rank (id, tenant_id, contest_id, team_id, score, solved_count, last_solve_at, rank)
-VALUES ($1,$2,$3,$4,1184.00,0,now() - interval '10 minutes',2)
+VALUES ($1,$2,$3,$4,$5,0,NULL,1)
 ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, team_id=EXCLUDED.team_id, score=EXCLUDED.score, solved_count=EXCLUDED.solved_count, last_solve_at=EXCLUDED.last_solve_at, rank=EXCLUDED.rank, updated_at=now()`,
-		acceptanceIDs.BattleLadderRankA, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleTeamA); err != nil {
+		acceptanceIDs.BattleLadderRankA, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleTeamA, outcome.RatingAAfter); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO ladder_rank (id, tenant_id, contest_id, team_id, score, solved_count, last_solve_at, rank)
-VALUES ($1,$2,$3,$4,1216.00,0,now() - interval '10 minutes',1)
+VALUES ($1,$2,$3,$4,$5,0,NULL,2)
 ON CONFLICT (id) DO UPDATE SET contest_id=EXCLUDED.contest_id, team_id=EXCLUDED.team_id, score=EXCLUDED.score, solved_count=EXCLUDED.solved_count, last_solve_at=EXCLUDED.last_solve_at, rank=EXCLUDED.rank, updated_at=now()`,
-		acceptanceIDs.BattleLadderRankB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleTeamB); err != nil {
+		acceptanceIDs.BattleLadderRankB, acceptanceIDs.TenantID, acceptanceIDs.BattleContest, acceptanceIDs.BattleTeamB, outcome.RatingBAfter); err != nil {
 		return err
 	}
 	sourceConfig, err := jsonb(map[string]any{"source": "teacher-curated", "license": "internal-training"})
@@ -1631,7 +1649,7 @@ ON CONFLICT (tenant_id, name) DO UPDATE SET start_date=EXCLUDED.start_date, end_
 	// 关闭同一验收课程上一次浏览器回归留下的未完成申诉,恢复可重复提交的基线。
 	if err := execJSON(ctx, tx, `
 UPDATE grade_appeal
-SET status=3, result_comment='验收种子已关闭上一轮未完成申诉。', handled_at=now()
+SET status=4, result_comment='验收种子已取消上一轮未完成申诉。', handled_at=now()
 WHERE tenant_id=$1 AND student_id=$2 AND course_id=$3 AND status IN (1,2) AND id<>$4`,
 		acceptanceIDs.TenantID, acceptanceIDs.StudentA, acceptanceIDs.Course, acceptanceIDs.GradeAppeal); err != nil {
 		return err
@@ -1643,6 +1661,28 @@ ON CONFLICT (id) DO UPDATE SET semester_id=EXCLUDED.semester_id, submitter_id=EX
 		acceptanceIDs.GradeReview, acceptanceIDs.TenantID, acceptanceIDs.Course, acceptanceIDs.Semester, acceptanceIDs.TeacherMain, acceptanceIDs.SchoolAdmin); err != nil {
 		return err
 	}
+	// 历史完成申诉引用真实解锁修订;最终审核再以更大修订锁定课程。
+	if err := execJSON(ctx, tx, `
+INSERT INTO grade_lock_outbox(id,tenant_id,review_id,course_id,locked,reason,trace_id,status)
+VALUES ($1,$2,$3,$4,false,'acceptance_appeal','acceptance_seed',3)
+ON CONFLICT (id) DO UPDATE SET locked=false`,
+		acceptanceIDs.GradeReview+199, acceptanceIDs.TenantID, acceptanceIDs.GradeReview, acceptanceIDs.Course); err != nil {
+		return err
+	}
+	// 初始审核与M6课程投影使用同一持久修订,避免已有及未来成绩出现解锁种子。
+	if err := execJSON(ctx, tx, `
+WITH event AS (
+ INSERT INTO grade_lock_outbox(id,tenant_id,review_id,course_id,locked,reason,trace_id,status)
+ VALUES ($1,$2,$3,$4,true,'acceptance_seed','acceptance_seed',3)
+ ON CONFLICT (id) DO UPDATE SET locked=true, updated_at=now()
+ RETURNING revision
+)
+UPDATE course SET grades_locked=true, grade_lock_revision=event.revision
+FROM event WHERE course.tenant_id=$2 AND course.id=$4`,
+		acceptanceIDs.GradeReview+200, acceptanceIDs.TenantID, acceptanceIDs.GradeReview, acceptanceIDs.Course); err != nil {
+		return err
+	}
+
 	if err := execJSON(ctx, tx, `
 INSERT INTO student_semester_grade (id, tenant_id, student_id, semester_id, total_credits, gpa, cumulative_gpa)
 VALUES ($1,$2,$3,$4,3.0,3.650,3.650)
@@ -1651,10 +1691,11 @@ ON CONFLICT (tenant_id, student_id, semester_id) DO UPDATE SET total_credits=EXC
 		return err
 	}
 	if err := execJSON(ctx, tx, `
-INSERT INTO grade_appeal (id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, handled_at)
-VALUES ($1,$2,$3,$4,'申请复核报告人工评分中对攻击路径描述部分的扣分。',3,$5,'复核后维持原分,教师已补充评语。',now())
-ON CONFLICT (id) DO UPDATE SET reason=EXCLUDED.reason, status=EXCLUDED.status, handler_id=EXCLUDED.handler_id, result_comment=EXCLUDED.result_comment, handled_at=EXCLUDED.handled_at`,
-		acceptanceIDs.GradeAppeal, acceptanceIDs.TenantID, acceptanceIDs.StudentA, acceptanceIDs.Course, acceptanceIDs.TeacherMain); err != nil {
+INSERT INTO grade_appeal (id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, handled_at, unlock_revision)
+SELECT $1,$2,$3,$4,'申请复核报告人工评分中对攻击路径描述部分的扣分。',3,$5,'复核后维持原分,教师已补充评语。',now(),revision
+FROM grade_lock_outbox WHERE id=$6 AND tenant_id=$2 AND course_id=$4 AND NOT locked
+ON CONFLICT (id) DO UPDATE SET reason=EXCLUDED.reason, status=EXCLUDED.status, handler_id=EXCLUDED.handler_id, result_comment=EXCLUDED.result_comment, handled_at=EXCLUDED.handled_at, unlock_revision=EXCLUDED.unlock_revision`,
+		acceptanceIDs.GradeAppeal, acceptanceIDs.TenantID, acceptanceIDs.StudentA, acceptanceIDs.Course, acceptanceIDs.TeacherMain, acceptanceIDs.GradeReview+199); err != nil {
 		return err
 	}
 	detail, err := jsonb(map[string]any{"gpa": 1.95, "suggestion": "建议预约导师并完成补强练习"})
@@ -1662,8 +1703,8 @@ ON CONFLICT (id) DO UPDATE SET reason=EXCLUDED.reason, status=EXCLUDED.status, h
 		return fmt.Errorf("编码学业预警详情失败: %w", err)
 	}
 	if err := execJSON(ctx, tx, `
-INSERT INTO academic_warning (id, tenant_id, student_id, semester_id, type, detail, status)
-VALUES ($1,$2,$3,$4,2,$5,1)
+INSERT INTO academic_warning (id, tenant_id, student_id, semester_id, type, detail, status, notify_trace_id)
+VALUES ($1,$2,$3,$4,2,$5,1,'acceptance_seed')
 ON CONFLICT (id) DO UPDATE SET type=EXCLUDED.type, detail=EXCLUDED.detail, status=EXCLUDED.status`,
 		acceptanceIDs.AcademicWarning, acceptanceIDs.TenantID, acceptanceIDs.StudentC, acceptanceIDs.Semester, detail); err != nil {
 		return err

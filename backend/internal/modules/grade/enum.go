@@ -33,8 +33,6 @@ const (
 	WarningStatusPending int16 = 1
 	// WarningStatusAcknowledged 表示学生已经确认预警。
 	WarningStatusAcknowledged int16 = 2
-	// WarningStatusNotifyFailed 表示预警通知事件发布失败。
-	WarningStatusNotifyFailed int16 = 3
 )
 
 const (

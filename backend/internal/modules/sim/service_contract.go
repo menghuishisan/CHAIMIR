@@ -3,6 +3,7 @@ package sim
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -27,6 +28,9 @@ func (s *Service) CreateSession(ctx context.Context, req contracts.SimCreateSess
 	}
 	if !auth.ServiceSourceRefAuthorized(ctx, req.SourceRef) {
 		return contracts.SimSessionInfo{}, apperr.ErrServiceUnauthorized
+	}
+	if err := s.requireSessionModules(ctx, req.TenantID, req.SourceRef); err != nil {
+		return contracts.SimSessionInfo{}, err
 	}
 	sharedAccountIDs, err := normalizeSessionSharedAccountIDs(req.OwnerAccountID, req.AuthorizedAccountIDs)
 	if err != nil {
@@ -196,12 +200,16 @@ func (s *Service) UpdateSessionAuthorizedAccounts(ctx context.Context, req contr
 	}); err != nil {
 		return err
 	}
+	var closeErrs []error
 	if s.wsHub != nil {
 		for _, accountID := range revoked {
 			if err := s.wsHub.CloseSession(ws.SessionKey{TenantID: req.TenantID, AccountID: accountID, Scope: simSessionSessionScope(req.SessionID)}); err != nil {
-				return apperr.ErrSimBackendComputeUnavailable.WithCause(err)
+				closeErrs = append(closeErrs, fmt.Errorf("关闭已撤销仿真成员连接失败: tenant_id=%d session_id=%d account_id=%d: %w", req.TenantID, req.SessionID, accountID, err))
 			}
 		}
+	}
+	if err := errors.Join(closeErrs...); err != nil {
+		return apperr.ErrSimBackendComputeUnavailable.WithCause(err)
 	}
 	return nil
 }

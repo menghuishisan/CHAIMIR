@@ -4,7 +4,7 @@
 // 上一段的检查点结果流到下一段(param_bindings)。
 // 阶段号由列表顺序决定,不让教师手填 —— 顺序即语义。
 
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, Layers, Plus, Trash2 } from 'lucide-react'
 import type { ParamBinding, StageConfig, UnlockCondition } from '@chaimir/api-client'
 import {
@@ -31,6 +31,7 @@ import {
   Textarea,
 } from '@chaimir/ui'
 import type { ExperimentDraft } from './wizard-state'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 
 export interface WizardStagesStepProps {
   draft: ExperimentDraft
@@ -55,7 +56,7 @@ export function WizardStagesStep({ draft, errors, onChange }: WizardStagesStepPr
         },
       })
     },
-    [draft.components, onChange],
+    [draft.components, onChange]
   )
 
   const move = useCallback(
@@ -67,7 +68,7 @@ export function WizardStagesStep({ draft, errors, onChange }: WizardStagesStepPr
       next.splice(target, 0, moved)
       writeStages(next)
     },
-    [draft.components.stages, writeStages],
+    [draft.components.stages, writeStages]
   )
 
   return (
@@ -77,7 +78,7 @@ export function WizardStagesStep({ draft, errors, onChange }: WizardStagesStepPr
       <Card>
         <CardHeader
           title="实验阶段"
-          description="按顺序推进的几段实验。前一段的检查点通过后解锁下一段。"
+          description="按顺序推进实验,每个环境与场景分配给一个阶段,再设置各阶段的进入条件。"
           actions={
             <Button variant="outline" size="sm" leftIcon={Plus} onClick={() => setModal({})}>
               添加阶段
@@ -107,7 +108,9 @@ export function WizardStagesStep({ draft, errors, onChange }: WizardStagesStepPr
                         <span className="min-w-0 truncate text-base text-ink">{stage.title}</span>
                       </div>
                       {stage.description ? (
-                        <p className="mt-1 line-clamp-2 text-xs text-ink-sub">{stage.description}</p>
+                        <p className="mt-1 line-clamp-2 text-xs text-ink-sub">
+                          {stage.description}
+                        </p>
                       ) : null}
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                         {(stage.components.envs ?? []).map((envId, envIndex) => (
@@ -169,7 +172,9 @@ export function WizardStagesStep({ draft, errors, onChange }: WizardStagesStepPr
       {modal ? (
         <StageFormModal
           stage={modal.index !== undefined ? draft.components.stages[modal.index] : undefined}
-          stageNumber={modal.index !== undefined ? modal.index + 1 : draft.components.stages.length + 1}
+          stageNumber={
+            modal.index !== undefined ? modal.index + 1 : draft.components.stages.length + 1
+          }
           draft={draft}
           onClose={() => setModal(undefined)}
           onSave={(stage) => {
@@ -190,9 +195,7 @@ export function WizardStagesStep({ draft, errors, onChange }: WizardStagesStepPr
 function unlockSummary(condition: UnlockCondition | undefined): string {
   if (!condition) return '直接进入'
   if (condition.type === 'manual') return '由老师开放'
-  return condition.min_score
-    ? `检查点达到 ${condition.min_score} 分后进入`
-    : '通过指定检查点后进入'
+  return condition.min_score ? `检查点达到 ${condition.min_score} 分后进入` : '通过指定检查点后进入'
 }
 
 interface StageFormModalProps {
@@ -224,57 +227,64 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
   const [envIds, setEnvIds] = useState<string[]>(stage?.components.envs ?? [])
   const [simIds, setSimIds] = useState<string[]>(stage?.components.sims ?? [])
   const [unlockType, setUnlockType] = useState<'none' | 'checkpoint' | 'manual'>(
-    stage?.unlock_condition ? stage.unlock_condition.type : 'none',
+    stage?.unlock_condition ? stage.unlock_condition.type : 'none'
   )
   const [unlockCheckpoint, setUnlockCheckpoint] = useState(
-    stage?.unlock_condition?.checkpoint_id ?? '',
+    stage?.unlock_condition?.checkpoint_id ?? ''
   )
   const [minScore, setMinScore] = useState(String(stage?.unlock_condition?.min_score ?? ''))
   const [bindings, setBindings] = useState<ParamBindingDraft[]>(() =>
-    (stage?.param_bindings ?? []).map(paramBindingDraft),
+    (stage?.param_bindings ?? []).map(paramBindingDraft)
   )
-  const [formError, setFormError] = useState<string>()
+  const occupied = useMemo(() => {
+    const others = draft.components.stages.filter((item) => item.stage !== stage?.stage)
+    return {
+      envs: new Set(others.flatMap((item) => item.components.envs ?? [])),
+      sims: new Set(others.flatMap((item) => item.components.sims ?? [])),
+    }
+  }, [draft.components.stages, stage?.stage])
 
-  const submit = useCallback(() => {
-    if (title.trim() === '') {
-      setFormError('请输入阶段名称')
-      return
-    }
-    if (envIds.length === 0 && simIds.length === 0) {
-      setFormError('请至少启用一个环境或场景,否则这个阶段没有内容')
-      return
-    }
-    if (unlockType === 'checkpoint' && unlockCheckpoint === '') {
-      setFormError('请选择作为进入条件的检查点')
-      return
-    }
-
-    const normalizedBindings: ParamBinding[] = []
+  // 固定值只解析一次,校验与保存消费同一结果,保留数字、布尔值等JSON类型。
+  const parsedBindings = useMemo(() => {
+    const value: ParamBinding[] = []
     for (let index = 0; index < bindings.length; index += 1) {
       const { constantValueText, ...binding } = bindings[index]
       if (!simIds.includes(binding.target_component)) {
-        setFormError(`第 ${index + 1} 条参数传递的目标必须是本阶段已启用的仿真场景`)
-        return
+        return { value, error: `第 ${index + 1} 条参数传递的目标必须是本阶段已启用的仿真场景` }
       }
       if (binding.source_type === 'constant') {
         if (constantValueText.trim() === '') {
-          setFormError(`第 ${index + 1} 条参数传递请填写固定值`)
-          return
+          return { value, error: `第 ${index + 1} 条参数传递请填写固定值` }
         }
         try {
-          normalizedBindings.push({
+          value.push({
             ...binding,
             constant_value: JSON.parse(constantValueText) as unknown,
           })
         } catch {
-          setFormError(`第 ${index + 1} 条固定值不是有效的 JSON,请按示例补全`)
-          return
+          return { value, error: `第 ${index + 1} 条固定值格式不正确,请按示例补全` }
         }
       } else {
-        normalizedBindings.push(binding)
+        value.push(binding)
       }
     }
-    setFormError(undefined)
+    return { value, error: null }
+  }, [bindings, simIds])
+
+  const { errors, validate } = useFormValidation(() => ({
+    title: title.trim() ? null : '请输入阶段名称',
+    components: envIds.length === 0 && simIds.length === 0
+      ? '请至少启用一个环境或场景,否则这个阶段没有内容'
+      : envIds.some((id) => occupied.envs.has(id)) || simIds.some((id) => occupied.sims.has(id))
+        ? '每个环境与场景只能分配给一个阶段,请先从其他阶段移除' : null,
+    checkpoint: unlockType === 'checkpoint' && unlockCheckpoint === '' ? '请选择作为进入条件的检查点' : null,
+    minScore: unlockType === 'checkpoint' && minScore.trim() !== '' && (!Number.isFinite(Number(minScore)) || Number(minScore) < 0)
+      ? '最低得分需要填写不小于 0 的数字' : null,
+    bindings: parsedBindings.error,
+  }))
+
+  const submit = useCallback(() => {
+    if (!validate()) return
 
     const unlock: UnlockCondition | undefined =
       unlockType === 'none'
@@ -284,7 +294,7 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
           : {
               type: 'checkpoint',
               checkpoint_id: unlockCheckpoint,
-              min_score: minScore === '' ? undefined : Number(minScore),
+              min_score: minScore.trim() === '' ? undefined : Number(minScore),
             }
 
     onSave({
@@ -293,40 +303,49 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
       description: description.trim() === '' ? undefined : description.trim(),
       components: { envs: envIds, sims: simIds },
       unlock_condition: unlock,
-      param_bindings: normalizedBindings.length > 0 ? normalizedBindings : undefined,
+      param_bindings: parsedBindings.value.length > 0 ? parsedBindings.value : undefined,
     })
   }, [
-    bindings,
     description,
     envIds,
     minScore,
     onSave,
+    parsedBindings.value,
     simIds,
     stageNumber,
     title,
     unlockCheckpoint,
     unlockType,
+    validate,
   ])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
       <ModalContent size="xl">
         <ModalHeader>
-          <ModalTitle>{editing ? `编辑第 ${stageNumber} 阶段` : `添加第 ${stageNumber} 阶段`}</ModalTitle>
+          <ModalTitle>
+            {editing ? `编辑第 ${stageNumber} 阶段` : `添加第 ${stageNumber} 阶段`}
+          </ModalTitle>
           <ModalDescription>
             选择这个阶段启用哪些组件、什么条件下解锁,以及是否把上一阶段的判分结果作为参数传入。
           </ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
-          <FormField label="阶段名称" htmlFor="stage-title" required>
+          <FormField label="阶段名称" htmlFor="stage-title" required error={errors.title}>
             <Input
               id="stage-title"
               value={title}
+              invalid={Boolean(errors.title)}
+              onBlur={() => validate(['title'])}
               onChange={(event) => setTitle(event.target.value)}
             />
           </FormField>
 
-          <FormField label="阶段说明" htmlFor="stage-description" helper="学生在工作台左栏看到的本阶段目标">
+          <FormField
+            label="阶段说明"
+            htmlFor="stage-description"
+            helper="学生在工作台左栏看到的本阶段目标"
+          >
             <Textarea
               id="stage-description"
               value={description}
@@ -335,6 +354,7 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
             />
           </FormField>
 
+          {errors.components ? <Callout tone="danger">{errors.components}</Callout> : null}
           <FormField label="启用的代码环境" helper="不勾选表示这个阶段不用代码环境">
             {draft.components.envs.length === 0 ? (
               <Callout tone="info">上一步还没有配置代码环境。</Callout>
@@ -344,10 +364,13 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
                   <Checkbox
                     key={env.id}
                     checked={envIds.includes(env.id)}
-                    label={`代码环境 ${index + 1} · ${env.runtimes.map((runtime) => runtime.runtime_code).join(' / ')}`}
+                    disabled={occupied.envs.has(env.id)}
+                    label={`代码环境 ${index + 1} · ${env.runtimes.map((runtime) => runtime.runtime_code).join(' / ')}${occupied.envs.has(env.id) ? '（已用于其他阶段）' : ''}`}
                     onCheckedChange={(checked) =>
                       setEnvIds((current) =>
-                        checked === true ? [...current, env.id] : current.filter((id) => id !== env.id),
+                        checked === true
+                          ? [...current, env.id]
+                          : current.filter((id) => id !== env.id)
                       )
                     }
                   />
@@ -365,10 +388,13 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
                   <Checkbox
                     key={sim.id}
                     checked={simIds.includes(sim.id)}
-                    label={`仿真场景 ${index + 1} · ${sim.package_code}`}
+                    disabled={occupied.sims.has(sim.id)}
+                    label={`仿真场景 ${index + 1} · ${sim.package_code}${occupied.sims.has(sim.id) ? '（已用于其他阶段）' : ''}`}
                     onCheckedChange={(checked) =>
                       setSimIds((current) =>
-                        checked === true ? [...current, sim.id] : current.filter((id) => id !== sim.id),
+                        checked === true
+                          ? [...current, sim.id]
+                          : current.filter((id) => id !== sim.id)
                       )
                     }
                   />
@@ -392,7 +418,7 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
 
           {unlockType === 'checkpoint' ? (
             <div className="grid gap-4 well p-4 sm:grid-cols-2">
-              <FormField label="作为条件的检查点" htmlFor="stage-unlock-checkpoint" required>
+              <FormField label="作为条件的检查点" htmlFor="stage-unlock-checkpoint" required error={errors.checkpoint}>
                 {draft.components.checkpoints.length === 0 ? (
                   <Callout tone="warning">
                     还没有检查点。请先完成第 4 步的检查点配置,再回来设置进入条件。
@@ -405,6 +431,8 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
                       label: `检查点 ${index + 1} · ${checkpoint.score} 分`,
                     }))}
                     value={unlockCheckpoint}
+                    invalid={Boolean(errors.checkpoint)}
+                    onBlur={() => validate(['checkpoint'])}
                     placeholder="选择检查点"
                     onValueChange={setUnlockCheckpoint}
                   />
@@ -414,12 +442,15 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
                 label="最低得分"
                 htmlFor="stage-unlock-score"
                 helper="留空表示通过即可,不要求分数"
+                error={errors.minScore}
               >
                 <Input
                   id="stage-unlock-score"
                   type="number"
                   min="0"
                   value={minScore}
+                  invalid={Boolean(errors.minScore)}
+                  onBlur={() => validate(['minScore'])}
                   onChange={(event) => setMinScore(event.target.value)}
                 />
               </FormField>
@@ -433,7 +464,7 @@ function StageFormModal({ stage, stageNumber, draft, onClose, onSave }: StageFor
             onChange={setBindings}
           />
 
-          {formError ? <Callout tone="danger">{formError}</Callout> : null}
+          {errors.bindings ? <Callout tone="danger">{errors.bindings}</Callout> : null}
         </ModalBody>
         <ModalFooter>
           <Button variant="outline" onClick={onClose}>
@@ -472,7 +503,7 @@ function ParamBindingsEditor({ draft, bindings, simIds, onChange }: ParamBinding
     (index: number, patch: Partial<ParamBindingDraft>) => {
       onChange(bindings.map((item, i) => (i === index ? { ...item, ...patch } : item)))
     },
-    [bindings, onChange],
+    [bindings, onChange]
   )
 
   return (
@@ -520,7 +551,9 @@ function ParamBindingsEditor({ draft, bindings, simIds, onChange }: ParamBinding
                 onValueChange={(value) => update(index, { target_component: value })}
               />
               {componentOptions.length === 0 ? (
-                <p className="mt-1 text-xs text-ink-sub">请先在本阶段启用仿真场景,参数才能传入该场景。</p>
+                <p className="mt-1 text-xs text-ink-sub">
+                  请先在本阶段启用仿真场景,参数才能传入该场景。
+                </p>
               ) : null}
             </FormField>
             <FormField

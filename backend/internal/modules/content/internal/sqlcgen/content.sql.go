@@ -1080,8 +1080,9 @@ SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags,
 FROM content_item
 WHERE tenant_id = $1 AND deleted_at IS NULL AND status = 2
   AND ($2::smallint = 0 OR type = $2)
-  AND (cardinality($3::smallint[]) = 0 OR difficulty = ANY($3::smallint[]))
-  AND (cardinality($4::text[]) = 0 OR knowledge_points && $4::text[])
+  AND (COALESCE(cardinality($3::smallint[]), 0) = 0 OR difficulty = ANY($3::smallint[]))
+  AND (COALESCE(cardinality($4::text[]), 0) = 0 OR knowledge_points && $4::text[])
+  AND (visibility <> 1 OR author_id = $6)
 ORDER BY random()
 LIMIT $5
 `
@@ -1092,6 +1093,7 @@ type RandomPickContentItemsParams struct {
 	Column3  []int16  `json:"column_3"`
 	Column4  []string `json:"column_4"`
 	Limit    int32    `json:"limit"`
+	ViewerID int64    `json:"viewer_id"`
 }
 
 func (q *Queries) RandomPickContentItems(ctx context.Context, arg RandomPickContentItemsParams) ([]ContentItem, error) {
@@ -1101,6 +1103,7 @@ func (q *Queries) RandomPickContentItems(ctx context.Context, arg RandomPickCont
 		arg.Column3,
 		arg.Column4,
 		arg.Limit,
+		arg.ViewerID,
 	)
 	if err != nil {
 		return nil, err

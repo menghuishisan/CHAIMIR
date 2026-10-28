@@ -9,7 +9,7 @@
 // 组件标识是教师显式维护的稳定引用键,后续阶段与检查点按它关联;输入格式与 M7 服务端校验一致。
 
 import { useCallback, useMemo, useState } from 'react'
-import { Link2, Network, Plus, Server, Trash2 } from 'lucide-react'
+import { Network, Plus, Server, Trash2 } from 'lucide-react'
 import {
   PAGINATION_MAX_SIZE,
   SANDBOX_ACCESS_PROFILE,
@@ -25,7 +25,6 @@ import {
   CardBody,
   CardHeader,
   Checkbox,
-  DescriptionList,
   Empty,
   FormField,
   IconButton,
@@ -43,12 +42,12 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { CompositionDeclarationFields } from '../../../sandbox/components/CompositionDeclarationFields'
 import {
   compositionDeclarationError,
   compositionSpecFromDeclaration,
   declarationFromSpec,
-  derivedInfraFromSpec,
 } from '../../../sandbox/composition'
 import { simCategoryLabel } from '../../../../utils/labels/sim'
 import type { ExperimentDraft } from './wizard-state'
@@ -285,7 +284,7 @@ interface EnvFormModalProps {
 /**
  * EnvFormModal 声明一个代码环境。
  * 运行时、镜像版本、工具与基础设施都从 M2 编排目录里选:手填编码会在学生进入时才发现拼错。
- * 连接由服务端编译器按组件声明产出,这里只读回显上次结果,不凭猜测新建。
+ * 连接候选由M2编译器提供,选完整后才能加入环境,草稿保存仍由外层提交。
  */
 function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
   const editing = env !== undefined
@@ -297,48 +296,26 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
   const [snapshotRetentionMinutes, setSnapshotRetentionMinutes] = useState(
     String(env?.snapshot_retention_minutes ?? 30)
   )
-  const [formError, setFormError] = useState<string>()
-
-  const derivedInfra = useMemo(() => derivedInfraFromSpec(env), [env])
-  // 连接原样带回,故引用要稳定:否则提交回调每次渲染都重建
-  const links = useMemo(() => env?.links ?? [], [env?.links])
+  const { errors, validate } = useFormValidation(() => ({
+    id: id.trim() === '' ? '请填写环境标识,后面的阶段与检查点会引用它'
+      : !COMPONENT_ID_PATTERN.test(id.trim()) ? '环境标识需为 1 至 64 位小写英文字母、数字或连字符,且首尾为字母或数字,例如 attack-node'
+        : !editing && usedIds.includes(id.trim()) ? '这个环境标识已被使用,请换一个' : null,
+    declaration: compositionDeclarationError(declaration) ?? null,
+    keepAlive: keepAlive && (keepAliveMinutes.trim() === '' || !Number.isInteger(Number(keepAliveMinutes)) || Number(keepAliveMinutes) <= 0)
+      ? '保留时长必须填写大于 0 的整数分钟数' : null,
+    snapshot: snapshotEnabled && (snapshotRetentionMinutes.trim() === '' || !Number.isInteger(Number(snapshotRetentionMinutes)) || Number(snapshotRetentionMinutes) <= 0)
+      ? '快照保留时长必须填写大于 0 的整数分钟数' : null,
+  }))
 
   const submit = useCallback(() => {
-    const trimmedId = id.trim()
-    if (trimmedId === '') {
-      setFormError('请填写环境标识,后面的阶段与检查点会引用它')
-      return
-    }
-    if (!COMPONENT_ID_PATTERN.test(trimmedId)) {
-      setFormError('环境标识需为 1 至 64 位小写英文字母、数字或连字符,且首尾为字母或数字,例如 attack-node')
-      return
-    }
-    if (!editing && usedIds.includes(trimmedId)) {
-      setFormError('这个环境标识已被使用,请换一个')
-      return
-    }
-    const declarationError = compositionDeclarationError(declaration)
-    if (declarationError !== undefined) {
-      setFormError(declarationError)
-      return
-    }
+    if (!validate()) return
     const keepAliveDuration = Number(keepAliveMinutes)
-    if (keepAlive && (!Number.isInteger(keepAliveDuration) || keepAliveDuration <= 0)) {
-      setFormError('保留时长必须填写大于 0 的整数分钟数')
-      return
-    }
     const snapshotRetention = Number(snapshotRetentionMinutes)
-    if (snapshotEnabled && (!Number.isInteger(snapshotRetention) || snapshotRetention <= 0)) {
-      setFormError('快照保留时长必须填写大于 0 的整数分钟数')
-      return
-    }
-    setFormError(undefined)
     const spec = compositionSpecFromDeclaration({
-      id: trimmedId,
+      id: id.trim(),
       declaration,
       accessProfile: SANDBOX_ACCESS_PROFILE.EXPERIMENT,
-      derivedInfra,
-      links,
+      base: env,
     })
     onSave({
       id: spec.id,
@@ -348,8 +325,11 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
       tools: spec.tools ?? [],
       links: spec.links ?? [],
       access_profile: spec.access_profile,
-      init_code_ref: env?.init_code_ref,
-      init_script_ref: env?.init_script_ref,
+      resource_profile: spec.resource_profile,
+      network_profile: spec.network_profile,
+      init_assets: spec.init_assets,
+      init_code_ref: spec.init_code_ref,
+      init_script_ref: spec.init_script_ref,
       keep_alive: keepAlive,
       keep_alive_minutes: keepAlive ? keepAliveDuration : 0,
       snapshot_enabled: snapshotEnabled,
@@ -357,18 +337,14 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
     })
   }, [
     declaration,
-    derivedInfra,
-    editing,
-    env?.init_code_ref,
-    env?.init_script_ref,
+    env,
     id,
     keepAlive,
     keepAliveMinutes,
-    links,
     onSave,
     snapshotEnabled,
     snapshotRetentionMinutes,
-    usedIds,
+    validate,
   ])
 
   return (
@@ -386,10 +362,13 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
             htmlFor="env-id"
             required
             helper="用于阶段与检查点之间引用,学生不会看到。使用小写英文字母、数字和连字符,例如 main 或 attack-node"
+            error={errors.id}
           >
             <Input
               id="env-id"
               value={id}
+              invalid={Boolean(errors.id)}
+              onBlur={() => validate(['id'])}
               disabled={editing}
               onChange={(event) => setId(event.target.value)}
             />
@@ -400,28 +379,8 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
             value={declaration}
             onChange={setDeclaration}
             toolsHelper="学生在这个环境里能打开哪些工具"
-            derivedInfraCodes={derivedInfra.map((item) => item.code)}
           />
-
-          {links.length > 0 ? (
-            <div className="flex flex-col gap-2 well p-4">
-              <div className="flex items-center gap-2">
-                <Link2 className="size-4 text-ink-sub" aria-hidden />
-                <h4 className="text-sm font-semibold text-ink">组件连接(只读)</h4>
-              </div>
-              <p className="text-sm text-ink-sub">
-                连接由平台按组件声明编译并冻结,保存时会重新校验。要改动请联系平台管理员调整组件声明。
-              </p>
-              <DescriptionList
-                dense
-                items={links.map((link) => ({
-                  term: `${link.source_component} → ${link.target_component}`,
-                  description: `${link.protocol} · ${link.target_endpoint}`,
-                  mono: true,
-                }))}
-              />
-            </div>
-          ) : null}
+          {errors.declaration ? <Callout tone="danger">{errors.declaration}</Callout> : null}
 
           <div className="flex flex-col gap-3 well p-4">
             <Checkbox
@@ -434,12 +393,15 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
                 label="保留时长(分钟)"
                 htmlFor="env-keepalive"
                 helper="超过后环境会被回收,学生下次进入会重新准备"
+                error={errors.keepAlive}
               >
                 <Input
                   id="env-keepalive"
                   type="number"
                   min="1"
                   value={keepAliveMinutes}
+                  invalid={Boolean(errors.keepAlive)}
+                  onBlur={() => validate(['keepAlive'])}
                   onChange={(event) => setKeepAliveMinutes(event.target.value)}
                 />
               </FormField>
@@ -454,25 +416,27 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
                 label="快照保留时长(分钟)"
                 htmlFor="env-snapshot-retention"
                 helper="超过后平台会清理快照,避免长期占用学校存储空间"
+                error={errors.snapshot}
               >
                 <Input
                   id="env-snapshot-retention"
                   type="number"
                   min="1"
                   value={snapshotRetentionMinutes}
+                  invalid={Boolean(errors.snapshot)}
+                  onBlur={() => validate(['snapshot'])}
                   onChange={(event) => setSnapshotRetentionMinutes(event.target.value)}
                 />
               </FormField>
             ) : null}
           </div>
 
-          {formError ? <Callout tone="danger">{formError}</Callout> : null}
         </ModalBody>
         <ModalFooter>
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="primary" onClick={submit}>
+          <Button variant="primary" onClick={submit} disabled={compositionDeclarationError(declaration) !== undefined}>
             {editing ? '保存环境' : '添加环境'}
           </Button>
         </ModalFooter>
@@ -499,7 +463,14 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
   const [packageCode, setPackageCode] = useState(sim?.package_code ?? '')
   const [version, setVersion] = useState(sim?.version ?? '')
   const [seed, setSeed] = useState(String(sim?.seed ?? 1))
-  const [formError, setFormError] = useState<string>()
+  const { errors, validate } = useFormValidation(() => ({
+    id: id.trim() === '' ? '请填写仿真场景标识'
+      : !COMPONENT_ID_PATTERN.test(id.trim()) ? '仿真场景标识需为 1 至 64 位小写英文字母、数字或连字符,且首尾为字母或数字,例如 mining-stage'
+        : !editing && usedIds.includes(id.trim()) ? '这个仿真场景标识已被使用,请换一个' : null,
+    package: packageCode === '' ? '请选择仿真场景' : null,
+    version: version === '' ? '请选择场景版本' : null,
+    seed: seed.trim() === '' || !Number.isSafeInteger(Number(seed)) || Number(seed) <= 0 ? '随机种子需要填写大于 0 的整数' : null,
+  }))
 
   const packages = useAsyncResource(
     () =>
@@ -542,34 +513,17 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
   )
 
   const submit = useCallback(() => {
-    const trimmedId = id.trim()
-    if (trimmedId === '') {
-      setFormError('请填写仿真场景标识')
-      return
-    }
-    if (!COMPONENT_ID_PATTERN.test(trimmedId)) {
-      setFormError('仿真场景标识需为 1 至 64 位小写英文字母、数字或连字符,且首尾为字母或数字,例如 mining-stage')
-      return
-    }
-    if (!editing && usedIds.includes(trimmedId)) {
-      setFormError('这个仿真场景标识已被使用,请换一个')
-      return
-    }
-    if (packageCode === '' || version === '') {
-      setFormError('请选择仿真场景与版本')
-      return
-    }
-    setFormError(undefined)
+    if (!validate()) return
     onSave({
-      id: trimmedId,
+      id: id.trim(),
       package_code: packageCode,
       version,
-      seed: Number(seed) || 1,
+      seed: Number(seed),
       // 场景初始参数由仿真包自身声明默认值;编排层不构造参数对象,
       // 需要按阶段传参时用阶段的参数绑定(第 3 步)表达
       params: sim?.params ?? {},
     })
-  }, [editing, id, onSave, packageCode, seed, sim?.params, usedIds, version])
+  }, [id, onSave, packageCode, seed, sim?.params, validate, version])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -586,10 +540,13 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
             htmlFor="sim-id"
             required
             helper="用于阶段与检查点之间引用,学生不会看到。使用小写英文字母、数字和连字符,例如 mining-stage"
+            error={errors.id}
           >
             <Input
               id="sim-id"
               value={id}
+              invalid={Boolean(errors.id)}
+              onBlur={() => validate(['id'])}
               disabled={editing}
               onChange={(event) => setId(event.target.value)}
             />
@@ -604,11 +561,13 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
           >
             {() => (
               <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label="仿真场景" htmlFor="sim-package" required>
+                <FormField label="仿真场景" htmlFor="sim-package" required error={errors.package}>
                   <Select
                     id="sim-package"
                     options={packageOptions}
                     value={packageCode}
+                    invalid={Boolean(errors.package)}
+                    onBlur={() => validate(['package'])}
                     placeholder={packageOptions.length > 0 ? '选择场景' : '暂无可用场景'}
                     disabled={packageOptions.length === 0}
                     onValueChange={(value) => {
@@ -617,11 +576,13 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
                     }}
                   />
                 </FormField>
-                <FormField label="场景版本" htmlFor="sim-version" required>
+                <FormField label="场景版本" htmlFor="sim-version" required error={errors.version}>
                   <Select
                     id="sim-version"
                     options={versionOptions}
                     value={version}
+                    invalid={Boolean(errors.version)}
+                    onBlur={() => validate(['version'])}
                     placeholder={
                       packageCode === ''
                         ? '请先选择场景'
@@ -642,17 +603,19 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
             htmlFor="sim-seed"
             required
             helper="同一种子保证每个学生看到相同的推演过程"
+            error={errors.seed}
           >
             <Input
               id="sim-seed"
               type="number"
               min="1"
               value={seed}
+              invalid={Boolean(errors.seed)}
+              onBlur={() => validate(['seed'])}
               onChange={(event) => setSeed(event.target.value)}
             />
           </FormField>
 
-          {formError ? <Callout tone="danger">{formError}</Callout> : null}
         </ModalBody>
         <ModalFooter>
           <Button variant="outline" onClick={onClose}>

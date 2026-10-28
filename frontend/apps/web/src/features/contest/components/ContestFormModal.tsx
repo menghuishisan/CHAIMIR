@@ -24,6 +24,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
+import { useFormValidation } from '../../../hooks/useFormValidation'
 import { toDateTimeInputValue } from '../../../utils/dateInput'
 import { contestModeLabel, matchModeLabel, teamModeLabel } from '../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
@@ -62,14 +63,13 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
   )
   const [roundMinutes, setRoundMinutes] = useState(String(readNumber(contest, RULE_ROUND_MINUTES, 10)))
 
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
 
   const isBattle = Number(mode) === ContestMode.BATTLE
 
   /** validate 校验时间顺序:报名要早于比赛,结束要晚于开始。 */
-  const validate = useCallback((): boolean => {
+  const { errors, validate } = useFormValidation(useCallback(() => {
     const next: Record<string, string | null> = {
       name: name.trim() === '' ? '请输入赛事名称' : null,
       signupStart: signupStart === '' ? '请选择报名开始时间' : null,
@@ -92,9 +92,8 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
             ? '比赛结束要晚于比赛开始'
             : null,
     }
-    setErrors(next)
-    return Object.values(next).every((value) => value === null)
-  }, [endAt, name, signupEnd, signupStart, startAt])
+    return next
+  }, [endAt, name, signupEnd, signupStart, startAt]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {

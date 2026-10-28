@@ -18,7 +18,7 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 		return apperr.ErrHTTPServiceMissing
 	}
 	api := gradeAPI{svc: svc}
-	g := r.Group("/api/v1/grade-center", authn.Middleware())
+	g := r.Group("/api/v1/grade-center", authn.Middleware(contracts.TenantModuleGrade))
 	all := g.Group("", auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleTeacher, contracts.RoleSchoolAdmin))
 	student := g.Group("", auth.RequireTenantAnyRole(roles, contracts.RoleStudent))
 	studentAdmin := g.Group("", auth.RequireTenantAnyRole(roles, contracts.RoleStudent, contracts.RoleSchoolAdmin))
@@ -29,7 +29,8 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	admin.PUT("/level-configs/:id", api.updateLevelConfig)
 	all.GET("/semesters", api.listSemesters)
 	admin.POST("/semesters", api.createSemester)
-	teacher.POST("/reviews", api.submitReview)
+	// 新报送依赖课程教学与成绩两个模块；历史审核仍只要求成绩模块。
+	r.POST("/api/v1/grade-center/reviews", authn.Middleware(contracts.TenantModuleGrade, contracts.TenantModuleTeaching), auth.RequireTenantAnyRole(roles, contracts.RoleTeacher, contracts.RoleSchoolAdmin), api.submitReview)
 	teacher.GET("/reviews/mine", api.listOwnReviews)
 	admin.GET("/reviews", api.listReviews)
 	admin.POST("/reviews/:id/approve", api.approveReview)
@@ -277,8 +278,8 @@ func (a gradeAPI) listWarnings(c *gin.Context) {
 	if !ok {
 		return
 	}
-	// status=0 表示不过滤;上限对齐 WarningStatusNotifyFailed,越界参数在边界处拒绝
-	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: int64(WarningStatusNotifyFailed), HasMax: true})
+	// status=0 表示不过滤;只接受学生确认状态,投递状态不进入公开筛选。
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: int64(WarningStatusAcknowledged), HasMax: true})
 	if !ok {
 		return
 	}

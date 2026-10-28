@@ -12,7 +12,8 @@ import { AuthBrandMark } from '../../../../components/AuthBrand'
 import { api } from '../../../../app/api'
 import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { passwordRequiredError, requiredError, useFieldErrors } from '../../authForm'
+import { passwordRequiredError, requiredError } from '../../authForm'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import {
   AuthFormError,
   AuthHeading,
@@ -33,14 +34,15 @@ export default function PlatformLoginPage() {
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
-  const { errors, setError } = useFieldErrors()
+  const { errors, validate } = useFormValidation(() => ({
+    username: requiredError(username, '请输入平台管理账号'),
+    password: passwordRequiredError(password, '请输入密码'),
+  }))
 
   const handleSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const usernameOk = setError('username', requiredError(username, '请输入平台管理账号'))
-      const passwordOk = setError('password', passwordRequiredError(password, '请输入密码'))
-      if (!usernameOk || !passwordOk) return
+      if (!validate()) return
 
       setSubmitting(true)
       setFormError(null)
@@ -54,7 +56,7 @@ export default function PlatformLoginPage() {
         setSubmitting(false)
       }
     },
-    [navigate, password, setError, username],
+    [navigate, password, username, validate],
   )
 
   return (
@@ -73,7 +75,7 @@ export default function PlatformLoginPage() {
             value={username}
             error={errors.username}
             onValueChange={setUsername}
-            onBlur={() => setError('username', requiredError(username, '请输入平台管理账号'))}
+            onBlur={() => validate(['username'])}
           />
 
           <AuthTextField
@@ -84,7 +86,7 @@ export default function PlatformLoginPage() {
             value={password}
             error={errors.password}
             onValueChange={setPassword}
-            onBlur={() => setError('password', passwordRequiredError(password, '请输入密码'))}
+            onBlur={() => validate(['password'])}
           />
 
           <AuthFormError message={formError} />

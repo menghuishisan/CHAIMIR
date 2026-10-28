@@ -49,6 +49,7 @@ import {
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../hooks'
+import { useFormValidation } from '../../../hooks/useFormValidation'
 import { formatDateTime } from '../../../utils/formatters'
 import { gradeAppealStatusLabel } from '../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
@@ -162,7 +163,7 @@ export function GradeAppeals({ canRecompute = false }: GradeAppealsProps) {
                 返回队列
               </Button>
               <span className="text-sm text-ink-sub tabular-nums">
-                第 {selectedIndex + 1} 条 / 共 {appeals.total} 条
+                第 {selectedIndex + 1} 条 / 共 {appeals.total ?? '—'} 条
               </span>
             </div>
           ) : undefined
@@ -318,13 +319,13 @@ function AppealDetailPane({
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState<AppealDecision>()
   const isPending = appeal.status === GradeAppealStatus.PENDING
+  const { errors, validate } = useFormValidation(useCallback(() => ({
+    comment: comment.trim() ? null : '请写下处理说明,学生会看到这段话',
+  }), [comment]), appeal.id)
 
   const submit = useCallback(
     async (decision: AppealDecision) => {
-      if (comment.trim() === '') {
-        setFormError('请写下处理说明,学生会看到这段话')
-        return
-      }
+      if (working || !validate()) return
       setFormError(undefined)
       setWorking(decision)
       try {
@@ -344,7 +345,7 @@ function AppealDetailPane({
         setWorking(undefined)
       }
     },
-    [appeal.id, comment, onHandled],
+    [appeal.id, comment, onHandled, validate, working],
   )
 
   return (
@@ -386,14 +387,18 @@ function AppealDetailPane({
             htmlFor={`appeal-comment-${appeal.id}`}
             required
             helper="写清处理结论与依据,学生会看到这段话"
-            error={formError}
+            error={errors.comment ?? formError}
           >
             <Textarea
               id={`appeal-comment-${appeal.id}`}
               value={comment}
               rows={4}
-              invalid={Boolean(formError)}
-              onChange={(event) => setComment(event.target.value)}
+              invalid={Boolean(errors.comment ?? formError)}
+              onBlur={() => void validate(['comment'])}
+              onChange={(event) => {
+                setComment(event.target.value)
+                setFormError(undefined)
+              }}
             />
           </FormField>
 
@@ -448,13 +453,18 @@ function RecomputeModal({ appeal, courseName, onClose, onDone }: RecomputeModalP
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
-  const semesters = useAsyncResource(() => api.grade.listSemesters(), [], () => false)
+  const semesters = useAsyncResource(() => api.grade.listSemesters(), [])
+  const { errors, validate } = useFormValidation(useCallback(() => {
+    if (!semesterId) return { semester: '请选择要重算的学期' }
+    if (semesters.status === 'success' && !semesters.data?.some((semester) => semester.id === semesterId)) {
+      return { semester: '请选择当前学校已登记的学期' }
+    }
+    return { semester: null }
+  }, [semesterId, semesters.data, semesters.status]), appeal.id)
 
   const submit = useCallback(async () => {
-    if (semesterId === '') {
-      setFormError('请选择要重算的学期')
-      return
-    }
+    // 学期列表是提交前置;加载失败或旧选择已失效时不得沿用缓存发起重算。
+    if (working || semesters.status !== 'success' || !validate()) return
     setFormError(undefined)
     setWorking(true)
     try {
@@ -466,7 +476,7 @@ function RecomputeModal({ appeal, courseName, onClose, onDone }: RecomputeModalP
     } finally {
       setWorking(false)
     }
-  }, [appeal.student_id, onDone, semesterId])
+  }, [appeal.student_id, onDone, semesterId, semesters.status, validate, working])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -486,24 +496,39 @@ function RecomputeModal({ appeal, courseName, onClose, onDone }: RecomputeModalP
             ]}
           />
 
-          <FormField
-            label="重算学期"
-            htmlFor="recompute-semester"
-            required
-            error={formError}
-            helper="选申诉课程所属的学期"
+          <ResourceState
+            resource={semesters}
+            emptyIcon={Scale}
+            emptyTitle="学校尚未登记学期"
+            emptyDescription="请先在成绩配置中登记学期,再重算绩点。"
+            skeleton={<Skeleton variant="line" lines={2} />}
           >
-            <Select
-              id="recompute-semester"
-              options={(semesters.data ?? []).map((semester: Semester) => ({
-                value: semester.id,
-                label: semester.name,
-              }))}
-              value={semesterId}
-              placeholder="选择学期"
-              onValueChange={setSemesterId}
-            />
-          </FormField>
+            {(items) => (
+              <FormField
+                label="重算学期"
+                htmlFor="recompute-semester"
+                required
+                error={errors.semester ?? formError}
+                helper="选申诉课程所属的学期"
+              >
+                <Select
+                  id="recompute-semester"
+                  options={items.map((semester: Semester) => ({
+                    value: semester.id,
+                    label: semester.name,
+                  }))}
+                  value={semesterId}
+                  disabled={working}
+                  invalid={Boolean(errors.semester ?? formError)}
+                  placeholder="选择学期"
+                  onValueChange={(value) => {
+                    setSemesterId(value)
+                    setFormError(undefined)
+                  }}
+                />
+              </FormField>
+            )}
+          </ResourceState>
 
           <Callout tone="info">
             正常情况下教师改分会自动触发重算。这里是事件未到达时的补救,重复重算不会有副作用。
@@ -513,7 +538,13 @@ function RecomputeModal({ appeal, courseName, onClose, onDone }: RecomputeModalP
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button variant="primary" leftIcon={RefreshCw} loading={working} onClick={() => void submit()}>
+          <Button
+            variant="primary"
+            leftIcon={RefreshCw}
+            loading={working}
+            disabled={semesters.status !== 'success'}
+            onClick={() => void submit()}
+          >
             开始重算
           </Button>
         </ModalFooter>

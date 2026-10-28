@@ -40,6 +40,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { formatDateTime } from '../../../../utils/formatters'
 import { transcriptScopeLabel } from '../../../../utils/labels/grade'
@@ -82,6 +83,12 @@ export function TranscriptBatchSection() {
 
   const scopeValue = Number(scope) as TranscriptScope
   const needsSemester = scopeValue === TranscriptScope.SEMESTER
+  const { errors, validate } = useFormValidation(() => ({
+    class: classId === '' ? '请先选择班级' : null,
+    students: selected.size === 0 ? '请至少勾选一名学生'
+      : selected.size > BATCH_LIMIT ? `一次最多生成 ${BATCH_LIMIT} 份,请分批处理` : null,
+    semester: needsSemester && semesterId === '' ? '单学期成绩单需要选择学期' : null,
+  }))
 
   const studentNameById = useMemo(
     () => new Map((students.data?.list ?? []).map((account: Account) => [account.id, account])),
@@ -89,18 +96,7 @@ export function TranscriptBatchSection() {
   )
 
   const generate = useCallback(async () => {
-    if (selected.size === 0) {
-      setFormError('请至少勾选一名学生')
-      return
-    }
-    if (selected.size > BATCH_LIMIT) {
-      setFormError(`一次最多生成 ${BATCH_LIMIT} 份,请分批处理`)
-      return
-    }
-    if (needsSemester && semesterId === '') {
-      setFormError('单学期成绩单需要选择学期')
-      return
-    }
+    if (working || !validate()) return
     setFormError(undefined)
     setWorking(true)
     try {
@@ -116,7 +112,7 @@ export function TranscriptBatchSection() {
     } finally {
       setWorking(false)
     }
-  }, [needsSemester, scopeValue, selected, semesterId])
+  }, [needsSemester, scopeValue, selected, semesterId, validate, working])
 
   /** download 逐份取件:授权是一次性的,每次点击重新签发。 */
   const download = useCallback(async (transcript: GradeTranscript) => {
@@ -190,7 +186,7 @@ export function TranscriptBatchSection() {
           />
           <CardBody className="flex flex-col gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <FormField label="班级" htmlFor="transcript-class" required>
+              <FormField label="班级" htmlFor="transcript-class" required error={errors.class}>
                 <Select
                   id="transcript-class"
                   options={(classes.data ?? []).map((item: Class) => ({
@@ -198,6 +194,8 @@ export function TranscriptBatchSection() {
                     label: `${item.name} · ${item.enrollment_year} 级`,
                   }))}
                   value={classId}
+                  invalid={Boolean(errors.class)}
+                  onBlur={() => validate(['class'])}
                   placeholder={(classes.data ?? []).length > 0 ? '选择班级' : '暂无班级'}
                   disabled={(classes.data ?? []).length === 0}
                   onValueChange={(value) => {
@@ -225,7 +223,7 @@ export function TranscriptBatchSection() {
             </div>
 
             {needsSemester ? (
-              <FormField label="学期" htmlFor="transcript-semester" required>
+              <FormField label="学期" htmlFor="transcript-semester" required error={errors.semester}>
                 <Select
                   id="transcript-semester"
                   options={(semesters.data ?? []).map((semester: Semester) => ({
@@ -233,6 +231,8 @@ export function TranscriptBatchSection() {
                     label: semester.name,
                   }))}
                   value={semesterId}
+                  invalid={Boolean(errors.semester)}
+                  onBlur={() => validate(['semester'])}
                   placeholder="选择学期"
                   onValueChange={setSemesterId}
                 />
@@ -248,7 +248,7 @@ export function TranscriptBatchSection() {
                 skeleton={<Skeleton variant="line" lines={4} />}
               >
                 {(page) => (
-                  <FormField label="选择学生" required>
+                  <FormField label="选择学生" required error={errors.students}>
                     <div className="flex flex-col gap-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <Button

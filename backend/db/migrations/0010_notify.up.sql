@@ -90,14 +90,14 @@ ALTER TABLE system_announcement ENABLE ROW LEVEL SECURITY;
 ALTER TABLE announcement_read ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY notification_tenant_rls ON notification
-    USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
-    WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+    USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
+    WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT);
 CREATE POLICY notification_preference_tenant_rls ON notification_preference
-    USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
-    WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+    USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
+    WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT);
 CREATE POLICY system_announcement_tenant_rls ON system_announcement
     USING (tenant_id IS NULL OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
     WITH CHECK (tenant_id IS NULL OR tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT);
 CREATE POLICY announcement_read_tenant_rls ON announcement_read
-    USING (tenant_id = current_setting('app.tenant_id')::BIGINT)
-    WITH CHECK (tenant_id = current_setting('app.tenant_id')::BIGINT);
+    USING (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT)
+    WITH CHECK (tenant_id = NULLIF(current_setting('app.tenant_id', true), '')::BIGINT);

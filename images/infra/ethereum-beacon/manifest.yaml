@@ -42,15 +42,19 @@ capabilities:
     required: [testnet_dir, data_dir, checkpoint_state_path, checkpoint_block_path]
     properties:
       testnet_dir:
+        title: 信标网络配置目录
         type: string
         x-chaimir-env: infra/BEACON_TESTNET_DIR
       data_dir:
+        title: 信标数据目录
         type: string
         x-chaimir-env: infra/BEACON_DATA_DIR
       checkpoint_state_path:
+        title: 检查点状态文件路径
         type: string
         x-chaimir-env: infra/BEACON_CHECKPOINT_STATE_PATH
       checkpoint_block_path:
+        title: 检查点区块文件路径
         type: string
         x-chaimir-env: infra/BEACON_CHECKPOINT_BLOCK_PATH
   student_access: private

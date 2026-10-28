@@ -28,24 +28,16 @@ type Experiment struct {
 	DeletedAt       pgtype.Timestamptz `json:"deleted_at"`
 }
 
-type ExperimentGroup struct {
-	ID           int64              `json:"id"`
-	TenantID     int64              `json:"tenant_id"`
-	ExperimentID int64              `json:"experiment_id"`
-	Name         string             `json:"name"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-}
-
-type ExperimentScoreOutbox struct {
+type ExperimentEventOutbox struct {
 	ID            int64              `json:"id"`
 	TenantID      int64              `json:"tenant_id"`
 	ExperimentID  int64              `json:"experiment_id"`
-	InstanceID    int64              `json:"instance_id"`
-	StudentID     int64              `json:"student_id"`
-	Score         pgtype.Numeric     `json:"score"`
-	ScoreRevision int32              `json:"score_revision"`
+	AggregateID   int64              `json:"aggregate_id"`
+	EventRevision int64              `json:"event_revision"`
+	Subject       string             `json:"subject"`
+	Payload       []byte             `json:"payload"`
 	TraceID       string             `json:"trace_id"`
-	ScoredAt      pgtype.Timestamptz `json:"scored_at"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
 	Status        int16              `json:"status"`
 	RetryCount    int32              `json:"retry_count"`
 	LastError     pgtype.Text        `json:"last_error"`
@@ -53,6 +45,14 @@ type ExperimentScoreOutbox struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	LeaseToken    string             `json:"lease_token"`
 	LeaseUntil    pgtype.Timestamptz `json:"lease_until"`
+}
+
+type ExperimentGroup struct {
+	ID           int64              `json:"id"`
+	TenantID     int64              `json:"tenant_id"`
+	ExperimentID int64              `json:"experiment_id"`
+	Name         string             `json:"name"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
 type GroupMember struct {

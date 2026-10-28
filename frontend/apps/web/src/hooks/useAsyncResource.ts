@@ -12,6 +12,8 @@ export interface AsyncResourceState<T> {
   data: T | null
   error: ApiError | null
   reload: () => void
+  /** 仅在显式reload时递增,供同范围统计随列表刷新,不随翻页或筛选变化。 */
+  refreshVersion: number
 }
 
 /**
@@ -51,7 +53,12 @@ export function useAsyncResource<T>(
   isEmpty: (value: T) => boolean = isDefaultEmpty
 ): AsyncResourceState<T> {
   const [version, setVersion] = useState(0)
-  const [state, setState] = useState<Omit<AsyncResourceState<T>, 'reload'>>({
+  // 请求归属在渲染时更新,避免依赖变化后到 effect 执行前仍暴露上一请求的成功状态。
+  // 调用方显式声明依赖,与下方 effect 的既有调用契约一致。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const requestKey = useMemo(() => ({}), [version, ...deps])
+  const [state, setState] = useState<Omit<AsyncResourceState<T>, 'reload' | 'refreshVersion'> & { requestKey: object }>({
+    requestKey,
     status: 'loading',
     data: null,
     error: null,
@@ -64,6 +71,7 @@ export function useAsyncResource<T>(
   useEffect(() => {
     let active = true
     setState((current) => ({
+      requestKey,
       status: 'loading',
       data: current.data,
       error: null,
@@ -75,6 +83,7 @@ export function useAsyncResource<T>(
           return
         }
         setState({
+          requestKey,
           status: isEmpty(data) ? 'empty' : 'success',
           data,
           error: null,
@@ -85,6 +94,7 @@ export function useAsyncResource<T>(
           return
         }
         setState({
+          requestKey,
           status: 'error',
           data: null,
           error: normalizeError(error),
@@ -94,9 +104,15 @@ export function useAsyncResource<T>(
     return () => {
       active = false
     }
-    // 调用方显式传入依赖列表，语义与 useEffect 的依赖参数一致。
+    // 请求归属已包含调用方显式声明的依赖和刷新次数。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version, ...deps])
+  }, [requestKey])
 
-  return useMemo(() => ({ ...state, reload }), [reload, state])
+  return useMemo(() => ({
+    status: state.requestKey === requestKey ? state.status : 'loading',
+    data: state.data,
+    error: state.requestKey === requestKey ? state.error : null,
+    reload,
+    refreshVersion: version,
+  }), [reload, requestKey, state, version])
 }

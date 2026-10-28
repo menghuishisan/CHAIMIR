@@ -77,11 +77,11 @@ func RegisterExperimentModule(ctx context.Context, deps ExperimentModuleDeps) (*
 	if _, err := experiment.SubscribeEvents(deps.EventBus, svc); err != nil {
 		return nil, err
 	}
-	scoreTask, err := experimentScoreOutboxTask(deps.Config, svc)
+	eventTask, err := experimentEventOutboxTask(deps.Config, svc)
 	if err != nil {
 		return nil, err
 	}
-	go background.Run(ctx, scoreTask)
+	go background.Run(ctx, eventTask)
 	task, err := experimentRecycleTask(deps.Config, svc)
 	if err != nil {
 		return nil, err
@@ -90,19 +90,19 @@ func RegisterExperimentModule(ctx context.Context, deps ExperimentModuleDeps) (*
 	return svc, nil
 }
 
-// experimentScoreOutboxTask 把 M7 得分事件 outbox 接入统一后台任务运行器。
-func experimentScoreOutboxTask(cfg config.ExperimentConfig, svc *experiment.Service) (background.Task, error) {
+// experimentEventOutboxTask 把 M7 绑定与得分事件 outbox 接入统一后台任务运行器。
+func experimentEventOutboxTask(cfg config.ExperimentConfig, svc *experiment.Service) (background.Task, error) {
 	if svc == nil {
-		return background.Task{}, fmt.Errorf("experiment score outbox worker 缺少 service")
+		return background.Task{}, fmt.Errorf("experiment event outbox worker 缺少 service")
 	}
-	if cfg.ScoreOutboxPollMs <= 0 {
-		return background.Task{}, fmt.Errorf("EXPERIMENT_SCORE_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
+	if cfg.EventOutboxPollMs <= 0 {
+		return background.Task{}, fmt.Errorf("EXPERIMENT_EVENT_OUTBOX_POLL_INTERVAL_MS 必须大于 0")
 	}
 	return background.Task{
-		Name:     "experiment.score_outbox",
-		Interval: time.Duration(cfg.ScoreOutboxPollMs) * time.Millisecond,
+		Name:     "experiment.event_outbox",
+		Interval: time.Duration(cfg.EventOutboxPollMs) * time.Millisecond,
 		Run: func(ctx context.Context) error {
-			return svc.RunExperimentScoreOutboxOnce(ctx)
+			return svc.RunExperimentEventOutboxOnce(ctx)
 		},
 	}, nil
 }

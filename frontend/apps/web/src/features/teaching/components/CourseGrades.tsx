@@ -1,15 +1,12 @@
 // 教学领域的课程成绩复用区块。
 // 三件事:配置权重(和须为 100%)、按权重计算全班成绩、人工调分与导出。
-// 权重来源是封闭枚举(作业/实验/考试),来源引用填对应作业编号 ——
-// 作业选项从课程作业清单取,不让教师手填内部编号。
+// 三类成绩统一从服务端课程来源目录选择真实对象，考试复用作业/测验评分。
 // 课程详情与成绩报送页都嵌入本组件，页面只负责各自的路由与上下文。
 
 import { useCallback, useMemo, useState } from 'react'
 import { Calculator, Download, Pencil, Percent, Send } from 'lucide-react'
 import {
   GradeSource,
-  PAGINATION_MAX_SIZE,
-  type Assignment,
   type GradeWeightInput,
   type TeachingCourseGrade,
 } from '@chaimir/api-client'
@@ -41,6 +38,7 @@ import {
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../hooks'
+import { useFormValidation } from '../../../hooks/useFormValidation'
 import { formatScore, formatShortDateTime } from '../../../utils/formatters'
 import { gradeSourceLabel } from '../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
@@ -285,50 +283,63 @@ interface WeightFormModalProps {
   onSaved: () => void
 }
 
+/** GradeWeightRow 保留占比输入的原始文本,空白不得隐式转换成零。 */
+interface GradeWeightRow extends Omit<GradeWeightInput, 'weight'> {
+  weight: string
+}
+
 /**
  * WeightFormModal 配置成绩权重。
  * 合计必须等于 100%(后端也校验),提交前在此就近提示,不让用户白跑一次请求。
  */
 function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModalProps) {
-  const [rows, setRows] = useState<GradeWeightInput[]>(
+  const [rows, setRows] = useState<GradeWeightRow[]>(
     current.length > 0
       ? current.map((item) => ({
           source_type: item.source_type,
           source_ref: item.source_ref,
-          weight: item.weight,
+          weight: String(item.weight),
         }))
-      : [{ source_type: GradeSource.ASSIGNMENT, source_ref: '', weight: 100 }],
+      : [{ source_type: GradeSource.ASSIGNMENT, source_ref: '', weight: '100' }],
   )
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
-  // 作业选项:权重的 source_ref 指向具体作业,教师从清单里选而不是手填编号
-  /**
-   * 课程作业一次取齐(PAGINATION_MAX_SIZE)。
-   * 不给下拉配翻页控件:那等于让教师先翻页才能选到作业;
-   * 浮层里也不出现分页 —— 需要分页说明它其实是一页(规范 §6.5.5 A)。
-   */
-  const assignmentList = useAsyncResource(
-    () => api.teaching.listCourseAssignments(courseId, { page: 1, size: PAGINATION_MAX_SIZE }),
-    [courseId],
-    (value) => value.list.length === 0,
-  )
+  // 完整目录不受公开作业列表的单页上限影响；读取失败保留当前编辑。
+  const sources = useAsyncResource(() => api.teaching.listGradeSources(courseId), [courseId])
+  const sourcesReady = sources.status === 'success' || sources.status === 'empty'
 
-  const total = rows.reduce((sum, row) => sum + row.weight, 0)
+  const total = rows.reduce((sum, row) => sum + (Number.isFinite(Number(row.weight)) ? Number(row.weight) : 0), 0)
+  const { errors, validate } = useFormValidation(() => {
+    const next: Record<string, string | null> = {}
+    const selected = new Set<string>()
+    rows.forEach((row, index) => {
+      const source = sources.data?.find((item) => item.source_type === row.source_type && item.source_ref === row.source_ref)
+      const key = `${row.source_type === GradeSource.EXAM ? GradeSource.ASSIGNMENT : row.source_type}:${row.source_ref}`
+      next[`source-${index}`] = !source || !Number.isFinite(source.max_score) || source.max_score <= 0
+        ? '请选择当前课程中可用的成绩来源；已失效的选项需要重新选择。'
+        : selected.has(key) ? '同一项成绩只能计入一次；同一作业不能同时按作业和考试计入。' : null
+      next[`weight-${index}`] = row.weight.trim() === '' || !Number.isFinite(Number(row.weight)) || Number(row.weight) <= 0
+        ? '每项占比都需要填写大于 0 的数字。' : null
+      selected.add(key)
+    })
+    next.total = Math.abs(total - 100) > 0.0001 ? '各项占比合计需要等于 100%。' : null
+    return next
+  })
 
-  const updateRow = useCallback((index: number, patch: Partial<GradeWeightInput>) => {
+  /** updateRow 只更新当前行,字段和合计错误统一由最新行数据重新计算。 */
+  const updateRow = useCallback((index: number, patch: Partial<GradeWeightRow>) => {
     setRows((current) => current.map((row, i) => (i === index ? { ...row, ...patch } : row)))
   }, [])
 
   const submit = useCallback(async () => {
-    if (total !== 100) {
-      setFormError(`权重合计当前是 ${total}%,需要正好等于 100%`)
-      return
-    }
+    if (working || !sourcesReady || !validate()) return
     setFormError(undefined)
     setWorking(true)
     try {
-      await api.teaching.setGradeWeights(courseId, { items: rows })
+      await api.teaching.setGradeWeights(courseId, {
+        items: rows.map((row) => ({ ...row, weight: Number(row.weight) })),
+      })
       toast.success('权重已保存')
       onSaved()
     } catch (error) {
@@ -336,25 +347,24 @@ function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModa
     } finally {
       setWorking(false)
     }
-  }, [courseId, onSaved, rows, total])
-
-  const assignmentOptions = useMemo(
-    () =>
-      (assignmentList.data?.list ?? []).map((item: Assignment) => ({
-        value: item.id,
-        label: item.title,
-      })),
-    [assignmentList.data],
-  )
+  }, [courseId, onSaved, rows, sourcesReady, validate, working])
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
+    <Modal open onOpenChange={(open) => !open && !working && onClose()}>
       <ModalContent size="lg">
         <ModalHeader>
           <ModalTitle>配置成绩权重</ModalTitle>
           <ModalDescription>各项占比合计需要等于 100%,系统按此计算总评。</ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
+          {sources.status === 'loading' ? <Skeleton variant="line" lines={1} /> : null}
+          {sources.status === 'error' ? (
+            <Callout tone="danger">
+              {sources.error?.message ?? '成绩来源暂时无法读取，请稍后重试。'}
+              <Button variant="outline" size="sm" onClick={sources.reload}>重新读取</Button>
+            </Callout>
+          ) : null}
+          {sources.status === 'empty' ? <Callout tone="info">课程还没有可计分的已发布作业或实验。</Callout> : null}
           {rows.map((row, index) => (
             <div key={index} className="flex flex-wrap items-end gap-3 well p-3">
               <FormField label="成绩来源" htmlFor={`weight-source-${index}`} className="mb-0 w-36">
@@ -365,59 +375,42 @@ function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModa
                     value: String(value),
                     label: gradeSourceLabel(value),
                   }))}
+                  disabled={working}
                   value={String(row.source_type)}
                   onValueChange={(value) =>
-                    updateRow(index, { source_type: Number(value) as GradeSource })
+                    updateRow(index, { source_type: Number(value) as GradeSource, source_ref: '' })
                   }
                 />
               </FormField>
-              {row.source_type === GradeSource.ASSIGNMENT ? (
-                <ResourceState
-                  resource={assignmentList}
-                  emptyIcon={Send}
-                  emptyTitle="课程还没有作业"
-                  emptyDescription="先创建作业,再把它纳入成绩权重。"
-                  skeleton={<Skeleton variant="line" lines={1} />}
-                >
-                  {() => (
-                    <FormField
-                      label="对应作业"
-                      htmlFor={`weight-ref-${index}`}
-                      className="mb-0 min-w-48 flex-1"
-                    >
-                      <Select
-                        id={`weight-ref-${index}`}
-                        size="sm"
-                        options={assignmentOptions}
-                        value={row.source_ref}
-                        placeholder="选择作业"
-                        onValueChange={(value) => updateRow(index, { source_ref: value })}
-                      />
-                    </FormField>
-                  )}
-                </ResourceState>
-              ) : (
-                <FormField
-                  label="来源说明"
-                  htmlFor={`weight-ref-${index}`}
-                  className="mb-0 min-w-48 flex-1"
-                  helper="实验与考试按整体计入,填写便于识别的名称"
-                >
-                  <Input
-                    id={`weight-ref-${index}`}
-                    value={row.source_ref}
-                    onChange={(event) => updateRow(index, { source_ref: event.target.value })}
-                  />
-                </FormField>
-              )}
-              <FormField label="占比 %" htmlFor={`weight-value-${index}`} className="mb-0 w-24">
+              <FormField
+                label="对应成绩"
+                htmlFor={`weight-ref-${index}`}
+                className="mb-0 min-w-48 flex-1"
+                error={errors[`source-${index}`] ?? (sourcesReady && row.source_ref !== '' && !sources.data?.some((item) => item.source_type === row.source_type && item.source_ref === row.source_ref) ? '原选项已失效，请重新选择。' : undefined)}
+              >
+                <Select
+                  id={`weight-ref-${index}`}
+                  size="sm"
+                  disabled={!sourcesReady || working}
+                  options={(sourcesReady ? sources.data ?? [] : []).filter((item) => item.source_type === row.source_type).map((item) => ({ value: item.source_ref, label: `${item.title}（满分 ${item.max_score}）` }))}
+                  value={row.source_ref}
+                  invalid={Boolean(errors[`source-${index}`]) || (sourcesReady && row.source_ref !== '' && !sources.data?.some((item) => item.source_type === row.source_type && item.source_ref === row.source_ref))}
+                  onBlur={() => validate([`source-${index}`])}
+                  placeholder="选择成绩来源"
+                  onValueChange={(value) => updateRow(index, { source_ref: value })}
+                />
+              </FormField>
+              <FormField label="占比 %" htmlFor={`weight-value-${index}`} className="mb-0 w-24" error={errors[`weight-${index}`]}>
                 <Input
                   id={`weight-value-${index}`}
                   type="number"
                   min="0"
                   max="100"
-                  value={String(row.weight)}
-                  onChange={(event) => updateRow(index, { weight: Number(event.target.value) || 0 })}
+                  disabled={working}
+                  value={row.weight}
+                  invalid={Boolean(errors[`weight-${index}`])}
+                  onBlur={() => validate([`weight-${index}`])}
+                  onChange={(event) => updateRow(index, { weight: event.target.value })}
                 />
               </FormField>
               {rows.length > 1 ? (
@@ -425,6 +418,7 @@ function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModa
                   type="button"
                   variant="ghost"
                   size="sm"
+                  disabled={working}
                   onClick={() => setRows((current) => current.filter((_, i) => i !== index))}
                 >
                   移除
@@ -438,10 +432,11 @@ function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModa
               type="button"
               variant="outline"
               size="sm"
+              disabled={working}
               onClick={() =>
                 setRows((current) => [
                   ...current,
-                  { source_type: GradeSource.ASSIGNMENT, source_ref: '', weight: 0 },
+                  { source_type: GradeSource.ASSIGNMENT, source_ref: '', weight: '0' },
                 ])
               }
             >
@@ -450,13 +445,14 @@ function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModa
             <Badge tone={total === 100 ? 'success' : 'warning'}>合计 {total}%</Badge>
           </div>
 
+          {errors.total ? <Callout tone="danger">{errors.total}</Callout> : null}
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
         </ModalBody>
         <ModalFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" disabled={working} onClick={onClose}>
             取消
           </Button>
-          <Button variant="primary" loading={working} onClick={() => void submit()}>
+          <Button variant="primary" disabled={!sourcesReady} loading={working} onClick={() => void submit()}>
             保存权重
           </Button>
         </ModalFooter>
@@ -480,13 +476,14 @@ function OverrideGradeModal({ courseId, grade, onClose, onSaved }: OverrideGrade
   const [total, setTotal] = useState(String(grade.final_total))
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const { errors, validate } = useFormValidation(() => ({
+    total: total.trim() === '' || !Number.isFinite(Number(total)) || Number(total) < 0 || Number(total) > 100
+      ? '总评需要填写 0 到 100 之间的数字' : null,
+  }))
 
   const submit = useCallback(async () => {
+    if (working || !validate()) return
     const value = Number(total)
-    if (!Number.isFinite(value) || value < 0 || value > 100) {
-      setFormError('总评需要是 0 到 100 之间的数字')
-      return
-    }
     setFormError(undefined)
     setWorking(true)
     try {
@@ -498,7 +495,7 @@ function OverrideGradeModal({ courseId, grade, onClose, onSaved }: OverrideGrade
     } finally {
       setWorking(false)
     }
-  }, [courseId, grade.student_id, onSaved, total])
+  }, [courseId, grade.student_id, onSaved, total, validate, working])
 
   return (
     <Modal open onOpenChange={(open) => !open && onClose()}>
@@ -513,7 +510,7 @@ function OverrideGradeModal({ courseId, grade, onClose, onSaved }: OverrideGrade
           <div className="well p-3 text-sm text-ink-sub">
             按权重计算:{formatScore(grade.auto_total)} 分
           </div>
-          <FormField label="调整后的总评" htmlFor="override-total" required error={formError}>
+          <FormField label="调整后的总评" htmlFor="override-total" required error={errors.total}>
             <Input
               id="override-total"
               type="number"
@@ -521,10 +518,12 @@ function OverrideGradeModal({ courseId, grade, onClose, onSaved }: OverrideGrade
               max="100"
               step="0.5"
               value={total}
-              invalid={Boolean(formError)}
+              invalid={Boolean(errors.total)}
+              onBlur={() => validate(['total'])}
               onChange={(event) => setTotal(event.target.value)}
             />
           </FormField>
+          {formError ? <Callout tone="danger">{formError}</Callout> : null}
         </ModalBody>
         <ModalFooter>
           <Button variant="outline" onClick={onClose}>

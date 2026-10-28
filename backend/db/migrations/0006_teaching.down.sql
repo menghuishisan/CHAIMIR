@@ -1,3 +1,7 @@
+DROP POLICY IF EXISTS course_experiment_score_tenant_rls ON course_experiment_score;
+DROP POLICY IF EXISTS course_experiment_source_tenant_rls ON course_experiment_source;
+DROP TABLE IF EXISTS course_experiment_score;
+DROP TABLE IF EXISTS course_experiment_source;
 DROP POLICY IF EXISTS teaching_grade_event_outbox_tenant_rls ON teaching_grade_event_outbox;
 DROP POLICY IF EXISTS course_grade_export_request_tenant_rls ON course_grade_export_request;
 DROP POLICY IF EXISTS course_grade_tenant_rls ON course_grade;
@@ -36,3 +40,5 @@ DROP TABLE IF EXISTS course_member;
 DROP TABLE IF EXISTS lesson;
 DROP TABLE IF EXISTS chapter;
 DROP TABLE IF EXISTS course;
+
+DROP FUNCTION IF EXISTS enforce_course_grades_writable();

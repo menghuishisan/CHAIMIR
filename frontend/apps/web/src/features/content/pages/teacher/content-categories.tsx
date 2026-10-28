@@ -3,6 +3,7 @@
 // (旧前端删除院系/专业/班级全无确认,是被审查列为 P0 的问题)。
 
 import { useCallback, useMemo, useState } from 'react'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { FolderTree, Pencil, Plus, Trash2 } from 'lucide-react'
 import type { ContentCategory } from '@chaimir/api-client'
 import {
@@ -269,8 +270,15 @@ function CategoryFormModal({
   const [name, setName] = useState(category?.name ?? '')
   const [parentId, setParentId] = useState(category?.parent_id ?? '')
   const [sort, setSort] = useState(String(category?.sort ?? nextSort))
-  const [fieldError, setFieldError] = useState<string>()
+  const [submitError, setSubmitError] = useState<string>()
   const [working, setWorking] = useState(false)
+  const sortValue = sort.trim() === '' ? nextSort : Number(sort)
+  const { errors, validate } = useFormValidation(() => ({
+    name: !name.trim() ? '请输入分类名称' : null,
+    sort: !Number.isInteger(sortValue) || sortValue < -2147483648 || sortValue > 2147483647
+      ? '排序请填写有效范围内的整数'
+      : null,
+  }))
 
   const parentOptions = useMemo(
     () => [
@@ -285,17 +293,14 @@ function CategoryFormModal({
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (name.trim() === '') {
-        setFieldError('请输入分类名称')
-        return
-      }
-      setFieldError(undefined)
+      if (!validate()) return
+      setSubmitError(undefined)
       setWorking(true)
       try {
         const payload = {
           parent_id: parentId === '' ? undefined : parentId,
           name: name.trim(),
-          sort: Number(sort) || nextSort,
+          sort: sortValue,
         }
         if (editing) {
           await api.content.updateCategory(category.id, payload)
@@ -306,12 +311,12 @@ function CategoryFormModal({
         }
         onSaved()
       } catch (error) {
-        setFieldError(userFacingErrorMessage(error, '保存没有成功,请稍后重试。'))
+        setSubmitError(userFacingErrorMessage(error, '保存没有成功,请稍后重试。'))
       } finally {
         setWorking(false)
       }
     },
-    [category?.id, editing, name, nextSort, onSaved, parentId, sort],
+    [category?.id, editing, name, onSaved, parentId, sortValue, validate],
   )
 
   return (
@@ -323,12 +328,13 @@ function CategoryFormModal({
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <FormField label="分类名称" htmlFor="category-name" required error={fieldError}>
+            <FormField label="分类名称" htmlFor="category-name" required error={errors.name}>
               <Input
                 id="category-name"
                 value={name}
-                invalid={Boolean(fieldError)}
+                invalid={Boolean(errors.name)}
                 onChange={(event) => setName(event.target.value)}
+                onBlur={() => validate(['name'])}
               />
             </FormField>
             <FormField label="父分类" htmlFor="category-parent">
@@ -339,15 +345,18 @@ function CategoryFormModal({
                 onValueChange={setParentId}
               />
             </FormField>
-            <FormField label="排序" htmlFor="category-sort" helper="数字越小越靠前">
+            <FormField label="排序" htmlFor="category-sort" error={errors.sort} helper="数字越小越靠前">
               <Input
                 id="category-sort"
                 type="number"
                 min="0"
                 value={sort}
+                invalid={Boolean(errors.sort)}
                 onChange={(event) => setSort(event.target.value)}
+                onBlur={() => validate(['sort'])}
               />
             </FormField>
+            {submitError ? <Callout tone="danger">{submitError}</Callout> : null}
           </ModalBody>
           <ModalFooter>
             <Button type="button" variant="outline" onClick={onClose}>

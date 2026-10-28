@@ -41,6 +41,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { CompositionDeclarationFields } from '../../../sandbox/components/CompositionDeclarationFields'
 import {
   compositionDeclarationError,
@@ -50,6 +51,7 @@ import {
 import { judgerStatusLabel, judgerTypeLabel } from '../../../../utils/labels/judge'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { JUDGER_STATUSES, JUDGER_TYPES } from '../../options'
+import { getFrozenJudgerSnapshot } from '../../rules'
 
 /** 判题器编码规则,与后端 codePattern 一致。 */
 const CODE_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/
@@ -100,7 +102,6 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
   const [timeoutSec, setTimeoutSec] = useState(String(spec?.timeout_sec ?? 0))
   const [maxRetries, setMaxRetries] = useState(String(spec?.max_retries ?? 0))
 
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
 
@@ -111,7 +112,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
 
   // 私有执行容器由判题器镜像 manifest 提供,表单只带回不编辑
   const sidecars = useMemo(() => spec?.execution_sidecars ?? [], [spec?.execution_sidecars])
-  const snapshot = spec?.composition_snapshot
+  const snapshot = getFrozenJudgerSnapshot(spec)
 
   const commandList = useMemo(
     () =>
@@ -123,7 +124,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
   )
 
   /** validate 按类型逐项校验,口径与后端 parseJudgerExecutionSpec 一致。 */
-  const validate = useCallback((): boolean => {
+  const { errors, validate } = useFormValidation(useCallback(() => {
     const timeoutValue = Number(timeoutSec)
     const retriesValue = Number(maxRetries)
     const defaultTimeoutValue = Number(defaultTimeout)
@@ -169,8 +170,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
       next.command = '人工评分不执行命令,请清空这一栏'
     }
 
-    setErrors(next)
-    return Object.values(next).every((value) => value === null)
+    return next
   }, [
     code,
     commandList,
@@ -186,7 +186,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
     needsRuntime,
     sidecars.length,
     timeoutSec,
-  ])
+  ]))
 
   /** buildExecutionSpec 只带该类型真正用到的执行策略字段,空值一律不写进声明。 */
   const buildExecutionSpec = useCallback((): JudgerExecutionSpec => {
@@ -222,10 +222,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (!validate()) {
-        setFormError('有几项还不能提交,按提示改一下。')
-        return
-      }
+      if (submitting || !validate()) return
       setFormError(undefined)
       setSubmitting(true)
       try {
@@ -269,6 +266,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
       needsRuntime,
       onSaved,
       status,
+      submitting,
       typeValue,
       validate,
     ],
@@ -299,6 +297,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   disabled={editing}
                   placeholder="solidity-testcase"
                   invalid={Boolean(errors.code)}
+                  onBlur={() => validate(['code'])}
                   onChange={(event) => setCode(event.target.value)}
                 />
               </FormField>
@@ -308,6 +307,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   value={name}
                   placeholder="Solidity 测试用例判题"
                   invalid={Boolean(errors.name)}
+                  onBlur={() => validate(['name'])}
                   onChange={(event) => setName(event.target.value)}
                 />
               </FormField>
@@ -338,6 +338,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   value={executorRef}
                   placeholder="builtin-testcase"
                   invalid={Boolean(errors.executorRef)}
+                  onBlur={() => validate(['executorRef'])}
                   onChange={(event) => setExecutorRef(event.target.value)}
                 />
               </FormField>
@@ -357,6 +358,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   min={1}
                   value={defaultTimeout}
                   invalid={Boolean(errors.defaultTimeout)}
+                  onBlur={() => validate(['defaultTimeout'])}
                   onChange={(event) => setDefaultTimeout(event.target.value)}
                 />
               </FormField>
@@ -372,6 +374,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   min={0}
                   value={timeoutSec}
                   invalid={Boolean(errors.timeoutSec)}
+                  onBlur={() => validate(['timeoutSec'])}
                   onChange={(event) => setTimeoutSec(event.target.value)}
                 />
               </FormField>
@@ -387,6 +390,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   min={0}
                   value={maxRetries}
                   invalid={Boolean(errors.maxRetries)}
+                  onBlur={() => validate(['maxRetries'])}
                   onChange={(event) => setMaxRetries(event.target.value)}
                 />
               </FormField>
@@ -450,6 +454,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                     value={genesisRef}
                     placeholder="genesis-default"
                     invalid={Boolean(errors.genesisRef)}
+                    onBlur={() => validate(['genesisRef'])}
                     onChange={(event) => setGenesisRef(event.target.value)}
                   />
                 </FormField>
@@ -481,6 +486,10 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   ]}
                 />
               </div>
+            ) : editing && needsRuntime ? (
+              <Callout tone="info">
+                判题环境尚未准备完成，完成后会显示已锁定的环境和镜像。
+              </Callout>
             ) : null}
 
             {needsCommand ? (
@@ -507,6 +516,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                     value={command}
                     placeholder="run-evm-tests"
                     invalid={Boolean(errors.command)}
+                    onBlur={() => validate(['command'])}
                     onChange={(event) => setCommand(event.target.value)}
                   />
                 </FormField>
@@ -525,6 +535,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                       value={execTarget}
                       placeholder="sandbox/testcase-evm"
                       invalid={Boolean(errors.execTarget)}
+                      onBlur={() => validate(['execTarget'])}
                       onChange={(event) => setExecTarget(event.target.value)}
                     />
                   </FormField>
@@ -585,7 +596,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="primary" loading={submitting}>
+            <Button type="submit" variant="primary" loading={submitting} disabled={needsRuntime && compositionDeclarationError(declaration) !== undefined}>
               {editing ? '保存配置' : '登记判题器'}
             </Button>
           </ModalFooter>

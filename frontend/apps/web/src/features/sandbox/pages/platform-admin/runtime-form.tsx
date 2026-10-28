@@ -26,8 +26,16 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { runtimeStatusLabel } from '../../../../utils/labels/sandbox'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import {
+  RuntimeContainerAccessFields,
+  readRuntimeContainerAccess,
+  runtimeContainerAccessFields,
+  validRuntimeContainerAccess,
+  type RuntimeContainerAccess,
+} from '../../components/RuntimeContainerAccessFields'
 
 const ADAPTER_LEVELS = [
   {
@@ -57,6 +65,7 @@ const WORKSPACE_OP_KEYS = [
   'run_script',
   'terminal',
   'selftest',
+  'clean_workspace',
 ] as const
 type WorkspaceOpKey = (typeof WORKSPACE_OP_KEYS)[number]
 const WORKSPACE_OP_LABELS: Record<WorkspaceOpKey, string> = {
@@ -68,6 +77,7 @@ const WORKSPACE_OP_LABELS: Record<WorkspaceOpKey, string> = {
   run_script: '执行脚本',
   terminal: '打开终端',
   selftest: '自检',
+  clean_workspace: '开放前清理工作区',
 }
 
 interface PortState {
@@ -82,6 +92,8 @@ interface SidecarState {
   imageUrl: string
   prepullCommand: string[]
   prepullHold: boolean
+  command: string[]
+  access: RuntimeContainerAccess
   raw?: Record<string, unknown>
 }
 interface VolumeState {
@@ -93,6 +105,7 @@ interface VolumeState {
   raw?: Record<string, unknown>
 }
 interface CapabilityState {
+  execTarget: string
   command: string[]
   timeout: string
 }
@@ -101,10 +114,15 @@ interface FormSpec {
   workspaceDir: string
   containerName: string
   imageUrl: string
+  containerAccess: RuntimeContainerAccess
   ports: PortState[]
   sidecars: SidecarState[]
   volumes: VolumeState[]
   workspaceOps: Record<WorkspaceOpKey, string[]>
+  workspaceExecTarget: string
+  scriptExecTarget: string
+  privateArchive: { execTarget: string; unpackTar: string[] }
+  resetStrategy: string
   capabilities: Record<'deploy' | 'tx' | 'query' | 'reset', CapabilityState>
 }
 
@@ -114,10 +132,10 @@ const emptyWorkspaceOps = (): Record<WorkspaceOpKey, string[]> =>
     string[]
   >
 const emptyCapabilities = (): FormSpec['capabilities'] => ({
-  deploy: { command: [''], timeout: '' },
-  tx: { command: [''], timeout: '' },
-  query: { command: [''], timeout: '' },
-  reset: { command: [''], timeout: '' },
+  deploy: { execTarget: '', command: [''], timeout: '' },
+  tx: { execTarget: '', command: [''], timeout: '' },
+  query: { execTarget: '', command: [''], timeout: '' },
+  reset: { execTarget: '', command: [''], timeout: '' },
 })
 
 function componentRecord(value: unknown): Record<string, unknown> {
@@ -138,6 +156,7 @@ function commandText(value: unknown): string[] {
     : []
 }
 
+/** readFormSpec 从运行时声明恢复字段,保留未编辑的完整声明。 */
 function readFormSpec(runtime?: SandboxRuntime): FormSpec {
   const spec = componentRecord(runtime?.adapter_spec)
   const container = componentRecord(spec.runtime_container)
@@ -152,6 +171,7 @@ function readFormSpec(runtime?: SandboxRuntime): FormSpec {
   for (const key of ['deploy', 'tx', 'query', 'reset'] as const) {
     const item = componentRecord(capability[key])
     capabilities[key] = {
+      execTarget: stringValue(item.exec_target),
       command: commandText(item.command),
       timeout: numberText(item.timeout_seconds),
     }
@@ -161,6 +181,7 @@ function readFormSpec(runtime?: SandboxRuntime): FormSpec {
     workspaceDir: stringValue(spec.workspace_dir) || '/workspace',
     containerName: stringValue(container.name),
     imageUrl: stringValue(container.image_url),
+    containerAccess: readRuntimeContainerAccess(container),
     ports: ports.map((item) => {
       const port = componentRecord(item)
       return {
@@ -178,6 +199,8 @@ function readFormSpec(runtime?: SandboxRuntime): FormSpec {
         imageUrl: stringValue(sidecar.image_url),
         prepullCommand: commandText(sidecar.prepull_command),
         prepullHold: sidecar.prepull_hold === true,
+        command: commandText(sidecar.command),
+        access: readRuntimeContainerAccess(sidecar),
         raw: sidecar,
       }
     }),
@@ -193,16 +216,25 @@ function readFormSpec(runtime?: SandboxRuntime): FormSpec {
       }
     }),
     workspaceOps,
+    workspaceExecTarget: stringValue(ops.exec_target),
+    scriptExecTarget: stringValue(ops.script_exec_target),
+    privateArchive: {
+      execTarget: stringValue(componentRecord(spec.private_archive_ops).exec_target),
+      unpackTar: commandText(componentRecord(spec.private_archive_ops).unpack_tar),
+    },
+    resetStrategy: stringValue(capability.reset_strategy),
     capabilities,
   }
 }
 
+/** buildAdapterSpec 将当前输入写回唯一服务端契约,不丢失私有执行与隔离配置。 */
 function buildAdapterSpec(form: FormSpec): SandboxAdapterSpec {
   return {
     ...form.baseSpec,
     workspace_dir: form.workspaceDir.trim(),
     runtime_container: {
       ...componentRecord(form.baseSpec.runtime_container),
+      ...runtimeContainerAccessFields(componentRecord(form.baseSpec.runtime_container), form.containerAccess),
       name: form.containerName.trim(),
       image_url: form.imageUrl.trim(),
       ports: form.ports
@@ -219,10 +251,12 @@ function buildAdapterSpec(form: FormSpec): SandboxAdapterSpec {
       .filter((sidecar) => sidecar.name.trim() !== '')
       .map((sidecar) => ({
         ...sidecar.raw,
+        ...runtimeContainerAccessFields(sidecar.raw ?? {}, sidecar.access),
         name: sidecar.name.trim(),
         image_url: sidecar.imageUrl.trim(),
         prepull_command: sidecar.prepullCommand,
         prepull_hold: sidecar.prepullHold,
+        command: sidecar.command,
       })),
     volume_domains: form.volumes
       .filter((volume) => volume.name.trim() !== '')
@@ -234,21 +268,34 @@ function buildAdapterSpec(form: FormSpec): SandboxAdapterSpec {
         persistence: volume.persistence.trim(),
         snapshot_scope: volume.snapshotScope.trim(),
       })),
-    workspace_ops: Object.fromEntries(
-      WORKSPACE_OP_KEYS.map((key) => [key, form.workspaceOps[key]])
-    ),
-    capability_commands: Object.fromEntries(
-      (['deploy', 'tx', 'query', 'reset'] as const).map((key) => [
-        key,
-        {
-          command: form.capabilities[key].command,
-          timeout_seconds:
-            form.capabilities[key].timeout.trim() === ''
-              ? 0
-              : Number(form.capabilities[key].timeout),
-        },
-      ])
-    ),
+    workspace_ops: {
+      ...Object.fromEntries(WORKSPACE_OP_KEYS.map((key) => [key, form.workspaceOps[key]])),
+      exec_target: form.workspaceExecTarget.trim(),
+      script_exec_target: form.scriptExecTarget.trim(),
+    },
+    private_archive_ops: {
+      exec_target: form.privateArchive.execTarget.trim(),
+      unpack_tar: form.privateArchive.unpackTar,
+    },
+    capability_commands: {
+      ...Object.fromEntries(
+        (['deploy', 'tx', 'query', 'reset'] as const).map((key) => [
+          key,
+          {
+            exec_target: form.capabilities[key].execTarget.trim(),
+            command: form.capabilities[key].command,
+            timeout_seconds:
+              form.capabilities[key].timeout.trim() === ''
+                ? 0
+                : Number(form.capabilities[key].timeout),
+          },
+        ])
+      ),
+      reset_strategy: form.resetStrategy,
+      ...(form.resetStrategy === 'recreate_runtime' ? {
+        reset: { exec_target: '', command: [], timeout_seconds: 0 },
+      } : {}),
+    },
   } as SandboxAdapterSpec
 }
 
@@ -280,7 +327,6 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
     )
   )
   const [form, setForm] = useState<FormSpec>(() => readFormSpec(runtime))
-  const [errors, setErrors] = useState<Record<string, string | null>>({})
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
   const parsed = useMemo(() => buildAdapterSpec(form), [form])
@@ -310,59 +356,69 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
     []
   )
 
+  const { errors, validate } = useFormValidation(useCallback(() => {
+    const next: Record<string, string | null> = {
+      code: CODE_PATTERN.test(code.trim()) ? null : '短名只能使用小写字母、数字和连字符。',
+      name: name.trim() === '' ? '请输入运行时名称。' : null,
+      eco: eco.trim() === '' ? '请输入所属生态。' : null,
+      workspaceDir: form.workspaceDir.startsWith('/')
+        ? null
+        : '工作区目录必须是环境内的绝对路径。',
+      container: form.containerName.trim() === '' ? '请填写主环境名称。' : null,
+      containerAccess: validRuntimeContainerAccess(form.containerAccess) ? null : '请检查主环境的数据域与临时目录。',
+      ports: form.ports.some(
+        (port) =>
+          port.name.trim() !== '' &&
+          Number(port.containerPort) > 0 &&
+          Number(port.servicePort) > 0
+      )
+        ? null
+        : '请至少填写一个有效端口。',
+      sidecars:
+        form.sidecars.every(
+          (sidecar) =>
+            sidecar.name.trim() !== '' &&
+            sidecar.imageUrl.trim() !== '' &&
+            validRuntimeContainerAccess(sidecar.access) &&
+            sidecar.prepullCommand.some((item) => item.trim() !== '')
+        ) && form.sidecars.filter((sidecar) => sidecar.prepullHold).length === 1
+          ? null
+          : '附加组件必须填写名称、镜像和预拉取命令,并且只能选择一个保持容器。',
+      workspaceOps: EXEC_TARGET_PATTERN.test(form.workspaceExecTarget.trim())
+        && EXEC_TARGET_PATTERN.test(form.scriptExecTarget.trim())
+        && form.workspaceExecTarget.trim() !== form.scriptExecTarget.trim()
+        && WORKSPACE_OP_KEYS.every((key) =>
+        form.workspaceOps[key].some((item) => item.trim() !== '')
+      )
+        ? null
+        : '请明确不同的学生与私有脚本执行目标,并补齐工作区操作命令。',
+      privateArchive: EXEC_TARGET_PATTERN.test(form.privateArchive.execTarget.trim())
+        && form.privateArchive.unpackTar.some((part) => part.trim() !== '')
+        ? null : '请填写私有归档的执行目标与解包命令。',
+      capabilities:
+        Number(adapterLevel) < RuntimeAdapterLevel.STANDARD ||
+        capabilityImpl.trim() !== '' ||
+        pluginRef.trim() !== '' ||
+        (['deploy', 'tx', 'query', 'reset'] as const).every((key) => {
+          if (key === 'reset' && form.resetStrategy === 'recreate_runtime') return true
+          const capability = form.capabilities[key]
+          return (
+            capability.command.some((item) => item.trim() !== '') &&
+            EXEC_TARGET_PATTERN.test(capability.execTarget.trim()) &&
+            Number.isInteger(Number(capability.timeout)) &&
+            Number(capability.timeout) > 0
+          )
+        })
+          ? null
+          : '请补齐链能力执行目标、命令和有效超时,并选择重置方式。',
+    }
+    return next
+  }, [adapterLevel, capabilityImpl, code, eco, form, name, pluginRef]))
+
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const next: Record<string, string | null> = {
-        code: CODE_PATTERN.test(code.trim()) ? null : '短名只能使用小写字母、数字和连字符。',
-        name: name.trim() === '' ? '请输入运行时名称。' : null,
-        eco: eco.trim() === '' ? '请输入所属生态。' : null,
-        workspaceDir: form.workspaceDir.startsWith('/')
-          ? null
-          : '工作区目录必须是环境内的绝对路径。',
-        container: form.containerName.trim() === '' ? '请填写主环境名称。' : null,
-        ports: form.ports.some(
-          (port) =>
-            port.name.trim() !== '' &&
-            Number(port.containerPort) > 0 &&
-            Number(port.servicePort) > 0
-        )
-          ? null
-          : '请至少填写一个有效端口。',
-        sidecars:
-          form.sidecars.every(
-            (sidecar) =>
-              sidecar.name.trim() !== '' &&
-              sidecar.imageUrl.trim() !== '' &&
-              sidecar.prepullCommand.some((item) => item.trim() !== '')
-          ) && form.sidecars.filter((sidecar) => sidecar.prepullHold).length === 1
-            ? null
-            : '附加组件必须填写名称、镜像和预拉取命令,并且只能选择一个保持容器。',
-        workspaceOps: WORKSPACE_OP_KEYS.every((key) =>
-          form.workspaceOps[key].some((item) => item.trim() !== '')
-        )
-          ? null
-          : '请补齐八项工作区操作命令。',
-        capabilities:
-          Number(adapterLevel) < RuntimeAdapterLevel.STANDARD ||
-          capabilityImpl.trim() !== '' ||
-          pluginRef.trim() !== '' ||
-          (['deploy', 'tx', 'query', 'reset'] as const).every((key) => {
-            const capability = form.capabilities[key]
-            return (
-              capability.command.some((item) => item.trim() !== '') &&
-              Number.isInteger(Number(capability.timeout)) &&
-              Number(capability.timeout) > 0
-            )
-          })
-            ? null
-            : '请补齐四项链能力命令并填写有效超时。',
-      }
-      setErrors(next)
-      if (Object.values(next).some((value) => value !== null)) {
-        setFormError('有几项还不能提交，请按提示补全。')
-        return
-      }
+      if (!validate()) return
       setFormError(undefined)
       setSubmitting(true)
       try {
@@ -392,13 +448,13 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
       code,
       eco,
       editing,
-      form,
       name,
       onSaved,
       parsed,
       pluginRef,
       runtime?.id,
       status,
+      validate,
     ]
   )
 
@@ -526,6 +582,9 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                   />
                 </FormField>
               </div>
+              <RuntimeContainerAccessFields label="主环境" value={form.containerAccess}
+                onChange={(value) => updateForm('containerAccess', value)} />
+              {errors.containerAccess ? <Callout tone="danger">{errors.containerAccess}</Callout> : null}
               <PortEditor
                 ports={form.ports}
                 error={errors.ports}
@@ -542,6 +601,16 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
             </section>
             <section className="well flex flex-col gap-3 p-3">
               <h3 className="text-sm font-medium text-ink">工作区操作</h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <FormField label="学生工作区执行目标" htmlFor={`${fieldId}-workspace-target`} helper="填写已声明的 Pod/容器,学生终端与文件操作使用此处。">
+                  <Input id={`${fieldId}-workspace-target`} value={form.workspaceExecTarget}
+                    onChange={(event) => updateForm('workspaceExecTarget', event.target.value)} />
+                </FormField>
+                <FormField label="私有脚本执行目标" htmlFor={`${fieldId}-script-target`} helper="必须与学生入口分开,挂载工作区并独享临时目录。">
+                  <Input id={`${fieldId}-script-target`} value={form.scriptExecTarget}
+                    onChange={(event) => updateForm('scriptExecTarget', event.target.value)} />
+                </FormField>
+              </div>
               <fieldset
                 className="flex flex-col gap-3"
                 aria-describedby={
@@ -572,9 +641,25 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
               </fieldset>
             </section>
             <section className="well flex flex-col gap-3 p-3">
+              <h3 className="text-sm font-medium text-ink">私有判题归档</h3>
+              <FormField label="私有归档执行目标" htmlFor={`${fieldId}-archive-target`} error={errors.privateArchive}>
+                <Input id={`${fieldId}-archive-target`} value={form.privateArchive.execTarget} invalid={Boolean(errors.privateArchive)}
+                  onChange={(event) => updateForm('privateArchive', { ...form.privateArchive, execTarget: event.target.value })} />
+              </FormField>
+              <ArgvEditor label="私有归档解包命令" value={form.privateArchive.unpackTar}
+                onChange={(unpackTar) => updateForm('privateArchive', { ...form.privateArchive, unpackTar })} />
+            </section>
+            <section className="well flex flex-col gap-3 p-3">
               <h3 className="text-sm font-medium text-ink">标准链能力命令</h3>
+              <FormField label="重置方式" htmlFor={`${fieldId}-reset-strategy`}>
+                <Select id={`${fieldId}-reset-strategy`} value={form.resetStrategy || 'command'} options={[
+                  { value: 'command', label: '执行原生重置命令' },
+                  { value: 'recreate_runtime', label: '重建运行环境' },
+                ]} onValueChange={(value) => updateForm('resetStrategy', value === 'command' ? '' : value)} />
+              </FormField>
               <div className="grid gap-3 sm:grid-cols-2">
                 {(['deploy', 'tx', 'query', 'reset'] as const).map((key) => (
+                  key === 'reset' && form.resetStrategy === 'recreate_runtime' ? null :
                   <fieldset
                     key={key}
                     className="grid gap-2"
@@ -592,6 +677,10 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                             ? '查询能力'
                             : '重置能力'}
                     </legend>
+                    <FormField label="链能力执行目标" htmlFor={`${fieldId}-${key}-target`}>
+                      <Input id={`${fieldId}-${key}-target`} value={form.capabilities[key].execTarget}
+                        onChange={(event) => updateCapability(key, 'execTarget', event.target.value)} />
+                    </FormField>
                     <ArgvEditor
                       label="命令参数"
                       value={form.capabilities[key].command}
@@ -642,6 +731,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
 }
 
 const CODE_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/
+const EXEC_TARGET_PATTERN = /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/
 
 function PortEditor({
   ports,
@@ -825,7 +915,8 @@ function SidecarEditor({
           onClick={() =>
             onChange([
               ...sidecars,
-              { name: '', imageUrl: '', prepullCommand: [''], prepullHold: false },
+              { name: '', imageUrl: '', prepullCommand: [''], prepullHold: false,
+                command: [], access: readRuntimeContainerAccess({}) },
             ])
           }
         >
@@ -833,7 +924,7 @@ function SidecarEditor({
         </Button>
       </div>
       {sidecars.map((sidecar, index) => (
-        <div key={`sidecar-${index}`} className="grid gap-2 sm:grid-cols-5">
+        <div key={`sidecar-${index}`} className="flex flex-col gap-3">
           <Input
             aria-label="组件名称"
             value={sidecar.name}
@@ -846,6 +937,13 @@ function SidecarEditor({
               )
             }
           />
+          <ArgvEditor
+            label="启动命令"
+            value={sidecar.command}
+            onChange={(command) => onChange(sidecars.map((item, i) => i === index ? { ...item, command } : item))}
+          />
+          <RuntimeContainerAccessFields label={sidecar.name || `组件 ${index + 1}`} value={sidecar.access}
+            onChange={(access) => onChange(sidecars.map((item, i) => i === index ? { ...item, access } : item))} />
           <ArgvEditor
             label="预拉取命令"
             value={sidecar.prepullCommand}
@@ -949,38 +1047,53 @@ function VolumeEditor({
               )
             }
           />
-          <Input
+          <Select
             aria-label="学生访问权限"
             value={volume.studentAccess}
-            placeholder="read-write"
-            onChange={(event) =>
+            placeholder="选择学生访问权限"
+            options={[
+              { value: 'none', label: '不可访问' },
+              { value: 'read_only', label: '只读' },
+              { value: 'read_write', label: '可读写' },
+            ]}
+            onValueChange={(studentAccess) =>
               onChange(
                 volumes.map((item, i) =>
-                  i === index ? { ...item, studentAccess: event.target.value } : item
+                  i === index ? { ...item, studentAccess } : item
                 )
               )
             }
           />
-          <Input
+          <Select
             aria-label="持久化策略"
             value={volume.persistence}
-            placeholder="ephemeral"
-            onChange={(event) =>
+            placeholder="选择持久化策略"
+            options={[
+              { value: 'object_storage_code', label: '工作区代码归档' },
+              { value: 'ephemeral', label: '临时数据' },
+              { value: 'snapshot', label: '快照保留' },
+            ]}
+            onValueChange={(persistence) =>
               onChange(
                 volumes.map((item, i) =>
-                  i === index ? { ...item, persistence: event.target.value } : item
+                  i === index ? { ...item, persistence } : item
                 )
               )
             }
           />
-          <Input
+          <Select
             aria-label="快照范围"
             value={volume.snapshotScope}
-            placeholder="workspace"
-            onChange={(event) =>
+            placeholder="选择快照范围"
+            options={[
+              { value: 'never', label: '不纳入快照' },
+              { value: 'always', label: '始终纳入' },
+              { value: 'snapshot_enabled', label: '开启快照时纳入' },
+            ]}
+            onValueChange={(snapshotScope) =>
               onChange(
                 volumes.map((item, i) =>
-                  i === index ? { ...item, snapshotScope: event.target.value } : item
+                  i === index ? { ...item, snapshotScope } : item
                 )
               )
             }

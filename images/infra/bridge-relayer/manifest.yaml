@@ -40,10 +40,12 @@ capabilities:
       - relay_chains
     properties:
       base_config:
+        title: 桥接配置文件路径
         type: string
         minLength: 1
         x-chaimir-env: infra/HYP_BASE_CONFIG
       relay_chains:
+        title: 参与桥接的链（逗号分隔）
         type: string
         minLength: 1
         x-chaimir-env: infra/HYP_RELAYCHAINS

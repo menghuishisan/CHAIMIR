@@ -169,6 +169,9 @@ func (s *Service) validateSSOConfig(req SSOConfigRequest) error {
 				return apperr.ErrIdentitySSOConfigInvalid
 			}
 		}
+		if _, err := ldapUserFilter(jsonx.StringField(req.Config, "user_filter"), "login-name"); err != nil {
+			return err
+		}
 	default:
 		return apperr.ErrIdentitySSOTypeInvalid
 	}
@@ -204,6 +207,11 @@ func (s *Service) validateLDAPCredentials(ctx context.Context, cfg SSOConfig, us
 	if err != nil {
 		return "", err
 	}
+	// 使用唯一模板契约构造查询,配置无效时在建立外部连接前拒绝。
+	filter, err := ldapUserFilter(data.UserFilter, username)
+	if err != nil {
+		return "", err
+	}
 	resolvedURL, serverName, err := netx.PrivateResolvedURL(ctx, data.URL, "636")
 	if err != nil {
 		return "", apperr.ErrIdentityLDAPServerInsecure.WithCause(err)
@@ -217,8 +225,6 @@ func (s *Service) validateLDAPCredentials(ctx context.Context, cfg SSOConfig, us
 	if err := conn.Bind(data.BindDN, data.BindPassword); err != nil {
 		return "", apperr.ErrIdentityInvalidCredentials.WithCause(err)
 	}
-	// 用户名进入 LDAP filter 前必须转义,避免目录查询注入。
-	filter := strings.ReplaceAll(data.UserFilter, "{username}", ldap.EscapeFilter(username))
 	search := ldap.NewSearchRequest(
 		data.BaseDN,
 		ldap.ScopeWholeSubtree,
@@ -248,6 +254,18 @@ func (s *Service) validateLDAPCredentials(ctx context.Context, cfg SSOConfig, us
 		return "", apperr.ErrIdentityInvalidCredentials.WithCause(err)
 	}
 	return matchValue, nil
+}
+
+// ldapUserFilter 按唯一登录名占位符转义并编译过滤式,供保存和认证入口共同校验。
+func ldapUserFilter(template, username string) (string, error) {
+	if !strings.Contains(template, "{username}") {
+		return "", apperr.ErrIdentitySSOConfigInvalid.WithCause(fmt.Errorf("LDAP user filter must include {username}"))
+	}
+	filter := strings.ReplaceAll(strings.TrimSpace(template), "{username}", ldap.EscapeFilter(username))
+	if _, err := ldap.CompileFilter(filter); err != nil {
+		return "", apperr.ErrIdentitySSOConfigInvalid.WithCause(fmt.Errorf("compile LDAP user filter: %w", err))
+	}
+	return filter, nil
 }
 
 // ldapConfig 描述租户 LDAP 配置 JSON 中服务端使用的字段。

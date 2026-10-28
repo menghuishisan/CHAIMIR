@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { ROLE_ROUTES } from '../../utils/roleRouting'
 import type { RoleNavigationConfig } from '../../layouts/main/navigation'
+import { TENANT_MODULE } from '@chaimir/api-client'
 
 export const schoolAdminNavigation: RoleNavigationConfig = {
   ...ROLE_ROUTES.schoolAdmin,
@@ -35,10 +36,30 @@ export const schoolAdminNavigation: RoleNavigationConfig = {
     {
       title: '教务与成绩',
       items: [
-        { name: '成绩审核', path: '/school-admin/approvals', icon: CheckCircle },
-        { name: '申诉处理', path: '/school-admin/appeals', icon: Scale },
-        { name: '学业预警', path: '/school-admin/alerts', icon: TriangleAlert },
-        { name: '成绩配置', path: '/school-admin/grade-settings', icon: Settings2 },
+        {
+          name: '成绩审核',
+          path: '/school-admin/approvals',
+          icon: CheckCircle,
+          module: TENANT_MODULE.GRADE,
+        },
+        {
+          name: '申诉处理',
+          path: '/school-admin/appeals',
+          icon: Scale,
+          module: TENANT_MODULE.GRADE,
+        },
+        {
+          name: '学业预警',
+          path: '/school-admin/alerts',
+          icon: TriangleAlert,
+          module: TENANT_MODULE.GRADE,
+        },
+        {
+          name: '成绩配置',
+          path: '/school-admin/grade-settings',
+          icon: Settings2,
+          module: TENANT_MODULE.GRADE,
+        },
       ],
     },
     {

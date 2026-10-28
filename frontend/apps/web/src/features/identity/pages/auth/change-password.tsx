@@ -14,8 +14,8 @@ import {
   confirmPasswordError,
   passwordRequiredError,
   passwordRuleError,
-  useFieldErrors,
 } from '../../authForm'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import {
   AuthFormError,
   AuthHeading,
@@ -44,7 +44,11 @@ export default function ChangePasswordPage() {
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const { errors, setError } = useFieldErrors()
+  const { errors, validate } = useFormValidation(() => ({
+    old: passwordRequiredError(oldPassword, '请输入当前密码'),
+    new: newPasswordError(newPassword, oldPassword),
+    confirm: confirmPasswordError(confirmPassword, newPassword, '新密码'),
+  }))
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -52,10 +56,7 @@ export default function ChangePasswordPage() {
   const handleSubmit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const oldOk = setError('old', passwordRequiredError(oldPassword, '请输入当前密码'))
-      const newOk = setError('new', newPasswordError(newPassword, oldPassword))
-      const confirmOk = setError('confirm', confirmPasswordError(confirmPassword, newPassword, '新密码'))
-      if (!oldOk || !newOk || !confirmOk) return
+      if (!validate()) return
 
       setSubmitting(true)
       setFormError(null)
@@ -68,7 +69,7 @@ export default function ChangePasswordPage() {
         setSubmitting(false)
       }
     },
-    [confirmPassword, navigate, newPassword, oldPassword, setError],
+    [navigate, newPassword, oldPassword, validate],
   )
 
   /** handleLogout 尽力吊销服务端会话,并始终清除本地凭证返回登录页 */
@@ -96,7 +97,7 @@ export default function ChangePasswordPage() {
           value={oldPassword}
           error={errors.old}
           onValueChange={setOldPassword}
-          onBlur={() => setError('old', passwordRequiredError(oldPassword, '请输入当前密码'))}
+          onBlur={() => validate(['old'])}
         />
 
         <AuthTextField
@@ -107,7 +108,7 @@ export default function ChangePasswordPage() {
           value={newPassword}
           error={errors.new}
           onValueChange={setNewPassword}
-          onBlur={() => setError('new', newPasswordError(newPassword, oldPassword))}
+          onBlur={() => validate(['new'])}
         />
 
         <AuthTextField
@@ -118,7 +119,7 @@ export default function ChangePasswordPage() {
           value={confirmPassword}
           error={errors.confirm}
           onValueChange={setConfirmPassword}
-          onBlur={() => setError('confirm', confirmPasswordError(confirmPassword, newPassword, '新密码'))}
+          onBlur={() => validate(['confirm'])}
         />
 
         <AuthFormError message={formError} />

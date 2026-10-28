@@ -181,7 +181,7 @@ function ConfigHistoryContent({ config, onRolledBack }: ConfigHistoryContentProp
         properties={[
           { label: '配置键', value: <span className="font-mono">{config.key}</span> },
           { label: '当前版本', value: config.version },
-          { label: '变更次数', value: history.total },
+          { label: '变更次数', value: history.total ?? '—' },
           { label: '最近更新', value: formatDateTime(config.updated_at) },
         ]}
       />
@@ -196,7 +196,7 @@ function ConfigHistoryContent({ config, onRolledBack }: ConfigHistoryContentProp
         </div>
         <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
           <p className="text-xs font-medium text-ink-sub">历史记录</p>
-          <p className="mt-1 text-lg font-medium text-ink">{history.total} 条变更</p>
+          <p className="mt-1 text-lg font-medium text-ink">{history.total ?? '—'} 条变更</p>
           <p className="mt-2 text-sm text-ink-sub">每次修改和回滚都会留下审计记录，可按时间回看。</p>
         </div>
       </div>

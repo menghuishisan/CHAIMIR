@@ -1,26 +1,24 @@
-// 内容域统一题库选题弹层。
+// 内容域统一题库选题列表片段,由试卷页面或课程作业内容区承载。
 //
 // 试卷与课程作业都从 M5 题库选择已发布版本,查询、列表展示和选择交互属于同一内容能力;
 // 调用方只负责把选中题目写入自己的业务表单,避免跨模块重复实现题库读取逻辑。
 
-import { useState } from 'react'
-import { FileText } from 'lucide-react'
-import { PAGINATION_MAX_SIZE, type ContentItem } from '@chaimir/api-client'
+import { useId, useState } from 'react'
+import { FileText, Search } from 'lucide-react'
+import { ContentStatus, type ContentItem } from '@chaimir/api-client'
 import {
   Button,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
+  DataPanel,
+  FilterBar,
+  FilterField,
+  Input,
+  Pagination,
   Table,
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
-import { useAsyncResource } from '../../../hooks'
+import { usePagedResource } from '../../../hooks'
 import { ContentItemClassificationCell, ContentItemIdentityCell } from './ContentItemCells'
 
 export interface ContentItemPickerProps {
@@ -43,10 +41,25 @@ export function ContentItemPicker({
   onPick,
 }: ContentItemPickerProps) {
   const [picked, setPicked] = useState<ContentItem[]>([])
-  const items = useAsyncResource(
-    () => api.content.getItems({ page: 1, size: PAGINATION_MAX_SIZE }),
-    [],
+  const keywordId = useId()
+  const [keyword, setKeyword] = useState('')
+  const [submittedKeyword, setSubmittedKeyword] = useState('')
+  const items = usePagedResource(
+    (params) =>
+      api.content.getItems({
+        ...params,
+        status: ContentStatus.PUBLISHED,
+        keyword: submittedKeyword || undefined,
+      }),
+    [submittedKeyword]
   )
+
+  /** handleSearch 由服务端查询完整已发布库,同条件再次查询时也刷新当前结果。 */
+  const handleSearch = () => {
+    const next = keyword.trim()
+    if (next === submittedKeyword) items.reload()
+    else setSubmittedKeyword(next)
+  }
 
   const columns: TableColumn<ContentItem>[] = [
     {
@@ -76,7 +89,7 @@ export function ContentItemPicker({
               setPicked((current) =>
                 isPicked
                   ? current.filter((candidate) => candidate.code !== item.code)
-                  : [...current, item],
+                  : [...current, item]
               )
             }
           >
@@ -88,74 +101,96 @@ export function ContentItemPicker({
   ]
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="lg">
-        <ModalHeader>
-          <ModalTitle>从题库选题</ModalTitle>
-          <ModalDescription>
-            选中的题目会按当前版本加入{targetName},之后题库改动不影响已添加内容。
-          </ModalDescription>
-        </ModalHeader>
-        <ModalBody>
-          <ResourceState
-            resource={items}
-            emptyIcon={FileText}
-            emptyTitle="题库里还没有题目"
-            emptyDescription="先在题库内容里创建题目,再回来选择。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-          >
-            {(page) => (
-              <div className="max-h-96 overflow-y-auto">
-                <Table
-                  columns={columns}
-                  data={page.list}
-                  rowKey={(item) => item.id}
-                  elevated={false}
-                  // <md 换行卡(§6.4.1 规则 3):题名一行、分类一行,选择按钮在右
-                  mobileCard={(item) => {
-                    const alreadyInTarget = selectedCodes.has(item.code)
-                    const isPicked = picked.some((candidate) => candidate.code === item.code)
-                    return {
-                      title: item.title,
-                      meta: <ContentItemClassificationCell item={item} />,
-                      action: (
-                        <Button
-                          type="button"
-                          variant={isPicked ? 'outline' : 'ghost'}
-                          size="sm"
-                          disabled={alreadyInTarget}
-                          onClick={() =>
-                            setPicked((current) =>
-                              isPicked
-                                ? current.filter((candidate) => candidate.code !== item.code)
-                                : [...current, item],
-                            )
-                          }
-                        >
-                          {alreadyInTarget ? `已在${targetName}中` : isPicked ? '取消选择' : '选择'}
-                        </Button>
-                      ),
-                    }
-                  }}
-                />
-              </div>
-            )}
-          </ResourceState>
-        </ModalBody>
-        <ModalFooter>
-          <Button type="button" variant="outline" onClick={onClose}>
-            取消
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            disabled={picked.length === 0}
-            onClick={() => onPick(picked)}
-          >
-            添加 {picked.length > 0 ? `${picked.length} 道` : ''}题目
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-ink-sub">
+        仅可选择已发布题目。选中的题目按当前版本加入{targetName},之后题库改动不影响已添加内容。
+      </p>
+      <DataPanel
+        label="已发布题目"
+        filter={
+          <FilterBar label="选题筛选" onSubmit={handleSearch} submitLabel="搜索">
+            <FilterField label="题目关键词" htmlFor={keywordId}>
+              <Input
+                id={keywordId}
+                value={keyword}
+                leftIcon={Search}
+                placeholder="输入关键词"
+                onChange={(event) => setKeyword(event.target.value)}
+              />
+            </FilterField>
+          </FilterBar>
+        }
+        footer={
+          <Pagination
+            page={items.page}
+            pageSize={items.pageSize}
+            total={items.total}
+            onPageChange={items.setPage}
+          />
+        }
+      >
+        <ResourceState
+          resource={items}
+          emptyIcon={FileText}
+          emptyTitle={submittedKeyword ? '没有匹配的已发布题目' : '还没有可选择的已发布题目'}
+          emptyDescription={
+            submittedKeyword
+              ? '换个关键词再试,或清空关键词查看全部。'
+              : '先在题库中发布题目,再回来选择。'
+          }
+          skeleton={
+            <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
+          }
+        >
+          {(page) => (
+            <Table
+              columns={columns}
+              data={page.list}
+              rowKey={(item) => item.id}
+              elevated={false}
+              // <md 换行卡(§6.4.1 规则 3):题名一行、分类一行,选择按钮在右
+              mobileCard={(item) => {
+                const alreadyInTarget = selectedCodes.has(item.code)
+                const isPicked = picked.some((candidate) => candidate.code === item.code)
+                return {
+                  title: item.title,
+                  meta: <ContentItemClassificationCell item={item} />,
+                  action: (
+                    <Button
+                      type="button"
+                      variant={isPicked ? 'outline' : 'ghost'}
+                      size="sm"
+                      disabled={alreadyInTarget}
+                      onClick={() =>
+                        setPicked((current) =>
+                          isPicked
+                            ? current.filter((candidate) => candidate.code !== item.code)
+                            : [...current, item]
+                        )
+                      }
+                    >
+                      {alreadyInTarget ? `已在${targetName}中` : isPicked ? '取消选择' : '选择'}
+                    </Button>
+                  ),
+                }
+              }}
+            />
+          )}
+        </ResourceState>
+      </DataPanel>
+      <div className="flex flex-wrap justify-end gap-3">
+        <Button type="button" variant="outline" onClick={onClose}>
+          取消
+        </Button>
+        <Button
+          type="button"
+          variant="primary"
+          disabled={picked.length === 0}
+          onClick={() => onPick(picked)}
+        >
+          添加 {picked.length > 0 ? `${picked.length} 道` : ''}题目
+        </Button>
+      </div>
+    </div>
   )
 }

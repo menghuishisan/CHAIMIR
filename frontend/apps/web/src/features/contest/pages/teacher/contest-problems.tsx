@@ -47,6 +47,7 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { toContentItemVersionOptions } from '../../../content/contentItemOptions'
 import { battleRoleLabel, battleRuleLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -240,6 +241,18 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
   const [battleRule, setBattleRule] = useState(String(problem?.battle_rule ?? BATTLE_RULES[0]))
   const [formError, setFormError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
+  const { errors, validate } = useFormValidation(() => ({
+    item: itemRef === '' ? '请选择这道赛题引用的题目' : null,
+    score: Number.isInteger(Number(score)) && Number(score) > 0
+      ? null : '分值需要是大于 0 的整数',
+    seq: Number.isInteger(Number(seq)) && Number(seq) > 0
+      ? null : '序号需要是大于 0 的整数',
+    minScore: dynamicEnabled && (
+      !Number.isInteger(Number(minScore)) || Number(minScore) <= 0 || Number(minScore) > Number(score)
+    ) ? '最低分需要是正整数且不超过题目分值' : null,
+    decay: dynamicEnabled && (!Number.isInteger(Number(decay)) || Number(decay) <= 0)
+      ? '每队衰减需要是大于 0 的整数' : null,
+  }))
 
   // 题目只列已发布的:草稿题目在学生答题时取不到题面
   const items = useAsyncResource(
@@ -269,32 +282,9 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      if (itemRef === '') {
-        setFormError('请选择这道赛题引用的题目')
-        return
-      }
+      if (submitting || !validate()) return
       const scoreValue = Number(score)
-      if (!Number.isInteger(scoreValue) || scoreValue <= 0) {
-        setFormError('分值需要是大于 0 的整数')
-        return
-      }
       const seqValue = Number(seq)
-      if (!Number.isInteger(seqValue) || seqValue <= 0) {
-        setFormError('序号需要是大于 0 的整数')
-        return
-      }
-      if (dynamicEnabled) {
-        const minValue = Number(minScore)
-        const decayValue = Number(decay)
-        if (!Number.isInteger(minValue) || minValue <= 0 || minValue > scoreValue) {
-          setFormError('最低分需要是正整数且不超过题目分值')
-          return
-        }
-        if (!Number.isInteger(decayValue) || decayValue <= 0) {
-          setFormError('每队衰减需要是大于 0 的整数')
-          return
-        }
-      }
 
       const [itemCode, itemVersion] = itemRef.split('|')
       const rule = Number(battleRule) as BattleRule
@@ -335,6 +325,8 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
       onSaved,
       score,
       seq,
+      submitting,
+      validate,
     ]
   )
 
@@ -363,12 +355,15 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                   label="引用题目"
                   htmlFor="problem-item"
                   required
+                  error={errors.item}
                   helper="题目按当前版本锁定;换题请新增赛题,已有提交仍绑定原题版本"
                 >
                   <Select
                     id="problem-item"
                     options={itemOptions}
                     value={itemRef}
+                    invalid={Boolean(errors.item)}
+                    onBlur={() => validate(['item'])}
                     placeholder={itemOptions.length > 0 ? '选择题目' : '暂无已发布题目'}
                     disabled={itemOptions.length === 0 || editing}
                     onValueChange={setItemRef}
@@ -378,19 +373,22 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
             </ResourceState>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <FormField label="分值" htmlFor="problem-score" required>
+              <FormField label="分值" htmlFor="problem-score" required error={errors.score}>
                 <Input
                   id="problem-score"
                   type="number"
                   min="1"
                   step="1"
                   value={score}
+                  invalid={Boolean(errors.score)}
+                  onBlur={() => validate(['score'])}
                   onChange={(event) => setScore(event.target.value)}
                 />
               </FormField>
               <FormField
                 label="序号"
                 htmlFor="problem-seq"
+                error={errors.seq}
                 helper="决定赛题在学生答题界面的排列顺序"
               >
                 <Input
@@ -399,6 +397,8 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                   min="1"
                   step="1"
                   value={seq}
+                  invalid={Boolean(errors.seq)}
+                  onBlur={() => validate(['seq'])}
                   onChange={(event) => setSeq(event.target.value)}
                 />
               </FormField>
@@ -416,6 +416,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                     label="每队衰减"
                     htmlFor="problem-decay"
                     required
+                    error={errors.decay}
                     helper="每有一支队伍通过,后续通过者的得分下降这么多"
                   >
                     <Input
@@ -424,6 +425,8 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                       min="1"
                       step="1"
                       value={decay}
+                      invalid={Boolean(errors.decay)}
+                      onBlur={() => validate(['decay'])}
                       onChange={(event) => setDecay(event.target.value)}
                     />
                   </FormField>
@@ -431,6 +434,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                     label="最低分"
                     htmlFor="problem-min-score"
                     required
+                    error={errors.minScore}
                     helper="衰减到这个分数后不再下降"
                   >
                     <Input
@@ -439,6 +443,8 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
                       min="1"
                       step="1"
                       value={minScore}
+                      invalid={Boolean(errors.minScore)}
+                      onBlur={() => validate(['minScore'])}
                       onChange={(event) => setMinScore(event.target.value)}
                     />
                   </FormField>

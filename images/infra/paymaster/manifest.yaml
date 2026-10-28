@@ -67,12 +67,15 @@ capabilities:
       - signer_address
     properties:
       entrypoint_address:
+        title: 入口合约地址
         type: string
         x-chaimir-env: infra/CHAIMIR_ENTRYPOINT_ADDRESS
       paymaster_address:
+        title: 代付合约地址
         type: string
         x-chaimir-env: infra/CHAIMIR_PAYMASTER_ADDRESS
       signer_address:
+        title: 签名账户地址
         type: string
         x-chaimir-env: infra/CHAIMIR_PAYMASTER_SIGNER_ADDRESS
   student_access: private

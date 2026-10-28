@@ -191,16 +191,19 @@ function ConvertTo-ChaimirProcessArgument {
     return $builder.ToString()
 }
 
-# Invoke-ChaimirDocker 以明确超时执行 Docker CLI,并保留可定位的标准输出与错误。
-function Invoke-ChaimirDocker {
+# Invoke-ChaimirProcess 按退出码执行原生工具,区分正常stderr和失败,并限制等待时间。
+function Invoke-ChaimirProcess {
     param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
         [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [int]$TimeoutSeconds = 300
+        [int]$TimeoutSeconds = 300,
+        [string]$WorkingDirectory
     )
-    if ($TimeoutSeconds -lt 1) { throw "Docker CLI 超时必须大于等于 1 秒" }
+    if ($TimeoutSeconds -lt 1 -or $TimeoutSeconds -gt 2147483) { throw "原生工具超时必须为1..2147483秒" }
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = [Diagnostics.ProcessStartInfo]::new()
-    $process.StartInfo.FileName = "docker.exe"
+    $process.StartInfo.FileName = $FilePath
+    if ($WorkingDirectory) { $process.StartInfo.WorkingDirectory = $WorkingDirectory }
     $process.StartInfo.Arguments = (($Arguments | ForEach-Object { ConvertTo-ChaimirProcessArgument ([string]$_) }) -join " ")
     $process.StartInfo.UseShellExecute = $false
     $process.StartInfo.CreateNoWindow = $true
@@ -209,36 +212,60 @@ function Invoke-ChaimirDocker {
     $process.StartInfo.StandardOutputEncoding = [Text.Encoding]::UTF8
     $process.StartInfo.StandardErrorEncoding = [Text.Encoding]::UTF8
     try {
-        if (-not $process.Start()) { throw "Docker CLI 启动失败" }
+        if (-not $process.Start()) { throw "原生工具启动失败: $FilePath" }
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             try {
-                & taskkill.exe /PID $process.Id /T /F | Out-Null
+                $termination = [Diagnostics.ProcessStartInfo]::new()
+                $termination.FileName = 'taskkill.exe'
+                $termination.Arguments = "/PID $($process.Id) /T /F"
+                $termination.UseShellExecute = $false
+                $termination.CreateNoWindow = $true
+                $terminator = [Diagnostics.Process]::Start($termination)
+                try {
+                    if (-not $terminator.WaitForExit(5000)) { throw 'taskkill未在5秒内结束' }
+                    if ($terminator.ExitCode -ne 0 -and -not $process.HasExited) { throw "taskkill退出码$($terminator.ExitCode)" }
+                } finally { $terminator.Dispose() }
             } catch {
-                Write-Warning ("Docker CLI 超时后的进程树终止失败: {0}" -f $_.Exception.Message)
+                Write-Warning ("原生工具超时后的进程树终止失败: {0}" -f $_.Exception.Message)
             }
-            try {
-                $process.Kill($true)
-            } catch {
-                Write-Warning ("Docker CLI 超时后的进程终止失败: {0}" -f $_.Exception.Message)
+            if (-not $process.HasExited) { $process.Kill() }
+            if (-not $process.WaitForExit(5000)) { throw "超时进程未能终止: $FilePath" }
+            if (-not $stdoutTask.Wait(5000) -or -not $stderrTask.Wait(5000)) {
+                throw "超时进程输出管道未关闭: $FilePath"
             }
             $stdout = $stdoutTask.GetAwaiter().GetResult()
             $stderr = $stderrTask.GetAwaiter().GetResult()
             return [pscustomobject]@{
                 Code = 124
-                Text = ((@(("Docker CLI 超时（{0} 秒）" -f $TimeoutSeconds), $stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim()
+                Stdout = $stdout
+                Stderr = $stderr
+                TimedOut = $true
+                Text = ((@(("原生工具超时（{0} 秒）: {1}" -f $TimeoutSeconds, $FilePath), $stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim()
             }
         }
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()
         return [pscustomobject]@{
             Code = $process.ExitCode
+            Stdout = $stdout
+            Stderr = $stderr
+            TimedOut = $false
             Text = ((@($stdout, $stderr) | Where-Object { $_ }) -join "`n").Trim()
         }
     } finally {
         $process.Dispose()
     }
+}
+
+# Invoke-ChaimirDocker 使用共享进程边界执行Docker,保持镜像脚本的统一结果契约。
+function Invoke-ChaimirDocker {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [int]$TimeoutSeconds = 300
+    )
+    return Invoke-ChaimirProcess -FilePath 'docker.exe' -Arguments $Arguments -TimeoutSeconds $TimeoutSeconds
 }
 
 # Get-ChaimirInternalImageBuildArguments 返回内部构建镜像参数到逻辑镜像名的唯一映射。
@@ -342,4 +369,4 @@ function Write-ChaimirDigestLock {
     [System.IO.File]::WriteAllText($Path, $contents, [System.Text.ASCIIEncoding]::new())
 }
 
-Export-ModuleMember -Function Get-ChaimirYamlValue, Get-ChaimirTopLevelYamlValue, Get-ChaimirYamlBlock, Get-ChaimirImageSourceType, Get-ChaimirImageCatalog, Read-ChaimirEnvFile, Get-ChaimirCanonicalRegistry, Invoke-ChaimirDocker, Get-ChaimirInternalImageBuildArguments, Resolve-ChaimirImageBuildPaths, Read-ChaimirDigestLock, Write-ChaimirDigestLock
+Export-ModuleMember -Function Get-ChaimirYamlValue, Get-ChaimirTopLevelYamlValue, Get-ChaimirYamlBlock, Get-ChaimirImageSourceType, Get-ChaimirImageCatalog, Read-ChaimirEnvFile, Get-ChaimirCanonicalRegistry, Invoke-ChaimirProcess, Invoke-ChaimirDocker, Get-ChaimirInternalImageBuildArguments, Resolve-ChaimirImageBuildPaths, Read-ChaimirDigestLock, Write-ChaimirDigestLock

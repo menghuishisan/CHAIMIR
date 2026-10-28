@@ -339,7 +339,7 @@
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody: { $ref: "#/components/requestBodies/SandboxWorkspaceFileWriteBody" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/sandboxes/{id}/files/save:
   post:

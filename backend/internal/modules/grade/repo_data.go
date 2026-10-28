@@ -10,6 +10,7 @@ import (
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
+	"chaimir/internal/platform/response"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
@@ -115,7 +116,7 @@ func (t *txStore) ListSemesters(ctx context.Context) ([]SemesterDTO, error) {
 	return out, nil
 }
 
-// LockSemesterCurrentScope 串行化当前租户当前学期切换。
+// LockSemesterCurrentScope 串行化租户内学期区间校验、创建与当前标记切换。
 func (t *txStore) LockSemesterCurrentScope(ctx context.Context, lockKey int64) error {
 	return t.q.LockSemesterCurrentScope(ctx, lockKey)
 }
@@ -237,6 +238,11 @@ func (t *txStore) RelockGradeReview(ctx context.Context, id, reviewerID int64, c
 		return ReviewDTO{}, err
 	}
 	return reviewDTO(row), nil
+}
+
+// LockGradeCourseScope 在更新审核/申诉前串行化同课程权威状态与修订分配。
+func (t *txStore) LockGradeCourseScope(ctx context.Context, tenantID, courseID int64) error {
+	return t.q.LockGradeCourseScope(ctx, sqlcgen.LockGradeCourseScopeParams{Column1: tenantID, Column2: courseID})
 }
 
 // CreateGradeLockOutbox 在审核状态事务内写入锁定事件 outbox。
@@ -366,10 +372,10 @@ func (t *txStore) GetGradeAppeal(ctx context.Context, id int64) (AppealDTO, erro
 	return appealDTO(row), nil
 }
 
-// ListGradeAppeals 查询成绩申诉分页列表和总数。
-func (t *txStore) ListGradeAppeals(ctx context.Context, status int16, page, size int) ([]AppealDTO, int64, error) {
-	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := t.q.ListGradeAppeals(ctx, sqlcgen.ListGradeAppealsParams{Status: status, PageOffset: offset, PageLimit: limit})
+// ListGradeAppeals 按同一角色课程范围查询申诉分页及总数,不在分页后过滤。
+func (t *txStore) ListGradeAppeals(ctx context.Context, query AppealListQuery) ([]AppealDTO, int64, error) {
+	limit, offset := pagex.LimitOffset(query.Page, query.Size)
+	rows, err := t.q.ListGradeAppeals(ctx, sqlcgen.ListGradeAppealsParams{Status: query.Status, AllCourses: query.AllCourses, CourseIds: query.CourseIDs, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -377,7 +383,7 @@ func (t *txStore) ListGradeAppeals(ctx context.Context, status int16, page, size
 	for _, row := range rows {
 		out = append(out, appealDTO(row))
 	}
-	total, err := t.q.CountGradeAppeals(ctx, status)
+	total, err := t.q.CountGradeAppeals(ctx, sqlcgen.CountGradeAppealsParams{Status: query.Status, AllCourses: query.AllCourses, CourseIds: query.CourseIDs})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -412,7 +418,7 @@ func (t *txStore) CreateAcademicWarning(ctx context.Context, id, tenantID, stude
 	if err != nil {
 		return WarningDTO{}, err
 	}
-	row, err := t.q.CreateAcademicWarning(ctx, sqlcgen.CreateAcademicWarningParams{ID: id, TenantID: tenantID, StudentID: studentID, SemesterID: semesterID, Type: typ, Detail: data})
+	row, err := t.q.CreateAcademicWarning(ctx, sqlcgen.CreateAcademicWarningParams{ID: id, TenantID: tenantID, StudentID: studentID, SemesterID: semesterID, Type: typ, Detail: data, NotifyTraceID: response.TraceFromContext(ctx)})
 	if err != nil {
 		return WarningDTO{}, err
 	}
@@ -508,7 +514,7 @@ func reviewDTO(row sqlcgen.GradeReview) ReviewDTO {
 
 // gradeLockOutbox 转换成绩锁事件 outbox 行。
 func gradeLockOutbox(row sqlcgen.GradeLockOutbox) GradeLockOutbox {
-	return GradeLockOutbox{ID: row.ID, TenantID: row.TenantID, ReviewID: row.ReviewID, CourseID: row.CourseID, Locked: row.Locked, Reason: row.Reason, TraceID: row.TraceID, Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), UpdatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.UpdatedAt)), LeaseToken: row.LeaseToken, LeaseUntil: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.LeaseUntil))}
+	return GradeLockOutbox{ID: row.ID, Revision: row.Revision, ChangedAt: timex.FromTimestamptz(row.CreatedAt), TenantID: row.TenantID, ReviewID: row.ReviewID, CourseID: row.CourseID, Locked: row.Locked, Reason: row.Reason, TraceID: row.TraceID, Status: row.Status, RetryCount: row.RetryCount, LastError: pgtypex.TextValue(row.LastError), CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), UpdatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.UpdatedAt)), LeaseToken: row.LeaseToken, LeaseUntil: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.LeaseUntil))}
 }
 
 // semesterGradeSummary 转换学期成绩聚合行。
@@ -530,7 +536,7 @@ func semesterGradeSummary(row sqlcgen.StudentSemesterGrade) (GradeSummaryDTO, er
 
 // appealDTO 转换申诉行。
 func appealDTO(row sqlcgen.GradeAppeal) AppealDTO {
-	return AppealDTO{ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), StudentID: ids.ID(row.StudentID), CourseID: ids.ID(row.CourseID), Reason: row.Reason, Status: row.Status, HandlerID: ids.ID(pgtypex.Int8Value(row.HandlerID)), ResultComment: pgtypex.TextValue(row.ResultComment), CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), HandledAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.HandledAt))}
+	return AppealDTO{UnlockRevision: pgtypex.Int8Value(row.UnlockRevision), ID: ids.ID(row.ID), TenantID: ids.ID(row.TenantID), StudentID: ids.ID(row.StudentID), CourseID: ids.ID(row.CourseID), Reason: row.Reason, Status: row.Status, HandlerID: ids.ID(pgtypex.Int8Value(row.HandlerID)), ResultComment: pgtypex.TextValue(row.ResultComment), CreatedAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.CreatedAt)), HandledAt: timex.RFC3339OrEmpty(timex.FromTimestamptz(row.HandledAt))}
 }
 
 // warningDTO 转换预警行。

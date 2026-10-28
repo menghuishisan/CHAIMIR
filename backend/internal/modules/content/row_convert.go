@@ -72,12 +72,6 @@ func paperItemFromRow(row sqlcgen.PaperItem) PaperItem {
 
 // criteriaJSON 序列化随机组卷条件。
 func criteriaJSON(criteria PaperCriteria) ([]byte, error) {
-	if criteria.KnowledgePoints == nil {
-		criteria.KnowledgePoints = []string{}
-	}
-	if criteria.Difficulties == nil {
-		criteria.Difficulties = []int16{}
-	}
 	return jsonx.AnyBytes(criteria, apperr.ErrPaperInvalid)
 }
 

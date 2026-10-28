@@ -30,16 +30,26 @@ export async function mountTerminal(
 
   terminal.open(container)
 
-  // 等容器完成首次绘制后再适配终端尺寸。
+  // 切标签隐藏/重新显示与窗口变化均由容器尺寸驱动,不以延时猜测布局完成。
   let disposed = false
-  const initialFitTimer = setTimeout(() => {
-    if (!disposed) fitAddon.fit()
-  }, 10)
+  const fit = () => {
+    if (!disposed && container.clientWidth > 0 && container.clientHeight > 0) fitAddon.fit()
+  }
+  const observer = new ResizeObserver(fit)
+  observer.observe(container)
+  fit()
   if (options.initialText) {
     terminal.write(options.initialText)
   }
   const dataSubscription = terminal.onData((data) => {
     options.onData?.(data)
+  })
+  // xterm的二进制输入用字符码承载原始字节,不能经WebSocket文本编码再次转码。
+  const binarySubscription = terminal.onBinary((data) => {
+    const buffer = new ArrayBuffer(data.length)
+    const bytes = new Uint8Array(buffer)
+    for (let index = 0; index < data.length; index += 1) bytes[index] = data.charCodeAt(index)
+    options.onBinary?.(buffer)
   })
 
   return {
@@ -49,8 +59,9 @@ export async function mountTerminal(
     resize: () => fitAddon.fit(),
     dispose: () => {
       disposed = true
-      clearTimeout(initialFitTimer)
+      observer.disconnect()
       dataSubscription.dispose()
+      binarySubscription.dispose()
       terminal.dispose()
     },
   }

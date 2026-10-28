@@ -4,6 +4,7 @@ package content
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -42,6 +43,9 @@ func (s *Service) UploadAttachment(ctx context.Context, req UploadAttachmentRequ
 		ScanPolicy:      s.attachmentScanPolicy,
 	})
 	if err != nil {
+		if errors.Is(err, upload.ErrInvalidFile) {
+			return AttachmentUploadDTO{}, apperr.ErrContentAttachmentUploadInvalid.WithCause(err)
+		}
 		return AttachmentUploadDTO{}, apperr.ErrContentAttachmentInvalid.WithCause(err)
 	}
 	if err := s.storage.Put(ctx, plan.Bucket, plan.Key, bytes.NewReader(req.Content), plan.Size, plan.ContentType); err != nil {

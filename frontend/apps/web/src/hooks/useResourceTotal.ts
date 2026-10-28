@@ -16,13 +16,15 @@ const COUNT_PROBE = { page: 1, size: 1 } as const
 /**
  * useResourceTotal 返回服务端总数;读取中或读取失败时返回 undefined。
  * 调用方按 `total ?? '—'` 渲染:数不出来就不显示数字,不用 0 冒充「一条都没有」。
+ * refreshVersion 必须来自对应列表,让操作成功后的reload同时撤销旧统计。
  */
 export function useResourceTotal(
   loader: (params: { page: number; size: number }) => Promise<PaginatedResponse<unknown>>,
   deps: DependencyList,
+  refreshVersion: number,
 ): number | undefined {
   // isEmpty 恒为 false:这里只关心 total,空列表不是需要渲染空态的资源
-  const resource = useAsyncResource(() => loader(COUNT_PROBE), deps, () => false)
+  const resource = useAsyncResource(() => loader(COUNT_PROBE), [...deps, refreshVersion], () => false)
   useEffect(() => {
     if (resource.status !== 'error') return
     console.error('指标总数读取失败', {
@@ -34,5 +36,5 @@ export function useResourceTotal(
       action: { label: '重试', onClick: resource.reload },
     })
   }, [resource.error, resource.reload, resource.status])
-  return resource.data ? resource.data.total : undefined
+  return resource.status === 'success' ? resource.data?.total : undefined
 }

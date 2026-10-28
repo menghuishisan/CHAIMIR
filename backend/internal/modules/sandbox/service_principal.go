@@ -77,18 +77,14 @@ func (s *Service) WriteSandboxFileForPrincipal(ctx context.Context, req contract
 
 // SaveSandboxFilesForPrincipal 立即保存经业务授权的工作区。
 func (s *Service) SaveSandboxFilesForPrincipal(ctx context.Context, access contracts.SandboxPrincipalRequest) (contracts.SandboxWorkspaceSave, error) {
-	if _, _, err := s.sandboxForPrincipal(ctx, access); err != nil {
-		return contracts.SandboxWorkspaceSave{}, err
-	}
-	key, hash, err := s.SaveSandboxFiles(ctx, contracts.SandboxSaveRequest{TenantID: access.TenantID, SandboxID: access.SandboxID, SourceRef: access.SourceRef})
+	sb, _, err := s.sandboxForPrincipal(ctx, access)
 	if err != nil {
 		return contracts.SandboxWorkspaceSave{}, err
 	}
-	info, err := s.GetSandboxForPrincipal(ctx, access)
-	if err != nil {
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
 		return contracts.SandboxWorkspaceSave{}, err
 	}
-	return contracts.SandboxWorkspaceSave{CodeStorageKey: key, CodeHash: hash, WorkspaceRevision: info.WorkspaceRevision}, nil
+	return s.saveSandboxFiles(ctx, access.TenantID, access.SandboxID)
 }
 
 // commandToolTargetForPrincipal 解析经业务授权的命令工具，而不使用 M2 租户内账号归属集合。
@@ -105,12 +101,11 @@ func (s *Service) commandToolTargetForPrincipal(ctx context.Context, access cont
 	}); err != nil {
 		return Sandbox{}, SandboxTool{}, apperr.ErrSandboxToolNotFound.WithCause(err)
 	}
-	for _, tool := range tools {
-		if tool.Kind == SandboxToolKindCommand && tool.Status == SandboxToolStatusReady && strings.EqualFold(tool.ToolCode, strings.TrimSpace(toolCode)) {
-			return sb, tool, nil
-		}
+	tool, err := s.readySandboxTool(ctx, sb, tools, SandboxToolKindCommand, toolCode)
+	if err != nil {
+		return Sandbox{}, SandboxTool{}, err
 	}
-	return Sandbox{}, SandboxTool{}, apperr.ErrSandboxToolNotFound
+	return sb, tool, nil
 }
 
 // RunCommandToolForPrincipal 在业务网关已经校验授权的情况下执行工具白名单内命令。
@@ -172,7 +167,7 @@ func (s *Service) TerminalTargetForPrincipal(ctx context.Context, access contrac
 	if targetContainer == "" || !runtimeContainerAllowed(runtime, targetContainer) {
 		return contracts.SandboxTerminalTarget{}, apperr.ErrSandboxOwnershipInvalid
 	}
-	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.Terminal, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir, "")
+	command := workspaceCommand(runtime.AdapterSpec.WorkspaceOps.Terminal, runtime.AdapterSpec.WorkspaceDir, runtime.AdapterSpec.WorkspaceDir)
 	return contracts.SandboxTerminalTarget{TenantID: sb.TenantID, SandboxID: sb.ID, Namespace: sb.Namespace, Container: targetContainer, Command: command}, nil
 }
 
@@ -212,19 +207,18 @@ func (s *Service) ToolProxyTargetForPrincipal(ctx context.Context, access contra
 	}); err != nil {
 		return contracts.SandboxToolProxyTarget{}, apperr.ErrSandboxToolNotFound.WithCause(err)
 	}
-	for _, tool := range tools {
-		if tool.Kind == SandboxToolKindWebEmbed && tool.Status == SandboxToolStatusReady && strings.EqualFold(tool.ToolCode, strings.TrimSpace(toolCode)) {
-			if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
-				return contracts.SandboxToolProxyTarget{}, err
-			}
-			target := toolProxyURL(sb, tool)
-			if target == nil || strings.TrimSpace(target.Host) == "" {
-				return contracts.SandboxToolProxyTarget{}, apperr.ErrSandboxToolProxyUnavailable
-			}
-			return contracts.SandboxToolProxyTarget{TargetURL: target.String()}, nil
-		}
+	tool, err := s.readySandboxTool(ctx, sb, tools, SandboxToolKindWebEmbed, toolCode)
+	if err != nil {
+		return contracts.SandboxToolProxyTarget{}, err
 	}
-	return contracts.SandboxToolProxyTarget{}, apperr.ErrSandboxToolNotFound
+	if err := s.markSandboxExecutionActive(ctx, sb); err != nil {
+		return contracts.SandboxToolProxyTarget{}, err
+	}
+	target := toolProxyURL(sb, tool)
+	if target == nil || strings.TrimSpace(target.Host) == "" {
+		return contracts.SandboxToolProxyTarget{}, apperr.ErrSandboxToolProxyUnavailable
+	}
+	return contracts.SandboxToolProxyTarget{TargetURL: target.String()}, nil
 }
 
 // ObserveSandboxToolAccess 记录经业务网关代理的 Web 工具访问。

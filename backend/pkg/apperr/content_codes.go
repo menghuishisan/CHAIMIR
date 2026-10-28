@@ -26,6 +26,8 @@ const (
 	CodeContentFullAccessDenied = "51011"
 	// CodeContentAttachmentInvalid 表示附件上传或下载授权请求不正确。
 	CodeContentAttachmentInvalid = "51012"
+	// CodeContentAttachmentUploadInvalid 表示上传附件未通过文件名、大小、类型或安全校验。
+	CodeContentAttachmentUploadInvalid = "51013"
 )
 
 const (
@@ -88,6 +90,8 @@ var (
 	ErrContentFullAccessDenied = New(CodeContentFullAccessDenied, "无法查看该内容的完整信息")
 	// ErrContentAttachmentInvalid 表示附件暂时不可用。
 	ErrContentAttachmentInvalid = New(CodeContentAttachmentInvalid, "附件暂时不可用,请检查后重试")
+	// ErrContentAttachmentUploadInvalid 提示选择符合要求的附件,不公开内部校验或扫描细节。
+	ErrContentAttachmentUploadInvalid = New(CodeContentAttachmentUploadInvalid, "附件格式、大小或内容不符合要求,请重新选择文件")
 )
 
 var (
@@ -98,7 +102,7 @@ var (
 	// ErrContentVersionImmutable 表示已发布版本不可修改。
 	ErrContentVersionImmutable = New(CodeContentVersionImmutable, "已发布版本不能直接修改,请创建新版本")
 	// ErrContentVersionNotPublished 表示内容版本暂不可被引用。
-	ErrContentVersionNotPublished = New(CodeContentVersionNotPublished, "该内容版本暂不可被引用")
+	ErrContentVersionNotPublished = New(CodeContentVersionNotPublished, "所选内容尚未发布或已停用,请先发布或重新选择")
 )
 
 var (
