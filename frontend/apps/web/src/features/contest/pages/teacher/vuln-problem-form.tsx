@@ -1,4 +1,4 @@
-// 漏洞题录入表单(漏洞题工坊页内)。
+// 漏洞题录入表单(漏洞题工坊页内)。设计 §7.4:字段多且分段,用右侧大抽屉(宽 880px、整高、底部固定操作条)。
 //
 // draft_body 的键不是自由的:后端预验证按 init_steps(初始化)、positive_steps(攻击 PoC)、
 // assertions(判定断言)三个数组执行链上操作,故表单按这三段渲染结构化编辑器,
@@ -23,13 +23,13 @@ import {
   FormField,
   IconButton,
   Input,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   SegmentedControl,
   Select,
   Textarea,
@@ -189,16 +189,16 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
   )
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>录入漏洞题</ModalTitle>
-          <ModalDescription>
+    <Drawer open onOpenChange={(open) => !open && onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader>
+          <DrawerTitle>录入漏洞题</DrawerTitle>
+          <DrawerDescription>
             填好初始化、攻击步骤与判定断言后做预验证:正向要打通、反向要不误判,双向通过才能固化进题库。
-          </ModalDescription>
-        </ModalHeader>
-        <form onSubmit={submit} noValidate>
-          <ModalBody className="flex flex-col gap-4">
+          </DrawerDescription>
+        </DrawerHeader>
+        <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
+          <DrawerBody className="flex flex-col gap-4">
             <FormField label="标题" htmlFor={`${fieldId}-title`} required error={errors.title}>
               <Input
                 id={`${fieldId}-title`}
@@ -338,18 +338,18 @@ export function VulnProblemFormModal({ sources, onClose, onSaved }: VulnProblemF
 
             {errors.steps ? <Callout tone="danger">{errors.steps}</Callout> : null}
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
-          </ModalBody>
-          <ModalFooter>
+          </DrawerBody>
+          <DrawerFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
             <Button type="submit" variant="primary" loading={submitting}>
               保存草稿
             </Button>
-          </ModalFooter>
+          </DrawerFooter>
         </form>
-      </ModalContent>
-    </Modal>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
@@ -369,7 +369,7 @@ function ChainStepEditor({ title, description, steps, onChange }: ChainStepEdito
   const fieldId = useId()
 
   return (
-    <div className="flex flex-col gap-3 well p-4">
+    <div className="flex flex-col gap-3 rounded-md bg-surface-hover p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-base text-ink">{title}</p>
@@ -458,7 +458,7 @@ function AssertionEditor({ assertions, error, onChange }: AssertionEditorProps) 
   const fieldId = useId()
 
   return (
-    <div className="flex flex-col gap-3 well p-4">
+    <div className="flex flex-col gap-3 rounded-md bg-surface-hover p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-base text-ink">判定断言</p>

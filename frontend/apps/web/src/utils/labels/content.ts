@@ -74,3 +74,19 @@ const PAPER_MODE_LABELS: Record<PaperMode, string> = {
 export function paperModeLabel(mode: PaperMode): string {
   return PAPER_MODE_LABELS[mode]
 }
+
+/** 理论题题型(题面 body.q_type,字符串)对应的文案 */
+const THEORY_QUESTION_TYPE_LABELS: Record<string, string> = {
+  single_choice: '单选题',
+  multiple_choice: '多选题',
+  true_false: '判断题',
+  fill_blank: '填空题',
+  short_answer: '简答题',
+}
+
+/** theoryQuestionTypeLabel 返回理论题题型文案;题面里的题型来自接口,不认识的返回 undefined */
+export function theoryQuestionTypeLabel(type: string): string | undefined {
+  return Object.prototype.hasOwnProperty.call(THEORY_QUESTION_TYPE_LABELS, type)
+    ? THEORY_QUESTION_TYPE_LABELS[type]
+    : undefined
+}

@@ -1,6 +1,7 @@
-// 题目版本与复用弹层(题库内容页内)。
+// 题目版本与复用弹层(题库内容页内,行内「版本历史」)。
 //
-// 三件事:看某个编号下的全部版本、基于已有版本建新版本、把题目克隆成新编号。
+// 三件事:看某个编号下的全部版本、基于已有版本建新版本(只有作者本人)、把已发布的题目克隆成新编号。
+// 建新版本或克隆成功后把新草稿交给调用方,直接打开编辑(设计 §6.7:创建类操作成功后进入新建的对象)。
 // 版本是内容复现的基础:作业与实验按 code + version 锁定引用,
 // 所以「改题」的正确做法是建新版本,而不是改已发布版本。
 
@@ -27,6 +28,7 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useSession } from '../../../../components/RoleGuard/session'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { formatShortDateTime } from '../../../../utils/formatters'
@@ -42,14 +44,18 @@ import { useFormValidation } from '../../../../hooks/useFormValidation'
 export interface ContentVersionsModalProps {
   item: ContentItem
   onClose: () => void
-  onChanged: () => void
+  /** 建新版本或克隆成功;参数是新建的草稿 */
+  onCreated: (draft: ContentItem) => void
 }
 
 /**
  * ContentVersionsModal 展示版本清单并承载建新版本与克隆。
  */
-export function ContentVersionsModal({ item, onClose, onChanged }: ContentVersionsModalProps) {
+export function ContentVersionsModal({ item, onClose, onCreated }: ContentVersionsModalProps) {
+  const { me } = useSession()
   const [mode, setMode] = useState<'versions' | 'new-version' | 'clone'>('versions')
+  // 只有作者能建新版本;只有已发布的题目能克隆(后端 CreateNewVersion / CloneItem 同一口径)
+  const mine = item.author_id === me.account.id
 
   const versions = useAsyncResource(() => api.content.getVersions(item.code), [item.code])
 
@@ -115,7 +121,7 @@ export function ContentVersionsModal({ item, onClose, onChanged }: ContentVersio
             aria-label="选择要做的操作"
             options={[
               { value: 'versions', label: '版本清单', icon: History },
-              { value: 'new-version', label: '建新版本', icon: GitBranch },
+              ...(mine ? [{ value: 'new-version', label: '建新版本', icon: GitBranch }] : []),
               { value: 'clone', label: '克隆为新题', icon: Copy },
             ]}
             value={mode}
@@ -155,18 +161,11 @@ export function ContentVersionsModal({ item, onClose, onChanged }: ContentVersio
             </ResourceState>
           ) : null}
 
-          {mode === 'new-version' ? (
-            <NewVersionForm
-              item={item}
-              versions={versions.data ?? []}
-              onDone={() => {
-                versions.reload()
-                onChanged()
-              }}
-            />
+          {mode === 'new-version' && mine ? (
+            <NewVersionForm item={item} versions={versions.data ?? []} onDone={onCreated} />
           ) : null}
 
-          {mode === 'clone' ? <CloneForm item={item} onDone={onChanged} /> : null}
+          {mode === 'clone' ? <CloneForm item={item} onDone={onCreated} /> : null}
         </ModalBody>
         <ModalFooter>
           <Button variant="outline" onClick={onClose}>
@@ -181,7 +180,7 @@ export function ContentVersionsModal({ item, onClose, onChanged }: ContentVersio
 interface NewVersionFormProps {
   item: ContentItem
   versions: ContentItem[]
-  onDone: () => void
+  onDone: (draft: ContentItem) => void
 }
 
 /**
@@ -207,12 +206,12 @@ function NewVersionForm({ item, versions, onDone }: NewVersionFormProps) {
     setFormError(undefined)
     setWorking(true)
     try {
-      await api.content.createNewVersion(item.code, {
+      const draft = await api.content.createNewVersion(item.code, {
         source_version: sourceVersion.trim(),
         new_version: target,
       })
       toast.success(`已创建版本 ${target}`)
-      onDone()
+      onDone(draft)
     } catch (error) {
       setFormError(userFacingErrorMessage(error, '创建新版本失败,请稍后重试。'))
     } finally {
@@ -264,7 +263,7 @@ function NewVersionForm({ item, versions, onDone }: NewVersionFormProps) {
 
 interface CloneFormProps {
   item: ContentItem
-  onDone: () => void
+  onDone: (draft: ContentItem) => void
 }
 
 /**
@@ -288,12 +287,12 @@ function CloneForm({ item, onDone }: CloneFormProps) {
     setFormError(undefined)
     setWorking(true)
     try {
-      await api.content.cloneItem(item.code, item.version, {
+      const draft = await api.content.cloneItem(item.code, item.version, {
         new_code: code,
         new_version: newVersion.trim(),
       })
       toast.success('已克隆为新题目草稿')
-      onDone()
+      onDone(draft)
     } catch (error) {
       setFormError(userFacingErrorMessage(error, '克隆失败,请稍后重试。'))
     } finally {
@@ -329,16 +328,21 @@ function CloneForm({ item, onDone }: CloneFormProps) {
         </FormField>
       </div>
 
-      {item.status !== ContentStatus.PUBLISHED ? (
-        <Callout tone="warning">
-          源题目还是草稿。克隆草稿会得到一份同样未完成的副本,建议先完成源题目。
-        </Callout>
-      ) : null}
-
       {formError ? <Callout tone="danger">{formError}</Callout> : null}
-      <Button variant="primary" leftIcon={Copy} loading={working} onClick={() => void submit()}>
-        克隆为新题目
-      </Button>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button
+          variant="primary"
+          leftIcon={Copy}
+          loading={working}
+          disabled={item.status !== ContentStatus.PUBLISHED}
+          onClick={() => void submit()}
+        >
+          克隆为新题目
+        </Button>
+        {item.status !== ContentStatus.PUBLISHED ? (
+          <span className="text-sm text-ink-sub">只有已发布的版本可以克隆,请先发布这个版本</span>
+        ) : null}
+      </div>
     </div>
   )
 }

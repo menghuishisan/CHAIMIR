@@ -27,7 +27,7 @@ export const ModalClose = DialogPrimitive.Close;
 const modalContentVariants = cva(
   cn(
     "fixed inset-x-4 inset-y-0 z-modal m-auto flex h-fit flex-col overflow-hidden",
-    "rounded-pane bg-surface text-ink shadow-lg",
+    "rounded-lg bg-surface text-ink shadow-lg",
     "data-[state=open]:animate-modal-in data-[state=closed]:animate-modal-out",
   ),
   {

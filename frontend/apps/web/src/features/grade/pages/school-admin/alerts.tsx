@@ -1,4 +1,6 @@
-// 学业预警页(校管侧栏,/school-admin/alerts)。
+// 学业预警页(校管侧栏,/school-admin/alerts)。设计 §7.5:
+// 页头 +「执行扫描」,次要「调整预警规则」;工具条(状态、学生搜索,写进地址);表格(学生、学期、预警类型与说明、
+// 状态、扫出时间)。扫描弹窗选范围后开始,完成后就地刷新并提示新增几条。学生姓名按页取完全部学生账号后解析。
 //
 // 预警由规则扫描产生:不及格课程数超阈值、平均学分绩点低于下限。
 // 校管能看全校预警并主动触发扫描;确认动作属于学生本人(后端 ackWarning 在 student 组),
@@ -7,26 +9,23 @@
 // 预警规则的维护在成绩配置页(对齐清单 §3.3:预警规则是配置页内 Tab)。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { Link } from 'react-router'
 import { RefreshCw, Settings2, TriangleAlert } from 'lucide-react'
 import {
   GradeWarningStatus,
   BaseIdentity,
-  PAGINATION_MAX_SIZE,
   type Account,
   type GradeWarning,
   type Semester,
 } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
+  buttonVariants,
   Callout,
   DataPanel,
-  FilterBar,
-  FilterField,
   FormField,
-  MetricStrip,
+  Icon,
   Modal,
   ModalBody,
   ModalContent,
@@ -46,8 +45,10 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
-import { formatDateTime } from '../../../../utils/formatters'
+import { useAsyncResource, usePagedResource, useResourceTotal, useUrlState } from '../../../../hooks'
+import { AccountNameText } from '../../../identity/components/AccountNameText'
+import { useAccountNames } from '../../../identity/useAccountNames'
+import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
 import {
   gradeWarningDetailTerm,
   gradeWarningStatusLabel,
@@ -56,33 +57,41 @@ import {
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { gradeWarningStatusTone } from '../../statusPresentation'
 
-/** 状态筛选项:值为空串表示不过滤;学生与状态都由服务端过滤。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(GradeWarningStatus.PENDING), label: '待学生确认' },
-  { value: String(GradeWarningStatus.ACKNOWLEDGED), label: '学生已确认' },
+/** 地址参数:status 确认状态分段,student 选中的学生(空为全部);页码在 page */
+const ALERTS_QUERY = {
+  status: { defaultValue: 'all', allowed: ['all', 'pending', 'acknowledged'] },
+  student: { defaultValue: '' },
+} as const
+
+const STATUS_SEGMENTS = [
+  { value: 'all', label: '全部' },
+  { value: 'pending', label: '待学生确认', status: GradeWarningStatus.PENDING },
+  { value: 'acknowledged', label: '学生已确认', status: GradeWarningStatus.ACKNOWLEDGED },
 ] as const
+
+/** 学生筛选里「全部学生」的取值(下拉不接受空串作选项值) */
+const ALL_STUDENTS = 'all'
 
 /**
  * SchoolAdminAlertsPage 呈现全校学业预警并承载扫描。
  */
 export default function SchoolAdminAlertsPage() {
-  const navigate = useNavigate()
-  const [studentFilter, setStudentFilter] = useState<string>('')
-  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [query, setQuery] = useUrlState(ALERTS_QUERY)
   const [scanOpen, setScanOpen] = useState(false)
+  const segment = STATUS_SEGMENTS.find((item) => item.value === query.status)
 
   const warnings = usePagedResource<GradeWarning>(
     (params) =>
       api.grade.listWarnings({
-        student_id: studentFilter || undefined,
-        status: statusFilter ? (Number(statusFilter) as GradeWarningStatus) : undefined,
+        student_id: query.student || undefined,
+        status: segment && 'status' in segment ? segment.status : undefined,
         ...params,
       }),
-    [studentFilter, statusFilter]
+    [query.status, query.student],
+    { urlPageKey: 'page' },
   )
 
-  // 指标带取全量口径,不随下方筛选变化:它回答「全校预警总体分布」
+  // 分段上的数字取全量口径,不随学生筛选变化
   const totalCount = useResourceTotal((params) => api.grade.listWarnings(params), [], warnings.refreshVersion)
   const pendingCount = useResourceTotal(
     (params) => api.grade.listWarnings({ status: GradeWarningStatus.PENDING, ...params }),
@@ -94,18 +103,10 @@ export default function SchoolAdminAlertsPage() {
     [],
     warnings.refreshVersion
   )
+  const segmentCounts: Record<string, number | undefined> = { all: totalCount, pending: pendingCount, acknowledged: acknowledgedCount }
 
-  // 预警只回 student_id / semester_id,姓名与学期名在此解析
-  const students = useAsyncResource(
-    () =>
-      api.identity.getAccounts({
-        role: BaseIdentity.STUDENT,
-        page: 1,
-        size: PAGINATION_MAX_SIZE,
-      }),
-    [],
-    () => false
-  )
+  // 预警只回 student_id / semester_id,姓名与学期名在此解析;学生超过一页时按页取完(设计 §10)
+  const students = useAccountNames(BaseIdentity.STUDENT)
 
   const semesters = useAsyncResource(
     () => api.grade.listSemesters(),
@@ -113,10 +114,6 @@ export default function SchoolAdminAlertsPage() {
     () => false
   )
 
-  const studentById = useMemo(
-    () => new Map((students.data?.list ?? []).map((account: Account) => [account.id, account])),
-    [students.data]
-  )
 
   const semesterNameById = useMemo(
     () => new Map((semesters.data ?? []).map((semester: Semester) => [semester.id, semester.name])),
@@ -127,24 +124,7 @@ export default function SchoolAdminAlertsPage() {
     {
       key: 'student_id',
       header: '学生',
-      render: (warning) => {
-        const account = studentById.get(warning.student_id)
-        return (
-          <div className="min-w-0">
-            <div className="truncate font-medium text-ink">
-              {account ? account.name : '已离校学生'}
-            </div>
-            {account?.no ? (
-              <div className="truncate font-mono text-xs text-ink-sub">{account.no}</div>
-            ) : null}
-          </div>
-        )
-      },
-    },
-    {
-      key: 'type',
-      header: '预警类型',
-      render: (warning) => <Badge tone="warning">{gradeWarningTypeLabel(warning.type)}</Badge>,
+      render: (warning) => <AccountNameText name={students.lookup(warning.student_id)} />,
     },
     {
       key: 'semester_id',
@@ -156,16 +136,21 @@ export default function SchoolAdminAlertsPage() {
       ),
     },
     {
-      key: 'detail',
-      header: '预警明细',
-      render: (warning) => <WarningDetail detail={warning.detail} />,
+      key: 'type',
+      header: '预警类型与说明',
+      render: (warning) => (
+        <span className="flex flex-col gap-1">
+          <span className="font-medium text-warning">{gradeWarningTypeLabel(warning.type)}</span>
+          <WarningDetail detail={warning.detail} />
+        </span>
+      ),
     },
     {
       key: 'created_at',
-      header: '产生时间',
+      header: '扫出时间',
       render: (warning) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDateTime(warning.created_at)}
+        <span title={formatDateTime(warning.created_at)} className="whitespace-nowrap text-ink-sub">
+          {formatRelativeOccurrence(warning.created_at)}
         </span>
       ),
     },
@@ -184,19 +169,13 @@ export default function SchoolAdminAlertsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '教务与成绩' }]} />}
         title="学业预警"
-        description="按预警规则扫描出的学业风险。学生在自己的页面确认后状态变为已确认。"
-        icon={TriangleAlert}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              leftIcon={Settings2}
-              onClick={() => navigate('/school-admin/grade-settings')}
-            >
+            <Link to="/school-admin/grade-settings#warning-rules" className={buttonVariants({ variant: 'outline' })}>
+              <Icon icon={Settings2} size="sm" />
               调整预警规则
-            </Button>
+            </Link>
             <Button variant="primary" leftIcon={RefreshCw} onClick={() => setScanOpen(true)}>
               执行扫描
             </Button>
@@ -204,58 +183,28 @@ export default function SchoolAdminAlertsPage() {
         }
       />
 
-      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是预警记录 */}
-      <MetricStrip
-        label="预警总量摘要"
-        className="mb-5"
-        items={[
-          { label: '预警总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
-          { label: '待确认', value: pendingCount ?? '—', hint: '学生尚未查看' },
-          { label: '已确认', value: acknowledgedCount ?? '—', hint: '确认由学生本人完成' },
-        ]}
-      />
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <SegmentedControl
+          aria-label="按确认状态筛选"
+          options={STATUS_SEGMENTS.map((item) => ({ value: item.value, label: item.label, count: segmentCounts[item.value] }))}
+          value={query.status}
+          onValueChange={(value) => setQuery({ status: value })}
+          className="max-w-full overflow-x-auto"
+        />
+        <Select
+          aria-label="按学生筛选"
+          value={query.student || ALL_STUDENTS}
+          onValueChange={(value) => setQuery({ student: value === ALL_STUDENTS ? '' : value })}
+          options={[
+            { value: ALL_STUDENTS, label: '全部学生' },
+            ...students.list.map((account) => ({ value: account.id, label: account.no ? `${account.name} · ${account.no}` : account.name })),
+          ]}
+          className="w-full sm:w-64"
+        />
+      </div>
 
-      <Callout
-        tone={pendingCount !== undefined && pendingCount > 0 ? 'warning' : 'info'}
-        title={pendingCount !== undefined && pendingCount > 0 ? '有预警等待学生确认' : '扫描结果由学生确认'}
-        className="mb-5"
-      >
-        {pendingCount !== undefined && pendingCount > 0
-          ? `当前有 ${pendingCount} 条预警等待学生确认。校管端负责扫描和跟进，不代替学生完成确认。`
-          : '执行扫描后，符合规则的学生会收到预警；确认动作必须由学生本人完成。'}
-      </Callout>
-
-      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
       <DataPanel
         label="预警记录"
-        filter={
-          <FilterBar label="预警记录筛选">
-            <FilterField label="确认状态" group>
-              <SegmentedControl
-                aria-label="按确认状态筛选"
-                size="sm"
-                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-                value={statusFilter}
-                onValueChange={setStatusFilter}
-              />
-            </FilterField>
-            <FilterField label="学生" htmlFor="alerts-student">
-              <Select
-                id="alerts-student"
-                options={[
-                  { value: '', label: '全部学生' },
-                  ...(students.data?.list ?? []).map((account: Account) => ({
-                    value: account.id,
-                    label: account.no ? `${account.name} · ${account.no}` : account.name,
-                  })),
-                ]}
-                value={studentFilter}
-                placeholder="全部学生"
-                onValueChange={setStudentFilter}
-              />
-            </FilterField>
-          </FilterBar>
-        }
         footer={
           <Pagination
             page={warnings.page}
@@ -268,9 +217,9 @@ export default function SchoolAdminAlertsPage() {
           <ResourceState
             resource={warnings}
             emptyIcon={TriangleAlert}
-            emptyTitle={studentFilter || statusFilter ? '没有符合条件的预警' : '暂无学业预警'}
+            emptyTitle={query.student || query.status !== 'all' ? '没有符合条件的预警' : '暂无学业预警'}
             emptyDescription={
-              studentFilter || statusFilter
+              query.student || query.status !== 'all'
                 ? '换个学生或状态看看,也可以清空条件查看全部。'
                 : '执行扫描后,达到预警条件的学生会出现在这里。'
             }
@@ -284,8 +233,11 @@ export default function SchoolAdminAlertsPage() {
                 elevated={false}
                 // <md 换行卡(§6.4.1 规则 3):学生名一行、预警原因与时间一行
                 mobileCard={(item) => ({
-                  title: studentById.get(item.student_id)?.name ?? '未登记学生',
-                  meta: `${gradeWarningTypeLabel(item.type)} · ${formatDateTime(item.created_at)}`,
+                  title: (() => {
+                    const name = students.lookup(item.student_id)
+                    return name.state === 'found' ? name.account.name : name.state === 'missing' ? '已移除的账号' : '…'
+                  })(),
+                  meta: `${gradeWarningTypeLabel(item.type)} · ${formatRelativeOccurrence(item.created_at)}`,
                   badge: (
                     <StatusIndicator
                       tone={gradeWarningStatusTone(item.status)}
@@ -300,7 +252,7 @@ export default function SchoolAdminAlertsPage() {
 
       {scanOpen ? (
         <ScanWarningsModal
-          students={students.data?.list ?? []}
+          students={students.list}
           semesters={semesters.data ?? []}
           onClose={() => setScanOpen(false)}
           onDone={() => {

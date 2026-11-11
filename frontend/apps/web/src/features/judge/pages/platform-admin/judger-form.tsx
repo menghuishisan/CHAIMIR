@@ -421,7 +421,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
             )}
 
             {needsRuntime ? (
-              <div className="flex flex-col gap-4 well p-4">
+              <div className="flex flex-col gap-4 rounded-md bg-surface-hover p-4">
                 <div>
                   <p className="text-base text-ink">判题环境</p>
                   <p className="text-sm text-ink-sub">
@@ -462,7 +462,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
             ) : null}
 
             {snapshot ? (
-              <div className="flex flex-col gap-2 well p-4">
+              <div className="flex flex-col gap-2 rounded-md bg-surface-hover p-4">
                 <div>
                   <p className="text-base text-ink">当前已冻结的判题环境(只读)</p>
                   <p className="text-sm text-ink-sub">
@@ -493,7 +493,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
             ) : null}
 
             {needsCommand ? (
-              <div className="flex flex-col gap-4 well p-4">
+              <div className="flex flex-col gap-4 rounded-md bg-surface-hover p-4">
                 <div>
                   <p className="text-base text-ink">执行入口</p>
                   <p className="text-sm text-ink-sub">

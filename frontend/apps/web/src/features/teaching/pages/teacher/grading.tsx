@@ -1,49 +1,33 @@
-// 批改中心页(教师侧栏,/teacher/grading)。
+// 批改中心页(教师侧栏,/teacher/grading)。设计 §7.4:
+// 顶部一行「课程」「作业」两个下拉(都写进地址;从课程详情进来时已选好)+ 可点的计数
+// 「待批改 n / 已出分 n / 迟交 n」;标签「学生提交 / 待人工评分 / 成绩申诉」(写进地址)。
+// 「学生提交」为队列 + 详情:左侧队列每行显示学生姓名与学号(用本课成员列表解析)、第几次、
+// 是否迟交、状态;右侧逐题显示学生答案、自动得分、人工得分输入和评语,底部「提交批改并看下一份」。
+// 上下方向键切换队列项,Ctrl/⌘ + 回车提交;提交后自动跳到下一份待批改,没有则显示
+// 「这份作业已全部批完」;当前选中的提交写进地址;窄屏变成队列页和详情页两级。
 //
-// 一页解决「按作业看提交 → 批改主观题 → 处理判题异常」三件事。
-// 作业上下文可从课程详情页带入(?assignment=),也可在本页选课程再选作业 ——
-// 不让教师手填作业编号(旧前端批改中心要求手输作业/课程/提交编号,实际不可用)。
-//
-// 判题任务在本页只做「查询进度、单任务重判、人工评分」三件教师能力,
-// 不触碰内部任务创建与批量重判(对齐清单 §6.4)。
-//
-// 成绩申诉也在本页:它是「学生对判分有异议」的下游动作,与批改是同一件事的两端,
-// 故作为本页内区块而不进侧栏(对齐清单 §3.2:成绩申诉是批改/成绩内页)。
-//
-// 归族:审阅队列族(规范 §6.5.3 第 ⑤ 族)。教师在这里的动作是「逐条把提交批完」,
-// 不是「在一堆记录里找一条」,故左队列常驻、右侧是当前提交的详情与评分表单,
-// 提交后自动落到下一条待批改项。按该族约束:无指标带(待办数量放队列头一行)、
-// 筛选(选课程与作业)并入队列头、键盘上下切条。
-//
-// 三块工作区用 Tabs 分开而不是纵向堆三个队列:同一页出现两套「左队列右详情」
-// 会让人不知道哪一栏在响应自己的操作(§6.5.0 通则 1 不重复表达同一结构)。
+// 判题任务在本页只做「单任务重判、人工评分」两件教师能力(对齐清单 §6.4)。
+// 成绩申诉是「学生对判分有异议」的下游动作,作为本页标签(对齐清单 §3.2)。
 
-import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { CheckSquare, ChevronLeft, ClipboardCheck, RefreshCw, RotateCcw } from 'lucide-react'
+import { CheckCheck, ChevronLeft, ClipboardCheck, RefreshCw, RotateCcw } from 'lucide-react'
 import {
   BOOL_FILTER,
-  type BoolFilter,
   PAGINATION_MAX_SIZE,
   SubmissionStatus,
   TENANT_MODULE,
-  type Assignment,
-  type Course,
+  type AssignmentDetail,
   type JudgeTask,
   type Submission,
 } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   cn,
-  DataPanel,
-  DescriptionList,
-  Empty,
-  FilterBar,
-  FilterField,
   FormField,
+  Icon,
   Input,
   Modal,
   ModalBody,
@@ -71,20 +55,40 @@ import {
 import { api } from '../../../../app/api'
 import { useSession } from '../../../../components/RoleGuard/session'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
+import {
+  useAsyncResource,
+  usePagedResource,
+  useResourceTotal,
+  useReviewQueue,
+  useUrlState,
+} from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { GradeAppeals } from '../../../grade/components/GradeAppeals'
 import { isJudgeTaskActive } from '../../../judge/rules'
 import { judgeTaskStatusTone } from '../../../judge/statusPresentation'
 import { useRejudgeTask } from '../../../judge/useRejudgeTask'
-import { formatDateTime, formatScore } from '../../../../utils/formatters'
+import { formatDateTime, formatRelativeOccurrence, formatScore } from '../../../../utils/formatters'
 import { judgeTaskStatusLabel } from '../../../../utils/labels/judge'
 import { submissionStatusLabel } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { submissionStatusTone } from '../../statusPresentation'
+import { formatAssignmentAnswer, itemStatement } from '../../assignment-answers'
+import { StudentName } from '../../components/StudentName'
+import { useCourseMemberNames } from '../../useCourseMemberNames'
 
 /** 待处理判题面板一次展示的条数:它是提示区不是全量列表。 */
 const PENDING_JUDGE_SIZE = 10
+
+/** 地址参数:tab 工作区,course / assignment 所选课程与作业,view 队列分段 */
+const GRADING_QUERY = {
+  tab: { defaultValue: 'submissions', allowed: ['submissions', 'manual', 'appeals'] },
+  course: { defaultValue: '' },
+  assignment: { defaultValue: '' },
+  view: { defaultValue: 'all', allowed: ['all', 'pending', 'graded', 'late'] },
+} as const
+
+/** 当前选中的提交写在地址的这个参数里(单独写,不清页码) */
+const SELECTED_PARAM = 'submission'
 
 /**
  * TeacherGradingPage 按作业列出提交并承载批改。
@@ -92,42 +96,26 @@ const PENDING_JUDGE_SIZE = 10
 export default function TeacherGradingPage() {
   const { me } = useSession()
   const gradesEnabled = me.enabled_modules.includes(TENANT_MODULE.GRADE)
-  const [workspace, setWorkspace] = useState('submissions')
+  const [query, setQuery] = useUrlState(GRADING_QUERY)
+  const tab = !gradesEnabled && query.tab === 'appeals' ? 'submissions' : query.tab
   return (
     <PageScaffold>
-      <PageHeader
-        kicker={<Breadcrumb items={[{ label: '教学' }]} />}
-        title="批改中心"
-        description={
-          gradesEnabled
-            ? '选择作业查看学生提交。主观题在这里给分评语,编程题的判题异常可以重判。学生的成绩申诉也在本页处理。'
-            : '选择作业查看学生提交。主观题在这里给分评语,编程题的判题异常可以重判。'
-        }
-        icon={CheckSquare}
-      />
-
-      <Tabs
-        value={!gradesEnabled && workspace === 'appeals' ? 'submissions' : workspace}
-        onValueChange={setWorkspace}
-      >
+      <PageHeader title="批改中心" />
+      <Tabs value={tab} onValueChange={(value) => setQuery({ tab: value })}>
         <TabsList aria-label="批改工作区">
           <TabsTrigger value="submissions">学生提交</TabsTrigger>
           <TabsTrigger value="manual">待人工评分</TabsTrigger>
           {gradesEnabled ? <TabsTrigger value="appeals">成绩申诉</TabsTrigger> : null}
         </TabsList>
-
         <TabsContent value="submissions">
           <SubmissionsQueue />
         </TabsContent>
-
         <TabsContent value="manual">
           <JudgeTasksSection />
         </TabsContent>
-
         {gradesEnabled ? (
           <TabsContent value="appeals">
-            {/* 申诉本身也是审阅队列族,由 GradeAppeals 自带该族骨架 */}
-            <GradeAppeals />
+            <GradeAppeals scope="teacher" />
           </TabsContent>
         ) : null}
       </Tabs>
@@ -135,149 +123,178 @@ export default function TeacherGradingPage() {
   )
 }
 
+/** viewFilter 队列分段对应的提交筛选 */
+function viewFilter(view: string): { status?: SubmissionStatus; is_late?: typeof BOOL_FILTER.YES } {
+  if (view === 'pending') return { status: SubmissionStatus.PENDING }
+  if (view === 'graded') return { status: SubmissionStatus.GRADED }
+  if (view === 'late') return { is_late: BOOL_FILTER.YES }
+  return {}
+}
+
 /**
- * SubmissionsQueue 是批改的审阅队列:左队列 + 右详情与评分表单(§6.5.3 第 ⑤ 族)。
- *
- * 课程与作业是「取哪些数据」的选择,故按 §6.5.2 归入队列头的 FilterBar,
- * 不再单独占一张「选择要批改的作业」卡。两个下拉都一次取齐(PAGINATION_MAX_SIZE):
- * 给下拉配翻页控件等于让教师先翻页再选,而下拉本身就该是可滚动的完整清单。
+ * SubmissionsQueue 是批改的审阅队列:左队列 + 右详情与评分表单。
+ * 两个下拉都一次取齐(PAGINATION_MAX_SIZE):下拉本身就该是可滚动的完整清单。
+ * 作业详情(题面与所属课程)在队列层读一次,不随切换提交重复读取。
  */
 function SubmissionsQueue() {
+  const [query, setQuery] = useUrlState(GRADING_QUERY)
   const [searchParams, setSearchParams] = useSearchParams()
-  const assignmentId = searchParams.get('assignment') ?? ''
-  const [courseId, setCourseId] = useState<string>('')
-  const [statusFilter, setStatusFilter] = useState<string>('')
-  const [lateFilter, setLateFilter] = useState<BoolFilter>(BOOL_FILTER.ANY)
-  const [selectedId, setSelectedId] = useState<string>()
-  /** <lg 走两级页面(§6.4.1 规则 4) */
+  const selectedParam = searchParams.get(SELECTED_PARAM) ?? undefined
   const [mobileView, setMobileView] = useState<'queue' | 'detail'>('queue')
+  const [finished, setFinished] = useState(false)
   const [actionError, setActionError] = useState<string>()
+  const assignmentId = query.assignment
+
+  const detail = useAsyncResource<AssignmentDetail | null>(
+    () => (assignmentId ? api.teaching.getAssignment(assignmentId) : Promise.resolve(null)),
+    [assignmentId],
+    () => false
+  )
+  // 课程可以只由作业推出(从别处链接进来时只带了作业)
+  const courseId = query.course || detail.data?.assignment.course_id || ''
+  const names = useCourseMemberNames([courseId])
 
   const courses = useAsyncResource(
     () => api.teaching.getCourses({ role: 'teacher', page: 1, size: PAGINATION_MAX_SIZE }),
     [],
     () => false
   )
-
   const assignments = useAsyncResource(
     () =>
       courseId
         ? api.teaching.listCourseAssignments(courseId, { page: 1, size: PAGINATION_MAX_SIZE })
-        : Promise.resolve({
-            list: [] as Assignment[],
-            total: 0,
-            page: 1,
-            size: PAGINATION_MAX_SIZE,
-          }),
+        : Promise.resolve(null),
     [courseId],
     () => false
   )
-
   const submissions = usePagedResource<Submission>(
     (params) =>
       assignmentId
-        ? api.teaching.getSubmissions(assignmentId, {
-            status: statusFilter ? (Number(statusFilter) as SubmissionStatus) : undefined,
-            is_late: lateFilter,
-            ...params,
-          })
+        ? api.teaching.getSubmissions(assignmentId, { ...viewFilter(query.view), ...params })
         : Promise.resolve({
             list: [] as Submission[],
             total: 0,
             page: params.page,
             size: params.size,
           }),
-    [assignmentId, lateFilter, statusFilter]
+    [assignmentId, query.view],
+    { urlPageKey: 'page' }
   )
-
-  const courseOptions = useMemo(
-    () =>
-      (courses.data?.list ?? []).map((course: Course) => ({
-        value: course.id,
-        label: course.name,
-      })),
-    [courses.data]
-  )
-
-  const assignmentOptions = useMemo(
-    () =>
-      (assignments.data?.list ?? []).map((item: Assignment) => ({
-        value: item.id,
-        label: item.title,
-      })),
-    [assignments.data]
-  )
-
-  const list = useMemo(() => submissions.data?.list ?? [], [submissions.data])
-  const selected = list.find((item) => item.id === selectedId) ?? list[0]
-  const selectedIndex = selected ? list.findIndex((item) => item.id === selected.id) : -1
-
-  // 待办摘要取服务端全量口径:待批改是教师最常看的数字,不能用当前页数出来的近似值。
-  // 「迟交」现在也走服务端 is_late 参数,故一并给出全量数(§6.5.4)。
+  // 分段计数取服务端全量口径(只读总数),不用当前页切片去数
+  const countLoader = (view: string) => (params: { page: number; size: number }) =>
+    assignmentId
+      ? api.teaching.getSubmissions(assignmentId, { ...viewFilter(view), ...params })
+      : Promise.resolve({ list: [] as Submission[], total: 0, page: 1, size: 1 })
+  const allCount = useResourceTotal(countLoader('all'), [assignmentId], submissions.refreshVersion)
   const pendingCount = useResourceTotal(
-    (params) =>
-      assignmentId
-        ? api.teaching.getSubmissions(assignmentId, { status: SubmissionStatus.PENDING, ...params })
-        : Promise.resolve({ list: [] as Submission[], total: 0, page: 1, size: 1 }),
+    countLoader('pending'),
     [assignmentId],
     submissions.refreshVersion
   )
   const gradedCount = useResourceTotal(
-    (params) =>
-      assignmentId
-        ? api.teaching.getSubmissions(assignmentId, { status: SubmissionStatus.GRADED, ...params })
-        : Promise.resolve({ list: [] as Submission[], total: 0, page: 1, size: 1 }),
+    countLoader('graded'),
     [assignmentId],
     submissions.refreshVersion
   )
   const lateCount = useResourceTotal(
-    (params) =>
-      assignmentId
-        ? api.teaching.getSubmissions(assignmentId, { is_late: BOOL_FILTER.YES, ...params })
-        : Promise.resolve({ list: [] as Submission[], total: 0, page: 1, size: 1 }),
+    countLoader('late'),
     [assignmentId],
     submissions.refreshVersion
   )
 
-  /** 批完一条直接落到下一条待批改项;没有下一条就退回队列层 */
-  const advanceToNext = useCallback(() => {
-    const nextPending = list.find(
-      (item, index) => index > selectedIndex && item.status !== SubmissionStatus.GRADED
-    )
-    setSelectedId(nextPending?.id ?? undefined)
-    if (!nextPending) setMobileView('queue')
-  }, [list, selectedIndex])
+  const list = useMemo(() => submissions.data?.list ?? [], [submissions.data])
+  const selected = finished
+    ? undefined
+    : (list.find((item) => item.id === selectedParam) ?? list[0])
+  const selectedIndex = selected ? list.findIndex((item) => item.id === selected.id) : -1
 
-  /** 键盘上下切条:整批批改靠键盘才快 */
-  const onQueueKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
-    event.preventDefault()
-    const step = event.key === 'ArrowDown' ? 1 : -1
-    const next = list[Math.min(Math.max(selectedIndex + step, 0), list.length - 1)]
-    if (next) setSelectedId(next.id)
-  }
+  /** select 把当前选中的提交写进地址(替换历史记录,不清页码) */
+  const select = useCallback(
+    (id: string | undefined) => {
+      setFinished(false)
+      setSearchParams(
+        (previous) => {
+          const params = new URLSearchParams(previous)
+          if (id) params.set(SELECTED_PARAM, id)
+          else params.delete(SELECTED_PARAM)
+          return params
+        },
+        { replace: true }
+      )
+    },
+    [setSearchParams]
+  )
+  const queue = useReviewQueue({
+    items: list,
+    currentId: selected?.id,
+    onSelect: select,
+    isPending: (item: Submission) => item.status !== SubmissionStatus.GRADED,
+  })
+
+  const courseOptions = (courses.data?.list ?? []).map((course) => ({
+    value: course.id,
+    label: course.name,
+  }))
+  const assignmentOptions = (assignments.data?.list ?? []).map((item) => ({
+    value: item.id,
+    label: item.title,
+  }))
 
   return (
     <>
-      {/* 待办摘要一行(§6.5.3 第 ⑤ 族:审阅队列不做指标带,待办数量放标题下一行) */}
-      <p className="mb-4 text-sm text-ink-sub">
-        {assignmentId === ''
-          ? '先选课程与作业,这里会显示这次作业的待批改数量。'
-          : `共 ${submissions.total ?? '—'} 次提交,待批改 ${pendingCount ?? '—'} 次、已出分 ${gradedCount ?? '—'} 次、迟交 ${lateCount ?? '—'} 次。`}
-      </p>
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center">
+        <Select
+          aria-label="选择课程"
+          options={courseOptions}
+          value={courseId}
+          placeholder={courseOptions.length > 0 ? '选择课程' : '还没有课程'}
+          disabled={courseOptions.length === 0}
+          onValueChange={(value) => setQuery({ course: value, assignment: '' })}
+          className="w-full lg:w-60"
+        />
+        <Select
+          aria-label="选择作业"
+          options={assignmentOptions}
+          value={assignmentId}
+          placeholder={
+            courseId === ''
+              ? '先选择课程'
+              : assignmentOptions.length > 0
+                ? '选择作业'
+                : '这门课还没有作业'
+          }
+          disabled={assignmentOptions.length === 0}
+          onValueChange={(value) => setQuery({ course: courseId, assignment: value })}
+          className="w-full lg:w-72"
+        />
+        {assignmentId ? (
+          <SegmentedControl
+            aria-label="按批改状态筛选"
+            size="sm"
+            options={[
+              { value: 'all', label: '全部', count: allCount },
+              { value: 'pending', label: '待批改', count: pendingCount },
+              { value: 'graded', label: '已出分', count: gradedCount },
+              { value: 'late', label: '迟交', count: lateCount },
+            ]}
+            value={query.view}
+            onValueChange={(value) => setQuery({ view: value })}
+          />
+        ) : null}
+      </div>
 
-      {courses.status === 'error' ? (
-        <Callout tone="danger" title="课程目录暂时读不到" className="mb-4">
-          <Button variant="outline" size="sm" onClick={courses.reload}>
-            重新加载课程
-          </Button>
-        </Callout>
-      ) : null}
-      {assignments.status === 'error' ? (
-        <Callout tone="danger" title="作业目录暂时读不到" className="mb-4">
-          <Button variant="outline" size="sm" onClick={assignments.reload}>
-            重新加载作业
-          </Button>
+      {courses.status === 'error' || assignments.status === 'error' ? (
+        <Callout tone="danger" className="mb-4">
+          <span className="flex flex-wrap items-center gap-3">
+            {courses.status === 'error' ? '课程列表暂时读不到。' : '作业列表暂时读不到。'}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={courses.status === 'error' ? courses.reload : assignments.reload}
+            >
+              重新读取
+            </Button>
+          </span>
         </Callout>
       ) : null}
       {actionError ? (
@@ -286,120 +303,50 @@ function SubmissionsQueue() {
         </Callout>
       ) : null}
 
-      <QueueDetailLayout
-        view={mobileView}
-        detailHeader={
-          selected ? (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                leftIcon={ChevronLeft}
-                onClick={() => setMobileView('queue')}
-              >
-                返回队列
-              </Button>
-              <span className="text-sm text-ink-sub tabular-nums">
-                第 {selectedIndex + 1} 条 / 共 {submissions.total ?? '—'} 条
-              </span>
-            </div>
-          ) : undefined
-        }
-        queue={
-          <DataPanel
-            label="提交队列"
-            className="min-h-0 flex-1"
-            filter={
-              <FilterBar label="提交筛选">
-                <FilterField label="课程" htmlFor="grading-course">
-                  <Select
-                    id="grading-course"
-                    options={courseOptions}
-                    value={courseId}
-                    placeholder={courseOptions.length > 0 ? '选择课程' : '暂无课程'}
-                    disabled={courseOptions.length === 0}
-                    onValueChange={(value) => {
-                      setCourseId(value)
-                      setSearchParams({})
-                      setSelectedId(undefined)
-                    }}
-                  />
-                </FilterField>
-                <FilterField label="作业" htmlFor="grading-assignment">
-                  <Select
-                    id="grading-assignment"
-                    options={assignmentOptions}
-                    value={assignmentId}
-                    placeholder={
-                      courseId === ''
-                        ? '请先选择课程'
-                        : assignmentOptions.length > 0
-                          ? '选择作业'
-                          : '该课程暂无作业'
-                    }
-                    disabled={assignmentOptions.length === 0}
-                    onValueChange={(value) => {
-                      setSearchParams({ assignment: value })
-                      setSelectedId(undefined)
-                    }}
-                  />
-                </FilterField>
-                <FilterField label="批改状态" group>
-                  <SegmentedControl
-                    aria-label="按批改状态筛选"
-                    size="sm"
-                    options={STATUS_FILTERS.map((item) => ({
-                      value: item.value,
-                      label: item.label,
-                    }))}
-                    value={statusFilter}
-                    onValueChange={(value) => {
-                      setStatusFilter(value)
-                      setSelectedId(undefined)
-                    }}
-                  />
-                </FilterField>
-                <FilterField label="是否迟交" group>
-                  <SegmentedControl
-                    aria-label="按是否迟交筛选"
-                    size="sm"
-                    options={LATE_FILTERS.map((item) => ({
-                      value: String(item.value),
-                      label: item.label,
-                    }))}
-                    value={String(lateFilter)}
-                    onValueChange={(value) => {
-                      setLateFilter(Number(value) as BoolFilter)
-                      setSelectedId(undefined)
-                    }}
-                  />
-                </FilterField>
-              </FilterBar>
-            }
-            footer={
-              <Pagination
-                page={submissions.page}
-                pageSize={submissions.pageSize}
-                total={submissions.total}
-                onPageChange={submissions.setPage}
-              />
-            }
-          >
-            {assignmentId === '' ? (
-              <Empty
-                icon={ClipboardCheck}
-                title="请先选择作业"
-                description="选定作业后会列出全班提交、得分与批改状态。"
-              />
-            ) : (
+      {assignmentId === '' ? (
+        <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-14 text-center shadow-xs">
+          <Icon icon={ClipboardCheck} size="lg" className="text-ink-faint" />
+          <p className="mt-3 text-md font-semibold text-ink">先选一份作业</p>
+          <p className="mt-1.5 text-sm text-ink-sub">
+            选好课程和作业后,这里会列出全班的提交,可以逐份批改。
+          </p>
+        </div>
+      ) : (
+        <QueueDetailLayout
+          view={mobileView}
+          detailHeader={
+            selected ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  leftIcon={ChevronLeft}
+                  onClick={() => setMobileView('queue')}
+                >
+                  返回队列
+                </Button>
+                <span className="text-sm tabular-nums text-ink-sub">
+                  第 {selectedIndex + 1} 份 / 共 {submissions.total ?? '—'} 份
+                </span>
+              </div>
+            ) : undefined
+          }
+          queue={
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg bg-surface shadow-xs">
               <ResourceState
                 resource={submissions}
                 emptyIcon={ClipboardCheck}
-                emptyTitle={statusFilter ? '这个状态下没有提交' : '还没有提交'}
+                emptyTitle={query.view === 'all' ? '还没有提交' : '这一类里没有提交'}
                 emptyDescription={
-                  statusFilter ? '换个状态看看,或查看全部提交。' : '学生提交作业后会出现在这里。'
+                  query.view === 'all'
+                    ? '学生提交作业后会出现在这里。'
+                    : '换一类看看,或查看全部提交。'
                 }
-                skeleton={<Skeleton variant="line" lines={5} />}
+                skeleton={
+                  <div aria-busy="true" className="p-4">
+                    <Skeleton variant="line" lines={6} />
+                  </div>
+                }
               >
                 {(page) => (
                   <div
@@ -407,97 +354,106 @@ function SubmissionsQueue() {
                     aria-label="提交队列"
                     aria-activedescendant={selected ? `submission-${selected.id}` : undefined}
                     tabIndex={0}
-                    onKeyDown={onQueueKeyDown}
-                    className="focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
+                    onKeyDown={queue.onListKeyDown}
+                    className="min-h-0 flex-1 overflow-y-auto focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent"
                   >
                     {page.list.map((submission) => {
-                      const isActive = submission.id === selected?.id
+                      const active = submission.id === selected?.id
                       return (
                         <div
                           key={submission.id}
                           id={`submission-${submission.id}`}
                           role="option"
-                          aria-selected={isActive}
+                          aria-selected={active}
                           onClick={() => {
-                            setSelectedId(submission.id)
+                            select(submission.id)
                             setMobileView('detail')
                           }}
                           className={cn(
                             'cursor-pointer border-t border-line px-4 py-3 first:border-t-0',
-                            isActive ? 'bg-primary-soft' : 'hover:bg-surface-hover'
+                            active ? 'bg-primary-soft' : 'hover:bg-surface-hover'
                           )}
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span className="truncate text-sm font-medium text-ink">
-                              第 {submission.attempt_no} 次提交
-                            </span>
+                            <StudentName member={names.lookup(submission.student_id)} compact />
                             <StatusIndicator
                               tone={submissionStatusTone(submission.status)}
                               label={submissionStatusLabel(submission.status)}
                             />
                           </div>
                           <p className="mt-1 truncate text-xs text-ink-sub">
-                            最终得分 {formatScore(submission.final_score)}
+                            第 {submission.attempt_no} 次 ·{' '}
+                            {formatRelativeOccurrence(submission.submitted_at)}
                             {submission.is_late ? ' · 迟交' : ''}
-                          </p>
-                          <p className="mt-1 font-mono text-xs text-ink-faint">
-                            {formatDateTime(submission.submitted_at)}
+                            {submission.status === SubmissionStatus.GRADED
+                              ? ` · ${formatScore(submission.final_score)} 分`
+                              : ''}
                           </p>
                         </div>
                       )
                     })}
-                    <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">
-                      ↑↓ 切换条目
-                    </p>
                   </div>
                 )}
               </ResourceState>
-            )}
-          </DataPanel>
-        }
-        detail={
-          selected ? (
-            <SubmissionGradePane
-              key={selected.id}
-              submission={selected}
-              onSaved={() => {
-                advanceToNext()
-                submissions.reload()
-              }}
-              onError={setActionError}
-            />
-          ) : (
-            <div className="flex min-h-48 items-center justify-center rounded-lg bg-surface p-6 text-sm text-ink-sub shadow-xs">
-              {assignmentId === ''
-                ? '先在左侧选择课程与作业。'
-                : '左侧选一次提交,在这里给分并写评语。'}
+              <div className="border-t border-line px-4 py-2 empty:hidden">
+                <Pagination
+                  page={submissions.page}
+                  pageSize={submissions.pageSize}
+                  total={submissions.total}
+                  onPageChange={submissions.setPage}
+                />
+              </div>
+              <p className="hidden border-t border-line px-4 py-2 text-xs text-ink-sub lg:block">
+                ↑↓ 切换 · Ctrl/⌘ + 回车提交批改
+              </p>
             </div>
-          )
-        }
-      />
+          }
+          detail={
+            finished ? (
+              <div className="flex min-h-48 flex-col items-center justify-center rounded-lg bg-surface p-6 text-center shadow-xs">
+                <Icon icon={CheckCheck} size="lg" className="text-primary" />
+                <p className="mt-3 text-md font-semibold text-ink">这份作业已全部批完</p>
+                <p className="mt-1 text-sm text-ink-sub">点左侧任意一份可以再看或修改。</p>
+              </div>
+            ) : selected && detail.data ? (
+              <SubmissionGradePane
+                key={selected.id}
+                submission={selected}
+                detail={detail.data}
+                student={<StudentName member={names.lookup(selected.student_id)} />}
+                submitShortcut={queue.submitShortcut}
+                onSaved={() => {
+                  setActionError(undefined)
+                  if (!queue.advance()) {
+                    setFinished(true)
+                    setMobileView('queue')
+                  }
+                  submissions.reload()
+                }}
+                onError={setActionError}
+              />
+            ) : (
+              <div className="flex min-h-48 items-center justify-center rounded-lg bg-surface p-6 text-sm text-ink-sub shadow-xs">
+                {detail.status === 'error'
+                  ? '作业题目暂时读不到,请刷新后重试。'
+                  : '左侧选一份提交,在这里给分并写评语。'}
+              </div>
+            )
+          }
+        />
+      )}
     </>
   )
 }
 
-/** 状态筛选项:值为空串表示不过滤。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(SubmissionStatus.PENDING), label: '待批改' },
-  { value: String(SubmissionStatus.GRADED), label: '已出分' },
-] as const
-
-/**
- * LATE_FILTERS 是「是否迟交」筛选项。
- * 布尔列没法用「缺省即不过滤」表达三种意图,全平台统一用 BoolFilter(0 不限 / 1 是 / 2 否)。
- */
-const LATE_FILTERS = [
-  { value: BOOL_FILTER.ANY, label: '不限' },
-  { value: BOOL_FILTER.YES, label: '仅迟交' },
-  { value: BOOL_FILTER.NO, label: '仅按时' },
-] as const
-
 interface SubmissionGradePaneProps {
   submission: Submission
+  /** 作业题面(队列层读一次) */
+  detail: AssignmentDetail
+  /** 学生姓名与学号的显示 */
+  student: React.ReactNode
+  /** Ctrl/⌘ + 回车提交的键盘处理 */
+  submitShortcut: (submit: () => void) => (event: React.KeyboardEvent<HTMLElement>) => void
   onSaved: () => void
   onError: (message: string) => void
 }
@@ -513,19 +469,36 @@ interface SubmissionGradePaneProps {
  * key 由调用方按提交编号给出:切换条目时整个表单重建,
  * 上一条的草稿不会串到下一条(评分与评语都是每条独立的)。
  */
-function SubmissionGradePane({ submission, onSaved, onError }: SubmissionGradePaneProps) {
+function SubmissionGradePane({
+  submission,
+  detail,
+  student,
+  submitShortcut,
+  onSaved,
+  onError,
+}: SubmissionGradePaneProps) {
   const [score, setScore] = useState(String(submission.manual_score ?? ''))
   const [comment, setComment] = useState(submission.comment ?? '')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
-  const { errors, validate } = useFormValidation(useCallback(() => ({
-    score: score.trim() === '' || !Number.isFinite(Number(score)) || Number(score) < 0
-      ? '请输入 0 或更大的评分' : null,
-    comment: comment.trim() === '' ? '请写下评语,让学生知道得分依据' : null,
-  }), [comment, score]))
+  const { errors, validate } = useFormValidation(
+    useCallback(
+      () => ({
+        score:
+          score.trim() === '' ||
+          !Number.isInteger(Number(score)) ||
+          Number(score) < 0 ||
+          Number(score) > submission.manual_max_score
+            ? `请输入 0 至 ${submission.manual_max_score} 之间的整数分数`
+            : null,
+        comment: comment.trim() === '' ? '请写下评语,让学生知道得分依据' : null,
+      }),
+      [comment, score, submission.manual_max_score]
+    )
+  )
 
   const submit = useCallback(async () => {
-    if (!validate()) return
+    if (working || !validate()) return
     const value = Number(score)
     setFormError(undefined)
     setWorking(true)
@@ -540,14 +513,19 @@ function SubmissionGradePane({ submission, onSaved, onError }: SubmissionGradePa
     } finally {
       setWorking(false)
     }
-  }, [comment, onError, onSaved, score, submission.id, validate])
+  }, [comment, onError, onSaved, score, submission.id, validate, working])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg bg-surface p-5 shadow-xs">
+    <div
+      className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg bg-surface p-5 shadow-xs"
+      onKeyDown={submitShortcut(() => void submit())}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-md font-semibold text-ink">第 {submission.attempt_no} 次提交</h3>
-          <p className="mt-0.5 text-xs text-ink-sub">{formatDateTime(submission.submitted_at)}</p>
+          <h3 className="text-md">{student}</h3>
+          <p className="mt-0.5 text-xs text-ink-sub">
+            第 {submission.attempt_no} 次提交 · {formatDateTime(submission.submitted_at)}
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <StatusIndicator
@@ -558,54 +536,96 @@ function SubmissionGradePane({ submission, onSaved, onError }: SubmissionGradePa
         </div>
       </div>
 
-      <DescriptionList
-        dense
-        columns={2}
-        items={[
-          { term: '自动判分', description: formatScore(submission.auto_score), mono: true },
-          { term: '当前最终得分', description: formatScore(submission.final_score), mono: true },
-        ]}
-      />
+      <dl className="grid grid-cols-2 gap-3 rounded-md bg-surface-hover p-3 text-sm">
+        <div>
+          <dt className="text-ink-sub">自动得分</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums text-ink">
+            {formatScore(submission.auto_score)}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-ink-sub">当前最终得分</dt>
+          <dd className="mt-0.5 font-semibold tabular-nums text-ink">
+            {formatScore(submission.final_score)}
+          </dd>
+        </div>
+      </dl>
 
-      <FormField label="我的评分" htmlFor="grade-score" required error={errors.score}>
-        <Input
-          id="grade-score"
-          type="number"
-          min="0"
-          step="0.5"
-          value={score}
-          invalid={Boolean(errors.score)}
-          onBlur={() => validate(['score'])}
-          onChange={(event) => setScore(event.target.value)}
-        />
-      </FormField>
+      {detail.items.length === 0 ? (
+        <p className="text-sm text-ink-sub">这份作业还没有题目。</p>
+      ) : (
+        <section aria-label="学生作答" className="flex flex-col gap-4">
+          {detail.items.map((item, index) => (
+            <div key={item.id} className="rounded-md bg-surface-hover p-4">
+              <h4 className="text-sm font-medium text-ink">
+                第 {index + 1} 题 · {item.title}
+              </h4>
+              <p className="mt-2 whitespace-pre-wrap break-words text-sm text-ink-sub">
+                {itemStatement(item)}
+              </p>
+              <p className="mt-3 text-xs font-medium text-ink-sub">学生答案</p>
+              <p className="mt-1 whitespace-pre-wrap break-words text-base text-ink">
+                {formatAssignmentAnswer(item, submission.content[item.id])}
+              </p>
+            </div>
+          ))}
+        </section>
+      )}
 
-      <FormField
-        label="评语"
-        htmlFor="grade-comment"
-        required
-        error={errors.comment}
-        helper="说清楚扣分点与改进方向,学生会在作业结果页看到"
-      >
-        <Textarea
-          id="grade-comment"
-          value={comment}
-          rows={6}
-          invalid={Boolean(errors.comment)}
-          onBlur={() => validate(['comment'])}
-          onChange={(event) => setComment(event.target.value)}
-        />
-      </FormField>
+      {submission.manual_max_score > 0 ? (
+        <>
+          <FormField
+            label="简答题评分"
+            htmlFor="grade-score"
+            required
+            error={errors.score}
+            helper={`本题组最高 ${submission.manual_max_score} 分`}
+          >
+            <Input
+              id="grade-score"
+              type="number"
+              min="0"
+              max={submission.manual_max_score}
+              step="1"
+              value={score}
+              invalid={Boolean(errors.score)}
+              onBlur={() => validate(['score'])}
+              onChange={(event) => setScore(event.target.value)}
+            />
+          </FormField>
 
-      {formError ? <Callout tone="danger">{formError}</Callout> : null}
+          <FormField
+            label="评语"
+            htmlFor="grade-comment"
+            required
+            error={errors.comment}
+            helper="说清楚扣分点与改进方向,学生会在作业结果页看到"
+          >
+            <Textarea
+              id="grade-comment"
+              value={comment}
+              rows={6}
+              invalid={Boolean(errors.comment)}
+              onBlur={() => validate(['comment'])}
+              onChange={(event) => setComment(event.target.value)}
+            />
+          </FormField>
 
-      {/* 动作条贴详情片底边;<lg 由 QueueDetailLayout 钉到屏幕底部 */}
-      <div className="sticky bottom-0 z-sticky -mx-5 -mb-5 mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-line bg-surface px-5 py-4">
-        <span className="mr-auto text-sm text-ink-sub">你的评分会覆盖为最终得分。</span>
-        <Button variant="primary" loading={working} onClick={() => void submit()}>
-          提交批改并看下一条
-        </Button>
-      </div>
+          {formError ? <Callout tone="danger">{formError}</Callout> : null}
+
+          {/* 动作条贴详情片底边;<lg 由 QueueDetailLayout 钉到屏幕底部 */}
+          <div className="sticky bottom-0 z-sticky -mx-5 -mb-5 mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-line bg-surface px-5 py-4">
+            <span className="mr-auto text-sm text-ink-sub">
+              简答题评分将与自动判分合并,再按迟交规则计分。
+            </span>
+            <Button variant="primary" loading={working} onClick={() => void submit()}>
+              提交批改并看下一份
+            </Button>
+          </div>
+        </>
+      ) : (
+        <Callout tone="info">这份作业由系统自动判分,无需教师评分。</Callout>
+      )}
     </div>
   )
 }
@@ -724,16 +744,23 @@ function ManualScoreModal({ task, onClose, onSaved }: ManualScoreModalProps) {
   const [comment, setComment] = useState('')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
-  const { errors, validate } = useFormValidation(useCallback(() => {
-    const scoreValue = Number(score)
-    const maxValue = Number(maxScore)
-    return {
-      maxScore: !Number.isFinite(maxValue) || maxValue <= 0 ? '满分需要是大于 0 的数字' : null,
-      score: score.trim() === '' || !Number.isFinite(scoreValue) || scoreValue < 0 || scoreValue > maxValue
-        ? '得分需要在 0 与满分之间' : null,
-      comment: comment.trim() === '' ? '请写下评分说明,学生会看到这段话' : null,
-    }
-  }, [comment, maxScore, score]))
+  const { errors, validate } = useFormValidation(
+    useCallback(() => {
+      const scoreValue = Number(score)
+      const maxValue = Number(maxScore)
+      return {
+        maxScore: !Number.isFinite(maxValue) || maxValue <= 0 ? '满分需要是大于 0 的数字' : null,
+        score:
+          score.trim() === '' ||
+          !Number.isFinite(scoreValue) ||
+          scoreValue < 0 ||
+          scoreValue > maxValue
+            ? '得分需要在 0 与满分之间'
+            : null,
+        comment: comment.trim() === '' ? '请写下评分说明,学生会看到这段话' : null,
+      }
+    }, [comment, maxScore, score])
+  )
 
   const submit = useCallback(async () => {
     if (!validate()) return
@@ -780,7 +807,13 @@ function ManualScoreModal({ task, onClose, onSaved }: ManualScoreModalProps) {
                 onChange={(event) => setScore(event.target.value)}
               />
             </FormField>
-            <FormField label="满分" htmlFor="manual-max" required helper="这道题的分值上限" error={errors.maxScore}>
+            <FormField
+              label="满分"
+              htmlFor="manual-max"
+              required
+              helper="这道题的分值上限"
+              error={errors.maxScore}
+            >
               <Input
                 id="manual-max"
                 type="number"

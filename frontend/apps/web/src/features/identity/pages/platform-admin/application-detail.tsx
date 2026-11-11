@@ -14,7 +14,6 @@ import { CircleCheck, CircleX, Inbox, ShieldCheck } from 'lucide-react'
 import { ApplicationStatus, type TenantApplication } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   DescriptionList,
@@ -27,7 +26,6 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
-  ObjectIdentity,
   PageHeader,
   PageScaffold,
   Skeleton,
@@ -38,7 +36,7 @@ import {
 import { api } from '../../../../app/api'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
+import { useAsyncResource, usePageLocation, locationLabel } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import {
   applicationStatusLabel,
@@ -65,23 +63,10 @@ export default function PlatformApplicationDetailPage() {
     () => false,
   )
 
+  usePageLocation([{ label: locationLabel(application, (data) => data.school_name, '申请详情') }])
+
   return (
     <PageScaffold>
-      {/*
-        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的学校名承担,
-        故页面头只出面包屑,末节到「入驻申请」为止(§6.5.0 通则 1)。
-      */}
-      <PageHeader
-        kicker={
-          <Breadcrumb
-            items={[
-              { label: '租户' },
-              { label: '入驻申请', href: '/platform-admin/applications' },
-            ]}
-          />
-        }
-      />
-
       <ResourceState
         resource={application}
         emptyIcon={Inbox}
@@ -121,15 +106,15 @@ function ApplicationReview({ application, onReviewed }: ApplicationReviewProps) 
         两个动作都不可撤销(通过会在一个事务里建租户与首个管理员),故它们仍走弹窗二次确认(§7.2 B),
         弹窗里才是逐项填写开通信息的地方 —— 身份区只负责「决定做哪件事」。
       */}
-      <ObjectIdentity
-        name={application.school_name}
+      <PageHeader
+        title={application.school_name}
         status={
           <StatusIndicator
             tone={applicationStatusTone(application.status)}
             label={applicationStatusLabel(application.status)}
           />
         }
-        subtitle={`${schoolTypeLabel(application.school_type)} · 提交于 ${formatDateTime(application.submitted_at)}`}
+        description={`${schoolTypeLabel(application.school_type)} · 提交于 ${formatDateTime(application.submitted_at)}`}
         actions={
           pending ? (
             <>
@@ -146,7 +131,7 @@ function ApplicationReview({ application, onReviewed }: ApplicationReviewProps) 
             </Button>
           )
         }
-        properties={[
+        meta={[
           { label: '联系人', value: application.contact_name },
           { label: '联系电话', value: <span className="font-mono">{application.contact_phone}</span> },
           { label: '联系邮箱', value: <span className="font-mono">{application.contact_email}</span> },

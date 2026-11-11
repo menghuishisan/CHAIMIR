@@ -7,13 +7,20 @@
 // 而不是让部分成功部分失败(后端 commit 以预览为准,不重新解析文件)。
 
 import { useCallback, useState } from 'react'
+import { Link } from 'react-router'
+import { Download } from 'lucide-react'
 import type { ImportActivationCode, ImportPreviewResponse } from '@chaimir/api-client'
 import {
-  Badge,
   Button,
   Callout,
   FormField,
   Input,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
   Modal,
   ModalBody,
   ModalContent,
@@ -23,16 +30,20 @@ import {
   ModalTitle,
   Progress,
   SegmentedControl,
+  Steps,
   Table,
   toast,
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { useAsyncResource } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
+import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { ImportActionFooter } from '../../components/ImportActionFooter'
 import { ImportPreviewPanel } from '../../components/ImportPreviewPanel'
 import { ImportPreviewRecovery } from '../../components/ImportPreviewRecovery'
+import { AccountImportBatches } from './account-batches'
 
 /** 导入目标:教师与学生模板列不同,后端按 type 分别解析。 */
 const IMPORT_TARGETS = [
@@ -41,6 +52,13 @@ const IMPORT_TARGETS = [
 ] as const
 
 type ImportTargetValue = (typeof IMPORT_TARGETS)[number]['value']
+
+/** 导入分三步(设计 §7.5):下载模板 → 上传并预览校验 → 确认导入 */
+const IMPORT_STEPS = [
+  { key: 'template', label: '下载模板' },
+  { key: 'preview', label: '上传并预览' },
+  { key: 'commit', label: '确认导入' },
+]
 
 export interface AccountImportModalProps {
   onClose: () => void
@@ -61,6 +79,24 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
   const { errors, validate } = useFormValidation(() => ({
     file: file ? null : '请选择要导入的文件',
   }), target)
+  // 导入时按组织名称匹配归属:教师要有院系、学生要有班级,还没建时先提示去建组织架构
+  const org = useAsyncResource(
+    () => Promise.all([api.identity.listDepartments(), api.identity.listClasses()]).then(([departments, classes]) => ({ departments, classes })),
+    [],
+    () => false,
+  )
+  const orgMissing =
+    org.status === 'success' && (target === 'teacher' ? (org.data?.departments.length ?? 0) === 0 : (org.data?.classes.length ?? 0) === 0)
+
+  /** downloadTemplate 下载当前导入对象的模板:文件名取自响应头,页面不自造 */
+  const downloadTemplate = useCallback(async () => {
+    setFormError(undefined)
+    try {
+      downloadAttachment(await api.identity.downloadAccountImportTemplate({ type: target }))
+    } catch (error) {
+      setFormError(userFacingErrorMessage(error, '模板下载没有成功,请稍后重试。'))
+    }
+  }, [target])
 
   const runPreview = useCallback(async () => {
     if (working || !validate() || !file) return
@@ -148,28 +184,27 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
   }
 
   return (
-    <Modal open onOpenChange={(open) => !open && !working && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>批量导入账号</ModalTitle>
-          <ModalDescription>
+    <Drawer open onOpenChange={(open) => !open && !working && onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader>
+          <DrawerTitle>批量导入账号</DrawerTitle>
+          <DrawerDescription>
             先上传文件做校验预览,确认无误后提交开通。预览结果保存在服务器,中途离开也不会丢。
-          </ModalDescription>
-        </ModalHeader>
-        <ModalBody className="flex flex-col gap-4">
-          <div className="grid gap-2 sm:grid-cols-3" aria-label="导入步骤">
-            {[
-              ['1', '选择模板', !preview],
-              ['2', '校验预览', Boolean(preview)],
-              ['3', '确认提交', false],
-            ].map(([step, label, active]) => (
-              <div key={String(step)} className="flex items-center gap-2 rounded-lg border border-border bg-surface p-3">
-                <Badge tone={active ? 'jade' : 'neutral'}>{step}</Badge>
-                <span className="text-sm text-ink">{label}</span>
-              </div>
-            ))}
-          </div>
-          <FormField label="导入对象" required helper="教师与学生的模板列不同,请选对再上传">
+          </DrawerDescription>
+        </DrawerHeader>
+        <DrawerBody className="flex flex-col gap-4">
+          <Steps steps={IMPORT_STEPS} current={preview ? 2 : file ? 1 : 0} />
+          {orgMissing ? (
+            <Callout tone="warning" title={target === 'teacher' ? '还没有院系' : '还没有班级'}>
+              <p>
+                导入时按名称匹配{target === 'teacher' ? '院系' : '班级'},请先建好组织架构。{' '}
+                <Link to="/school-admin/organization" className="font-medium text-primary underline-offset-2 hover:underline">
+                  先去建组织架构
+                </Link>
+              </p>
+            </Callout>
+          ) : null}
+          <FormField label="导入对象" required helper="教师与学生的模板列不同,请选对再下载模板和上传">
             <SegmentedControl
               aria-label="导入对象"
               options={IMPORT_TARGETS.map((item) => ({ value: item.value, label: item.label }))}
@@ -182,6 +217,13 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
               }}
             />
           </FormField>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" leftIcon={Download} disabled={working} onClick={() => void downloadTemplate()}>
+              下载{target === 'teacher' ? '教师' : '学生'}导入模板
+            </Button>
+            <span className="text-sm text-ink-sub">按模板列填写,不要改表头。</span>
+          </div>
 
           <FormField
             label="导入文件"
@@ -219,7 +261,9 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
           />
 
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
-        </ModalBody>
+
+          {!preview ? <AccountImportBatches /> : null}
+        </DrawerBody>
         <ImportActionFooter
           preview={preview}
           fileSelected={Boolean(file)}
@@ -229,7 +273,7 @@ export function AccountImportModal({ onClose, onCommitted }: AccountImportModalP
           onPreview={() => void runPreview()}
           onCommit={() => void commit()}
         />
-      </ModalContent>
-    </Modal>
+      </DrawerContent>
+    </Drawer>
   )
 }

@@ -96,7 +96,7 @@ func assignmentItemDTO(item AssignmentItemFace) (AssignmentItemDTO, error) {
 	if err != nil {
 		return AssignmentItemDTO{}, err
 	}
-	return AssignmentItemDTO{ID: ids.ID(item.ID), ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: item.JudgerCode, Title: item.Title, Type: item.Type, Difficulty: item.Difficulty, Body: body}, nil
+	return AssignmentItemDTO{ID: ids.ID(item.ID), ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, Title: item.Title, Type: item.Type, Difficulty: item.Difficulty, Body: body}, nil
 }
 
 // assignmentDetailDTO 将作业详情转换为学生或教师读取的完整响应。
@@ -131,7 +131,7 @@ func submissionDTO(s Submission) (SubmissionDTO, error) {
 	if err != nil {
 		return SubmissionDTO{}, err
 	}
-	return SubmissionDTO{ID: ids.ID(s.ID), AssignmentID: ids.ID(s.AssignmentID), StudentID: ids.ID(s.StudentID), AttemptNo: s.AttemptNo, Content: content, JudgeTaskRef: s.JudgeTaskRef, AutoScore: s.AutoScore, ManualScore: s.ManualScore, FinalScore: s.FinalScore, Comment: s.Comment, IsLate: s.IsLate, Status: s.Status, SubmittedAt: timex.RFC3339OrEmpty(s.SubmittedAt)}, nil
+	return SubmissionDTO{ID: ids.ID(s.ID), AssignmentID: ids.ID(s.AssignmentID), StudentID: ids.ID(s.StudentID), AttemptNo: s.AttemptNo, Content: content, ManualMaxScore: manualMaximumScore(s.ContentRef), JudgeTaskRef: s.JudgeTaskRef, AutoScore: s.AutoScore, ManualScore: s.ManualScore, FinalScore: s.FinalScore, Comment: s.Comment, IsLate: s.IsLate, Status: s.Status, SubmittedAt: timex.RFC3339OrEmpty(s.SubmittedAt)}, nil
 }
 
 // draftDTO 将服务端权威作答草稿转换为 HTTP 响应结构。
@@ -201,31 +201,15 @@ func finalTotal(g CourseGrade) float64 {
 	return g.AutoTotal
 }
 
-// publicSubmissionContent 深拷贝提交内容并移除内部对象存储和哈希字段。
+// publicSubmissionContent 仅投影学生结构化答案,不暴露内部评分元信息。
 func publicSubmissionContent(in map[string]any) (map[string]any, error) {
-	cloned, err := jsonx.CloneObjectStrict(in)
+	answers, ok := in["answers"].(map[string]any)
+	if !ok {
+		return nil, apperr.ErrTeachingSubmissionInvalid
+	}
+	cloned, err := jsonx.CloneObjectStrict(answers)
 	if err != nil {
 		return nil, err
 	}
-	stripInternalSubmissionFields(cloned)
 	return cloned, nil
-}
-
-// stripInternalSubmissionFields 递归移除不应出现在用户响应中的存储实现细节。
-func stripInternalSubmissionFields(value any) {
-	switch node := value.(type) {
-	case map[string]any:
-		for key, child := range node {
-			switch key {
-			case "code_storage_key", "code_hash", "object_key", "storage_key", "bucket", "object_ref":
-				delete(node, key)
-				continue
-			}
-			stripInternalSubmissionFields(child)
-		}
-	case []any:
-		for _, child := range node {
-			stripInternalSubmissionFields(child)
-		}
-	}
 }

@@ -11,6 +11,7 @@ import { confirmPasswordError, passwordRuleError, requiredError } from '../../au
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import {
   AuthFormError,
+  AuthFormBrand,
   AuthHeading,
   AuthPanel,
   AuthPrimaryLink,
@@ -18,6 +19,7 @@ import {
   AuthSubmit,
   AuthSuccess,
   AuthTextField,
+  PasswordRuleChecklist,
 } from '../../components/AuthUI'
 
 /**
@@ -61,7 +63,7 @@ export default function ActivatePage() {
     return (
       <AuthPanel>
         <AuthSuccess title="账号已激活" description="现在可以用刚设置的密码登录平台。">
-          <AuthPrimaryLink to="/auth/login">前往登录</AuthPrimaryLink>
+          <AuthPrimaryLink to="/auth/login">用新密码登录</AuthPrimaryLink>
         </AuthSuccess>
       </AuthPanel>
     )
@@ -69,13 +71,16 @@ export default function ActivatePage() {
 
   return (
     <AuthPanel>
+      <AuthFormBrand />
       <form className="w-full max-w-sm" onSubmit={handleSubmit} noValidate>
-        <AuthHeading title="激活账号" description="使用学校下发的激活码开通账号并设置密码。" />
+        <AuthHeading title="激活账号" description="用学校下发的激活码开通账号,并设置登录密码。" />
 
         <AuthTextField
           label="激活码"
           id={`${fieldId}-code`}
           autoComplete="one-time-code"
+          placeholder="输入学校通知里的激活码"
+          spellCheck={false}
           value={activationCode}
           error={errors.code}
           onValueChange={setActivationCode}
@@ -92,6 +97,7 @@ export default function ActivatePage() {
           onValueChange={setPassword}
           onBlur={() => validate(['password'])}
         />
+        <PasswordRuleChecklist value={password} />
 
         <AuthTextField
           label="确认密码"

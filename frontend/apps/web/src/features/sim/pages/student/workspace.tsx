@@ -19,6 +19,7 @@ import { Dices, LoaderCircle, Lock, TriangleAlert } from 'lucide-react'
 import {
   Badge,
   Button,
+  IconButton,
   toast,
   useReducedMotion,
 } from '@chaimir/ui'
@@ -42,6 +43,7 @@ import { useSimPlayback } from '../../playback'
 import { SimPlaybackControls } from '../../components/SimPlaybackControls'
 import { SimRuntimeWorkbench } from '../../components/SimRuntimeWorkbench'
 import { SimShareModal } from '../../components/SimShareModal'
+import { SimVersionMenu } from '../../components/SimVersionMenu'
 import { useIsolatedSimStream, type IsolatedSnapshot } from '../../isolatedStream'
 
 /** 默认随机种子:固定值保证「同一个场景每次进来都一样」,换条件是显式动作。 */
@@ -395,6 +397,20 @@ function SimRuntime({ packageCode, version, sessionId, restore, onExit }: SimRun
         snapshot={snapshot}
         onExit={onExit}
         onShare={sessionId ? () => setShareOpen(true) : undefined}
+        titleExtra={
+          <>
+            <IconButton
+              variant="on-dark"
+              size="sm"
+              icon={Dices}
+              aria-label="换一组条件"
+              title="换一组条件"
+              disabled={Boolean(error)}
+              onClick={() => setSeed((current) => current + 1)}
+            />
+            {sessionId ? null : <SimVersionMenu packageCode={packageCode} version={version} />}
+          </>
+        }
         onSelectElement={selectElement}
         onInteract={interact}
         footer={
@@ -422,15 +438,6 @@ function SimRuntime({ packageCode, version, sessionId, restore, onExit }: SimRun
               ) : null}
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Button
-                variant="on-dark"
-                size="sm"
-                leftIcon={Dices}
-                disabled={Boolean(error)}
-                onClick={() => setSeed((current) => current + 1)}
-              >
-                换一组条件
-              </Button>
               <SimPlaybackControls
                 playing={playback.playing}
                 onToggle={playback.toggle}

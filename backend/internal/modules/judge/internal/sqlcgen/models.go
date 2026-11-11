@@ -140,8 +140,6 @@ type AssignmentItem struct {
 	ItemVersion  string             `json:"item_version"`
 	Score        int32              `json:"score"`
 	Seq          int32              `json:"seq"`
-	GradingMode  int16              `json:"grading_mode"`
-	JudgerCode   pgtype.Text        `json:"judger_code"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -1214,9 +1212,6 @@ type SubmissionJudgeOutbox struct {
 	StudentID        int64              `json:"student_id"`
 	ItemCode         string             `json:"item_code"`
 	ItemVersion      string             `json:"item_version"`
-	JudgerCode       string             `json:"judger_code"`
-	CodeStorageKey   string             `json:"code_storage_key"`
-	CodeHash         string             `json:"code_hash"`
 	ExtraInput       []byte             `json:"extra_input"`
 	SourceRef        string             `json:"source_ref"`
 	Status           int16              `json:"status"`

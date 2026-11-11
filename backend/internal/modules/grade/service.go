@@ -75,8 +75,7 @@ type ServiceDeps struct {
 	Teaching    contracts.TeachingReadService
 	Bus         eventbus.Bus
 	Cache       summaryCache
-	Storage     *storage.Storage
-	Objects     objectStorage
+	Storage     objectStorage
 	FileService fileService
 	Config      config.GradeConfig
 }
@@ -86,10 +85,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Teaching == nil || deps.Bus == nil {
 		return nil, fmt.Errorf("grade service 依赖不完整")
 	}
-	objects := deps.Objects
-	if objects == nil {
-		objects = deps.Storage
-	}
+	objects := deps.Storage
 	if objects == nil {
 		return nil, fmt.Errorf("grade service 对象存储依赖不完整")
 	}

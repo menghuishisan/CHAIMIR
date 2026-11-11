@@ -34,7 +34,7 @@ export function AppSidebar({ config, collapsed = false, onToggleCollapsed }: App
         {config.groups.map((group) => (
           <div key={group.title} className="mt-4 first:mt-0">
             {!collapsed && (
-              <div className="px-2.5 pb-1.5 font-mono text-xs text-on-dark-sub">
+              <div className="px-2.5 pb-1.5 text-xs text-on-dark-sub">
                 {group.title}
               </div>
             )}
@@ -112,10 +112,11 @@ function SidebarLink({ item, collapsed }: { item: RoleNavigationItem; collapsed:
       to={item.path}
       className={({ isActive }) =>
         cn(
-          'relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors duration-fast',
-          collapsed && 'justify-center px-0 py-2.5',
+          // 菜单项高 38、字号 14(规范 §6.2);激活项玉色浅底 + 玉色文字 + 字重 600,不加左侧指示条
+          'flex h-9.5 items-center gap-2.5 rounded-md px-2.5 text-nav transition-colors duration-fast',
+          collapsed && 'justify-center px-0',
           isActive
-            ? 'bg-on-dark-accent-soft font-medium text-accent before:absolute before:left-0 before:top-1/2 before:h-4 before:w-0.5 before:-translate-y-1/2 before:rounded-full before:bg-accent'
+            ? 'bg-on-dark-accent-soft font-semibold text-accent'
             : 'text-on-dark-sub hover:bg-dark-elevated hover:text-on-dark',
         )
       }

@@ -7,7 +7,6 @@ import { Download, FileText } from 'lucide-react'
 import type { AuditLogEntry, AuditQueryParams } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   DataPanel,
@@ -21,7 +20,6 @@ import {
   Select,
   Table,
   toast,
-  type BreadcrumbItem,
   type SelectOption,
   type TableColumn,
 } from '@chaimir/ui'
@@ -36,7 +34,6 @@ import { TraceIdCell } from './TraceIdCell'
 
 interface AuditLogPageProps {
   idPrefix: string
-  breadcrumbItems: BreadcrumbItem[]
   title: string
   description: string
   actionOptions: readonly SelectOption[]
@@ -50,7 +47,6 @@ interface AuditLogPageProps {
 /** AuditLogPage 承载两种管理范围共用的审计只读工作流。 */
 export function AuditLogPage({
   idPrefix,
-  breadcrumbItems,
   title,
   description,
   actionOptions,
@@ -165,10 +161,8 @@ export function AuditLogPage({
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={breadcrumbItems} />}
         title={title}
         description={description}
-        icon={FileText}
         actions={
           <Button variant="outline" leftIcon={Download} loading={exporting} onClick={() => void exportLogs()}>
             导出当前结果

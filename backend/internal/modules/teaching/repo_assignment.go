@@ -85,7 +85,7 @@ func (s *txStore) ReplaceAssignmentItems(ctx context.Context, tenantID, assignme
 	}
 	out := make([]AssignmentItem, 0, len(items))
 	for _, item := range items {
-		row, err := s.q.CreateAssignmentItem(ctx, sqlcgen.CreateAssignmentItemParams{ID: item.ID, TenantID: tenantID, AssignmentID: assignmentID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: pgtypex.Text(item.JudgerCode)})
+		row, err := s.q.CreateAssignmentItem(ctx, sqlcgen.CreateAssignmentItemParams{ID: item.ID, TenantID: tenantID, AssignmentID: assignmentID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq})
 		if err != nil {
 			return nil, err
 		}
@@ -190,7 +190,7 @@ func (s *txStore) ListSubmissionsByAssignment(ctx context.Context, query Submiss
 
 // UpdateSubmissionManualGrade 更新教师批改分。
 func (s *txStore) UpdateSubmissionManualGrade(ctx context.Context, tenantID, id int64, manual, final int32, comment string) (Submission, error) {
-	row, err := s.q.UpdateSubmissionManualGrade(ctx, sqlcgen.UpdateSubmissionManualGradeParams{TenantID: tenantID, ID: id, ManualScore: pgtypex.Int4(manual), FinalScore: pgtypex.Int4(final), Comment: pgtypex.Text(comment)})
+	row, err := s.q.UpdateSubmissionManualGrade(ctx, sqlcgen.UpdateSubmissionManualGradeParams{TenantID: tenantID, SubmissionID: id, ManualScore: pgtypex.Int4(manual), FinalScore: pgtypex.Int4(final), Comment: pgtypex.Text(comment)})
 	if err != nil {
 		return Submission{}, err
 	}
@@ -221,7 +221,7 @@ func (s *txStore) CreateJudgeOutbox(ctx context.Context, outbox JudgeOutbox) (Ju
 	if err != nil {
 		return JudgeOutbox{}, err
 	}
-	row, err := s.q.CreateJudgeOutbox(ctx, sqlcgen.CreateJudgeOutboxParams{ID: outbox.ID, TenantID: outbox.TenantID, SubmissionID: outbox.SubmissionID, AssignmentItemID: outbox.AssignmentItemID, AssignmentID: outbox.AssignmentID, SourceOwnerID: outbox.SourceOwnerID, SourceCourseID: outbox.SourceCourseID, SourceScope: outbox.SourceScope, StudentID: outbox.StudentID, ItemCode: outbox.ItemCode, ItemVersion: outbox.ItemVersion, JudgerCode: outbox.JudgerCode, CodeStorageKey: outbox.CodeStorageKey, CodeHash: outbox.CodeHash, ExtraInput: extra, SourceRef: outbox.SourceRef})
+	row, err := s.q.CreateJudgeOutbox(ctx, sqlcgen.CreateJudgeOutboxParams{ID: outbox.ID, TenantID: outbox.TenantID, SubmissionID: outbox.SubmissionID, AssignmentItemID: outbox.AssignmentItemID, AssignmentID: outbox.AssignmentID, SourceOwnerID: outbox.SourceOwnerID, SourceCourseID: outbox.SourceCourseID, SourceScope: outbox.SourceScope, StudentID: outbox.StudentID, ItemCode: outbox.ItemCode, ItemVersion: outbox.ItemVersion, ExtraInput: extra, SourceRef: outbox.SourceRef})
 	if err != nil {
 		return JudgeOutbox{}, err
 	}

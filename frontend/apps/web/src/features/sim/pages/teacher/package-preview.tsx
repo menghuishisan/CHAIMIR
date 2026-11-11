@@ -19,13 +19,13 @@ import {
   Badge,
   Button,
   Callout,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   Skeleton,
   StatusIndicator,
   type StatusTone,
@@ -76,34 +76,34 @@ export function SimPackagePreviewModal({ item, onClose }: SimPackagePreviewModal
   )
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="lg">
-        <ModalHeader>
-          <ModalTitle>审核报告</ModalTitle>
-          <ModalDescription>
+    <Drawer open onOpenChange={(open) => !open && onClose()}>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>审核报告</DrawerTitle>
+          <DrawerDescription>
             {item.name} · 版本 {item.version}。四项校验全部通过后平台才能让场景上架。
-          </ModalDescription>
-        </ModalHeader>
+          </DrawerDescription>
+        </DrawerHeader>
         <ResourceState
           resource={preview}
           emptyIcon={FileSearch}
           emptyTitle="还没有审核报告"
           emptyDescription="提交场景后平台会生成校验报告。"
           skeleton={
-            <ModalBody>
+            <DrawerBody>
               <Skeleton variant="line" lines={5} />
-            </ModalBody>
+            </DrawerBody>
           }
         >
           {(data) => <PreviewBody review={data.review} />}
         </ResourceState>
-        <ModalFooter>
+        <DrawerFooter>
           <Button variant="outline" onClick={onClose}>
             关闭
           </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+        </DrawerFooter>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
@@ -115,7 +115,7 @@ function PreviewBody({ review }: { review: SimPackageReview }) {
   const scanFindings = report.static_scan?.findings ?? []
 
   return (
-    <ModalBody className="flex flex-col gap-4">
+    <DrawerBody className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <StatusIndicator
           tone={simReviewResultTone(review.result)}
@@ -167,9 +167,9 @@ function PreviewBody({ review }: { review: SimPackageReview }) {
       <SimPreviewFrames frames={report.preview_frames} />
 
       {report.bundle_hash ? (
-        <p className="font-mono text-xs text-ink-faint">场景包校验值 {report.bundle_hash}</p>
+        <p className="font-mono text-xs text-ink-sub">场景包校验值 {report.bundle_hash}</p>
       ) : null}
-    </ModalBody>
+    </DrawerBody>
   )
 }
 
@@ -184,7 +184,7 @@ interface CheckRowProps {
  */
 function CheckRow({ label, status, extra }: CheckRowProps) {
   return (
-    <div className="flex flex-col gap-1.5 well p-3">
+    <div className="flex flex-col gap-1.5 rounded-md bg-surface-hover p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-sm text-ink">{label}</span>
         <StatusIndicator

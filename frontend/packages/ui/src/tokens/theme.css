@@ -12,30 +12,37 @@
  */
 
 @theme {
-  /* ---------- 字体(§2.3 三层字体栈) ---------- */
-  /* Body 与 Data 用可变字体,家族名带 Variable 后缀(@fontsource-variable 的约定) */
+  /* ---------- 字体(§2.3:正文 + 等宽;display 只用于品牌展示位) ---------- */
+  /* Body 与 Data 用可变字体,家族名带 Variable 后缀(@fontsource-variable 的约定)。
+     站酷庆科黄油体只给品牌锁定组合、认证页大标语、封面题识、租户首字徽记、竞赛结算大数字,
+     页面标题和数字用正文粗体(门禁拦截业务页面里的 font-display) */
   --font-display: "ZCOOL QingKe HuangYou", "Noto Sans SC Variable", "Microsoft YaHei", sans-serif;
   --font-sans: "Noto Sans SC Variable", -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Consolas, monospace;
 
-  /* 字号阶梯:xs12/sm13/base14/md15/lg16/xl18/2xl22/3xl28/4xl38 */
+  /* 字号阶梯:xs12/sm13/nav14/base15/md16/lg17/xl19/2xl22/3xl26/stat28/4xl34。
+     正文基准 15(14 在宽屏上又空又难读);nav 是侧栏菜单项,stat 是看板统计数字 */
   --text-xs: 12px;
   --text-xs--line-height: 1.5;
   --text-sm: 13px;
   --text-sm--line-height: 1.5;
-  --text-base: 14px;
-  --text-base--line-height: 1.5;
-  --text-md: 15px;
+  --text-nav: 14px;
+  --text-nav--line-height: 1.4;
+  --text-base: 15px;
+  --text-base--line-height: 1.6;
+  --text-md: 16px;
   --text-md--line-height: 1.5;
-  --text-lg: 16px;
-  --text-lg--line-height: 1.5;
-  --text-xl: 18px;
+  --text-lg: 17px;
+  --text-lg--line-height: 1.4;
+  --text-xl: 19px;
   --text-xl--line-height: 1.4;
   --text-2xl: 22px;
   --text-2xl--line-height: 1.35;
-  --text-3xl: 28px;
+  --text-3xl: 26px;
   --text-3xl--line-height: 1.3;
-  --text-4xl: 38px;
+  --text-stat: 28px;
+  --text-stat--line-height: 1.2;
+  --text-4xl: 34px;
   --text-4xl--line-height: 1.25;
 
   /* ---------- 原始色阶(§2.1,全部经 AA 校验) ---------- */
@@ -59,10 +66,10 @@
   --color-cinnabar-600: #c13a26;
   --color-cinnabar-700: #a32e1d;
 
-  /* 宣纸 paper:阅读光面 */
-  --color-paper-bg: #f7f5ef;
-  --color-paper-card: #fdfcf9;
-  --color-paper-sunken: #f1eee6;
+  /* 宣纸 paper:阅读纸面 */
+  --color-paper-bg: #f5f3ed;
+  --color-paper-card: #ffffff;
+  --color-paper-sunken: #f1eee7;
 
   /* ---------- 语义令牌:底层与深色面板 ---------- */
   --color-substrate: #0a100e;
@@ -70,6 +77,7 @@
   --color-dark-surface: #121b17;
   --color-dark-elevated: #16211b;
   --color-dark-line: #1f2d26;
+  --color-dark-control: #64756d; /* 深色输入控件轮廓:对墨底 3.94:1、深色面 3.60:1(WCAG 1.4.11 控件边界 ≥3:1) */
   --color-terminal: #060b09;
   --color-on-dark: #edf3ef; /* 对 dark-bg ≈15:1 */
   --color-on-dark-sub: #96a69e; /* 对 dark-bg ≈6.8:1 */
@@ -86,25 +94,27 @@
   --color-on-dark-blue: #9dbdf5;
   --color-on-dark-violet: #cbb3f5;
 
-  /* ---------- 语义令牌:光面(宣纸) ----------
-     三档明度必须拉得开(规范 §2.1:相邻差不得小于 8/255)。差太小时「浅一档 + 落影」
-     表达不出抬起、「深一档」表达不出凹陷,矩形只能靠轮廓被认出来,与 §6.5.1
-     「容器不画边框」直接冲突。故抬起片取纯白(在暖白纸上读作「新的一张」)、凹陷井压到 #efebe0。 */
-  --color-canvas: #f7f5ef;
+  /* ---------- 语义令牌:纸面(宣纸) ----------
+     「纸面 + 白卡」两档(规范 §6.5.1):纸面上只摆无边框白卡和不带容器的文字;
+     surface-hover 兼做卡内强调块底色;surface-sunken 只用于标签底、禁用输入底、代码片段底,
+     不再做表头、筛选区、分组的大面积底色。对比度为实测值(§2.1 校验列)。 */
+  --color-canvas: #f5f3ed;
   --color-surface: #ffffff;
-  --color-surface-sunken: #efebe0;
-  --color-surface-hover: #f3f0e8;
-  --color-line: #e7e3d7;
-  --color-line-strong: #d8d3c4;
-  --color-ink: #1c2420; /* 纸上正文 ≈14:1 */
-  --color-ink-sub: #5f6b64; /* ≈5.2:1 */
-  --color-ink-faint: #8b948d; /* 仅占位/禁用 */
+  --color-surface-sunken: #f1eee7;
+  --color-surface-hover: #f7f5f0;
+  --color-line: #efece4; /* 卡内分隔线、表格行线 */
+  --color-line-strong: #e2ded4; /* 强分隔线、描边按钮 */
+  --color-line-control: #818a83; /* 输入控件轮廓:白 3.56:1、纸面 3.21:1、sunken 3.07:1(WCAG 1.4.11) */
+  --color-ink: #16201b; /* 纸上正文:白 16.7:1、纸面 15.1:1 */
+  --color-ink-sub: #5c6862; /* 次要文字:白 5.81:1、纸面 5.24:1、sunken 5.02:1 */
+  --color-ink-faint: #9aa29b; /* 只用于装饰(箭头、分隔、禁用图标),不承载文字:白 2.62:1 */
 
   /* ---------- 语义令牌:品牌与交互 ---------- */
   --color-on-solid: #ffffff; /* 一切语义实底(primary/seal/danger/warning/info)上的文字;各组合均 ≥4.5:1(warning 最低 ≈5.0:1) */
   --color-primary: #0b7a5d; /* jade-700,浅区实底按钮/文字级主色,白字 ≈5.1:1 */
   --color-primary-hover: #096549;
-  --color-primary-soft: #e7f6f0; /* 玉浅底(激活/选中底) */
+  --color-primary-soft: #e7f6f0; /* 玉浅底(激活/选中底);primary 字对它 4.76:1 */
+  --color-primary-soft-hover: #d3ece1; /* secondary 按钮悬停底;配 primary-hover 字 5.68:1 */
   --color-seal: #df4b34; /* 品牌章 */
   --color-seal-soft: rgb(223 75 52 / 0.1); /* 朱砂浅底(对抗能量类徽标),与玉的 primary-soft 同位 */
   --color-seal-action: #c13a26; /* 落印类实底按钮,白字 ≈5.8:1 */
@@ -115,7 +125,7 @@
   --color-success: #0b7a5d;
   --color-success-bg: #e7f6f0;
   --color-success-border: #bfe8d9;
-  --color-warning: #a16207;
+  --color-warning: #9a5a00; /* 白 5.47:1、纸面 4.93:1、warning-bg 4.95:1(#a16207 在新纸面上只有 4.44) */
   --color-warning-bg: #fbf3e0;
   --color-warning-border: #edd9a8;
   --color-danger: #ce2c31;
@@ -128,19 +138,16 @@
 
   /* ---------- 圆角(§2.4) ---------- */
   --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px; /* 抬起片与光面左上角 */
-  --radius-pane: 14px; /* 大面:浮层面板、底部 sheet、品牌块 */
+  --radius-md: 10px; /* 按钮、输入框、卡内小块 */
+  --radius-lg: 14px; /* 白卡、弹窗 */
+  --radius-pane: 16px; /* 纸面左上角、底部 sheet、大徽记 */
 
   /* ---------- 阴影 = 海拔(§2.4/§4.1) ---------- */
-  /* xs 是抬起片专用:双层落影。单层 5% 比它取代的边框还弱,撑不起「纸片浮在纸上」 */
-  --shadow-xs: 0 1px 2px rgb(16 24 20 / 0.06), 0 2px 6px rgb(16 24 20 / 0.05);
-  --shadow-sm: 0 1px 2px rgb(16 24 20 / 0.04), 0 2px 8px rgb(16 24 20 / 0.05);
+  /* xs 是白卡的默认阴影(无边框,靠一细一散两层落影浮在纸面上);sm 是可点卡片悬停 */
+  --shadow-xs: 0 1px 2px rgb(20 28 24 / 0.05), 0 6px 20px -6px rgb(20 28 24 / 0.09);
+  --shadow-sm: 0 2px 4px rgb(20 28 24 / 0.06), 0 12px 28px -8px rgb(20 28 24 / 0.14);
   --shadow-md: 0 4px 14px rgb(16 24 20 / 0.08), 0 2px 6px rgb(16 24 20 / 0.04);
   --shadow-lg: 0 12px 32px rgb(16 24 20 / 0.12), 0 4px 12px rgb(16 24 20 / 0.06);
-  /* 光面浮于底层:**单向**投影,只从顶与左透出(规范 §1.2 缝只在导航侧)。
-     四周环绕的投影会在纸周围压出一圈暗环,把内容读作「被装进一个容器」 */
-  --shadow-pane: -3px -3px 14px -5px rgb(0 0 0 / 0.38);
 
   /* ---------- 动效曲线(§2.5,覆盖 Tailwind 默认) ---------- */
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -401,12 +408,10 @@
   --z-toast: 200;
 
   --topnav-h: 56px;
-  --sidebar-w: 220px;
+  --sidebar-w: 224px;
   --sidebar-w-collapsed: 64px;
-  /* 光面到底层的缝:只作用于顶与左(规范 §1.2),右下由光面出血到视口边。
-     没有 --content-max —— 全局限宽会在宽屏把内容缩成居中一根柱子,
-     两侧空白复现外壳刚去掉的隔离感;唯一需要限宽的正文在「学习阅读族」自己的骨架里写。 */
-  --pane-inset: 8px;
+  /* 没有 --content-max —— 全局限宽会在宽屏把内容缩成居中一根柱子;
+     需要限宽的内容(课时正文、长表单)在各页自己写。纸面不再与导航留缝(2026-11 改版)。 */
 
   /* 沉浸态工作台栏宽(规范 §2.4 / §7.1 三区骨架):
      左辅助区 300 / 右事件流 320 / 收起后的竖向把手 40。
@@ -414,6 +419,9 @@
   --wb-aside-w: 300px;
   --wb-stream-w: 320px;
   --wb-rail-w: 40px;
+
+  /* 顶栏弹出层(通知铃铛、任务与下载)的宽度:380,窄屏时不超过视口减去两侧 16 的边距(设计 §7.8) */
+  --topbar-popover-w: min(380px, calc(100vw - 32px));
 
   --t-press: 120ms;
   --t-fast: 160ms;
@@ -449,6 +457,11 @@
   transition-duration: var(--t-slow);
 }
 
+/* ---------- 环形进度填充过渡(ProgressRing 首次出现时从 0 填充,设计 §6.10) ---------- */
+@utility transition-ring {
+  transition-property: stroke-dashoffset;
+}
+
 /* ---------- 侧栏宽度过渡(§4.4:只动导航宽度,属性名集中于主题层) ---------- */
 @utility transition-sidebar {
   transition-property: width;
@@ -464,6 +477,11 @@
 }
 @utility w-wb-rail {
   width: var(--wb-rail-w);
+}
+
+/* ---------- 顶栏弹出层宽度(通知铃铛、任务与下载) ---------- */
+@utility w-topbar-popover {
+  width: var(--topbar-popover-w);
 }
 
 /* ---------- 竖排文字(§7.1:侧栏收起为竖向把手时,面板名沿把手竖排) ---------- */
@@ -503,19 +521,9 @@
   }
 }
 
-/* ---------- 光面外框(FE-6 / §1.2:日常页宣纸光面浮于墨色底层) ----------
-   缝只作用于**顶与左**(挨着顶栏与侧栏那两边),右下不留 —— 光面出血到视口边缘,
-   纸因此有落点。四周等宽的缝 + 四角圆角 + 环绕投影会把内容读作「被装进一个容器」,
-   那是隔离感而不是层次。<md 归零走全宽,圆角与投影由 paper-surface 统一处理 */
-@utility pane-frame {
-  padding: 0;
-  @media (min-width: 48rem) {
-    padding-top: var(--pane-inset);
-    padding-left: var(--pane-inset);
-  }
-}
-
-/* ---------- 光面与滚动视口(FE-6):形状固定在外层,滚动固定在内层 ---------- */
+/* ---------- 纸面与滚动视口(FE-6):形状固定在外层,滚动固定在内层 ----------
+   纸面直接贴住侧栏和顶栏,不留缝、不加投影;只在侧栏常驻(≥lg)时把左上角收成圆角,
+   让墨色导航在那一角自然包住纸面。窄屏全宽、无圆角。 */
 @utility paper-surface {
   display: flex;
   min-width: 0;
@@ -525,9 +533,8 @@
   overflow: hidden;
   background-color: var(--color-canvas);
   border-top-left-radius: 0;
-  @media (min-width: 48rem) {
-    border-top-left-radius: var(--radius-lg);
-    box-shadow: var(--shadow-pane);
+  @media (min-width: 64rem) {
+    border-top-left-radius: var(--radius-pane);
   }
 }
 
@@ -542,31 +549,62 @@
   background-color: transparent;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  @media (min-width: 48rem) {
-    /* 滚动内容由内层承载,同步光面的左上裁切,避免内容滚动后盖平方角。 */
-    border-top-left-radius: var(--radius-lg);
+  @media (min-width: 64rem) {
+    /* 滚动内容由内层承载,同步纸面的左上裁切,避免内容滚动后盖平圆角。 */
+    border-top-left-radius: var(--radius-pane);
   }
 }
 
-/* ---------- 看板指标带(§6.5.3 第 ② 族:Stat 大卡按 auto-fit 铺开) ----------
+/* ---------- 整卡可点(规范 §6.5.0 通则 4):卡内唯一的真实链接或按钮铺满整张卡 ----------
+   卡片加 interactive-card,卡内主链接加 card-link:链接的 ::after 铺满卡片,于是点卡片任何位置
+   都是在点这个真实链接 —— 中键与 Ctrl/⌘ 点击在新标签页打开、右键复制链接、读屏读到的是链接文字。
+   卡内其它按钮用 relative z-base 浮在覆盖层之上,单独可点、不触发整卡。
+   悬停升到 shadow-sm,键盘焦点画在整张卡上,按下有按压反馈(只动 transform 与 box-shadow)。 */
+@utility interactive-card {
+  position: relative;
+  transition:
+    transform var(--t-press) var(--ease-out),
+    box-shadow var(--t-fast) var(--ease-out);
+  &:has(.card-link:hover) {
+    box-shadow: var(--shadow-sm);
+  }
+  &:has(.card-link:focus-visible) {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+  &:has(.card-link:active) {
+    transform: scale(0.99);
+  }
+}
+
+@utility card-link {
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-lg);
+  }
+  &:focus-visible {
+    outline: none;
+  }
+}
+
+/* ---------- 卡片网格(设计 §6.1「卡片网格」:我的课程、实验、竞赛、仿真场景等) ----------
+   单卡最小宽 18rem(约 300px),自动排列;auto-fill 保留空位,只有一两张卡时不会被拉成半屏宽。
+   窄屏自然变成单列(规范 §6.4.1)。 */
+@utility card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(18rem, 100%), 1fr));
+}
+
+/* ---------- 看板指标带(看板的 Stat 数字卡按 auto-fit 铺开) ----------
    为什么不用 `grid-cols-2/4` 这类定列数栅格:项数与列数不一定整除 ——
    两项摊进四列会各自拉成半屏宽的巨卡,五项会在第二行留三个空位。
    auto-fit + minmax 让卡宽随内容在下限以上自适应,项数变化时不产生空版面
-   (§6.5.0 通则 3:内容短就短,不补版面)。下限取 13rem:够放 Display 字号的四位数 + 标签。 */
+   (§6.5.0 通则 2:内容短就短,不补版面)。下限取 13rem:够放 Display 字号的四位数 + 标签。 */
 @utility metric-band {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
-}
-
-/* ---------- 凹陷井(§6.5.1 第 2 级:抬起片内部的字段分组/只读信息块) ----------
-   只用凹陷底色表达「同一张纸上的一块凹区」,不画边框、不加投影 ——
-   近白描边矩形套在近白圆角卡片里、卡片又套在近白圆角光面里,就是「壳里套壳」。
-   只定圆角与底色:内距在调用处显式写(p-4 分组 / p-3 信息条),
-   避免两个不同工具类同时定 padding 后靠样式表顺序决胜负。
-   只放在 Card / Table / Stat 这类抬起片内部;井里不再套井。 */
-@utility well {
-  border-radius: var(--radius-md);
-  background-color: var(--color-surface-sunken);
 }
 
 /* ---------- 层级工具类(§2.4:z-index 只许引用令牌阶) ---------- */

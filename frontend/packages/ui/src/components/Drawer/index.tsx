@@ -46,8 +46,13 @@ const drawerContentVariants = cva("fixed z-drawer flex flex-col shadow-lg", {
       light: "bg-surface text-ink",
       dark: "bg-dark-bg text-on-dark",
     },
+    /** 宽度:default 按方位的默认宽;wide 是长表单用的右侧大抽屉(约 880px,设计 §7.4) */
+    size: {
+      default: "",
+      wide: "max-w-220",
+    },
   },
-  defaultVariants: { side: "right", tone: "light" },
+  defaultVariants: { side: "right", tone: "light", size: "default" },
 });
 
 /* 关闭按钮双色调:命中区经 hit-target 扩到 44×44(§3.2) */
@@ -78,14 +83,14 @@ export interface DrawerContentProps
 export const DrawerContent = forwardRef<
   ElementRef<typeof DialogPrimitive.Content>,
   DrawerContentProps
->(({ side, tone, className, style, children, ...props }, ref) => {
+>(({ side, tone, size, className, style, children, ...props }, ref) => {
   const resolvedSide = side ?? "right";
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-drawer bg-substrate/60 animate-fade-in data-[state=closed]:animate-fade-out" />
       <DialogPrimitive.Content
         ref={ref}
-        className={cn(drawerContentVariants({ side: resolvedSide, tone }), className)}
+        className={cn(drawerContentVariants({ side: resolvedSide, tone, size }), className)}
         style={resolvedSide === "bottom" ? { maxHeight: "88vh", ...style } : style}
         {...props}
       >

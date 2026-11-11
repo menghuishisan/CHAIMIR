@@ -32,6 +32,8 @@ interface SimRuntimeWorkbenchProps {
   snapshot: RuntimeViewSnapshot
   onExit: () => void
   onShare?: () => void
+  /** 场景名旁的小控件:本机推演的「换一组条件」与版本切换 */
+  titleExtra?: ReactNode
   onSelectElement: (elementId: string) => void
   onInteract: (interaction: InteractionDescriptor, payload: JsonObject, target?: string) => void
   footer: ReactNode
@@ -45,6 +47,7 @@ export function SimRuntimeWorkbench({
   snapshot,
   onExit,
   onShare,
+  titleExtra,
   onSelectElement,
   onInteract,
   footer,
@@ -61,6 +64,7 @@ export function SimRuntimeWorkbench({
           exitLabel="退出推演"
           title={title}
           subtitle={version ? `${descriptor.meta.name} · ${version}` : descriptor.meta.name}
+          titleExtra={titleExtra}
           progress={
             <ChainProgress
               onDark
@@ -73,7 +77,7 @@ export function SimRuntimeWorkbench({
           cta={
             onShare ? (
               <Button variant="primary" size="sm" leftIcon={Share2} onClick={onShare}>
-                分享这次推演
+                分享推演
               </Button>
             ) : undefined
           }

@@ -7,7 +7,7 @@
 // 是否渲染换绑手机号由 props 显式声明,页面不在运行时判角色枚举 —— 与铃铛归属同一处理。
 
 import { useCallback, useId, useMemo, useState, type ReactNode } from 'react'
-import { KeyRound, LogOut, ShieldCheck, Smartphone } from 'lucide-react'
+import { ChevronDown, KeyRound, LogOut, Monitor, ShieldCheck, Smartphone } from 'lucide-react'
 import { SessionStatus, SmsScene, TenantStatus, type Session } from '@chaimir/api-client'
 import {
   Badge,
@@ -16,24 +16,22 @@ import {
   Card,
   CardBody,
   CardHeader,
-  DataPanel,
+  cn,
   FormField,
   Input,
-  ObjectIdentity,
-  PageBody,
+  PageHeader,
   PageScaffold,
-  PageSection,
+  Skeleton,
   StatusIndicator,
-  Table,
   toast,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { invalidateAppResource } from '../../../../app/resourceInvalidation'
-import { ResourceState } from '../../../../components/ResourceState'
+import { ResourceError } from '../../../../components/ResourceState'
 import { useSession } from '../../../../components/RoleGuard'
-import { useAsyncResource } from '../../../../hooks'
-import { formatDateTime } from '../../../../utils/formatters'
+import { useAsyncResource, usePageLocation } from '../../../../hooks'
+import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
+import { deviceLabel } from '../../deviceLabel'
 import {
   accountStatusLabel,
   baseIdentityLabel,
@@ -103,52 +101,30 @@ export default function ProfilePage({ canChangePhone, statusKind = 'account' }: 
     return items
   }, [account])
 
+  usePageLocation([{ label: '个人中心' }])
+
   return (
     <PageScaffold>
-      {/*
-        归族:详情族(§6.5.3 第 ④)。这一页核对的对象就是「我的账号」——
-        h1 由 ObjectIdentity 的姓名承担,故不再出 PageHeader:
-        个人中心从顶栏头像菜单进入,没有父级可挂面包屑,空页面头只会白占一行(§6.5.0 通则 1)。
-        改密与换绑手机号是表单类动作区(§6.5.4),留在右栏各成一块可聚焦抬起片。
-      */}
-      <ObjectIdentity
-        name={account.name}
+      <PageHeader
+        title={account.name}
         status={<StatusIndicator tone={statusPresentation.tone} label={statusPresentation.label} />}
-        subtitle={`${userRolesLabel(account.roles) || '未分配角色'} · 身份资料由平台/学校维护,如需更正请联系系统管理员`}
-        properties={identityProperties}
+        meta={[{ value: userRolesLabel(account.roles) || '未分配角色' }, ...identityProperties]}
       />
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
-        <div className="rounded-lg border border-border bg-surface p-5 shadow-xs">
-          <div className="flex items-center gap-2">
-            <ShieldCheck aria-hidden="true" className="size-4 shrink-0 text-primary" />
-            <p className="font-medium text-ink">账号安全</p>
-          </div>
-          <p className="mt-2 text-sm leading-relaxed text-ink-sub">
-            定期更新密码可以让其他设备上的旧会话失效；登录会话列表会显示最近的设备和地址。
-          </p>
+      <div className="grid gap-6 lg:grid-cols-5">
+        <div className="min-w-0 lg:col-span-3">
+          <SessionsSection />
         </div>
-        <div className="rounded-lg border border-border bg-surface p-5 shadow-xs">
-          <p className="font-medium text-ink">资料维护</p>
-          <p className="mt-2 text-sm leading-relaxed text-ink-sub">
+        <div className="flex min-w-0 flex-col gap-5 lg:col-span-2">
+          <PasswordCard />
+          {canChangePhone ? <PhoneCard onChanged={reload} /> : null}
+          <p className="text-sm text-ink-sub">
             {canChangePhone
-              ? '身份资料由学校维护，手机号可以在本页通过验证码换绑。'
-              : '平台身份资料由系统管理员维护，平台账号不提供租户字段或手机号换绑入口。'}
+              ? '姓名、编号等身份资料由学校维护,如需更正请联系学校管理员。'
+              : '平台账号的资料由系统管理员维护,如需更正请联系他们。'}
           </p>
         </div>
       </div>
-
-      <PageBody
-        className="mt-6 gap-6"
-        rail={
-          <div className="flex flex-col gap-5">
-            <PasswordCard />
-            {canChangePhone ? <PhoneCard onChanged={reload} /> : null}
-          </div>
-        }
-      >
-        <SessionsSection />
-      </PageBody>
     </PageScaffold>
   )
 }
@@ -390,104 +366,109 @@ function PhoneCard({ onChanged }: { onChanged: () => void }) {
 }
 
 /**
- * SessionsSection 列出登录会话。
- * 会话是安全信息:生效中的会话要能被用户认出来(设备与地址),异常会话经改密统一吊销 ——
- * 后端未提供单条会话吊销接口,故不做「踢下线」按钮,而是指引改密。
+ * SessionsSection 登录设备:每个会话一行,显示为「Windows · Chrome 152」(前端解析浏览器信息串,
+ * 完整信息串悬停可见)、登录地址、登录时间、状态;有效会话排在前并标「在线」,已退出的折叠。
+ * 接口分不出哪个会话是本机(设计 §10);后端没有单条会话吊销接口,退出其他设备靠修改密码。
  */
 function SessionsSection() {
   const sessions = useAsyncResource(() => api.identity.getSessions(), [])
-
-  const columns: TableColumn<Session>[] = [
-    {
-      key: 'device_info',
-      header: '设备',
-      render: (session) => (
-        <span className="text-ink">{session.device_info || '未知设备'}</span>
-      ),
-    },
-    {
-      key: 'ip',
-      header: '登录地址',
-      mono: true,
-      render: (session) => session.ip || '—',
-    },
-    {
-      key: 'created_at',
-      header: '登录时间',
-      render: (session) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDateTime(session.created_at)}
-        </span>
-      ),
-    },
-    {
-      key: 'expire_at',
-      header: '有效期至',
-      render: (session) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDateTime(session.expire_at)}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (session) => (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <StatusIndicator
-            tone={sessionStatusTone(session.status)}
-            label={sessionStatusLabel(session.status)}
-          />
-          {session.status === SessionStatus.ACTIVE ? <Badge tone="jade">在线</Badge> : null}
-        </div>
-      ),
-    },
-  ]
+  const [showEnded, setShowEnded] = useState(false)
+  const list = sessions.data ?? []
+  const active = list
+    .filter((session) => session.status === SessionStatus.ACTIVE)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+  const ended = list
+    .filter((session) => session.status !== SessionStatus.ACTIVE)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
 
   return (
-    // 列表型页内子视图走 DataPanel 片段(§6.5.5 B):会话清单一次回齐,不分页也不筛选
-    <PageSection
-      title="登录会话"
-      description="这里列出你的登录记录。如果看到不认识的设备,请立即修改密码。"
-    >
-      <div className="flex flex-col gap-4">
-        <Callout tone="info" title="如何退出其他设备">
-          <span className="flex items-start gap-2">
-            <LogOut aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
-            <span>修改密码后,其他设备上的登录会全部失效。</span>
-          </span>
-        </Callout>
+    <section aria-labelledby="sessions-title">
+      <h2 id="sessions-title" className="text-md font-semibold text-ink">
+        登录设备
+      </h2>
+      <p className="mb-3 mt-1 flex items-start gap-1.5 text-sm text-ink-sub">
+        <LogOut aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+        看到不认识的设备,请立即修改密码 —— 改密后其他设备上的登录会全部失效。
+      </p>
+      {sessions.status === 'error' ? (
+        <ResourceError
+          message={sessions.error?.message ?? '登录记录暂时读取不到'}
+          traceId={sessions.error?.traceId}
+          onRetry={sessions.reload}
+        />
+      ) : sessions.status === 'loading' ? (
+        <div aria-busy="true" className="rounded-lg bg-surface p-4 shadow-xs">
+          <Skeleton variant="line" lines={4} />
+        </div>
+      ) : list.length === 0 ? (
+        <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-12 text-center shadow-xs">
+          <ShieldCheck aria-hidden="true" className="size-6 text-ink-faint" />
+          <p className="mt-3 text-md font-semibold text-ink">还没有登录记录</p>
+        </div>
+      ) : (
+        <>
+          <ul className="divide-y divide-line overflow-hidden rounded-lg bg-surface shadow-xs">
+            {active.map((session) => (
+              <li key={session.id}>
+                <SessionRow session={session} />
+              </li>
+            ))}
+            {active.length === 0 ? <li className="px-4 py-3 text-sm text-ink-sub">没有正在登录的设备。</li> : null}
+          </ul>
+          {ended.length > 0 ? (
+            <div className="mt-4">
+              <button
+                type="button"
+                aria-expanded={showEnded}
+                onClick={() => setShowEnded((value) => !value)}
+                className="flex items-center gap-1.5 rounded-md text-sm font-medium text-ink-sub hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              >
+                <ChevronDown aria-hidden="true" className={cn('size-4 transition-transform duration-fast', showEnded ? '' : '-rotate-90')} />
+                已退出的设备({ended.length})
+              </button>
+              {showEnded ? (
+                <ul className="mt-3 divide-y divide-line overflow-hidden rounded-lg bg-surface shadow-xs">
+                  {ended.map((session) => (
+                    <li key={session.id}>
+                      <SessionRow session={session} />
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+        </>
+      )}
+    </section>
+  )
+}
 
-        <DataPanel label="登录会话">
-          <ResourceState
-            resource={sessions}
-            emptyIcon={ShieldCheck}
-            emptyTitle="暂无登录记录"
-            emptyDescription="登录记录会在你从新设备登录后出现。"
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-          >
-            {(list) => (
-              <Table
-                columns={columns}
-                data={list}
-                rowKey={(session) => session.id}
-                elevated={false}
-                // <md 换行卡(§6.4.1 规则 3):设备一行、地址与时间一行
-                mobileCard={(session) => ({
-                  title: session.device_info || '未知设备',
-                  meta: `${session.ip || '地址未知'} · ${formatDateTime(session.created_at)}`,
-                  badge: (
-                    <StatusIndicator
-                      tone={sessionStatusTone(session.status)}
-                      label={sessionStatusLabel(session.status)}
-                    />
-                  ),
-                })}
-              />
-            )}
-          </ResourceState>
-        </DataPanel>
+/** SessionRow 一个登录会话:设备名(完整信息串悬停可见)、地址与时间、状态 */
+function SessionRow({ session }: { session: Session }) {
+  const online = session.status === SessionStatus.ACTIVE
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <span className="grid size-9 shrink-0 place-items-center rounded-md bg-surface-hover text-ink-sub">
+        <Monitor aria-hidden="true" className="size-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-base font-medium text-ink" title={session.device_info || undefined}>
+          {deviceLabel(session.device_info)}
+        </p>
+        <p className="truncate text-sm text-ink-sub">
+          <span className="font-mono">{session.ip || '地址未知'}</span>
+          {' · '}
+          <time dateTime={session.created_at} title={formatDateTime(session.created_at)}>
+            {formatRelativeOccurrence(session.created_at)}
+          </time>
+          登录
+        </p>
       </div>
-    </PageSection>
+      {online ? (
+        <Badge tone="jade">在线</Badge>
+      ) : (
+        <StatusIndicator tone={sessionStatusTone(session.status)} label={sessionStatusLabel(session.status)} />
+      )}
+    </div>
   )
 }

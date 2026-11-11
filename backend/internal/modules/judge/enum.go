@@ -14,6 +14,8 @@ const (
 	JudgerTypeSimCheckpoint int16 = 5
 	// JudgerTypeManual 表示人工评分。
 	JudgerTypeManual int16 = 6
+	// JudgerTypeTheoryQuestion 表示 M5 理论题的后端内置判分。
+	JudgerTypeTheoryQuestion int16 = 7
 )
 
 const (

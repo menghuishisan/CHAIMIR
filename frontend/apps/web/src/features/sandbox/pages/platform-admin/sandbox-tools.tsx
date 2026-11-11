@@ -17,7 +17,6 @@ import {
 } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   Card,
@@ -103,10 +102,8 @@ export default function PlatformSandboxToolsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="实验工具"
         description="学生在实验环境里能用到的工具。教师在编排环境时显式选择,平台按能力依赖补齐必要组件。"
-        icon={Package}
         actions={
           <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
             登记工具
@@ -135,8 +132,7 @@ export default function PlatformSandboxToolsPage() {
         description="按类型筛选。不再使用的工具改成停用,不做删除 —— 历史环境仍引用着它。"
       >
         <div className="flex flex-col gap-4">
-          {/* 数据区是一排工具卡(已是抬起片),筛选走 bare 无底形态,避免片里套片(§6.5.2) */}
-          <FilterBar label="工具筛选" bare>
+          <FilterBar label="工具筛选">
             <FilterField label="工具类型" group>
               <SegmentedControl
                 aria-label="按工具类型筛选"

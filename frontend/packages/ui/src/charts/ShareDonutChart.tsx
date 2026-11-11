@@ -114,7 +114,7 @@ export function ShareDonutChart({
         </ResponsiveContainer>
         {/* 中心读数:绝对定位在环心,pointer-events-none 让鼠标穿透到扇区上 */}
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className={cn("font-display text-2xl tabular-nums", styles.total)}>{total}</span>
+          <span className={cn("text-2xl font-bold tabular-nums", styles.total)}>{total}</span>
           <span className={cn("mt-0.5 text-xs", styles.label)}>{totalLabel}</span>
         </div>
       </div>

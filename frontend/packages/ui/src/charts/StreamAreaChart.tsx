@@ -75,7 +75,7 @@ export function StreamAreaChart({
             {name}
             {unit ? ` · ${unit}` : ""}
           </div>
-          <div className={cn("font-display text-3xl tabular-nums", styles.value)}>
+          <div className={cn("text-3xl font-bold tabular-nums", styles.value)}>
             {latest ?? "—"}
           </div>
         </div>

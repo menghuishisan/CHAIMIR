@@ -1,113 +1,93 @@
 // login-forms 是登录页三种登录方式的表单:手机号(密码/验证码)、校内账号、学校统一认证。
 // 三者共用同一个状态机(login-state 的 LoginController),因此切换方式不会丢已填内容;
 // 每种方式一个表单组件,提交动作与字段一一对应,不做「一个表单按变量长出不同字段」的分支拼装。
-// 页尾三条次级公共入口(统一认证 / 激活码 / 入驻申请)随主要方式一同出现,统一认证页自身不再重复。
+// 布局(设计 §7.1):主表单为手机号登录,顶部分段切换「密码 / 验证码」;一条分隔线引出「其他登录方式」,
+// 并列「校内账号」「学校统一认证」两个次要按钮;最下方一行「首次使用?激活账号 · 忘记密码 · 学校申请入驻」。
 
 import { useId } from 'react'
 import { Link } from 'react-router'
-import { ArrowLeft, IdCard } from 'lucide-react'
-import { Checkbox, cn } from '@chaimir/ui'
+import { ArrowLeft, Building2, IdCard } from 'lucide-react'
+import { Button, Checkbox } from '@chaimir/ui'
 import { platformLayerEnabled } from '../../../../app/config'
 import {
+  AUTH_TEXT_LINK_CLASS,
   AuthFormError,
   AuthHeading,
+  AuthLinkRow,
   AuthQuietAction,
+  AuthSegmented,
   AuthSmsField,
   AuthSubmit,
   AuthTextField,
 } from '../../components/AuthUI'
 import type { LoginController, PhoneLoginMethod } from './login-state'
 
-/** 手机号登录的两种凭据方式(页面级双态开关的选项) */
+/** 手机号登录的两种凭据方式 */
 const PHONE_METHODS: { value: PhoneLoginMethod; label: string }[] = [
-  { value: 'password', label: '密码登录' },
-  { value: 'sms', label: '验证码登录' },
+  { value: 'password', label: '密码' },
+  { value: 'sms', label: '验证码' },
 ]
 
 /**
- * PhoneMethodSwitch 密码/验证码方式切换。
- * 手写而非用设计系统 SegmentedControl:后者是光面语境配色,放到墨色底层上对比关系会反过来。
- */
-function PhoneMethodSwitch({
-  method,
-  onChange,
-}: {
-  method: PhoneLoginMethod
-  onChange: (next: PhoneLoginMethod) => void
-}) {
-  return (
-    <div className="mt-6 flex gap-1 rounded-lg bg-dark-elevated p-1" role="group" aria-label="登录方式">
-      {PHONE_METHODS.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          aria-pressed={method === option.value}
-          onClick={() => onChange(option.value)}
-          className={cn(
-            'flex min-h-11 flex-1 rounded-md text-sm transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2',
-            method === option.value
-              ? 'bg-dark-surface font-medium text-accent'
-              : 'text-on-dark-sub hover:text-on-dark',
-          )}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-/**
- * RememberRow 免登录选项与忘记密码入口同行:一个决定这次登录记多久,一个是登不进去时的出路。
+ * RememberRow 免登录选项放在主按钮上方左侧:它决定这次登录记多久。
  */
 function RememberRow({ remember, onRememberChange }: { remember: boolean; onRememberChange: (value: boolean) => void }) {
   return (
-    <div className="mt-5 flex items-center justify-between">
+    <div className="mt-5 flex items-center">
       <Checkbox
         label="30 天内免登录"
         checked={remember}
         onCheckedChange={(checked) => onRememberChange(checked === true)}
+        onDark
         className="text-on-dark-sub"
       />
-      <Link to="/auth/forgot" className="hit-target relative rounded-sm text-sm text-on-dark-sub transition-colors duration-fast hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
-        忘记密码
-      </Link>
     </div>
   )
 }
 
 /**
- * AltEntries 登录页底部的次级公共入口。
- * 这三条通路都对应后端免认证接口,若不在登录页给出落点,用户就只能靠手输地址进入:
- * 统一认证(CAS/LDAP)、激活码开通账号、学校入驻申请(仅 SaaS 形态存在)。
+ * OtherMethods 一条分隔线引出「其他登录方式」,并列校内账号与学校统一认证两个次要按钮。
+ * 点击在同一块区域切换表单(登录方式写进地址,刷新不回到默认)。
  */
-function AltEntries({ onUseSso }: { onUseSso: () => void }) {
+function OtherMethods({ login }: { login: LoginController }) {
   return (
-    <div className="mt-10">
-      {/* 与主表单的分界靠留白密度,不画分隔线(FE-6/规范 §1.2) */}
-      <p className="text-xs uppercase text-on-dark-faint">其他方式</p>
-      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-on-dark-sub">
-        <button type="button" onClick={onUseSso} className="hit-target relative rounded-sm transition-colors duration-fast hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
-          学校统一认证登录
-        </button>
-        <span aria-hidden className="text-on-dark-faint">
-          ·
-        </span>
-        <Link to="/auth/activate" className="hit-target relative rounded-sm transition-colors duration-fast hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
-          用激活码开通账号
-        </Link>
-        {platformLayerEnabled ? (
-          <>
-            <span aria-hidden className="text-on-dark-faint">
-              ·
-            </span>
-            <Link to="/auth/apply" className="hit-target relative rounded-sm transition-colors duration-fast hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
-              学校入驻申请
-            </Link>
-          </>
-        ) : null}
+    <div className="mt-8">
+      <div className="flex items-center gap-3 text-sm text-on-dark-sub">
+        <span aria-hidden="true" className="h-px flex-1 bg-dark-line" />
+        <span>其他登录方式</span>
+        <span aria-hidden="true" className="h-px flex-1 bg-dark-line" />
+      </div>
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <Button variant="on-dark" leftIcon={IdCard} onClick={() => login.switchView('account')}>
+          校内账号
+        </Button>
+        <Button variant="on-dark" leftIcon={Building2} onClick={() => login.switchView('sso')}>
+          学校统一认证
+        </Button>
       </div>
     </div>
+  )
+}
+
+/**
+ * EntryLinks 最下方一行公共入口,按使用频率排列:激活账号、忘记密码、学校申请入驻(仅 SaaS)。
+ * 这些通路都对应后端免认证接口,若不在登录页给出落点,用户就只能靠手输地址进入。
+ */
+function EntryLinks() {
+  return (
+    <AuthLinkRow lead="首次使用?">
+      <Link to="/auth/activate" className={AUTH_TEXT_LINK_CLASS}>
+        激活账号
+      </Link>
+      <Link to="/auth/forgot" className={AUTH_TEXT_LINK_CLASS}>
+        忘记密码
+      </Link>
+      {platformLayerEnabled ? (
+        <Link to="/auth/apply" className={AUTH_TEXT_LINK_CLASS}>
+          学校申请入驻
+        </Link>
+      ) : null}
+    </AuthLinkRow>
   )
 }
 
@@ -118,9 +98,9 @@ export function PhoneLoginForm({ login }: { login: LoginController }) {
   const fieldId = useId()
   return (
     <form onSubmit={login.submitPhone} noValidate>
-      <AuthHeading title="欢迎回来" description="使用绑定的手机号登录" />
+      <AuthHeading title="登录 Chaimir" description="用绑定的手机号登录" />
 
-      <PhoneMethodSwitch method={login.phoneMethod} onChange={login.setPhoneMethod} />
+      <AuthSegmented label="登录凭据" options={PHONE_METHODS} value={login.phoneMethod} onChange={login.setPhoneMethod} />
 
       <AuthTextField
         label="手机号"
@@ -164,11 +144,9 @@ export function PhoneLoginForm({ login }: { login: LoginController }) {
 
       <AuthSubmit loading={login.submitting}>登录</AuthSubmit>
 
-      <AuthQuietAction icon={IdCard} onClick={() => login.switchView('account')}>
-        使用学校代号和学号/工号登录
-      </AuthQuietAction>
+      <OtherMethods login={login} />
 
-      <AltEntries onUseSso={() => login.switchView('sso')} />
+      <EntryLinks />
     </form>
   )
 }
@@ -180,7 +158,7 @@ export function AccountLoginForm({ login }: { login: LoginController }) {
   const fieldId = useId()
   return (
     <form onSubmit={login.submitAccount} noValidate>
-      <AuthHeading title="校内账号登录" description="使用学校下发的账号登录" />
+      <AuthHeading title="校内账号登录" description="用学校下发的学号或工号登录" />
 
       <AuthTextField
         label="学校代号"
@@ -223,20 +201,20 @@ export function AccountLoginForm({ login }: { login: LoginController }) {
         返回手机号登录
       </AuthQuietAction>
 
-      <AltEntries onUseSso={() => login.switchView('sso')} />
+      <EntryLinks />
     </form>
   )
 }
 
 /**
  * SsoLoginForm 学校统一认证入口:只收学校代号,认证本身在该校认证系统完成。
- * 这里不列其他方式入口 —— 下一步已经明确是离站认证,再铺开选项会岔开注意力。
+ * 这里不列其他公共入口 —— 下一步已经明确是去本校认证,再铺开选项会岔开注意力。
  */
 export function SsoLoginForm({ login }: { login: LoginController }) {
   const fieldId = useId()
   return (
     <form onSubmit={login.submitSso} noValidate>
-      <AuthHeading title="学校统一认证" description="输入学校代号后前往本校认证系统登录" />
+      <AuthHeading title="学校统一认证" description="输入学校代号后,前往本校的认证系统登录" />
 
       <AuthTextField
         label="学校代号"

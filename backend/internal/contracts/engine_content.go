@@ -3,6 +3,11 @@ package contracts
 
 import "context"
 
+const (
+	// ContentTypeTheoryQuestion 表示 M5 理论题,供跨模块契约判型。
+	ContentTypeTheoryQuestion int16 = 3
+)
+
 // ContentItemRef 是业务模块锁定内容版本时使用的稳定引用。
 type ContentItemRef struct {
 	ItemCode    string `json:"item_code"`

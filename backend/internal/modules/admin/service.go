@@ -94,8 +94,7 @@ type ServiceDeps struct {
 	Config      config.AdminConfig
 	Cipher      *pkgcrypto.Cipher
 	Transfers   transferService
-	Storage     *storage.Storage
-	Objects     objectStorage
+	Storage     objectStorage
 	FileService fileService
 }
 
@@ -104,10 +103,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Identity == nil || deps.Stats == nil || deps.AuditRead == nil || deps.Teaching == nil || deps.Sandbox == nil || deps.Experiment == nil || deps.Contest == nil || deps.Bus == nil {
 		return nil, fmt.Errorf("admin service 依赖不完整")
 	}
-	objects := deps.Objects
-	if objects == nil {
-		objects = deps.Storage
-	}
+	objects := deps.Storage
 	if deps.Transfers == nil || objects == nil || deps.FileService == nil {
 		return nil, fmt.Errorf("admin service 缺少统一导入导出或文件服务依赖")
 	}

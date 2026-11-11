@@ -81,8 +81,6 @@ type AssignmentItem struct {
 	ItemVersion  string
 	Score        int32
 	Seq          int32
-	GradingMode  int16
-	JudgerCode   string
 	CreatedAt    time.Time
 }
 
@@ -128,9 +126,6 @@ type JudgeOutbox struct {
 	StudentID        int64
 	ItemCode         string
 	ItemVersion      string
-	JudgerCode       string
-	CodeStorageKey   string
-	CodeHash         string
 	ExtraInput       map[string]any
 	SourceRef        string
 	Status           int16

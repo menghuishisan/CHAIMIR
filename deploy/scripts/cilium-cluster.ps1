@@ -404,8 +404,12 @@ function Approve-KubeletServingCertificates {
         }
 
         if ($staleCsrNames.Count -gt 0) {
-            $deleteArgs = @("--context", $runtimeContext, "delete", "certificatesigningrequests") + @($staleCsrNames) + @("--ignore-not-found=true")
-            Invoke-Native -FilePath "kubectl" -Arguments $deleteArgs
+            # 分批传递已核验的名称,避免积压证书请求超过 Windows 原生命令行长度。
+            for ($csrOffset = 0; $csrOffset -lt $staleCsrNames.Count; $csrOffset += 20) {
+                $csrLast = [Math]::Min($csrOffset + 19, $staleCsrNames.Count - 1)
+                $deleteArgs = @("--context", $runtimeContext, "delete", "certificatesigningrequests") + @($staleCsrNames[$csrOffset..$csrLast]) + @("--ignore-not-found=true")
+                Invoke-Native -FilePath "kubectl" -Arguments $deleteArgs
+            }
             $staleCsrNames.Clear()
         }
 

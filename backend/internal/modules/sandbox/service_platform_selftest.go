@@ -163,7 +163,7 @@ func (s *Service) runtimePlansForSnapshot(ctx context.Context, snapshot contract
 			if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &frozenAdapter); err != nil {
 				return apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
 			}
-			runtime.AdapterSpec = materializeRuntimeTopology(frozen.InstanceCode, frozenAdapter)
+			runtime.AdapterSpec = MaterializeRuntimeTopology(frozen.InstanceCode, frozenAdapter)
 			runtime.AdapterLevel = frozen.AdapterLevel
 			runtime.CapabilityImpl = frozen.CapabilityImpl
 			runtime.PluginRef = frozen.PluginRef

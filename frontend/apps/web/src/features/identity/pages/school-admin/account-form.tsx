@@ -1,4 +1,4 @@
-// 账号表单(账号管理页的流程页)。
+// 账号抽屉(账号管理页):新增与编辑同一处,编辑时就是账号详情(设计 §7.5 整行打开账号抽屉)。
 //
 // 新增与编辑共用一个表单,但后端字段不同:创建要手机号/学工号/基础身份/开通方式,
 // 编辑只改姓名、归属组织、入学年份与职称(手机号由本人换绑,学工号与身份不可改)。
@@ -16,6 +16,13 @@ import {
   DescriptionList,
   FormField,
   Input,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   Modal,
   ModalBody,
   ModalContent,
@@ -32,6 +39,7 @@ import { api } from '../../../../app/api'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
+import { formatDate } from '../../../../utils/formatters'
 import { baseIdentityLabel } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { isPasswordStrong, isPhoneNumber } from '../../authForm'
@@ -214,18 +222,18 @@ export function AccountFormModal({ account, onClose, onSaved }: AccountFormModal
   }
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>{editing ? '编辑账号资料' : '新增账号'}</ModalTitle>
-          <ModalDescription>
+    <Drawer open onOpenChange={(open) => !open && !submitting && onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader>
+          <DrawerTitle>{editing ? account.name : '新增账号'}</DrawerTitle>
+          <DrawerDescription>
             {editing
               ? '手机号由本人在个人中心换绑;学工号与身份创建后不可修改。'
               : '开通后本人用激活码或初始密码首次登录,首次登录会要求改密。'}
-          </ModalDescription>
-        </ModalHeader>
-        <form onSubmit={submit} noValidate>
-          <ModalBody className="flex flex-col gap-4">
+          </DrawerDescription>
+        </DrawerHeader>
+        <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
+          <DrawerBody className="flex flex-col gap-4">
             {!editing ? (
               <FormField label="身份" required helper="身份决定归属组织与可用功能,创建后不可修改">
                 <SegmentedControl
@@ -304,8 +312,10 @@ export function AccountFormModal({ account, onClose, onSaved }: AccountFormModal
                 dense
                 columns={2}
                 items={[
+                  { term: '身份', description: baseIdentityLabel(account.base_identity) },
                   { term: '学工号', description: account.no ?? '未设置', mono: true },
                   { term: '手机号', description: account.phone_masked ?? '未绑定', mono: true },
+                  ...(account.created_at ? [{ term: '开通于', description: formatDate(account.created_at) }] : []),
                 ]}
               />
             )}
@@ -365,7 +375,7 @@ export function AccountFormModal({ account, onClose, onSaved }: AccountFormModal
             </ResourceState>
 
             {!editing ? (
-              <div className="flex flex-col gap-3 well p-4">
+              <div className="flex flex-col gap-3 rounded-md bg-surface-hover p-4">
                 <Checkbox
                   checked={useActivation}
                   label="用激活码开通(本人自行设置密码)"
@@ -397,17 +407,17 @@ export function AccountFormModal({ account, onClose, onSaved }: AccountFormModal
             ) : null}
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
-          </ModalBody>
-          <ModalFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+          </DrawerBody>
+          <DrawerFooter>
+            <Button type="button" variant="outline" disabled={submitting} onClick={onClose}>
               取消
             </Button>
             <Button type="submit" variant="primary" loading={submitting}>
               {editing ? '保存资料' : '开通账号'}
             </Button>
-          </ModalFooter>
+          </DrawerFooter>
         </form>
-      </ModalContent>
-    </Modal>
+      </DrawerContent>
+    </Drawer>
   )
 }

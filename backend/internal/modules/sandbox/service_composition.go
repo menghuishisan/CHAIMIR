@@ -834,7 +834,7 @@ func compileCompositionLinks(spec contracts.SandboxCompositionSpec, runtimes map
 		}
 		applyRuntimeParameterComponents(&compiledRuntime, runtimeComponents)
 		compiledRuntimes[runtimePlan.InstanceCode] = compiledRuntime
-		compiledRuntimes[runtimePlan.InstanceCode] = materializeRuntimeTopology(runtimePlan.InstanceCode, compiledRuntime)
+		compiledRuntimes[runtimePlan.InstanceCode] = MaterializeRuntimeTopology(runtimePlan.InstanceCode, compiledRuntime)
 	}
 	for _, ref := range refs {
 		tool := compiledTools[ref.Code]
@@ -1479,11 +1479,6 @@ func MaterializeRuntimeTopology(instance string, adapter AdapterSpec) AdapterSpe
 	adapter.CapabilityCommands.Query.ExecTarget = rewriteRuntimeExecTarget(adapter.CapabilityCommands.Query.ExecTarget, podNames)
 	adapter.CapabilityCommands.Reset.ExecTarget = rewriteRuntimeExecTarget(adapter.CapabilityCommands.Reset.ExecTarget, podNames)
 	return adapter
-}
-
-// materializeRuntimeTopology 保留包内调用的短名称,所有实际规则仍由统一实现维护。
-func materializeRuntimeTopology(instance string, adapter AdapterSpec) AdapterSpec {
-	return MaterializeRuntimeTopology(instance, adapter)
 }
 
 // rewriteRuntimeExecTarget prefixes the Pod portion of a declared pod/container target.

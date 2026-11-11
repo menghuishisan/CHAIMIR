@@ -1,4 +1,6 @@
-// 系统公告页(校管侧栏 /school-admin/announcements、平台侧栏 /platform-admin/announcements 共用)。
+// 系统公告页(校管侧栏 /school-admin/announcements、平台侧栏 /platform-admin/announcements 共用)。设计 §7.7:
+// 页头 +「发布公告」;已发布公告列表行(标题、范围标签:全平台 / 全校 / 指定角色、发布时间),点开就地展开全文;
+// 发布弹窗里范围选择在上、正文在下,发布前显示「将通知谁」的一句确认。指标条与常驻说明卡去掉。
 //
 // 这是「发」的一侧:发布公告。「收」的一侧是顶栏铃铛进入的通知收件箱 ——
 // 两者不互相替代(规范 §10)。平台管理端没有收件箱(无租户、站内信在数据模型层不成立),
@@ -18,16 +20,12 @@ import {
 } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
-  Card,
-  CardBody,
-  CardHeader,
   Checkbox,
   FormField,
   Input,
-  MetricStrip,
+  ListRow,
   Modal,
   ModalBody,
   ModalContent,
@@ -37,7 +35,6 @@ import {
   ModalTitle,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
   Skeleton,
@@ -49,7 +46,7 @@ import { ResourceState } from '../../../components/ResourceState'
 import { usePagedResource } from '../../../hooks'
 import { useFormValidation } from '../../../hooks/useFormValidation'
 import { facetCount } from '../../../utils/facets'
-import { formatDateTime } from '../../../utils/formatters'
+import { formatDateTime, formatRelativeOccurrence } from '../../../utils/formatters'
 import { announcementScopeLabel } from '../../../utils/labels/notify'
 import { userRoleLabel } from '../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
@@ -66,23 +63,10 @@ const SCHOOL_SCOPE_OPTIONS = [
 /** 可定向的角色:校内三类身份。 */
 const TARGET_ROLE_OPTIONS = [UserRole.TEACHER, UserRole.STUDENT, UserRole.SCHOOL_ADMIN] as const
 
-/** 两个发布方的页面文案。 */
-const PUBLISHER_COPY: Record<
-  AnnouncementPublisher,
-  { group: string; description: string; listDescription: string; emptyDescription: string }
-> = {
-  platform: {
-    group: '底层资源',
-    description: '向全平台所有学校发布公告。发布后会实时推送到各校师生的通知收件箱。',
-    listDescription: '按发布时间从新到旧排列,这里是你发布过的平台公告。',
-    emptyDescription: '发布公告后会推送到所有学校师生的通知收件箱。',
-  },
-  school: {
-    group: '系统配置',
-    description: '向全校或指定角色发布公告。发布后会推送到对应人员的通知收件箱。',
-    listDescription: '按发布时间从新到旧排列,包含平台下发的公告。',
-    emptyDescription: '发布公告后会推送到师生的通知收件箱。',
-  },
+/** 两个发布方的空列表说明。 */
+const PUBLISHER_COPY: Record<AnnouncementPublisher, { emptyDescription: string }> = {
+  platform: { emptyDescription: '发布公告后会推送到所有学校师生的通知收件箱。' },
+  school: { emptyDescription: '发布公告后会推送到师生的通知收件箱;平台下发的公告也会出现在这里。' },
 }
 
 export interface AnnouncementsPageProps {
@@ -99,11 +83,13 @@ export interface AnnouncementsPageProps {
  */
 export default function AnnouncementsPage({ publisher }: AnnouncementsPageProps) {
   const [createOpen, setCreateOpen] = useState(false)
+  const [expanded, setExpanded] = useState<string>()
   const copy = PUBLISHER_COPY[publisher]
 
   const announcements = usePagedResource<Announcement>(
     (params) => api.notify.getAnnouncements(params),
     [],
+    { urlPageKey: 'page' },
   )
 
   // 按范围分桶取后端 facets.scope:全量分组计数,不用当前页切片去数(§6.5.4)
@@ -119,10 +105,17 @@ export default function AnnouncementsPage({ publisher }: AnnouncementsPageProps)
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: copy.group }]} />}
         title="系统公告"
-        description={copy.description}
-        icon={Megaphone}
+        meta={
+          announcements.total
+            ? [
+                { value: `共 ${announcements.total} 条` },
+                { label: '全平台', value: platformCount || undefined },
+                { label: '全校', value: tenantCount || undefined },
+                { label: '指定角色', value: roleCount || undefined },
+              ]
+            : undefined
+        }
         actions={
           <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
             发布公告
@@ -130,96 +123,54 @@ export default function AnnouncementsPage({ publisher }: AnnouncementsPageProps)
         }
       />
 
-      {/*
-        归族:资源列表族的卡片列表形态(§6.5.3 第 ① 族 + §6.5.2 第二条出路)。
-        为什么不是时间流族(第 ⑥):⑥ 的每条是「时间 + 状态点 + 一句主文」,
-        而公告的主体是整段正文,压不进一行事件条。故按卡片列表排,卡本身就是抬起片,
-        不再套 DataPanel(那会成为片里套片)。
-
-        指标退为一行内联摘要:按范围分桶(平台/全校/定向)走后端聚合契约(facets.scope),
-        是全量口径而非当前页切片(§6.5.4)。每条公告的定向角色仍在卡片标题的标签里可见。
-      */}
-      <MetricStrip
-        label="公告总量摘要"
-        className="mb-5"
-        items={[
-          { label: '公告总数', value: announcements.total, hint: '你能看到的全部' },
-          { label: '平台公告', value: platformCount, hint: '所有学校可见' },
-          { label: '全校公告', value: tenantCount, hint: '本校全员可见' },
-          { label: '定向公告', value: roleCount, hint: '只发给指定角色' },
-        ]}
-      />
-
-      <div className="mb-6 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border border-border bg-surface p-5 shadow-xs">
-          <p className="text-xs font-medium text-ink-sub">发布前检查</p>
-          <ol className="mt-3 flex flex-col gap-2 text-sm leading-relaxed text-ink-sub">
-            <li>确认标题能概括这次变更或通知事项。</li>
-            <li>正文按阅读顺序组织，必要时使用换行分段。</li>
-            <li>发布后不可撤回或修改，请在确认前复核投递范围。</li>
-          </ol>
-        </div>
-        <div className="rounded-lg border border-border bg-surface p-5 shadow-xs">
-          <p className="text-xs font-medium text-ink-sub">当前发布范围</p>
-          <p className="mt-2 text-lg font-medium text-ink">
-            {publisher === 'platform' ? '全平台学校' : '本校师生'}
-          </p>
-          <p className="mt-2 text-sm leading-relaxed text-ink-sub">
-            {publisher === 'platform'
-              ? '发布后由各校通知收件箱接收，平台管理员本身不进入租户通知流。'
-              : '可在发布窗口中选择全校可见或指定校内角色。'}
-          </p>
-        </div>
-      </div>
-
-      <PageSection title="已发布公告" description={copy.listDescription}>
-        <ResourceState
-          resource={announcements}
-          emptyIcon={Megaphone}
-          emptyTitle="还没有公告"
-          emptyDescription={copy.emptyDescription}
-          emptyAction={
-            <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
-              发布公告
-            </Button>
-          }
-          skeleton={<Skeleton variant="line" lines={4} />}
-        >
-          {(page) => (
-            <div className="flex flex-col gap-4">
-              <div className="flex flex-col gap-3">
-                {page.list.map((announcement) => (
-                  <Card key={announcement.id}>
-                    <CardHeader
-                      title={
-                        <span className="flex flex-wrap items-center gap-2">
-                          <span className="min-w-0 truncate">{announcement.title}</span>
-                          <Badge tone="neutral">{announcementScopeLabel(announcement.scope)}</Badge>
-                          {announcement.target_roles && announcement.target_roles.length > 0 ? (
-                            <span className="flex flex-wrap gap-1">
-                              {announcement.target_roles.map((role) => (
-                                <Badge key={role} tone="jade">
-                                  {userRoleLabel(role)}
-                                </Badge>
-                              ))}
-                            </span>
-                          ) : null}
+      <ResourceState
+        resource={announcements}
+        emptyIcon={Megaphone}
+        emptyTitle="还没有公告"
+        emptyDescription={copy.emptyDescription}
+        emptyAction={
+          <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
+            发布公告
+          </Button>
+        }
+        skeleton={<Skeleton variant="line" lines={5} />}
+      >
+        {(page) => (
+          <>
+            <ul className="divide-y divide-line rounded-lg bg-surface px-2 py-1 shadow-xs">
+              {page.list.map((announcement) => {
+                const open = expanded === announcement.id
+                return (
+                  <li key={announcement.id}>
+                    <ListRow
+                      title={announcement.title}
+                      meta={
+                        <span className="flex flex-wrap items-center gap-x-2" title={formatDateTime(announcement.published_at)}>
+                          {formatRelativeOccurrence(announcement.published_at)}发布
+                          {announcement.expire_at ? <span>· 有效期至 {formatDateTime(announcement.expire_at)}</span> : null}
                         </span>
                       }
-                      description={
-                        announcement.expire_at
-                          ? `${formatDateTime(announcement.published_at)} · 有效期至 ${formatDateTime(announcement.expire_at)}`
-                          : formatDateTime(announcement.published_at)
+                      trailing={
+                        <span className="flex flex-wrap items-center justify-end gap-1.5">
+                          <Badge tone="neutral">{announcementScopeLabel(announcement.scope)}</Badge>
+                          {(announcement.target_roles ?? []).map((role) => (
+                            <Badge key={role} tone="jade">
+                              {userRoleLabel(role)}
+                            </Badge>
+                          ))}
+                        </span>
                       }
+                      selected={open}
+                      onSelect={() => setExpanded(open ? undefined : announcement.id)}
                     />
-                    <CardBody>
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink sm:text-base">
-                        {announcement.content}
-                      </p>
-                    </CardBody>
-                  </Card>
-                ))}
-              </div>
+                    {open ? (
+                      <p className="whitespace-pre-wrap px-3 pb-4 pt-1 text-sm leading-relaxed text-ink">{announcement.content}</p>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ul>
+            <div className="mt-4">
               <Pagination
                 page={announcements.page}
                 pageSize={announcements.pageSize}
@@ -227,13 +178,9 @@ export default function AnnouncementsPage({ publisher }: AnnouncementsPageProps)
                 onPageChange={announcements.setPage}
               />
             </div>
-          )}
-        </ResourceState>
-      </PageSection>
-
-      <Callout tone="info" className="mt-4">
-        公告发布后不能撤回或修改。如果内容有误,请发一条新公告说明更正。
-      </Callout>
+          </>
+        )}
+      </ResourceState>
 
       {createOpen ? (
         <AnnouncementFormModal
@@ -275,6 +222,14 @@ function AnnouncementFormModal({ publisher, onClose, onPublished }: Announcement
 
   const scopeValue = Number(scope) as AnnouncementScope
   const isRoleScoped = scopeValue === AnnouncementScope.ROLES
+  // 发布前的「将通知谁」:按范围与选中的角色写成一句话
+  const audienceText = isPlatform
+    ? '所有学校的师生与管理员'
+    : isRoleScoped
+      ? roles.length > 0
+        ? `本校的${roles.map((role) => userRoleLabel(role)).join('、')}`
+        : '(请先选择角色)'
+      : '本校全部师生与管理员'
   const { errors, validate } = useFormValidation(useCallback(() => ({
     title: title.trim() === '' ? '请输入公告标题' : null,
     content: content.trim() === '' ? '请输入公告内容' : null,
@@ -312,39 +267,10 @@ function AnnouncementFormModal({ publisher, onClose, onPublished }: Announcement
       <ModalContent size="xl">
         <ModalHeader>
           <ModalTitle>发布公告</ModalTitle>
-          <ModalDescription>
-            公告会推送到对应人员的通知收件箱。发布后不能撤回,请确认内容无误。
-          </ModalDescription>
+          <ModalDescription>公告会推送到对应人员的通知收件箱。</ModalDescription>
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <FormField label="公告标题" htmlFor="announcement-title" required error={errors.title}>
-              <Input
-                id="announcement-title"
-                value={title}
-                invalid={Boolean(errors.title)}
-                onBlur={() => validate(['title'])}
-                onChange={(event) => setTitle(event.target.value)}
-              />
-            </FormField>
-
-            <FormField
-              label="公告内容"
-              htmlFor="announcement-content"
-              required
-              helper="换行会原样保留"
-              error={errors.content}
-            >
-              <Textarea
-                id="announcement-content"
-                value={content}
-                rows={8}
-                invalid={Boolean(errors.content)}
-                onBlur={() => validate(['content'])}
-                onChange={(event) => setContent(event.target.value)}
-              />
-            </FormField>
-
             {isPlatform ? (
               <Callout tone="info" title="这条公告对全平台可见">
                 所有学校的师生与管理员都会收到。平台公告不支持只发给某些角色。
@@ -391,6 +317,33 @@ function AnnouncementFormModal({ publisher, onClose, onPublished }: Announcement
               </FormField>
             ) : null}
 
+            <FormField label="公告标题" htmlFor="announcement-title" required error={errors.title}>
+              <Input
+                id="announcement-title"
+                value={title}
+                invalid={Boolean(errors.title)}
+                onBlur={() => validate(['title'])}
+                onChange={(event) => setTitle(event.target.value)}
+              />
+            </FormField>
+
+            <FormField
+              label="公告内容"
+              htmlFor="announcement-content"
+              required
+              helper="换行会原样保留"
+              error={errors.content}
+            >
+              <Textarea
+                id="announcement-content"
+                value={content}
+                rows={8}
+                invalid={Boolean(errors.content)}
+                onBlur={() => validate(['content'])}
+                onChange={(event) => setContent(event.target.value)}
+              />
+            </FormField>
+
             <FormField
               label="有效期至"
               htmlFor="announcement-expire"
@@ -403,6 +356,10 @@ function AnnouncementFormModal({ publisher, onClose, onPublished }: Announcement
                 onChange={(event) => setExpireAt(event.target.value)}
               />
             </FormField>
+
+            <p className="rounded-md bg-surface-hover px-4 py-3 text-sm text-ink">
+              将通知:<span className="font-medium">{audienceText}</span>。发布后不能撤回或修改,有误请发一条新公告更正。
+            </p>
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </ModalBody>

@@ -388,13 +388,13 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
             {[...suspects]
               .sort((a, b) => b.score - a.score)
               .map((suspect) => (
-                <div key={suspect.source_ref} className="flex flex-col gap-2 well p-3">
+                <div key={suspect.source_ref} className="flex flex-col gap-2 rounded-md bg-surface-hover p-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <Badge tone={suspect.score >= 0.95 ? 'danger' : 'warning'}>
                       相似度 {Math.round(suspect.score * 100)}%
                     </Badge>
                     {suspect.code_hash ? (
-                      <span className="truncate font-mono text-xs text-ink-faint">
+                      <span className="truncate font-mono text-xs text-ink-sub">
                         {suspect.code_hash.slice(0, 12)}
                       </span>
                     ) : null}

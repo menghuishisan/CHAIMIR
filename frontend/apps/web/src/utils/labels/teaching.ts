@@ -6,7 +6,6 @@ import {
   CourseType,
   CourseVisibility,
   GradeSource,
-  GradingMode,
   JoinMode,
   LatePolicy,
   LessonContentType,
@@ -114,16 +113,6 @@ export function submissionStatusLabel(status: SubmissionStatus): string {
  * 课程难度与题目难度是两套枚举:课程为 TeachingDifficulty(入门/进阶/高阶/研究型),
  * 题目为 ContentDifficulty(入门/基础/进阶/挑战),不可混用。
  */
-
-const GRADING_MODE_LABELS: Record<GradingMode, string> = {
-  [GradingMode.AUTO]: '自动判分',
-  [GradingMode.MANUAL]: '教师批改',
-}
-
-/** gradingModeLabel 返回判分方式文案。 */
-export function gradingModeLabel(mode: GradingMode): string {
-  return GRADING_MODE_LABELS[mode]
-}
 
 const GRADE_SOURCE_LABELS: Record<GradeSource, string> = {
   [GradeSource.ASSIGNMENT]: '作业',

@@ -5,8 +5,20 @@ import {
   BattleRule,
   ContestStatus,
   SANDBOX_ACCESS_PROFILE,
+  UserRole,
+  type Account,
+  type Contest,
   type ContestBattleRuntimeConfig,
 } from '@chaimir/api-client'
+
+/**
+ * canManageContest 与后端 canManageContest 同一口径:组织者本人或学校管理员。
+ * 教师赛事列表接口返回本校全部赛事,但详情、状态流转、对局监控都只对能管理的人开放,
+ * 列表里只显示这些,不给点进去就报错的行。
+ */
+export function canManageContest(contest: Pick<Contest, 'organizer_id'>, account: Pick<Account, 'id' | 'roles'>): boolean {
+  return contest.organizer_id === account.id || account.roles.includes(UserRole.SCHOOL_ADMIN)
+}
 
 /** 进行中和封榜期均可提交;封榜只影响榜单的公开更新。 */
 export function isContestAnswerable(status: ContestStatus): boolean {

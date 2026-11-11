@@ -13,11 +13,9 @@ import { History, RotateCcw, TriangleAlert } from 'lucide-react'
 import { AdminScope, type ConfigChangeLog, type SystemConfig } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   DataPanel,
-  ObjectIdentity,
   PageHeader,
   PageScaffold,
   Pagination,
@@ -28,7 +26,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, usePageLocation, locationLabel } from '../../../../hooks'
 import { formatDateTime } from '../../../../utils/formatters'
 import { configKeyDescription, configKeyLabel } from '../../../../utils/labels/admin'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -48,23 +46,10 @@ export default function PlatformConfigHistoryPage() {
     () => false,
   )
 
+  usePageLocation([{ label: locationLabel(config, (data) => configKeyLabel(data.key), '变更历史') }])
+
   return (
     <PageScaffold>
-      {/*
-        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的配置项名承担,
-        故页面头只出面包屑,末节到「系统配置」为止(§6.5.0 通则 1)。
-      */}
-      <PageHeader
-        kicker={
-          <Breadcrumb
-            items={[
-              { label: '底层资源' },
-              { label: '系统配置', href: '/platform-admin/settings' },
-            ]}
-          />
-        }
-      />
-
       <ResourceState
         resource={config}
         emptyIcon={History}
@@ -170,15 +155,15 @@ function ConfigHistoryContent({ config, onRolledBack }: ConfigHistoryContentProp
 
   return (
     <>
-      <ObjectIdentity
-        name={`${configKeyLabel(config.key)}的变更历史`}
-        subtitle={configKeyDescription(config.key) ?? '使用方自定义的系统配置项，修改与回滚均记入全平台审计。'}
+      <PageHeader
+        title={`${configKeyLabel(config.key)}的变更历史`}
+        description={configKeyDescription(config.key) ?? '使用方自定义的系统配置项，修改与回滚均记入全平台审计。'}
         actions={
           <Button variant="outline" onClick={() => navigate('/platform-admin/settings')}>
             返回系统配置
           </Button>
         }
-        properties={[
+        meta={[
           { label: '配置键', value: <span className="font-mono">{config.key}</span> },
           { label: '当前版本', value: config.version },
           { label: '变更次数', value: history.total ?? '—' },

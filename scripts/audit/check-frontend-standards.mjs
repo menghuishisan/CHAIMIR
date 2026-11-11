@@ -17,7 +17,7 @@ const extensions = new Set(['.ts', '.tsx', '.js', '.jsx', '.css'])
 const violations = []
 
 /**
- * 边框圈盒规则的豁免组件(规范 §6.5.1):
+ * 边框圈盒规则的豁免组件(规范 §6.5.1,纸面 + 白卡两档):
  * - 浮层(Modal/Drawer/Menu/Popover/Toast)不在光面容器层次里,可用发丝边把自己从未知背景上分离;
  * - 输入控件(Input/Textarea/Select/Checkbox/Radio/Switch/SegmentedControl)的边框是控件自身的形,
  *   规则本来就只禁止「用边框圈出一个容器」。
@@ -36,6 +36,17 @@ const BORDER_EXEMPT_COMPONENTS = [
   'Switch',
   'SegmentedControl',
 ]
+
+/** isBrandDisplayFile 判断文件是否是允许使用站酷字体的品牌展示位(规范 §2.3)。 */
+function isBrandDisplayFile(file) {
+  const normalized = file.split(path.sep).join('/')
+  return normalized.includes('/packages/ui/src/brand/') || normalized.endsWith('/apps/web/src/layouts/auth/AuthIntro.tsx')
+}
+
+/** isTopBarFile 判断文件是否属于顶栏(当前位置只在这里渲染,规范 §6.2)。 */
+function isTopBarFile(file) {
+  return file.split(path.sep).join('/').includes('/apps/web/src/layouts/main/')
+}
 
 /** isBorderExempt 判断文件是否为上述豁免组件的实现。 */
 function isBorderExempt(file) {
@@ -162,22 +173,25 @@ for (const root of roots) {
         /\brounded-(?:sm|md|lg|xl|2xl|3xl|full|pane)\b/.test(line) &&
         /\bborder\s+border-(?:line|line-strong)\b/.test(line)
       ) {
-        addViolation(file, lineNumber, '光面内的容器不得用边框圈盒(改用 well 或 bg-surface+shadow-xs)', line)
+        addViolation(file, lineNumber, '纸面上的容器不得用边框圈盒(白卡用 bg-surface+shadow-xs,卡内强调块用 bg-surface-hover)', line)
       }
-      // 复合工具类的底色由规范锁定,不接受覆盖(§6.5.1 井色、§4 骨架微光)。
-      // 它们是多属性复合类,tailwind-merge 无法只摘掉其中的 background —— 若登记冲突会把整个类移除,
-      // 导致「只想改圆角」的调用连底色一起丢。故在此拦截:同一 className 里不得与 bg-* 并存。
-      // 判据只看同一行:这两个类都是就地书写,不经跨行拼装(见 packages/ui/src/lib/cn.ts 说明)。
-      for (const composite of ['well', 'skeleton-shimmer']) {
-        const hasComposite = new RegExp(`(?:^|["'\`\\s])${composite}(?=["'\`\\s]|$)`).test(line)
-        if (hasComposite && /\bbg-[a-z][a-z0-9-]*\b/.test(line)) {
-          addViolation(
-            file,
-            lineNumber,
-            `${composite} 的底色由规范锁定,不得同时写 bg-*(需要别的底色就别用这个工具类)`,
-            line,
-          )
-        }
+      // 骨架微光的底色由规范锁定,不接受覆盖(§4):它是多属性复合类,tailwind-merge 无法只摘掉其中的 background,
+      // 若登记冲突会把整个类移除。故在此拦截:同一 className 里不得与 bg-* 并存。
+      if (/(?:^|["'`\s])skeleton-shimmer(?=["'`\s]|$)/.test(line) && /\bbg-[a-z][a-z0-9-]*\b/.test(line)) {
+        addViolation(file, lineNumber, 'skeleton-shimmer 的底色由规范锁定,不得同时写 bg-*', line)
+      }
+      // 规范 §6.5.1:surface-sunken 只用于标签底、禁用输入底、代码片段底,不做表头、筛选区、分组的大面积底色。
+      // 判据:与 rounded-lg 及以上同行出现 —— 那就是一块米黄底的大盒子。
+      if (/\bbg-surface-sunken\b/.test(line) && /\brounded-(?:lg|xl|2xl|3xl|pane)\b/.test(line)) {
+        addViolation(file, lineNumber, 'surface-sunken 不得做大面积底色(§6.5.1):卡内强调块改用 bg-surface-hover', line)
+      }
+      // 规范 §2.3:站酷字体只用于品牌展示位(品牌组件与认证页介绍区),页面标题和数字用正文粗体。
+      if (/\bfont-display\b/.test(line) && !isBrandDisplayFile(file) && !file.endsWith('.css')) {
+        addViolation(file, lineNumber, '站酷字体只用于品牌展示位(§2.3),页面标题与数字用正文字体粗体', line)
+      }
+      // 规范 §6.2:当前位置只在顶栏,内容区不放面包屑;页面用 usePageLocation 声明位置。
+      if (/<Breadcrumb\b|\bkicker=/.test(line) && !isTopBarFile(file)) {
+        addViolation(file, lineNumber, '内容区不得放面包屑(§6.2):当前位置在顶栏,页面用 usePageLocation 声明', line)
       }
       // 令牌类必须真的存在,否则 Tailwind 静默不出样式(见文件上方说明)
       for (const match of line.matchAll(COLOR_UTILITY_RE)) {
@@ -196,41 +210,6 @@ for (const root of roots) {
  * checkPageFamilyRules 落两条页面族谱门禁(规范 §6.5.0 通则 1 / §6.5.2)。
  * 逐文件而非逐行:两条规则都要看整份文件的结构。
  */
-/**
- * filterBarOccurrences 定位每一处 `<FilterBar`,并判断它是否 bare、是否落在 DataPanel 内部。
- *
- * 「落在 DataPanel 内部」用 `<DataPanel` 与 `</DataPanel>` 的配对深度判定 ——
- * 逐处判定才拦得住「同页一处合规、另一处摆在光面上」的情形。
- * bare 只认写在这一处 FilterBar 开标签里的 `bare`,不认文件里别处出现的同名词。
- */
-function filterBarOccurrences(source) {
-  const out = []
-  let depth = 0
-  let cursor = 0
-  const token = /<DataPanel\b|<\/DataPanel>|<FilterBar\b/g
-  let match = token.exec(source)
-  while (match !== null) {
-    cursor = match.index
-    if (match[0] === '<DataPanel') depth += 1
-    else if (match[0] === '</DataPanel>') depth = Math.max(0, depth - 1)
-    else {
-      // 取这一处 FilterBar 开标签的属性文本:到该元素第一个顶层 > 为止
-      let braces = 0
-      let end = cursor + '<FilterBar'.length
-      for (; end < source.length; end += 1) {
-        const ch = source[end]
-        if (ch === '{') braces += 1
-        else if (ch === '}') braces -= 1
-        else if (ch === '>' && braces === 0) break
-      }
-      const attrs = source.slice(cursor, end + 1)
-      out.push({ index: cursor, bare: /\bbare\b/.test(attrs), insideDataPanel: depth > 0 })
-    }
-    match = token.exec(source)
-  }
-  return out
-}
-
 /**
  * floatingLayerViolations 定位浮层(Modal / Drawer)内部出现的分页与指标带(§6.5.5 A 禁止)。
  * 用配对深度判定所处层级:深度 > 0 即在浮层内。
@@ -295,25 +274,7 @@ function checkPageFamilyRules(file, lines) {
   if (!file.includes(`${path.sep}apps${path.sep}web${path.sep}`)) return
   const source = lines.join('\n')
 
-  // ① §6.5.2:FilterBar 的井必须落在抬起片内部 —— 表格型列表页经 `DataPanel` 的 filter 槽位。
-  //    卡片网格型列表页的数据区本身就是一排 Card(抬起片),塞进 DataPanel 会成为片里套片,
-  //    故那类页面走 §6.5.1 红线的另一条出路:`bare` 无底形态直接排在光面上(不带井色)。
-  //    两条出路之外的写法(井色摆在光面上)才是违规。
-  //
-  //    判定逐处而不是逐文件:同一页可能既有落在 DataPanel 里的筛选,又有另一条摆在光面上的 ——
-  //    只看「文件里出现过 DataPanel」会把后者放过去(实时监控页就曾这样漏掉一处)。
-  for (const bar of filterBarOccurrences(source)) {
-    if (bar.bare || bar.insideDataPanel) continue
-    const lineNumber = source.slice(0, bar.index).split('\n').length
-    addViolation(
-      file,
-      lineNumber,
-      'FilterBar 的井不得摆在光面上(§6.5.2):表格型进 DataPanel 的 filter 槽位,卡片网格型用 bare 无底形态',
-      '<FilterBar',
-    )
-  }
-
-  // ② §6.5.5 A:浮层里不出现分页与指标带 —— 需要这两样说明它其实是一页,应当改成整页并归族。
+  // ① §6.5.4 A:浮层里不出现分页与指标带 —— 需要这两样说明它其实是一页,应当改成整页。
   //    典型误用是给弹窗里的下拉配一条分页(等于让用户先翻页才能选到人),
   //    以及把分页历史塞进弹窗。判定按 Modal/Drawer 的配对深度逐处做。
   for (const hit of floatingLayerViolations(source)) {
@@ -321,13 +282,13 @@ function checkPageFamilyRules(file, lines) {
     addViolation(
       file,
       lineNumber,
-      `浮层内不得出现 ${hit.tag}(§6.5.5 A):需要分页或指标带说明它其实是一页,应改成整页并归族`,
+      `浮层内不得出现 ${hit.tag}(§6.5.4 A):需要分页或指标带说明它其实是一页,应改成整页`,
       `<${hit.tag}`,
     )
   }
 
-  // ③ §6.5.1「不出现第三级」:落在抬起片内部的 Table 必须传 elevated={false},
-  //    否则它自己再画一层底色与落影 —— 片里套片。判定按同文件的配对深度做;
+  // ② §6.5.1「白卡里不再套卡」:落在白卡内部的 Table 必须传 elevated={false},
+  //    否则它自己再画一层底色与落影 —— 卡里套卡。判定按同文件的配对深度做;
   //    「组件根节点是井、而包住它的 ModalBody 在调用方」那种跨文件情形静态判不了,留走查
   //    (本轮 ImportPreviewPanel 就是这么查出来的)。
   for (const t of elementAttrs(source, 'Table')) {
@@ -337,37 +298,9 @@ function checkPageFamilyRules(file, lines) {
     addViolation(
       file,
       lineNumber,
-      'Table 落在抬起片内部必须传 elevated={false}(§6.5.1 不出现第三级)',
+      'Table 落在白卡内部必须传 elevated={false}(§6.5.1 白卡里不再套卡)',
       '<Table',
     )
-  }
-
-  // ④ §6.5.0 通则 1:面包屑末节与 h1 同名等于白占一行,面包屑只到父级。
-  //    两种同名都要抓:字面量相等(`label: '成绩审核'` vs `title="成绩审核"`),
-  //    以及**同一个表达式**(`label: copy.title` vs `title={copy.title}`)——
-  //    后者曾漏掉学校/平台告警页与实验编排向导两处,故不再只比字面量。
-  //    真正比不了的是「两个不同表达式恰好求出同一个值」,那只能走查。
-  const crumbMatch = source.match(/<Breadcrumb\s+items=\{\[([\s\S]*?)\]\}/)
-  if (crumbMatch) {
-    const labels = [...crumbMatch[1].matchAll(/label:\s*([^,}\n]+)/g)].map((m) => m[1].trim())
-    const lastLabel = labels.length > 0 ? labels[labels.length - 1] : undefined
-    // 标题两种写法:字面量 title="X" 与表达式 title={expr}
-    const literalTitle = source.match(/\btitle="([^"]+)"/)
-    const exprTitle = source.match(/\btitle=\{([^\n]+?)\}\s*$/m)
-    const titleForms = [
-      literalTitle ? `'${literalTitle[1]}'` : undefined,
-      exprTitle ? exprTitle[1].trim() : undefined,
-    ].filter(Boolean)
-
-    if (lastLabel !== undefined && titleForms.includes(lastLabel)) {
-      const lineNumber = lines.findIndex((line) => line.includes('<Breadcrumb')) + 1
-      addViolation(
-        file,
-        lineNumber,
-        `面包屑末节 ${lastLabel} 与页面标题同名(§6.5.0 通则 1),面包屑只到父级`,
-        crumbMatch[0].split('\n')[0],
-      )
-    }
   }
 }
 

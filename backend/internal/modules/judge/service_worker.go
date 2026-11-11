@@ -230,6 +230,8 @@ func (s *Service) taskWithExecutionExpectation(ctx context.Context, task JudgeTa
 // needsSandbox 判断判题是否需要 M2 沙箱执行或链能力。
 func needsSandbox(task JudgeTask) bool {
 	switch task.InputSnapshot.JudgerType {
+	case JudgerTypeTheoryQuestion:
+		return false
 	case JudgerTypeFlag:
 		return strings.TrimSpace(jsonx.StringFromAny(task.InputSnapshot.Expectation["flag_chain_target"])) != ""
 	case JudgerTypeSimCheckpoint:
@@ -644,6 +646,9 @@ func (s *Service) markOutboxFailed(ctx context.Context, item JudgeEventOutbox, c
 
 // executeJudgerSelftest 在判题器声明的真实私有 sidecar 中执行 manifest 自检命令。
 func (s *Service) executeJudgerSelftest(ctx context.Context, j Judger) error {
+	if j.Type == JudgerTypeTheoryQuestion {
+		return SelftestBuiltinTheoryJudger()
+	}
 	if err := validateJudgerResourceSpecForUse(j); err != nil {
 		return err
 	}

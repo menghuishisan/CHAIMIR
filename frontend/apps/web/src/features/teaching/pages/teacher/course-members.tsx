@@ -2,10 +2,13 @@
 // 批量添加的粒度是「一个班级」(M6 需求 C1):教师从组织架构选班,服务端按班解析在校学生,
 // 页面不接触学生编号 —— 账号目录是学校管理员能力,教师端也不该先拉一份全校名录。
 // 成员列表的姓名与学号由 M6 随成员一并下发(服务端经 M1 契约批量解析),不在前端二次匹配。
+// 设计 §7.4:成员表(姓名、学号、加入方式、加入时间),搜索写进地址。成员接口不接受关键词,
+// 一门课 30–200 人,故按页取完后在前端按姓名或学号筛选、分页。
 
 import { useCallback, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router'
 import { UserMinus, UserPlus, Users } from 'lucide-react'
-import type { Class, CourseMember } from '@chaimir/api-client'
+import { PAGINATION_DEFAULT_SIZE, PAGINATION_MAX_SIZE, type Class, type CourseMember } from '@chaimir/api-client'
 import {
   Badge,
   Button,
@@ -30,7 +33,10 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { useAsyncResource, useUrlState } from '../../../../hooks'
+import { SearchBox } from '../../../../components/SearchBox'
+import { collectAllPages } from '../../../../utils/allPages'
+import { readPage } from '../../../../utils/urlQuery'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatShortDateTime } from '../../../../utils/formatters'
 import { joinModeLabel } from '../../../../utils/labels/teaching'
@@ -39,6 +45,11 @@ import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 export interface CourseMembersProps {
   courseId: string
 }
+
+/** 地址参数:q 是成员搜索词(姓名或学号) */
+const MEMBERS_QUERY = {
+  q: { defaultValue: '' },
+} as const
 
 /**
  * CourseMembers 管理课程成员。
@@ -49,10 +60,36 @@ export function CourseMembers({ courseId }: CourseMembersProps) {
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
-  const members = usePagedResource<CourseMember>(
-    (params) => api.teaching.listMembers(courseId, params),
+  const [query, setQuery] = useUrlState(MEMBERS_QUERY)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const page = readPage(searchParams, 'page')
+  const members = useAsyncResource<CourseMember[]>(
+    () => collectAllPages((params) => api.teaching.listMembers(courseId, params), PAGINATION_MAX_SIZE),
     [courseId],
   )
+  const keyword = query.q.trim().toLowerCase()
+  const filtered = useMemo(
+    () =>
+      (members.data ?? []).filter(
+        (member) =>
+          keyword === '' ||
+          member.student_name.toLowerCase().includes(keyword) ||
+          (member.student_no ?? '').toLowerCase().includes(keyword),
+      ),
+    [keyword, members.data],
+  )
+  const pageItems = filtered.slice((page - 1) * PAGINATION_DEFAULT_SIZE, page * PAGINATION_DEFAULT_SIZE)
+  /** setPage 把成员表页码写进地址(替换历史记录) */
+  const setPage = (next: number) =>
+    setSearchParams(
+      (previous) => {
+        const params = new URLSearchParams(previous)
+        if (next === 1) params.delete('page')
+        else params.set('page', String(next))
+        return params
+      },
+      { replace: true },
+    )
 
   const removeMember = useCallback(async () => {
     if (!removeTarget) return
@@ -106,7 +143,7 @@ export function CourseMembers({ courseId }: CourseMembersProps) {
           variant="ghost"
           size="sm"
           icon={UserMinus}
-          aria-label="把该学生移出课程"
+          aria-label={`把${member.student_name}移出课程`}
           onClick={() => setRemoveTarget(member)}
         />
       ),
@@ -124,17 +161,22 @@ export function CourseMembers({ courseId }: CourseMembersProps) {
       }
     >
       <div className="flex flex-col gap-4">
+        <SearchBox
+          label="搜索成员"
+          placeholder="按姓名或学号搜索"
+          value={query.q}
+          onSearch={(value) => setQuery({ q: value })}
+        />
         {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
 
-        {/* 列表型页内子视图走 DataPanel 片段(§6.5.5 B):数据表与分页同处一块抬起片 */}
         <DataPanel
           label="选课成员"
           footer={
             <Pagination
-              page={members.page}
-              pageSize={members.pageSize}
-              total={members.total}
-              onPageChange={members.setPage}
+              page={page}
+              pageSize={PAGINATION_DEFAULT_SIZE}
+              total={members.data ? filtered.length : undefined}
+              onPageChange={setPage}
             />
           }
         >
@@ -150,12 +192,13 @@ export function CourseMembers({ courseId }: CourseMembersProps) {
             }
             skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
           >
-            {(page) => (
+            {() => (
               <Table
                 columns={columns}
-                data={page.list}
+                data={pageItems}
                 rowKey={(member) => member.id}
                 elevated={false}
+                empty={<p className="px-4 py-8 text-center text-sm text-ink-sub">没有匹配「{query.q}」的成员。</p>}
                 // <md 换行卡(§6.4.1 规则 3):学生名一行、学号与加入方式一行,移出按钮在右
                 mobileCard={(member) => ({
                   title: member.student_name,
@@ -190,20 +233,17 @@ export function CourseMembers({ courseId }: CourseMembersProps) {
       <Modal open={removeTarget !== undefined} onOpenChange={(open) => !open && setRemoveTarget(undefined)}>
         <ModalContent size="sm">
           <ModalHeader>
-            <ModalTitle>确认移出课程</ModalTitle>
+            <ModalTitle>把「{removeTarget?.student_name ?? ''}」移出课程?</ModalTitle>
             <ModalDescription>
-              移出后该学生看不到这门课程,已有的作业提交与成绩记录仍保留。
+              移出后这名学生看不到这门课程,已有的作业提交与成绩记录仍保留。
             </ModalDescription>
           </ModalHeader>
-          <ModalBody>
-            <p className="text-base text-ink">{removeTarget?.student_name ?? ''}</p>
-          </ModalBody>
           <ModalFooter>
             <Button variant="outline" onClick={() => setRemoveTarget(undefined)}>
               取消
             </Button>
             <Button variant="danger" loading={working} onClick={() => void removeMember()}>
-              确认移出
+              移出课程
             </Button>
           </ModalFooter>
         </ModalContent>

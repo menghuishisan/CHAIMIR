@@ -1,20 +1,20 @@
 // PlatformLoginPage 平台管理员登录通道(仅 SaaS 形态注册路由,私有化部署下该路径不存在):
 // 与学校用户入口彻底分离 —— 不做「选择角色」,不与手机号登录混排(规范/对齐清单 §认证)。
-// 特权通道用落印语义强调(朱砂只用于品牌章与落印动作),其余仍是同一块墨色底层(FE-6),
-// 不另造一套暗色皮肤。会话不提供「免登录」:超管令牌不落 localStorage,只随浏览器会话存续。
+// 与学校登录同一块墨色底层(FE-6),主按钮同为玉色。入口是认证页页脚的「平台管理员登录」;
+// 本页表单下方链回学校账号登录。会话不提供「免登录」:超管令牌不落 localStorage,只随浏览器会话存续。
 
 import { useCallback, useId, useState } from 'react'
 import type { FormEvent } from 'react'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { ShieldCheck } from 'lucide-react'
 import { Icon } from '@chaimir/ui'
-import { AuthBrandMark } from '../../../../components/AuthBrand'
 import { api } from '../../../../app/api'
 import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { passwordRequiredError, requiredError } from '../../authForm'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import {
+  AuthFormBrand,
   AuthFormError,
   AuthHeading,
   AuthPanel,
@@ -62,10 +62,10 @@ export default function PlatformLoginPage() {
   return (
     <AuthPanel>
       <div className="w-full max-w-sm">
-        {/* 品牌行:朱砂章标明这是落印级别的特权入口,副标题点明通道用途 */}
-        <AuthBrandMark large subtitle="平台管理通道" />
+        {/* 品牌行:副标题点明这是平台管理通道,宽窄屏都显示 */}
+        <AuthFormBrand subtitle="平台管理通道" always />
 
-        <form className="mt-10" onSubmit={handleSubmit} noValidate>
+        <form onSubmit={handleSubmit} noValidate>
           <AuthHeading title="平台管理员登录" description="仅限平台运营人员使用,操作全程记入审计" />
 
           <AuthTextField
@@ -93,9 +93,17 @@ export default function PlatformLoginPage() {
 
           <AuthSubmit loading={submitting}>登录</AuthSubmit>
 
-          <p className="mt-5 flex items-start gap-2 text-xs text-on-dark-sub">
+          <p className="mt-5 flex items-start gap-2 text-sm text-on-dark-sub">
             <Icon icon={ShieldCheck} size="sm" className="mt-px shrink-0" />
-            本通道不用于学校师生登录;学校账号请从学校登录入口进入。
+            <span>
+              学校管理员、教师和学生请从
+              <Link
+                to="/auth/login"
+                className="mx-1 rounded-sm text-accent underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+              >
+                学校账号登录
+              </Link>
+            </span>
           </p>
         </form>
       </div>

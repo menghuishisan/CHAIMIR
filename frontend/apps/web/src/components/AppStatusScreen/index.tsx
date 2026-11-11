@@ -53,21 +53,21 @@ export function AppStatusScreen({
         fullScreen ? 'min-h-dvh' : 'min-h-0 flex-1',
       )}
     >
-      <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-dark-line bg-dark-surface">
+      <div className="flex size-14 items-center justify-center rounded-full bg-dark-elevated">
         <Icon
           icon={icon}
           size="lg"
           className={cn(TONE_ICON_CLASS[tone], spinning && 'animate-spin')}
         />
       </div>
-      <h1 className="mt-5 text-xl font-bold">{title}</h1>
+      <h1 className="mt-5 text-2xl font-bold">{title}</h1>
       {description ? (
-        <p className="mt-2 max-w-sm text-sm text-on-dark-sub">{description}</p>
+        <p className="mt-2 max-w-md text-base text-on-dark-sub">{description}</p>
       ) : null}
       {traceId ? (
         <p className="mt-3 font-mono text-xs text-on-dark-sub">{traceHintText(traceId)}</p>
       ) : null}
-      {actions ? <div className="mt-6 flex items-center gap-3">{actions}</div> : null}
+      {actions ? <div className="mt-7 flex flex-wrap items-center justify-center gap-3">{actions}</div> : null}
     </div>
   )
 }

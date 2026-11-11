@@ -7,6 +7,7 @@
     "build": "vite build",
     "type-check": "tsc --noEmit",
     "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
+    "test": "node --test \"src/**/*.test.ts\"",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -14,6 +15,7 @@
     "@chaimir/ide": "workspace:*",
     "@chaimir/sim-sdk": "workspace:*",
     "@chaimir/ui": "workspace:*",
+    "bowser": "2.14.1",
     "lucide-react": "^0.460.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",

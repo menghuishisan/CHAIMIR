@@ -28,8 +28,8 @@ export const Checkbox = forwardRef<ElementRef<typeof CheckboxPrimitive.Root>, Ch
           // hover 边框转主色作可点暗示;选中态边框已是主色,叠加无视觉冲突
           "hit-target relative flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none",
           onDark
-            ? "border-dark-line bg-dark-elevated hover:border-accent data-[state=checked]:border-accent data-[state=checked]:bg-accent"
-            : "border-line-strong bg-surface hover:border-primary data-[state=checked]:border-primary data-[state=checked]:bg-primary",
+            ? "border-dark-control bg-dark-elevated hover:border-accent data-[state=checked]:border-accent data-[state=checked]:bg-accent"
+            : "border-line-control bg-surface hover:border-primary data-[state=checked]:border-primary data-[state=checked]:bg-primary",
           // 无 label 时禁用态在框上弱化;有 label 时由外层 label 统一弱化,避免二次叠加
           !label && "disabled:opacity-50",
           !label && className,

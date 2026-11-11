@@ -4,6 +4,9 @@ package contracts
 import "context"
 
 const (
+	// JudgerCodeTheoryQuestion 是 M5 与 M3 共用的内置理论题策略标识。
+	JudgerCodeTheoryQuestion = "theory-question"
+
 	// JudgeSandboxModeFresh 表示使用全新判题沙箱执行。
 	JudgeSandboxModeFresh = "fresh"
 	// JudgeSandboxModeReuse 表示复用业务现场沙箱只读状态执行断言。

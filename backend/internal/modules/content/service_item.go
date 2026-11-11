@@ -136,6 +136,11 @@ func (s *Service) UpdateDraftItem(ctx context.Context, itemID int64, req UpdateI
 		if current.Status != StatusDraft {
 			return apperr.ErrContentVersionImmutable
 		}
+		if current.Type == TypeTheoryQuestion {
+			if err := validateTheoryQuestionBody(req.Body); err != nil {
+				return err
+			}
+		}
 		current.Title = req.Title
 		current.CategoryID = req.CategoryID.Int64()
 		current.Difficulty = req.Difficulty
@@ -172,6 +177,11 @@ func (s *Service) PublishItem(ctx context.Context, itemID int64) (ItemDTO, error
 		}
 		if err := validateContestSubmitKey(item); err != nil {
 			return Item{}, err
+		}
+		if item.Type == TypeTheoryQuestion {
+			if err := validateTheoryQuestionBody(item.Body); err != nil {
+				return Item{}, err
+			}
 		}
 		return tx.PublishItem(ctx, tenantID, id)
 	})

@@ -11,7 +11,6 @@ import { useNavigate } from 'react-router'
 import { ArrowRight, ExternalLink, Inbox, Search } from 'lucide-react'
 import { ApplicationStatus, type TenantApplication } from '@chaimir/api-client'
 import {
-  Breadcrumb,
   Button,
   Callout,
   DataPanel,
@@ -133,7 +132,7 @@ export default function PlatformApplicationsPage() {
             label={applicationStatusLabel(item.status)}
           />
           {item.reviewed_at ? (
-            <span className="font-mono text-xs text-ink-faint">{formatDateTime(item.reviewed_at)}</span>
+            <span className="font-mono text-xs text-ink-sub">{formatDateTime(item.reviewed_at)}</span>
           ) : null}
         </div>
       ),
@@ -158,10 +157,8 @@ export default function PlatformApplicationsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '租户' }]} />}
         title="入驻申请"
         description="学校提交的开通申请。审核通过会创建学校并开通首个管理员账号,请先核对联系人身份。"
-        icon={Inbox}
       />
 
       {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是申请记录 */}

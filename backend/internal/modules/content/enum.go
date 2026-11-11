@@ -1,13 +1,15 @@
 // content enum 文件定义 M5 内容、作者、可见性、状态和组卷枚举。
 package content
 
+import "chaimir/internal/contracts"
+
 const (
 	// TypeExperimentTemplate 表示实验模板。
 	TypeExperimentTemplate int16 = 1
 	// TypeContestProblem 表示竞赛题。
 	TypeContestProblem int16 = 2
 	// TypeTheoryQuestion 表示理论题。
-	TypeTheoryQuestion int16 = 3
+	TypeTheoryQuestion int16 = contracts.ContentTypeTheoryQuestion
 )
 
 const (

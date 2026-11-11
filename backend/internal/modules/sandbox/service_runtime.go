@@ -305,7 +305,7 @@ func (s *Service) RunRuntimeSelftest(ctx context.Context, runtimeID int64) (Runt
 		return RuntimeSelftestResponse{}, err
 	}
 	// 自检计划沿用正式沙箱的实例化 Pod 拓扑,确保 workspace、链动作和私有侧车的执行目标与实际 Pod 名一致。
-	runtime.AdapterSpec = materializeRuntimeTopology(runtime.Code, runtime.AdapterSpec)
+	runtime.AdapterSpec = MaterializeRuntimeTopology(runtime.Code, runtime.AdapterSpec)
 	selftestID := s.ids.Generate()
 	sb := Sandbox{
 		ID:             selftestID,

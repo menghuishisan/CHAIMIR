@@ -82,7 +82,6 @@ export default function SchoolAdminAuditPage() {
   return (
     <AuditLogPage
       idPrefix="audit"
-      breadcrumbItems={[{ label: '系统配置' }, { label: '审计日志' }]}
       title="审计日志"
       description="本校范围内的敏感操作记录。只能查询与导出,不能修改或删除。"
       actionOptions={ACTION_OPTIONS}

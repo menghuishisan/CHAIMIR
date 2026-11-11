@@ -27,7 +27,7 @@ export function ImportPreviewPanel({ preview, emptyDescription }: ImportPreviewP
   ]
 
   return (
-    <div className="flex flex-col gap-3 well p-4">
+    <div className="flex flex-col gap-3 rounded-md bg-surface-hover p-4">
       <p className="text-sm text-ink-sub">已保存文件:{preview.file_name} · 有效期至{formatDateTime(preview.expire_at)}</p>
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone="neutral">共 {preview.total} 行</Badge>
@@ -40,7 +40,7 @@ export function ImportPreviewPanel({ preview, emptyDescription }: ImportPreviewP
           <Callout tone="warning" title="有问题的行不会被导入">
             修正这些行后重新上传,或直接提交只导入没有问题的行。
           </Callout>
-          {/* elevated={false}:本组件根节点已是井、井又在 ModalBody 里,表格再画一层就成了第三级(§6.5.1) */}
+          {/* elevated={false}:本组件根节点已是浅底区,表格再画一层白卡就成了卡里套卡;有问题的行就是全部列出的行 */}
           <Table
             columns={errorColumns}
             data={errorRows}

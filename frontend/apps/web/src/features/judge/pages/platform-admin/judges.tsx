@@ -12,7 +12,6 @@ import { ArrowRight, Cpu, Plus, Settings2, ShieldCheck, Timer } from 'lucide-rea
 import { JudgerStatus, JudgerType, type Judger } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   Card,
@@ -55,6 +54,7 @@ const TYPE_HINTS: Record<JudgerType, string> = {
   [JudgerType.STATIC_SCAN]: '静态扫描代码,查找漏洞模式与写法问题',
   [JudgerType.SIM_CHECKPOINT]: '按仿真过程中的检查点给分',
   [JudgerType.MANUAL]: '不自动判,由教师在批改中心人工打分',
+  [JudgerType.THEORY_QUESTION]: '按题型校验客观答案,不启动代码运行环境',
 }
 
 /**
@@ -87,10 +87,8 @@ export default function PlatformJudgesPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="判题器"
         description="判一道题用哪种方式。教师出题时按短名引用,登记后建议先自测一次再开放。"
-        icon={Cpu}
         actions={
           <Button variant="primary" leftIcon={Plus} onClick={() => setFormTarget({})}>
             登记判题器
@@ -120,8 +118,7 @@ export default function PlatformJudgesPage() {
         description="按类型筛选。停用的判题器不会分配新任务,已排队的任务照旧执行完。"
       >
         <div className="flex flex-col gap-4">
-          {/* 数据区是一排 JudgerCard(已是抬起片),故筛选走 bare 无底形态而非井,避免片里套片(§6.5.2) */}
-          <FilterBar label="判题器筛选" bare>
+          <FilterBar label="判题器筛选">
             <FilterField label="判题器类型" group>
               <SegmentedControl
                 aria-label="按判题器类型筛选"

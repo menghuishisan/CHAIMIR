@@ -27,7 +27,6 @@ import {
 } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   Card,
@@ -92,10 +91,8 @@ export default function PlatformSettingsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="系统配置"
         description="平台级运行参数。改动立即对全平台生效,每次改动都会留下可回滚的记录。"
-        icon={Settings}
       />
 
       {/*
@@ -327,7 +324,7 @@ function ConfigEditModal({ config, onClose, onSaved }: ConfigEditModalProps) {
             </FormField>
 
             {credentialKeys.length > 0 ? (
-              <div className="flex flex-col gap-4 well p-4">
+              <div className="flex flex-col gap-4 rounded-md bg-surface-hover p-4">
                 <div>
                   <p className="text-base text-ink">凭据字段</p>
                   <p className="text-sm text-ink-sub">

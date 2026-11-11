@@ -191,8 +191,6 @@ type AssignmentItemInput struct {
 	ItemVersion string `json:"item_version"`
 	Score       int32  `json:"score"`
 	Seq         int32  `json:"seq"`
-	GradingMode int16  `json:"grading_mode"`
-	JudgerCode  string `json:"judger_code"`
 }
 
 type AssignmentDTO struct {
@@ -215,8 +213,6 @@ type AssignmentItemDTO struct {
 	ItemVersion string         `json:"item_version"`
 	Score       int32          `json:"score"`
 	Seq         int32          `json:"seq"`
-	GradingMode int16          `json:"grading_mode"`
-	JudgerCode  string         `json:"judger_code,omitempty"`
 	Title       string         `json:"title,omitempty"`
 	Type        int16          `json:"type,omitempty"`
 	Difficulty  int16          `json:"difficulty,omitempty"`
@@ -241,7 +237,7 @@ type DraftDTO struct {
 }
 
 type SubmitAssignmentRequest struct {
-	ContentRef map[string]any `json:"content_ref"`
+	Answers map[string]any `json:"answers"`
 }
 
 type GradeSubmissionRequest struct {
@@ -250,19 +246,20 @@ type GradeSubmissionRequest struct {
 }
 
 type SubmissionDTO struct {
-	ID           ids.ID         `json:"id"`
-	AssignmentID ids.ID         `json:"assignment_id"`
-	StudentID    ids.ID         `json:"student_id"`
-	AttemptNo    int32          `json:"attempt_no"`
-	Content      map[string]any `json:"content"`
-	JudgeTaskRef string         `json:"judge_task_ref,omitempty"`
-	AutoScore    *int32         `json:"auto_score,omitempty"`
-	ManualScore  *int32         `json:"manual_score,omitempty"`
-	FinalScore   *int32         `json:"final_score,omitempty"`
-	Comment      string         `json:"comment,omitempty"`
-	IsLate       bool           `json:"is_late"`
-	Status       int16          `json:"status"`
-	SubmittedAt  string         `json:"submitted_at"`
+	ID             ids.ID         `json:"id"`
+	AssignmentID   ids.ID         `json:"assignment_id"`
+	StudentID      ids.ID         `json:"student_id"`
+	AttemptNo      int32          `json:"attempt_no"`
+	Content        map[string]any `json:"content"`
+	ManualMaxScore int32          `json:"manual_max_score"`
+	JudgeTaskRef   string         `json:"judge_task_ref,omitempty"`
+	AutoScore      *int32         `json:"auto_score,omitempty"`
+	ManualScore    *int32         `json:"manual_score,omitempty"`
+	FinalScore     *int32         `json:"final_score,omitempty"`
+	Comment        string         `json:"comment,omitempty"`
+	IsLate         bool           `json:"is_late"`
+	Status         int16          `json:"status"`
+	SubmittedAt    string         `json:"submitted_at"`
 }
 
 type ProgressRequest struct {

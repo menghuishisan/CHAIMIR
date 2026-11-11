@@ -299,7 +299,33 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [title, due_at, max_attempts, late_policy, items]
+            properties:
+              title: { type: string, minLength: 1 }
+              chapter_id: { type: string }
+              due_at: { type: string, format: date-time }
+              max_attempts: { type: integer, minimum: 1 }
+              late_policy: { type: integer, enum: [1, 2, 3] }
+              late_penalty: { type: object, additionalProperties: true }
+              items:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [item_code, item_version, score, seq]
+                  properties:
+                    item_code: { type: string, minLength: 1 }
+                    item_version: { type: string, minLength: 1 }
+                    score: { type: integer, minimum: 1 }
+                    seq: { type: integer, minimum: 1 }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/assignments/{id}:
   get:
@@ -317,7 +343,33 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [title, due_at, max_attempts, late_policy, items]
+            properties:
+              title: { type: string, minLength: 1 }
+              chapter_id: { type: string }
+              due_at: { type: string, format: date-time }
+              max_attempts: { type: integer, minimum: 1 }
+              late_policy: { type: integer, enum: [1, 2, 3] }
+              late_penalty: { type: object, additionalProperties: true }
+              items:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [item_code, item_version, score, seq]
+                  properties:
+                    item_code: { type: string, minLength: 1 }
+                    item_version: { type: string, minLength: 1 }
+                    score: { type: integer, minimum: 1 }
+                    seq: { type: integer, minimum: 1 }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/assignments/{id}/publish:
   post:
@@ -358,7 +410,22 @@
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [content]
+            properties:
+              content:
+                type: object
+                additionalProperties:
+                  oneOf:
+                    - { type: string }
+                    - { type: boolean }
+                    - { type: array, items: { type: string } }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/assignments/{id}/submit:
   post:
@@ -368,7 +435,22 @@
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [answers]
+            properties:
+              answers:
+                type: object
+                additionalProperties:
+                  oneOf:
+                    - { type: string }
+                    - { type: boolean }
+                    - { type: array, items: { type: string } }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/submissions/{id}:
   get:

@@ -626,6 +626,11 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 		}
 		items = append(items, catalogJudger{id: platformJudgerID(m.Name), code: m.Name, name: m.Description, typ: platformJudgerType(m.Judger.Type), executorRef: m.Name, runtimeNeeded: strings.TrimSpace(m.Judger.RuntimeCode) != "", defaultTimeout: m.Resources.TimeoutSeconds, resource: resource})
 	}
+	items = append(items, catalogJudger{
+		id: platformJudgerID(contracts.JudgerCodeTheoryQuestion), code: contracts.JudgerCodeTheoryQuestion, name: "理论题判分",
+		typ: 7, executorRef: "m3-backend-strategy", defaultTimeout: 30,
+		resource: judge.JudgerResourceSpec{TimeoutSec: 30},
+	})
 	onchainResource := judge.JudgerResourceSpec{}
 	onchainComposition := contracts.SandboxCompositionSpec{ID: "judge:onchain-assert", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}
 	genesisRef := strings.TrimSpace(genesisRefs["testcase-evm"])

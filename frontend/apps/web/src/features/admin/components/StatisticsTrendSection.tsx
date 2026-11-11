@@ -6,22 +6,22 @@
 // 呈现形态按规范 §8.3:历史序列先出折线图,数据表是同一份数据的等价切换(ChartContainer 提供),
 // 而不是只给一张 40 行的「日期 × 指标 × 数值」长表 —— 那等于让读者自己在数字里找趋势。
 // metrics 是后端写入的开放对象:只呈现已登记的键,未登记键跳过,不猜语义、不把内部键名抛到界面上。
+// 时间范围切换在图表区右上角(设计 §7.5):近 7 / 30 / 90 天一键切换,「自定义」再展开日期;范围写进地址。
 
 import { useMemo, useState } from 'react'
 import { CalendarRange } from 'lucide-react'
 import type { Statistics } from '@chaimir/api-client'
 import {
-  Badge,
   ChartContainer,
   FilterBar,
   FilterField,
   Input,
-  PageSection,
+  SegmentedControl,
   TrendLineChart,
   type ChartDataTable,
   type TrendSeries,
 } from '@chaimir/ui'
-import { useAsyncResource } from '../../../hooks'
+import { useAsyncResource, useUrlState } from '../../../hooks'
 import { formatDate } from '../../../utils/formatters'
 import { statisticsMetricLabel } from '../../../utils/labels/admin'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
@@ -30,8 +30,22 @@ import {
   type StatisticsMetricGroup,
 } from '../statisticsPresentation'
 
-/** 趋势默认区间:近 30 天。 */
-const DEFAULT_RANGE_DAYS = 30
+/** 地址参数:range 是预设区间(天数)或 custom;from / to 只在 custom 时生效 */
+const TREND_QUERY = {
+  range: { defaultValue: '30', allowed: ['7', '30', '90', 'custom'] },
+  from: { defaultValue: '' },
+  to: { defaultValue: '' },
+} as const
+
+const RANGE_OPTIONS = [
+  { value: '7', label: '近 7 天' },
+  { value: '30', label: '近 30 天' },
+  { value: '90', label: '近 90 天' },
+  { value: 'custom', label: '自定义' },
+]
+
+/** ISO_DATE 地址里的日期必须是 YYYY-MM-DD;不合法时回到预设区间 */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
 
 /** 一组指标在当前区间内的图表数据。 */
 interface TrendGroup {
@@ -53,13 +67,17 @@ export interface StatisticsTrendSectionProps {
 }
 
 /**
- * StatisticsTrendSection 渲染「区间筛选 + 每组一张趋势图」。
- * 区间是需要确认才生效的字段,故交给 FilterBar 的 onSubmit 收口(回车即查询)。
+ * StatisticsTrendSection 渲染「标题行(右上角区间切换)+ 每组一张趋势图」。
+ * 自定义区间是需要确认才生效的字段,交给 FilterBar 的 onSubmit 收口(回车即查询)。
  */
 export function StatisticsTrendSection({ load, idPrefix, description }: StatisticsTrendSectionProps) {
-  const [from, setFrom] = useState(() => isoDate(-DEFAULT_RANGE_DAYS))
-  const [to, setTo] = useState(() => isoDate(0))
-  const [range, setRange] = useState({ from: isoDate(-DEFAULT_RANGE_DAYS), to: isoDate(0) })
+  const [query, setQuery] = useUrlState(TREND_QUERY)
+  const custom = query.range === 'custom' && ISO_DATE.test(query.from) && ISO_DATE.test(query.to)
+  const range = custom
+    ? { from: query.from, to: query.to }
+    : { from: isoDate(-Number(query.range === 'custom' ? '30' : query.range)), to: isoDate(0) }
+  const [from, setFrom] = useState(() => (custom ? query.from : range.from))
+  const [to, setTo] = useState(() => (custom ? query.to : range.to))
 
   const statistics = useAsyncResource(
     () => load({ from: range.from, to: range.to }),
@@ -76,13 +94,32 @@ export function StatisticsTrendSection({ load, idPrefix, description }: Statisti
     : undefined
 
   return (
-    <PageSection title="运营统计" description={description}>
+    <section aria-labelledby={`${idPrefix}-trend-title`} className="mt-2">
+      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 id={`${idPrefix}-trend-title`} className="text-md font-semibold text-ink">
+            运营趋势
+          </h2>
+          <p className="mt-0.5 text-sm text-ink-sub">
+            {description}
+            {latest ? ` 最新快照 ${formatDate(latest.date)},共 ${snapshots.length} 天数据。` : ''}
+          </p>
+        </div>
+        <SegmentedControl
+          aria-label="统计区间"
+          size="sm"
+          options={RANGE_OPTIONS}
+          value={query.range}
+          onValueChange={(value) =>
+            value === 'custom' ? setQuery({ range: value, from, to }) : setQuery({ range: value, from: '', to: '' })
+          }
+        />
+      </div>
       <div className="flex flex-col gap-4">
-        {/* 数据区是一组 ChartContainer(各自已是抬起片),筛选走 bare 无底形态,避免片里套片(§6.5.2) */}
+        {query.range === 'custom' ? (
         <FilterBar
-          bare
-          label="统计区间筛选"
-          onSubmit={() => setRange({ from, to })}
+          label="自定义统计区间"
+          onSubmit={() => setQuery({ range: 'custom', from, to })}
           submitLabel="查询"
           submitIcon={CalendarRange}
           submitting={loading}
@@ -104,12 +141,6 @@ export function StatisticsTrendSection({ load, idPrefix, description }: Statisti
             />
           </FilterField>
         </FilterBar>
-
-        {latest ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="neutral">最新快照 {formatDate(latest.date)}</Badge>
-            <Badge tone="jade">共 {snapshots.length} 天数据</Badge>
-          </div>
         ) : null}
 
         {/* 没有任何可呈现的分组时也要出一张容器:它自己有空/载/错三态与引导文案,
@@ -133,7 +164,7 @@ export function StatisticsTrendSection({ load, idPrefix, description }: Statisti
           ))}
         </div>
       </div>
-    </PageSection>
+    </section>
   )
 }
 

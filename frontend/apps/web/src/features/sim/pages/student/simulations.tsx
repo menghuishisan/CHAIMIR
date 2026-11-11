@@ -1,26 +1,27 @@
-// 仿真实验室页(学生侧栏,/student/simulations)。
+// 仿真实验室页(学生侧栏,/student/simulations)。设计 §7.2:
+// 页头 + 搜索;分类筛选用带计数的分类标签(计数来自接口分组计数);卡片网格,卡片显示场景名、分类、
+// 当前版本、运行位置;整卡用当前版本直接进入推演,卡内「其他版本」打开版本弹窗。分类与搜索写进地址。
+//
 // 只做场景检索与版本选择:仿真会话由 M7 实验实例编排产生(POST /sim/sessions 在 internal 组),
 // 学生不能独立建会话。因此本页能直接进入的只有「本机确定性推演」——
 // 平台内置场景在浏览器 Worker 内按同一 seed 复现,不上报动作、不建实时连接(对齐清单 §6.6)。
+// 本校自建场景(compute=isolated)在服务端隔离容器里运行,只能从课程实验进入,
+// 卡片上直接说明且不是链接 —— 不让人点进去才发现进不了。
 //
-// 本校自建场景(compute=isolated)在服务端隔离容器里运行,一个会话一个容器,
-// 会话只能由课程实验编排产生,故本页对它不给「进入推演」入口 —— 不摊出必然失败的按钮。
+// 分类计数另取一次(只带搜索词、不带分类,每页 1 条):接口的分组计数与当前筛选同口径,
+// 选中某一类后其余分类的数字会消失,故标签上的数字取自不带分类的那一次。
 
-import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router'
-import { Layers, Network, Play, Search } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router'
+import { History, Layers, Network, Server } from 'lucide-react'
 import { SIM_COMPUTE, SIM_PACKAGE_STATUS, type SimPackageMeta } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
-  DataPanel,
-  FilterBar,
-  FilterField,
+  Card,
   FormField,
-  Input,
-  MetricStrip,
+  Icon,
   Modal,
   ModalBody,
   ModalContent,
@@ -31,30 +32,37 @@ import {
   PageHeader,
   PageScaffold,
   Pagination,
+  SegmentedControl,
   Select,
   Skeleton,
-  StatusIndicator,
-  Table,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
-import { facetGroup, facetTopEntries } from '../../../../utils/facets'
+import { ResourceError, ResourceState } from '../../../../components/ResourceState'
+import { SearchBox } from '../../../../components/SearchBox'
+import { useAsyncResource, usePagedResource, useUrlState } from '../../../../hooks'
+import { facetGroup, facetSum } from '../../../../utils/facets'
 import { formatDate } from '../../../../utils/formatters'
-import {
-  simCategoryLabel,
-  simComputeLabel,
-  simPackageStatusLabel,
-} from '../../../../utils/labels/sim'
-import { simPackageStatusTone } from '../../statusPresentation'
+import { simCategoryLabel } from '../../../../utils/labels/sim'
+
+/** 地址参数:category 是分类(空为全部),q 是搜索词 */
+const SIM_QUERY = {
+  category: { defaultValue: '' },
+  q: { defaultValue: '' },
+} as const
+
+/** 分类标签里「全部」的取值(分段控件不接受空串) */
+const ALL_CATEGORIES = 'all'
+
+/** workspaceHref 推演工作台地址:版本随地址带入,刷新后回到同一版本 */
+function workspaceHref(code: string, version: string): string {
+  return `/student/simulations/${encodeURIComponent(code)}/workspace?version=${encodeURIComponent(version)}`
+}
 
 /**
  * StudentSimulationsPage 检索可用仿真场景并进入推演。
  */
 export default function StudentSimulationsPage() {
-  const [keyword, setKeyword] = useState('')
-  const [submittedKeyword, setSubmittedKeyword] = useState('')
+  const [query, setQuery] = useUrlState(SIM_QUERY)
   const [versionPickerCode, setVersionPickerCode] = useState<string>()
 
   // 学生只看已发布场景:草稿与审核中的包属教师提交流程,下架包不再可用
@@ -62,220 +70,143 @@ export default function StudentSimulationsPage() {
     (params) =>
       api.sim.getPackages({
         status: SIM_PACKAGE_STATUS.PUBLISHED,
-        keyword: submittedKeyword || undefined,
+        category: query.category || undefined,
+        keyword: query.q || undefined,
         ...params,
       }),
-    [submittedKeyword],
+    [query.category, query.q],
+    { urlPageKey: 'page' },
   )
-
-  // 分类分布取后端 facets.category:与当前筛选同口径的全量分组计数,不用当前页切片去数(§6.5.4)
-  const facets = packages.total === undefined ? undefined : packages.data?.facets
-  const categories = facetGroup(facets, 'category')
-  const categoryKinds = categories ? Object.keys(categories).length : undefined
-  const topCategory = useMemo(
-    () => facetTopEntries(facets, 'category', 1)?.[0],
-    [facets],
+  const categoryCounts = useAsyncResource(
+    () => api.sim.getPackages({ status: SIM_PACKAGE_STATUS.PUBLISHED, keyword: query.q || undefined, page: 1, size: 1 }),
+    [query.q],
+    () => false,
   )
+  const categoryFacets = categoryCounts.data?.facets
+  const categoryOptions = useMemo(() => {
+    const group = facetGroup(categoryFacets, 'category') ?? {}
+    const known = Object.keys(group).sort((a, b) => simCategoryLabel(a).localeCompare(simCategoryLabel(b), 'zh-CN'))
+    // 地址里的分类没有场景时也保留它的标签,否则分段控件无选中项
+    if (query.category && !known.includes(query.category)) known.push(query.category)
+    return [
+      { value: ALL_CATEGORIES, label: '全部', count: facetSum(categoryFacets, 'category') },
+      ...known.map((category) => ({ value: category, label: simCategoryLabel(category), count: group[category] ?? 0 })),
+    ]
+  }, [categoryFacets, query.category])
 
-  // FilterBar 自己是 form 并接住回车,故这里只需要提交动作本身
-  const handleSearch = useCallback(() => {
-    setSubmittedKeyword(keyword.trim())
-  }, [keyword])
-
-  const columns: TableColumn<SimPackageMeta>[] = [
-    {
-      key: 'name',
-      header: '仿真场景',
-      render: (pkg) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{pkg.name}</div>
-          <div className="truncate text-xs text-ink-sub">{simCategoryLabel(pkg.category)}</div>
-        </div>
-      ),
-    },
-    {
-      key: 'version',
-      header: '当前版本',
-      mono: true,
-    },
-    {
-      key: 'compute',
-      header: '运行位置',
-      render: (pkg) => (
-        <Badge tone={pkg.compute === SIM_COMPUTE.BROWSER ? 'jade' : 'info'}>
-          {simComputeLabel(pkg.compute)}
-        </Badge>
-      ),
-    },
-    {
-      key: 'updated_at',
-      header: '更新时间',
-      render: (pkg) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDate(pkg.updated_at)}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (pkg) => (
-        <StatusIndicator tone={simPackageStatusTone(pkg.status)} label={simPackageStatusLabel(pkg.status)} />
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (pkg) =>
-        pkg.compute === SIM_COMPUTE.BROWSER ? (
-          <div className="flex justify-end gap-1">
-            <Button variant="ghost" size="sm" onClick={() => setVersionPickerCode(pkg.code)}>
-              选择版本
-            </Button>
-            <EnterSimulationButton code={pkg.code} version={pkg.version} />
-          </div>
-        ) : (
-          <span className="block text-right text-xs text-ink-sub">随课程实验进入</span>
-        ),
-    },
-  ]
+  const filtered = query.category !== '' || query.q !== ''
+  const list = packages.data?.list ?? []
 
   return (
     <PageScaffold>
-      <PageHeader
-        kicker={<Breadcrumb items={[{ label: '学习区' }]} />}
-        title="仿真实验室"
-        description="选一个场景进入推演。推演在你的浏览器里按固定随机种子运行,每次结果都可复现。"
-        icon={Network}
-      />
+      <PageHeader title="仿真实验室" description="选一个场景开始推演。平台场景在你的浏览器里按固定的随机种子运行,每次结果都能复现。" />
 
-      {/* 指标退为一行内联摘要:分类分布走后端聚合契约(facets.category),
-          是全量口径而非当前页切片(§6.5.4);算力位置在每一行里逐条可见。 */}
-      <MetricStrip
-        label="场景总量摘要"
-        className="mb-5"
-        items={[
-          { label: '可用场景', value: packages.total, hint: '已发布给你的' },
-          { label: '涵盖分类', value: categoryKinds, hint: '按当前搜索统计' },
-          {
-            label: '最多的分类',
-            value: topCategory ? simCategoryLabel(topCategory.value) : '—',
-            hint: topCategory ? `共 ${topCategory.count} 个场景` : packages.total === 0 ? '暂无场景' : undefined,
-          },
-        ]}
-      />
-
-      <DataPanel
-        label="场景列表"
-        filter={
-          <FilterBar label="场景筛选" onSubmit={handleSearch} submitLabel="搜索">
-            <FilterField label="场景名称" htmlFor="sim-keyword">
-              <Input
-                id="sim-keyword"
-                value={keyword}
-                leftIcon={Search}
-                placeholder="输入场景名称"
-                onChange={(event) => setKeyword(event.target.value)}
-              />
-            </FilterField>
-          </FilterBar>
-        }
-        footer={
-          <Pagination
-            page={packages.page}
-            pageSize={packages.pageSize}
-            total={packages.total}
-            onPageChange={packages.setPage}
+      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="-mx-1 overflow-x-auto px-1 pb-1">
+          <SegmentedControl
+            aria-label="按分类筛选"
+            options={categoryOptions}
+            value={query.category || ALL_CATEGORIES}
+            onValueChange={(value) => setQuery({ category: value === ALL_CATEGORIES ? '' : value })}
           />
-        }
-      >
-          <ResourceState
-            resource={packages}
-            emptyIcon={Network}
-            emptyTitle={submittedKeyword ? '没有匹配的场景' : '暂无可用场景'}
-            emptyDescription={
-              submittedKeyword
-                ? '换个关键词再试,或清空搜索查看全部场景。'
-                : '老师提交并通过审核的仿真场景会显示在这里。'
-            }
-            emptyAction={
-              submittedKeyword ? (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setKeyword('')
-                    setSubmittedKeyword('')
-                  }}
-                >
-                  清空搜索
-                </Button>
-              ) : undefined
-            }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-          >
-            {(page) => (
-              <Table
-                columns={columns}
-                data={page.list}
-                rowKey={(item) => item.id}
-                elevated={false}
-                // <md 换行卡(§6.4.1 规则 3):场景名一行、分类与版本一行
-                mobileCard={(item) => ({
-                  title: item.name,
-                  meta: `${simCategoryLabel(item.category)} · 版本 ${item.version}`,
-                  badge: <StatusIndicator tone={simPackageStatusTone(item.status)} label={simPackageStatusLabel(item.status)} />,
-                  action:
-                    item.compute === SIM_COMPUTE.BROWSER ? (
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setVersionPickerCode(item.code)}
-                        >
-                          版本
-                        </Button>
-                        <EnterSimulationButton code={item.code} version={item.version} />
-                      </div>
-                    ) : (
-                      <span className="shrink-0 text-xs text-ink-faint">随课程进入</span>
-                    ),
-                })}
-              />
-            )}
-          </ResourceState>
-      </DataPanel>
+        </div>
+        <SearchBox
+          label="搜索仿真场景"
+          placeholder="搜索场景名称"
+          value={query.q}
+          onSearch={(value) => setQuery({ q: value })}
+        />
+      </div>
+
+      {packages.status === 'error' ? (
+        <ResourceError
+          message={packages.error?.message ?? '仿真场景暂时读取不到'}
+          traceId={packages.error?.traceId}
+          onRetry={packages.reload}
+        />
+      ) : packages.status === 'empty' ? (
+        <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-14 text-center shadow-xs">
+          <Icon icon={Network} size="lg" className="text-ink-faint" />
+          <p className="mt-3 text-md font-semibold text-ink">{filtered ? '没有符合条件的场景' : '还没有可用的仿真场景'}</p>
+          <p className="mt-1.5 text-sm text-ink-sub">
+            {filtered ? '换个分类或关键词试试。' : '平台上架和老师提交并通过审核的场景会显示在这里。'}
+          </p>
+          {filtered ? (
+            <Button variant="outline" className="mt-5" onClick={() => setQuery({ category: '', q: '' })}>
+              看全部场景
+            </Button>
+          ) : null}
+        </div>
+      ) : packages.status === 'loading' && list.length === 0 ? (
+        <ul className="card-grid gap-4" aria-busy="true" aria-label="正在读取仿真场景">
+          {Array.from({ length: 6 }, (_, index) => (
+            <li key={index} className="flex flex-col gap-3 rounded-lg bg-surface p-5 shadow-xs">
+              <Skeleton variant="title" width="half" />
+              <Skeleton variant="line" lines={2} />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <>
+          <ul className="card-grid gap-4" aria-busy={packages.status === 'loading' || undefined}>
+            {list.map((pkg) => (
+              <li key={pkg.id}>
+                <SimPackageCard pkg={pkg} onOtherVersions={() => setVersionPickerCode(pkg.code)} />
+              </li>
+            ))}
+          </ul>
+          <div className="mt-6">
+            <Pagination page={packages.page} pageSize={packages.pageSize} total={packages.total} onPageChange={packages.setPage} />
+          </div>
+        </>
+      )}
 
       {versionPickerCode ? (
-        <VersionPickerModal
-          code={versionPickerCode}
-          onClose={() => setVersionPickerCode(undefined)}
-        />
+        <VersionPickerModal code={versionPickerCode} onClose={() => setVersionPickerCode(undefined)} />
       ) : null}
     </PageScaffold>
   )
 }
 
-interface EnterSimulationButtonProps {
-  code: string
-  version: string
-}
-
 /**
- * EnterSimulationButton 进入指定版本的推演工作台。
- * 版本随路由带入:同一场景的不同版本是不同的推演内容,刷新后必须还能回到同一版本。
+ * SimPackageCard 一个场景:场景名、分类、当前版本、运行位置。
+ * 平台场景整卡链向当前版本的工作台,卡内「其他版本」单独可点;学校自建场景不可点,直接写明从哪里进入。
  */
-function EnterSimulationButton({ code, version }: EnterSimulationButtonProps) {
-  const navigate = useNavigate()
+function SimPackageCard({ pkg, onOtherVersions }: { pkg: SimPackageMeta; onOtherVersions: () => void }) {
+  const runnable = pkg.compute === SIM_COMPUTE.BROWSER
   return (
-    <Button
-      variant="primary"
-      size="sm"
-      leftIcon={Play}
-      onClick={() => navigate(`/student/simulations/${code}/workspace?version=${version}`)}
-    >
-      进入推演
-    </Button>
+    <Card interactive={runnable} className="flex h-full flex-col gap-2 p-5">
+      <div className="flex items-start justify-between gap-3">
+        {runnable ? (
+          <Link to={workspaceHref(pkg.code, pkg.version)} className="card-link line-clamp-2 text-lg font-bold text-ink">
+            {pkg.name}
+          </Link>
+        ) : (
+          <span className="line-clamp-2 text-lg font-bold text-ink">{pkg.name}</span>
+        )}
+        <Badge tone="neutral" className="shrink-0">
+          {simCategoryLabel(pkg.category)}
+        </Badge>
+      </div>
+      <p className="text-sm text-ink-sub">
+        版本 <span className="font-mono">{pkg.version}</span> · {formatDate(pkg.updated_at)} 更新
+      </p>
+      <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-3">
+        {runnable ? (
+          <>
+            <span className="text-sm text-ink-sub">在浏览器里运行</span>
+            <Button variant="ghost" size="sm" leftIcon={History} className="relative z-base" onClick={onOtherVersions}>
+              其他版本
+            </Button>
+          </>
+        ) : (
+          <span className="flex items-center gap-1.5 text-sm text-ink-sub">
+            <Icon icon={Server} size="sm" className="shrink-0" />
+            在学校服务器上运行,请从课程的实验任务里打开
+          </span>
+        )}
+      </div>
+    </Card>
   )
 }
 
@@ -285,7 +216,7 @@ interface VersionPickerModalProps {
 }
 
 /**
- * VersionPickerModal 列出场景的全部版本供选择。
+ * VersionPickerModal 列出场景的全部可用版本供选择。
  * 老版本仍可进入:课程可能指定了特定版本作为教学材料。
  */
 function VersionPickerModal({ code, onClose }: VersionPickerModalProps) {
@@ -296,10 +227,7 @@ function VersionPickerModal({ code, onClose }: VersionPickerModalProps) {
   const options = useMemo(
     () =>
       (versions.data ?? [])
-        .filter(
-          (item) =>
-            item.status === SIM_PACKAGE_STATUS.PUBLISHED && item.compute === SIM_COMPUTE.BROWSER,
-        )
+        .filter((item) => item.status === SIM_PACKAGE_STATUS.PUBLISHED && item.compute === SIM_COMPUTE.BROWSER)
         .map((item) => ({ value: item.version, label: `${item.version} · ${formatDate(item.updated_at)}` })),
     [versions.data],
   )
@@ -309,9 +237,7 @@ function VersionPickerModal({ code, onClose }: VersionPickerModalProps) {
       <ModalContent size="sm">
         <ModalHeader>
           <ModalTitle>选择场景版本</ModalTitle>
-          <ModalDescription>
-            不同版本的推演内容可能不同。如果课程指定了版本,请按老师的要求选择。
-          </ModalDescription>
+          <ModalDescription>不同版本的推演内容可能不同。如果课程指定了版本,请按老师的要求选择。</ModalDescription>
         </ModalHeader>
         <ModalBody>
           <ResourceState
@@ -326,12 +252,7 @@ function VersionPickerModal({ code, onClose }: VersionPickerModalProps) {
                 <Callout tone="info">这个场景当前没有已发布的版本。</Callout>
               ) : (
                 <FormField label="场景版本" required>
-                  <Select
-                    options={options}
-                    value={selected ?? options[0].value}
-                    placeholder="选择版本"
-                    onValueChange={setSelected}
-                  />
+                  <Select options={options} value={selected ?? options[0].value} placeholder="选择版本" onValueChange={setSelected} />
                 </FormField>
               )
             }
@@ -343,13 +264,8 @@ function VersionPickerModal({ code, onClose }: VersionPickerModalProps) {
           </Button>
           <Button
             variant="primary"
-            leftIcon={Play}
             disabled={options.length === 0}
-            onClick={() =>
-              navigate(
-                `/student/simulations/${code}/workspace?version=${selected ?? options[0].value}`,
-              )
-            }
+            onClick={() => navigate(workspaceHref(code, selected ?? options[0].value))}
           >
             进入推演
           </Button>

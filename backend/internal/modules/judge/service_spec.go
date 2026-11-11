@@ -159,7 +159,7 @@ func validateJudgerRequest(req JudgerRequest) (JudgerExecutionSpec, error) {
 
 // judgerNeedsSandbox 统一判定判题器是否必须冻结 M2 judge-private 环境快照。
 func judgerNeedsSandbox(typ int16, runtimeRequired bool) bool {
-	return runtimeRequired || typ == JudgerTypeTestcase || typ == JudgerTypeOnchainAssert || typ == JudgerTypeStaticScan
+	return typ != JudgerTypeTheoryQuestion && (runtimeRequired || typ == JudgerTypeTestcase || typ == JudgerTypeOnchainAssert || typ == JudgerTypeStaticScan)
 }
 
 // validateSubmitRequest 校验内部判题提交契约。

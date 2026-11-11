@@ -8,11 +8,10 @@
 // 表单与教师侧共用同一实现,只是落到不同归属,由 global 显式声明。
 
 import { useMemo, useState } from 'react'
-import { Bug, Database, Plus, Settings2 } from 'lucide-react'
+import { Database, Plus, Settings2 } from 'lucide-react'
 import { type VulnSource } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   Card,
@@ -59,10 +58,8 @@ export default function PlatformVulnerabilitiesPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="漏洞题源"
         description="全平台共享的漏洞案例来源。学校的教师从这些来源同步案例,再转化成本校的赛题。"
-        icon={Bug}
         actions={
           <Button variant="primary" leftIcon={Plus} onClick={() => setFormTarget({})}>
             添加全局来源

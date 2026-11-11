@@ -19,7 +19,6 @@ import {
   RefreshCw,
   Server,
   ShieldCheck,
-  ArrowLeft,
 } from 'lucide-react'
 import {
   ImagePrepullStatus,
@@ -33,7 +32,6 @@ import {
 } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   Checkbox,
@@ -48,7 +46,6 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
-  ObjectIdentity,
   PageHeader,
   PageScaffold,
   PageSection,
@@ -62,7 +59,7 @@ import { api } from '../../../../app/api'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { appConfig } from '../../../../app/config'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
+import { useAsyncResource, usePageLocation, locationLabel } from '../../../../hooks'
 import {
   imagePrepullStatusLabel,
   runtimeImageStatusLabel,
@@ -104,30 +101,10 @@ export default function PlatformRuntimeDetailPage() {
     () => false
   )
 
+  usePageLocation([{ label: locationLabel(runtime, (data) => data.name, '运行时详情') }])
+
   return (
     <PageScaffold>
-      {/*
-        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的运行时名承担,
-        故页面头只出面包屑,末节到「链运行时」为止(§6.5.0 通则 1)。
-      */}
-      <PageHeader
-        kicker={
-          <Breadcrumb
-            items={[{ label: '底层资源' }, { label: '链运行时', href: '/platform-admin/runtimes' }]}
-          />
-        }
-        actions={
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={ArrowLeft}
-            onClick={() => navigate('/platform-admin/runtimes')}
-          >
-            返回列表
-          </Button>
-        }
-      />
-
       <ResourceState
         resource={runtime}
         emptyIcon={Server}
@@ -206,8 +183,8 @@ function RuntimeOverview({
         合成一个标签会让「已开放但自检失败」这种要紧组合读不出来。
         适配清单里的目录、端口、组件数是声明细节,下沉到属性表。
       */}
-      <ObjectIdentity
-        name={runtime.name}
+      <PageHeader
+        title={runtime.name}
         status={
           <div className="flex flex-wrap items-center gap-2">
             <StatusIndicator
@@ -220,13 +197,13 @@ function RuntimeOverview({
             />
           </div>
         }
-        subtitle={`${runtime.code} · ${runtime.eco} · 适配层级 ${runtime.adapter_level}`}
+        description={`${runtime.code} · ${runtime.eco} · 适配层级 ${runtime.adapter_level}`}
         actions={
           <Button variant="outline" onClick={onBack}>
             返回运行时列表
           </Button>
         }
-        properties={[
+        meta={[
           { label: '教师可否选用', value: selectable ? '可以选用' : '暂不可选' },
           { label: '镜像版本数', value: `${images.length} 个` },
           { label: '可自检版本', value: `${selftestImages.length} 个` },

@@ -133,6 +133,16 @@ function compareGroup(group) {
     if (name.startsWith(group.prefix))
       backend.set(screaming(name.slice(group.prefix.length)), value);
   }
+  for (const [member, [path, constant]] of Object.entries(group.aliases ?? {})) {
+    const declarations = [...read(group.go).matchAll(
+      new RegExp(`^\\s*${group.prefix}([A-Za-z0-9_]+)\\s+(?:int16\\s+)?=\\s*contracts\\.${constant}\\s*$`, 'gm'),
+    )];
+    if (!declarations.some((match) => screaming(match[1]) === member)) {
+      return [`${group.enum}.${member}:后端未引用已登记的共享常量 contracts.${constant}`];
+    }
+    const value = goNumericConstants(path).get(constant);
+    if (value !== undefined) backend.set(member, value);
+  }
   const frontend = tsNumericEnum(group.ts, group.enum);
   if (backend.size === 0)
     return [
@@ -386,6 +396,7 @@ const groups = [
     "Type",
     "frontend/packages/api-client/src/constants/content.ts",
     "ContentType",
+    { THEORY_QUESTION: ["backend/internal/contracts/engine_content.go", "ContentTypeTheoryQuestion"] },
   ],
   [
     "backend/internal/modules/content/enum.go",
@@ -490,12 +501,6 @@ const groups = [
     "LatePolicy",
     "frontend/packages/api-client/src/constants/teaching.ts",
     "LatePolicy",
-  ],
-  [
-    "backend/internal/modules/teaching/enum.go",
-    "GradingMode",
-    "frontend/packages/api-client/src/constants/teaching.ts",
-    "GradingMode",
   ],
   [
     "backend/internal/modules/teaching/enum.go",
@@ -760,7 +765,7 @@ const groups = [
     "frontend/packages/api-client/src/constants/notify.ts",
     "AnnouncementScope",
   ],
-].map(([go, prefix, ts, enumName]) => ({ go, prefix, ts, enum: enumName }));
+].map(([go, prefix, ts, enumName, aliases]) => ({ go, prefix, ts, enum: enumName, aliases }));
 
 const stringGroups = [
   [
@@ -770,7 +775,7 @@ const stringGroups = [
     "IMPORT_TEMPLATE_FORMAT",
   ],
   [
-    "backend/internal/modules/identity/enum.go",
+    "backend/internal/contracts/tenant_modules.go",
     "TenantModule",
     "frontend/packages/api-client/src/constants/identity.ts",
     "TENANT_MODULE",

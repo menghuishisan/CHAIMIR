@@ -27,7 +27,6 @@ import {
 } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   MetricStrip,
@@ -155,10 +154,8 @@ export default function PlatformSimulationsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="仿真治理"
         description="教师提交的仿真场景包在这里审核。通过后上架给全平台使用,之后也可以下架或重新上架。"
-        icon={Shield}
       />
 
       {/* 指标降为内联摘要:本页主体是提交记录,不是这三个数字(§6.5.3 第 ① 族) */}
@@ -181,8 +178,7 @@ export default function PlatformSimulationsPage() {
         description="每一条对应一次场景包提交。四项自动校验全过才能通过审核。"
       >
         <div className="flex flex-col gap-4">
-          {/* 数据区是一排 ReviewCard(已是抬起片),筛选走 bare 无底形态,避免片里套片(§6.5.2) */}
-          <FilterBar label="提交记录筛选" bare>
+          <FilterBar label="提交记录筛选">
             <FilterField label="审核状态" group>
               <SegmentedControl
                 aria-label="按审核状态筛选"
@@ -353,7 +349,7 @@ function ReviewCard({ review, onAct }: ReviewCardProps) {
               重新上架
             </Button>
           ) : (
-            <span className="text-sm text-ink-faint">这条记录当前没有可执行的动作</span>
+            <span className="text-sm text-ink-sub">这条记录当前没有可执行的动作</span>
           )}
         </div>
 

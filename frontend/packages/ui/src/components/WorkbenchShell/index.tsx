@@ -52,6 +52,8 @@ export interface WorkbenchTopbarProps {
   title: string;
   /** 副标题(如所属课程/关卡) */
   subtitle?: string;
+  /** 紧跟标题的小控件(如仿真的「换一组条件」与版本切换);属于当前对象本身,不是主操作 */
+  titleExtra?: ReactNode;
   /** ChainProgress 进度插槽,居中展示 */
   progress?: ReactNode;
   /** 单一主 CTA 插槽,靠右 */
@@ -67,11 +69,12 @@ export function WorkbenchTopbar({
   exitLabel = "保存并退出",
   title,
   subtitle,
+  titleExtra,
   progress,
   cta,
 }: WorkbenchTopbarProps) {
   return (
-    <header className="flex h-12 shrink-0 items-center border-b border-dark-line bg-dark-bg">
+    <header className="flex h-14 shrink-0 items-center border-b border-dark-line bg-dark-bg">
       <button
         type="button"
         onClick={onExit}
@@ -82,9 +85,10 @@ export function WorkbenchTopbar({
         {exitLabel}
       </button>
       <div className="min-w-0 px-4">
-        <div className="truncate text-sm font-medium leading-tight text-on-dark">{title}</div>
-        {subtitle && <div className="truncate text-xs leading-tight text-on-dark-sub">{subtitle}</div>}
+        <div className="truncate text-base font-semibold leading-tight text-on-dark">{title}</div>
+        {subtitle && <div className="truncate text-sm leading-tight text-on-dark-sub">{subtitle}</div>}
       </div>
+      {titleExtra && <div className="flex shrink-0 items-center gap-1">{titleExtra}</div>}
       <div className="flex min-w-0 flex-1 items-center justify-center overflow-x-auto px-2">{progress}</div>
       {cta && <div className="flex shrink-0 items-center pl-2 pr-4">{cta}</div>}
     </header>

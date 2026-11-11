@@ -54,7 +54,7 @@ export function Stat({ label, value, icon, delta, hint, chain, className }: Stat
         <span className="text-sm text-ink-sub">{label}</span>
         {icon && <Icon icon={icon} size="lg" className="text-ink-faint" />}
       </div>
-      <div className="mt-2 font-display text-3xl text-ink tabular-nums">{value}</div>
+      <div className="mt-2 text-stat font-bold text-ink tabular-nums">{value}</div>
       {/* 迷你链进度紧贴数值下方(§5.1),delta/hint 再排其后,层次:数值 > 链 > 补充 */}
       {chain && (
         <ChainProgress size="sm" done={chain.done} total={chain.total} className="mt-2" />

@@ -43,9 +43,19 @@ import { formatScore, formatShortDateTime } from '../../../utils/formatters'
 import { gradeSourceLabel } from '../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
 import { GRADE_SOURCES } from '../options'
+import { StudentName } from './StudentName'
+import { useCourseMemberNames, type MemberName } from '../useCourseMemberNames'
 
 export interface CourseGradesProps {
   courseId: string
+}
+
+/** memberTitle 窄屏行卡标题里的学生名(纯文字) */
+function memberTitle(member: MemberName): string {
+  if (member.state === 'found') return member.no ? `${member.name} · ${member.no}` : member.name
+  if (member.state === 'left') return '已退课学生'
+  if (member.state === 'failed') return '姓名暂时读不到'
+  return '正在读取姓名'
 }
 
 /**
@@ -59,6 +69,8 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
 
   const weights = useAsyncResource(() => api.teaching.listGradeWeights(courseId), [courseId], () => false)
   const grades = usePagedResource<TeachingCourseGrade>((params) => api.teaching.listGrades(courseId, params), [courseId])
+  // 成绩记录只回学生编号:用本课成员列表换成姓名与学号,已退课的显示「已退课学生」
+  const names = useCourseMemberNames([courseId])
 
   /** computeGrades 按权重重算全班成绩。 */
   const computeGrades = useCallback(async () => {
@@ -95,10 +107,7 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
     {
       key: 'student_id',
       header: '学生',
-      // 成绩记录只回 student_id;按序号呈现,不把内部编号当学生名显示
-      render: (grade) => (
-        <span className="text-ink">{grade.is_locked ? '成绩已锁定' : '在读学生'}</span>
-      ),
+      render: (grade) => <StudentName member={names.lookup(grade.student_id)} />,
     },
     {
       key: 'auto_total',
@@ -234,7 +243,7 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
                   elevated={false}
                   // <md 换行卡(§6.4.1 规则 3):学生一行、按权重与调整分一行,总评在右
                   mobileCard={(grade) => ({
-                    title: grade.is_locked ? '成绩已锁定' : '在读学生',
+                    title: memberTitle(names.lookup(grade.student_id)),
                     meta: `按权重 ${formatScore(grade.auto_total)}${grade.is_overridden ? ` · 人工调整 ${formatScore(grade.override_total)}` : ''} · ${grade.credits} 学分`,
                     badge: (
                       <span className="font-mono text-sm font-medium text-ink tabular-nums">
@@ -366,7 +375,7 @@ function WeightFormModal({ courseId, current, onClose, onSaved }: WeightFormModa
           ) : null}
           {sources.status === 'empty' ? <Callout tone="info">课程还没有可计分的已发布作业或实验。</Callout> : null}
           {rows.map((row, index) => (
-            <div key={index} className="flex flex-wrap items-end gap-3 well p-3">
+            <div key={index} className="flex flex-wrap items-end gap-3 rounded-md bg-surface-hover p-3">
               <FormField label="成绩来源" htmlFor={`weight-source-${index}`} className="mb-0 w-36">
                 <Select
                   id={`weight-source-${index}`}
@@ -507,7 +516,7 @@ function OverrideGradeModal({ courseId, grade, onClose, onSaved }: OverrideGrade
           </ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
-          <div className="well p-3 text-sm text-ink-sub">
+          <div className="rounded-md bg-surface-hover p-3 text-sm text-ink-sub">
             按权重计算:{formatScore(grade.auto_total)} 分
           </div>
           <FormField label="调整后的总评" htmlFor="override-total" required error={errors.total}>

@@ -1,45 +1,30 @@
-// 组织架构页(校管侧栏,/school-admin/organization)。
+// 组织架构页(校管侧栏,/school-admin/organization)。设计 §7.5:
+// 左栏院系→专业树(搜索、新建院系、在院系下新建专业、重命名、删除);右栏是所选节点的内容:
+// 选中专业时为班级表格(勾选、班级名、入学年份、状态),上方「新建班级」,勾选后出现「批量升届」;
+// 选中院系时是它的专业列表,上方「新建专业」。主操作随选中节点变化,树为空时为「新建院系」。
+// 页头「批量导入」与「整届归档」;选中的节点与搜索词写进地址;删除有下级的节点时先说明原因。
 //
-// 院系 → 专业 → 班级三层,一页维护:三张表量级本就适合一次读齐并在页面层组装成树,
-// 逐个院系去调专业接口会产生 N+1。
-//
-// 升届与归档是按年份的批量动作(后端 promoteClasses 接班级编号 + 目标年份,
-// archiveClasses 接入学年份),两者都会改变学生的班级归属,故各自确认并说明影响范围。
-//
-// 删除有前置条件:院系下有专业、专业下有班级、班级里有学生时后端会拒绝 ——
-// 界面先说明这一点,不让管理员点了才发现删不掉。
+// 三层结构一次并行读齐(loadOrganizationView),在页面层组装成树(organizationTree,与教师组织查看共用)。
+// 升届接班级编号 + 目标年份(只对在读班级,目标年份须晚于原入学年份);归档按入学年份整届进行,
+// 会同时归档该届学生账号并让其下线 —— 两者都各自确认并说明影响范围。
 
 import { useCallback, useMemo, useState } from 'react'
+import { Archive, Building2, GraduationCap, MoreVertical, MoveUp, Network, Pencil, Plus, Trash2, Upload, Users } from 'lucide-react'
+import { ClassStatus, type Class, type Department, type Major } from '@chaimir/api-client'
 import {
-  Archive,
-  Building2,
-  MoveUp,
-  Network,
-  Pencil,
-  Plus,
-  Trash2,
-  Upload,
-  Users,
-} from 'lucide-react'
-import {
-  ClassStatus,
-  type Class,
-  type Department,
-  type Major,
-} from '@chaimir/api-client'
-import {
-  Badge,
-  Breadcrumb,
   Button,
   Callout,
-  Card,
-  CardBody,
-  CardHeader,
   Checkbox,
   Empty,
   FormField,
   IconButton,
   Input,
+  ListRow,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
   Modal,
   ModalBody,
   ModalContent,
@@ -47,31 +32,31 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
-  MetricStrip,
   PageHeader,
   PageScaffold,
-  PageSection,
   SegmentedControl,
   Select,
+  StatusIndicator,
   toast,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
+import { useAsyncResource, useUrlState } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { CLASS_STATUS_LABELS } from '../../../../utils/labels/identity'
-import {
-  OrganizationClassSection,
-  type OrganizationClassRow,
-} from '../../components/OrganizationClassSection'
-import {
-  countClassesByMajor,
-  loadOrganizationView,
-  type OrganizationView,
-} from '../../organizationView'
+import { OrgTree } from '../../components/OrgTree'
+import { loadOrganizationView, type OrganizationView } from '../../organizationView'
+import { buildOrgTree, classesOfMajor, resolveOrgSelection } from '../../organizationTree'
+import { CLASS_STATUS_TONES } from '../../statusPresentation'
 import { OrgImportModal } from './org-import'
+
+/** 地址参数:dept / major 是选中的节点(专业优先),q 是树上方的搜索词 */
+const ORG_QUERY = {
+  dept: { defaultValue: '' },
+  major: { defaultValue: '' },
+  q: { defaultValue: '' },
+} as const
 
 /** 待删除目标:三层各自的删除前置条件不同,用一个联合类型统一确认弹窗。 */
 type DeleteTarget =
@@ -79,243 +64,54 @@ type DeleteTarget =
   | { kind: 'major'; item: Major }
   | { kind: 'class'; item: Class }
 
-const DELETE_COPY: Record<DeleteTarget['kind'], { title: string; description: string }> = {
-  department: {
-    title: '确认删除院系',
-    description: '院系下还有专业时无法删除。请先移除或调整这些专业。',
-  },
-  major: {
-    title: '确认删除专业',
-    description: '专业下还有班级时无法删除。请先移除或调整这些班级。',
-  },
-  class: {
-    title: '确认删除班级',
-    description: '班级里还有学生时无法删除。可以改为归档,归档后班级不再出现在常规名单里。',
-  },
+const DELETE_TITLES: Record<DeleteTarget['kind'], string> = {
+  department: '删除这个院系?',
+  major: '删除这个专业?',
+  class: '删除这个班级?',
+}
+
+/**
+ * deleteBlocker 有下级时不能删除,返回原因(后端同样会拒绝);班级里有没有学生页面拿不到,由后端判断。
+ */
+function deleteBlocker(target: DeleteTarget, view: OrganizationView): string | undefined {
+  if (target.kind === 'department') {
+    const count = view.majors.filter((major) => major.department_id === target.item.id).length
+    return count > 0 ? `这个院系下还有 ${count} 个专业,要先删除或调整这些专业才能删除院系。` : undefined
+  }
+  if (target.kind === 'major') {
+    const count = view.classes.filter((entity) => entity.major_id === target.item.id).length
+    return count > 0 ? `这个专业下还有 ${count} 个班级,要先删除或调整这些班级才能删除专业。` : undefined
+  }
+  return undefined
 }
 
 /**
  * SchoolAdminOrganizationPage 维护院系、专业与班级三层结构。
  */
 export default function SchoolAdminOrganizationPage() {
-  const [statusFilter, setStatusFilter] = useState<string>('')
-  const [keyword, setKeyword] = useState('')
-  const [departmentForm, setDepartmentForm] = useState<{ item?: Department } | undefined>()
-  const [majorForm, setMajorForm] = useState<{ item?: Major } | undefined>()
-  const [classForm, setClassForm] = useState<{ item?: Class } | undefined>()
-  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>()
-  const [promoteOpen, setPromoteOpen] = useState(false)
-  const [archiveOpen, setArchiveOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
-  const [working, setWorking] = useState(false)
-  const [actionError, setActionError] = useState<string>()
-
-  const view = useAsyncResource<OrganizationView>(
-    loadOrganizationView,
-    [],
-    () => false,
-  )
-
-  const runDelete = useCallback(async () => {
-    if (!deleteTarget) return
-    setWorking(true)
-    setActionError(undefined)
-    try {
-      if (deleteTarget.kind === 'department') await api.identity.deleteDepartment(deleteTarget.item.id)
-      if (deleteTarget.kind === 'major') await api.identity.deleteMajor(deleteTarget.item.id)
-      if (deleteTarget.kind === 'class') await api.identity.deleteClass(deleteTarget.item.id)
-      toast.success('已删除')
-      setDeleteTarget(undefined)
-      view.reload()
-    } catch (error) {
-      setActionError(userFacingErrorMessage(error, '删除没有成功。可能下级还有内容,请先处理下级。'))
-    } finally {
-      setWorking(false)
-    }
-  }, [deleteTarget, view])
-
-  const data = view.data
-
-  const stats = useMemo(() => {
-    if ((view.status !== 'success' && view.status !== 'empty') || !data) return undefined
-    return {
-      departments: data.departments.length,
-      majors: data.majors.length,
-      classes: data.classes.length,
-      active: data.classes.filter((item) => item.status === ClassStatus.ACTIVE).length,
-    }
-  }, [data, view.status])
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const view = useAsyncResource<OrganizationView>(loadOrganizationView, [], () => false)
 
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '用户与组织' }]} />}
         title="组织架构"
-        description="维护院系、专业与班级。账号开通时按这里的结构选择归属,所以建议先建好组织。"
-        icon={Network}
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <Button variant="ghost" leftIcon={Archive} disabled={view.status !== 'success'} onClick={() => setArchiveOpen(true)}>
+              整届归档
+            </Button>
             <Button variant="outline" leftIcon={Upload} onClick={() => setImportOpen(true)}>
               批量导入
-            </Button>
-            <Button variant="primary" leftIcon={Plus} onClick={() => setDepartmentForm({})}>
-              新建院系
             </Button>
           </div>
         }
       />
 
-      {/*
-        归族:资源列表族(§6.5.3 第 ①)。四项由一次取齐的全量列表算出,
-        三个组织接口都不分页,故客户端聚合就是全量口径(§6.5.4)。指标降为内联摘要:
-        这一页的主体是院系专业卡与班级明细表,不是四个数字。
-      */}
-      <MetricStrip
-        label="组织规模摘要"
-        className="mb-5"
-        items={[
-          { label: '院系', value: stats?.departments, hint: '已建立的院系' },
-          { label: '专业', value: stats?.majors, hint: '各院系下设专业' },
-          { label: '班级', value: stats?.classes, hint: '含已归档' },
-          {
-            label: '在读班级',
-            value: stats?.active,
-            hint: stats ? `已归档 ${stats.classes - stats.active} 个` : undefined,
-          },
-        ]}
-      />
-
-      <ResourceState
-        resource={view}
-        emptyIcon={Network}
-        emptyTitle="还没有组织结构"
-        emptyDescription="先建院系,再在院系下建专业,最后建班级。也可以用批量导入一次建好。"
-        emptyAction={
-          <Button variant="primary" leftIcon={Plus} onClick={() => setDepartmentForm({})}>
-            新建院系
-          </Button>
-        }
-      >
-        {(value) => (
-          <>
-            {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
-            <PageSection
-              title="院系与专业"
-              description="每个院系下设的专业。带的数字是该专业当前的班级数。"
-              actions={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  leftIcon={Plus}
-                  disabled={value.departments.length === 0}
-                  onClick={() => setMajorForm({})}
-                >
-                  新建专业
-                </Button>
-              }
-            >
-              {value.departments.length === 0 ? (
-                <Empty
-                  icon={Building2}
-                  title="还没有院系"
-                  description="院系是组织结构的第一层,先建院系。"
-                  action={
-                    <Button variant="primary" leftIcon={Plus} onClick={() => setDepartmentForm({})}>
-                      新建院系
-                    </Button>
-                  }
-                />
-              ) : (
-                <div className={value.departments.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
-                  {value.departments.map((department) => (
-                    <DepartmentCard
-                      key={department.id}
-                      department={department}
-                      majors={value.majors.filter((major) => major.department_id === department.id)}
-                      classes={value.classes}
-                      onEdit={() => setDepartmentForm({ item: department })}
-                      onDelete={() => setDeleteTarget({ kind: 'department', item: department })}
-                      onEditMajor={(major) => setMajorForm({ item: major })}
-                      onDeleteMajor={(major) => setDeleteTarget({ kind: 'major', item: major })}
-                    />
-                  ))}
-                </div>
-              )}
-            </PageSection>
-
-            <ClassesSection
-              view={value}
-              statusFilter={statusFilter}
-              keyword={keyword}
-              onStatusChange={setStatusFilter}
-              onKeywordChange={setKeyword}
-              onCreate={() => setClassForm({})}
-              onEdit={(item) => setClassForm({ item })}
-              onDelete={(item) => setDeleteTarget({ kind: 'class', item })}
-              onPromote={() => setPromoteOpen(true)}
-              onArchive={() => setArchiveOpen(true)}
-            />
-          </>
-        )}
+      <ResourceState resource={view} emptyIcon={Network} emptyTitle="还没有组织结构" emptyDescription="先建院系,再在院系下建专业,最后建班级。">
+        {(data) => <OrgManager view={data} onChanged={view.reload} />}
       </ResourceState>
-
-      {departmentForm ? (
-        <DepartmentFormModal
-          department={departmentForm.item}
-          onClose={() => setDepartmentForm(undefined)}
-          onSaved={() => {
-            setDepartmentForm(undefined)
-            view.reload()
-          }}
-        />
-      ) : null}
-
-      {majorForm && data ? (
-        <MajorFormModal
-          major={majorForm.item}
-          departments={data.departments}
-          onClose={() => setMajorForm(undefined)}
-          onSaved={() => {
-            setMajorForm(undefined)
-            view.reload()
-          }}
-        />
-      ) : null}
-
-      {classForm && data ? (
-        <ClassFormModal
-          item={classForm.item}
-          majors={data.majors}
-          onClose={() => setClassForm(undefined)}
-          onSaved={() => {
-            setClassForm(undefined)
-            view.reload()
-          }}
-        />
-      ) : null}
-
-      {promoteOpen && data ? (
-        <PromoteClassesModal
-          classes={data.classes}
-          onClose={() => setPromoteOpen(false)}
-          onDone={() => {
-            setPromoteOpen(false)
-            view.reload()
-          }}
-        />
-      ) : null}
-
-      {archiveOpen && data ? (
-        <ArchiveClassesModal
-          classes={data.classes}
-          onClose={() => setArchiveOpen(false)}
-          onDone={() => {
-            setArchiveOpen(false)
-            view.reload()
-          }}
-        />
-      ) : null}
 
       {importOpen ? (
         <OrgImportModal
@@ -327,200 +123,401 @@ export default function SchoolAdminOrganizationPage() {
         />
       ) : null}
 
-      <Modal open={deleteTarget !== undefined} onOpenChange={(open) => !open && setDeleteTarget(undefined)}>
+      {archiveOpen && view.data ? (
+        <ArchiveClassesModal
+          classes={view.data.classes}
+          onClose={() => setArchiveOpen(false)}
+          onDone={() => {
+            setArchiveOpen(false)
+            view.reload()
+          }}
+        />
+      ) : null}
+    </PageScaffold>
+  )
+}
+
+/** OrgManager 左栏树 + 右栏所选节点;表单与删除确认都从这里打开 */
+function OrgManager({ view, onChanged }: { view: OrganizationView; onChanged: () => void }) {
+  const [query, setQuery] = useUrlState(ORG_QUERY)
+  const [departmentForm, setDepartmentForm] = useState<{ item?: Department } | undefined>()
+  const [majorForm, setMajorForm] = useState<{ item?: Major; departmentId?: string } | undefined>()
+  const [classForm, setClassForm] = useState<{ item?: Class; majorId?: string } | undefined>()
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget>()
+  const [promoteIds, setPromoteIds] = useState<string[]>()
+  const [working, setWorking] = useState(false)
+  const [deleteError, setDeleteError] = useState<string>()
+
+  const tree = useMemo(
+    () => buildOrgTree(view.departments, view.majors, view.classes, query.q),
+    [query.q, view.classes, view.departments, view.majors],
+  )
+  const selection = resolveOrgSelection(tree, { dept: query.dept, major: query.major })
+  const departmentNode = selection ? tree.find((node) => node.department.id === selection.departmentId) : undefined
+  const selectedMajor =
+    selection?.kind === 'major' ? departmentNode?.majors.find((child) => child.major.id === selection.majorId)?.major : undefined
+
+  const runDelete = useCallback(async () => {
+    if (!deleteTarget) return
+    setWorking(true)
+    setDeleteError(undefined)
+    try {
+      if (deleteTarget.kind === 'department') await api.identity.deleteDepartment(deleteTarget.item.id)
+      if (deleteTarget.kind === 'major') await api.identity.deleteMajor(deleteTarget.item.id)
+      if (deleteTarget.kind === 'class') await api.identity.deleteClass(deleteTarget.item.id)
+      toast.success(`已删除:${deleteTarget.item.name}`)
+      setDeleteTarget(undefined)
+      onChanged()
+    } catch (error) {
+      setDeleteError(userFacingErrorMessage(error, '删除没有成功,请稍后重试。'))
+    } finally {
+      setWorking(false)
+    }
+  }, [deleteTarget, onChanged])
+
+  const nodeMenu = (items: { label: string; icon: typeof Pencil; onSelect: () => void; danger?: boolean }[], name: string) => (
+    <Menu>
+      <MenuTrigger asChild>
+        <IconButton variant="ghost" size="sm" icon={MoreVertical} aria-label={`${name} 的更多操作`} />
+      </MenuTrigger>
+      <MenuContent align="end">
+        {items.map((entry, index) =>
+          entry.danger ? (
+            <span key={entry.label}>
+              {index > 0 ? <MenuSeparator /> : null}
+              <MenuItem danger icon={entry.icon} onSelect={entry.onSelect}>
+                {entry.label}
+              </MenuItem>
+            </span>
+          ) : (
+            <MenuItem key={entry.label} icon={entry.icon} onSelect={entry.onSelect}>
+              {entry.label}
+            </MenuItem>
+          ),
+        )}
+      </MenuContent>
+    </Menu>
+  )
+
+  const blocker = deleteTarget ? deleteBlocker(deleteTarget, view) : undefined
+
+  return (
+    <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+      <div className="lg:sticky lg:top-6 lg:w-80 lg:shrink-0">
+        <OrgTree
+          tree={tree}
+          selection={selection}
+          keyword={query.q}
+          onSearch={(value) => setQuery({ q: value })}
+          onSelectDepartment={(id) => setQuery({ dept: id, major: '' })}
+          onSelectMajor={(id) => setQuery({ major: id, dept: '' })}
+          emptyText="还没有院系。院系是组织结构的第一层。"
+          action={
+            <>
+              <span className="text-sm font-semibold text-ink">院系与专业</span>
+              <Button variant={view.departments.length === 0 ? 'primary' : 'ghost'} size="sm" leftIcon={Plus} onClick={() => setDepartmentForm({})}>
+                新建院系
+              </Button>
+            </>
+          }
+          renderDepartmentActions={(department) =>
+            nodeMenu(
+              [
+                { label: '在此院系下新建专业', icon: Plus, onSelect: () => setMajorForm({ departmentId: department.id }) },
+                { label: '重命名', icon: Pencil, onSelect: () => setDepartmentForm({ item: department }) },
+                { label: '删除', icon: Trash2, danger: true, onSelect: () => setDeleteTarget({ kind: 'department', item: department }) },
+              ],
+              department.name,
+            )
+          }
+          renderMajorActions={(major) =>
+            nodeMenu(
+              [
+                { label: '重命名', icon: Pencil, onSelect: () => setMajorForm({ item: major }) },
+                { label: '删除', icon: Trash2, danger: true, onSelect: () => setDeleteTarget({ kind: 'major', item: major }) },
+              ],
+              major.name,
+            )
+          }
+        />
+      </div>
+
+      <section aria-live="polite" className="min-w-0 flex-1">
+        {view.departments.length === 0 ? (
+          <div className="rounded-lg bg-surface shadow-xs">
+            <Empty
+              icon={Building2}
+              title="先建院系"
+              description="先建院系,再在院系下建专业,最后建班级。也可以用批量导入一次建好。"
+              action={
+                <Button variant="primary" leftIcon={Plus} onClick={() => setDepartmentForm({})}>
+                  新建院系
+                </Button>
+              }
+            />
+          </div>
+        ) : !selection || !departmentNode ? (
+          <div className="rounded-lg bg-surface shadow-xs">
+            <Empty icon={Network} title="没有匹配的内容" description="换个搜索词,或清空搜索查看全部。" />
+          </div>
+        ) : selection.kind === 'major' && selectedMajor ? (
+          <MajorPane
+            department={departmentNode.department}
+            major={selectedMajor}
+            classes={view.classes}
+            keyword={query.q}
+            onCreate={() => setClassForm({ majorId: selectedMajor.id })}
+            onEdit={(item) => setClassForm({ item })}
+            onDelete={(item) => setDeleteTarget({ kind: 'class', item })}
+            onPromote={setPromoteIds}
+          />
+        ) : (
+          <DepartmentPane
+            department={departmentNode.department}
+            majors={departmentNode.majors}
+            onCreate={() => setMajorForm({ departmentId: departmentNode.department.id })}
+            onOpen={(id) => setQuery({ major: id, dept: '' })}
+          />
+        )}
+      </section>
+
+      {departmentForm ? (
+        <DepartmentFormModal
+          department={departmentForm.item}
+          onClose={() => setDepartmentForm(undefined)}
+          onSaved={() => {
+            setDepartmentForm(undefined)
+            onChanged()
+          }}
+        />
+      ) : null}
+
+      {majorForm ? (
+        <MajorFormModal
+          major={majorForm.item}
+          departments={view.departments}
+          initialDepartmentId={majorForm.departmentId}
+          onClose={() => setMajorForm(undefined)}
+          onSaved={() => {
+            setMajorForm(undefined)
+            onChanged()
+          }}
+        />
+      ) : null}
+
+      {classForm ? (
+        <ClassFormModal
+          item={classForm.item}
+          majors={view.majors}
+          initialMajorId={classForm.majorId}
+          onClose={() => setClassForm(undefined)}
+          onSaved={() => {
+            setClassForm(undefined)
+            onChanged()
+          }}
+        />
+      ) : null}
+
+      {promoteIds ? (
+        <PromoteClassesModal
+          classes={view.classes.filter((entity) => promoteIds.includes(entity.id))}
+          onClose={() => setPromoteIds(undefined)}
+          onDone={() => {
+            setPromoteIds(undefined)
+            onChanged()
+          }}
+        />
+      ) : null}
+
+      <Modal
+        open={deleteTarget !== undefined}
+        onOpenChange={(open) => {
+          if (!open && !working) {
+            setDeleteTarget(undefined)
+            setDeleteError(undefined)
+          }
+        }}
+      >
         <ModalContent size="sm">
           {deleteTarget ? (
             <>
               <ModalHeader>
-                <ModalTitle>{DELETE_COPY[deleteTarget.kind].title}</ModalTitle>
-                <ModalDescription>{DELETE_COPY[deleteTarget.kind].description}</ModalDescription>
+                <ModalTitle>{blocker ? `暂时不能删除「${deleteTarget.item.name}」` : DELETE_TITLES[deleteTarget.kind]}</ModalTitle>
+                <ModalDescription>
+                  {blocker ??
+                    (deleteTarget.kind === 'class'
+                      ? '班级里还有学生时不能删除,可以改为归档。删除不能撤销。'
+                      : '删除不能撤销。')}
+                </ModalDescription>
               </ModalHeader>
-              <ModalBody>
-                <p className="text-base text-ink">{deleteTarget.item.name}</p>
-              </ModalBody>
+              {blocker ? null : (
+                <ModalBody className="flex flex-col gap-3">
+                  <p className="text-base font-medium text-ink">{deleteTarget.item.name}</p>
+                  {deleteError ? <Callout tone="danger">{deleteError}</Callout> : null}
+                </ModalBody>
+              )}
               <ModalFooter>
-                <Button variant="outline" onClick={() => setDeleteTarget(undefined)}>
-                  取消
+                <Button variant="outline" disabled={working} onClick={() => setDeleteTarget(undefined)}>
+                  {blocker ? '知道了' : '取消'}
                 </Button>
-                <Button variant="danger" loading={working} onClick={() => void runDelete()}>
-                  确认删除
-                </Button>
+                {blocker ? null : (
+                  <Button variant="danger" loading={working} onClick={() => void runDelete()}>
+                    确认删除
+                  </Button>
+                )}
               </ModalFooter>
             </>
           ) : null}
         </ModalContent>
       </Modal>
-    </PageScaffold>
+    </div>
   )
 }
 
-interface DepartmentCardProps {
+interface MajorPaneProps {
   department: Department
-  majors: Major[]
+  major: Major
   classes: Class[]
-  onEdit: () => void
-  onDelete: () => void
-  onEditMajor: (major: Major) => void
-  onDeleteMajor: (major: Major) => void
-}
-
-/**
- * DepartmentCard 展示单个院系及其专业,并承载两层的编辑与删除。
- */
-function DepartmentCard({
-  department,
-  majors,
-  classes,
-  onEdit,
-  onDelete,
-  onEditMajor,
-  onDeleteMajor,
-}: DepartmentCardProps) {
-  const classCountByMajor = useMemo(() => countClassesByMajor(classes), [classes])
-
-  return (
-    <Card>
-      <CardHeader
-        title={department.name}
-        description={`院系代码 ${department.code}`}
-        actions={
-          <div className="flex items-center gap-1">
-            <Badge tone="neutral">{majors.length} 个专业</Badge>
-            <IconButton variant="ghost" size="sm" icon={Pencil} aria-label={`编辑 ${department.name}`} onClick={onEdit} />
-            <IconButton
-              variant="ghost"
-              size="sm"
-              icon={Trash2}
-              aria-label={`删除 ${department.name}`}
-              onClick={onDelete}
-            />
-          </div>
-        }
-      />
-      <CardBody>
-        {majors.length === 0 ? (
-          <p className="text-sm text-ink-sub">这个院系下还没有专业。</p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {majors.map((major) => (
-              <li key={major.id} className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate text-sm text-ink">
-                  {major.name}
-                  <span className="ml-1.5 text-xs text-ink-sub">
-                    {classCountByMajor.get(major.id) ?? 0} 个班
-                  </span>
-                </span>
-                <span className="flex shrink-0 items-center gap-1">
-                  <IconButton
-                    variant="ghost"
-                    size="sm"
-                    icon={Pencil}
-                    aria-label={`编辑 ${major.name}`}
-                    onClick={() => onEditMajor(major)}
-                  />
-                  <IconButton
-                    variant="ghost"
-                    size="sm"
-                    icon={Trash2}
-                    aria-label={`删除 ${major.name}`}
-                    onClick={() => onDeleteMajor(major)}
-                  />
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardBody>
-    </Card>
-  )
-}
-
-interface ClassesSectionProps {
-  view: OrganizationView
-  statusFilter: string
   keyword: string
-  onStatusChange: (value: string) => void
-  onKeywordChange: (value: string) => void
   onCreate: () => void
   onEdit: (item: Class) => void
   onDelete: (item: Class) => void
-  onPromote: () => void
-  onArchive: () => void
+  /** 以勾选的班级打开批量升届 */
+  onPromote: (classIds: string[]) => void
 }
 
 /**
- * ClassesSection 渲染班级明细与批量升届/归档入口。
+ * MajorPane 所选专业的班级:「新建班级」为主操作;在读班级可勾选,勾选后出现「批量升届」。
+ * 已归档的班级不能升届(后端同一口径),不给勾选框。
  */
-function ClassesSection({
-  view,
-  statusFilter,
-  keyword,
-  onStatusChange,
-  onKeywordChange,
-  onCreate,
-  onEdit,
-  onDelete,
-  onPromote,
-  onArchive,
-}: ClassesSectionProps) {
-  const columns: TableColumn<OrganizationClassRow>[] = [
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (row) => (
-        <div className="flex items-center justify-end gap-1">
-          <IconButton
-            variant="ghost"
-            size="sm"
-            icon={Pencil}
-            aria-label={`编辑 ${row.entity.name}`}
-            onClick={() => onEdit(row.entity)}
-          />
-          <IconButton
-            variant="ghost"
-            size="sm"
-            icon={Trash2}
-            aria-label={`删除 ${row.entity.name}`}
-            onClick={() => onDelete(row.entity)}
-          />
-        </div>
-      ),
-    },
-  ]
+function MajorPane({ department, major, classes, keyword, onCreate, onEdit, onDelete, onPromote }: MajorPaneProps) {
+  const { list, filtered } = classesOfMajor(classes, major.id, keyword)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  // 切换专业或列表变化后,只保留仍在当前列表里的在读班级
+  const selectable = list.filter((entity) => entity.status === ClassStatus.ACTIVE)
+  const picked = selectable.filter((entity) => selected.has(entity.id))
+  const allPicked = selectable.length > 0 && picked.length === selectable.length
 
   return (
-    <OrganizationClassSection
-      view={view}
-      keyword={keyword}
-      statusFilter={statusFilter}
-      onKeywordChange={onKeywordChange}
-      onStatusChange={onStatusChange}
-      description={(count) => `共 ${count} 个班级。升届把班级整体升到下一年级,归档把某一届班级转为已归档。`}
-      emptyDescription={
-        view.majors.length === 0 ? '先建专业,才能在专业下建班级。' : '班级是学生账号的归属,开通学生账号前先建班级。'
-      }
-      actions={
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" leftIcon={MoveUp} onClick={onPromote}>
-            批量升届
-          </Button>
-          <Button variant="outline" size="sm" leftIcon={Archive} onClick={onArchive}>
-            批量归档
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            leftIcon={Plus}
-            disabled={view.majors.length === 0}
-            onClick={onCreate}
-          >
-            新建班级
-          </Button>
+    <div className="rounded-lg bg-surface p-5 shadow-xs">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold text-ink">{major.name}</h2>
+          <p className="mt-0.5 text-sm text-ink-sub">
+            {department.name} · {filtered ? `匹配的 ${list.length} 个班级` : `${list.length} 个班级`}
+          </p>
         </div>
-      }
-      extraColumns={columns}
-    />
+        <Button variant="primary" leftIcon={Plus} onClick={onCreate}>
+          新建班级
+        </Button>
+      </div>
+
+      {picked.length > 0 ? (
+        <div role="region" aria-label="批量操作" className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-md bg-primary-soft px-3 py-2">
+          <span className="text-sm font-medium text-ink">已选 {picked.length} 个班级</span>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" leftIcon={MoveUp} onClick={() => onPromote(picked.map((entity) => entity.id))}>
+              批量升届
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+              取消选择
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {list.length === 0 ? (
+        <Empty icon={Users} title="这个专业下还没有班级" description="班级是学生账号的归属,开通学生账号前先建班级。" />
+      ) : (
+        <>
+          <div className="mt-4 flex items-center gap-3 border-b border-line px-1 pb-2 text-xs text-ink-sub">
+            <Checkbox
+              checked={allPicked}
+              disabled={selectable.length === 0}
+              aria-label="选择全部在读班级"
+              onCheckedChange={(checked) => setSelected(checked === true ? new Set(selectable.map((entity) => entity.id)) : new Set())}
+            />
+            <span>班级 · 入学年份 · 状态</span>
+          </div>
+          <ul className="divide-y divide-line">
+            {list.map((entity) => {
+              const active = entity.status === ClassStatus.ACTIVE
+              return (
+                <li key={entity.id} className="flex items-center gap-3 px-1">
+                  {active ? (
+                    <Checkbox
+                      checked={selected.has(entity.id)}
+                      aria-label={`选择 ${entity.name}`}
+                      onCheckedChange={(checked) => {
+                        const next = new Set(selected)
+                        if (checked === true) next.add(entity.id)
+                        else next.delete(entity.id)
+                        setSelected(next)
+                      }}
+                    />
+                  ) : (
+                    <span aria-hidden="true" className="size-4 shrink-0" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <ListRow
+                      title={entity.name}
+                      meta={`${entity.enrollment_year} 级`}
+                      trailing={
+                        <span className="flex items-center gap-2">
+                          <StatusIndicator tone={CLASS_STATUS_TONES[entity.status]} label={CLASS_STATUS_LABELS[entity.status]} />
+                          <IconButton variant="ghost" size="sm" icon={Pencil} aria-label={`编辑 ${entity.name}`} onClick={() => onEdit(entity)} />
+                          <IconButton variant="ghost" size="sm" icon={Trash2} aria-label={`删除 ${entity.name}`} onClick={() => onDelete(entity)} />
+                        </span>
+                      }
+                    />
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** DepartmentPane 所选院系的专业列表:「新建专业」为主操作,整行切到该专业的班级 */
+function DepartmentPane({
+  department,
+  majors,
+  onCreate,
+  onOpen,
+}: {
+  department: Department
+  majors: { major: Major; classCount: number }[]
+  onCreate: () => void
+  onOpen: (majorId: string) => void
+}) {
+  return (
+    <div className="rounded-lg bg-surface p-5 shadow-xs">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold text-ink">{department.name}</h2>
+          <p className="mt-0.5 text-sm text-ink-sub">
+            院系代码 {department.code} · {majors.length} 个专业
+          </p>
+        </div>
+        <Button variant="primary" leftIcon={Plus} onClick={onCreate}>
+          新建专业
+        </Button>
+      </div>
+      {majors.length === 0 ? (
+        <Empty icon={GraduationCap} title="这个院系下还没有专业" description="在院系下建专业,再在专业下建班级。" />
+      ) : (
+        <ul className="mt-3 divide-y divide-line">
+          {majors.map(({ major, classCount }) => (
+            <li key={major.id}>
+              <ListRow title={major.name} meta={`${classCount} 个班级`} onSelect={() => onOpen(major.id)} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }
 
@@ -611,6 +608,8 @@ function DepartmentFormModal({ department, onClose, onSaved }: DepartmentFormMod
 interface MajorFormModalProps {
   major?: Major
   departments: Department[]
+  /** 新建时预选的院系(从树上「在此院系下新建专业」或院系页进入) */
+  initialDepartmentId?: string
   onClose: () => void
   onSaved: () => void
 }
@@ -618,10 +617,10 @@ interface MajorFormModalProps {
 /**
  * MajorFormModal 承载专业新建与编辑。
  */
-function MajorFormModal({ major, departments, onClose, onSaved }: MajorFormModalProps) {
+function MajorFormModal({ major, departments, initialDepartmentId, onClose, onSaved }: MajorFormModalProps) {
   const editing = major !== undefined
   const [name, setName] = useState(major?.name ?? '')
-  const [departmentId, setDepartmentId] = useState(major?.department_id ?? '')
+  const [departmentId, setDepartmentId] = useState(major?.department_id ?? initialDepartmentId ?? '')
   const { errors, validate } = useFormValidation(() => ({
     name: name.trim() ? null : '请输入专业名称',
     department: departmentId ? null : '请选择所属院系',
@@ -698,6 +697,8 @@ function MajorFormModal({ major, departments, onClose, onSaved }: MajorFormModal
 interface ClassFormModalProps {
   item?: Class
   majors: Major[]
+  /** 新建时预选的专业(从专业页进入) */
+  initialMajorId?: string
   onClose: () => void
   onSaved: () => void
 }
@@ -705,10 +706,10 @@ interface ClassFormModalProps {
 /**
  * ClassFormModal 承载班级新建与编辑。
  */
-function ClassFormModal({ item, majors, onClose, onSaved }: ClassFormModalProps) {
+function ClassFormModal({ item, majors, initialMajorId, onClose, onSaved }: ClassFormModalProps) {
   const editing = item !== undefined
   const [name, setName] = useState(item?.name ?? '')
-  const [majorId, setMajorId] = useState(item?.major_id ?? '')
+  const [majorId, setMajorId] = useState(item?.major_id ?? initialMajorId ?? '')
   const [year, setYear] = useState(String(item?.enrollment_year ?? new Date().getFullYear()))
   const [status, setStatus] = useState(String(item?.status ?? ClassStatus.ACTIVE))
   const { errors, validate } = useFormValidation(() => ({
@@ -827,7 +828,8 @@ interface PromoteClassesModalProps {
  * 故这里勾选具体班级而不是笼统"全校升届"。
  */
 function PromoteClassesModal({ classes, onClose, onDone }: PromoteClassesModalProps) {
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  // 从专业页勾选进入:传入的班级默认全选,在这里还可以再去掉几个
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(classes.map((item) => item.id)))
   const [targetYear, setTargetYear] = useState(String(new Date().getFullYear()))
   const { errors, validate } = useFormValidation(() => ({
     classes: selected.size > 0 ? null : '请至少勾选一个班级',
@@ -863,7 +865,7 @@ function PromoteClassesModal({ classes, onClose, onDone }: PromoteClassesModalPr
         <ModalHeader>
           <ModalTitle>批量升届</ModalTitle>
           <ModalDescription>
-            把选中班级的入学年份统一改成目标年份。班级里的学生归属不变。
+            把选中班级的入学年份统一改成目标年份(须晚于原来的入学年份),班里学生的入学年份一并更新;学生归属不变。
           </ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
@@ -883,7 +885,7 @@ function PromoteClassesModal({ classes, onClose, onDone }: PromoteClassesModalPr
             <Empty icon={Users} title="没有在读班级" description="只有在读班级可以升届。" />
           ) : (
             <FormField label="选择班级" required error={errors.classes}>
-              <div className="flex max-h-72 flex-col gap-2 overflow-y-auto well p-3">
+              <div className="flex max-h-72 flex-col gap-2 overflow-y-auto rounded-md bg-surface-hover p-3">
                 {activeClasses.map((item) => (
                   <Checkbox
                     key={item.id}
@@ -971,7 +973,7 @@ function ArchiveClassesModal({ classes, onClose, onDone }: ArchiveClassesModalPr
         <ModalHeader>
           <ModalTitle>批量归档班级</ModalTitle>
           <ModalDescription>
-            整届毕业时用这个:该年份的所有在读班级会转为已归档,不再出现在常规名单里。历史数据保留。
+            整届毕业时用这个:该年份的所有在读班级转为已归档,该届学生账号也一并归档并立即下线。历史数据保留,账号可以在账号管理里恢复。
           </ModalDescription>
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">

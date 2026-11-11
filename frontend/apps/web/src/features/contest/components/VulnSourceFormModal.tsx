@@ -1,4 +1,4 @@
-// 漏洞源配置表单(教师漏洞题工坊页内 / 平台漏洞题源页内共用)。
+// 漏洞源配置表单(教师漏洞题工坊页内 / 平台漏洞题源页内共用)。设计 §7.4:字段多且分组,用右侧大抽屉。
 //
 // 后端 validateVulnSourceConfig 对 config 有明确要求:公网 HTTP(S) 接口地址、GET/POST、
 // 1-60 秒超时、字段映射里 external_ref/title/draft_body 必填。故这里按这些键渲染结构化字段,
@@ -23,13 +23,13 @@ import {
   Checkbox,
   FormField,
   Input,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   SegmentedControl,
   Select,
   toast,
@@ -181,17 +181,17 @@ export function VulnSourceFormModal({
   )
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>{editing ? '修改漏洞来源' : '添加漏洞来源'}</ModalTitle>
-          <ModalDescription>
+    <Drawer open onOpenChange={(open) => !open && onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader>
+          <DrawerTitle>{editing ? '修改漏洞来源' : '添加漏洞来源'}</DrawerTitle>
+          <DrawerDescription>
             来源是一个返回漏洞案例列表的公开接口。字段映射告诉系统该读响应里的哪些字段。
             {global ? '这里维护的是全平台共享的来源,所有学校都能从它同步案例。' : ''}
-          </ModalDescription>
-        </ModalHeader>
-        <form onSubmit={submit} noValidate>
-          <ModalBody className="flex flex-col gap-4">
+          </DrawerDescription>
+        </DrawerHeader>
+        <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
+          <DrawerBody className="flex flex-col gap-4">
             <FormField label="来源名称" htmlFor={`${fieldId}-name`} required error={errors.name}>
               <Input
                 id={`${fieldId}-name`}
@@ -287,7 +287,7 @@ export function VulnSourceFormModal({
               </FormField>
             </div>
 
-            <div className="flex flex-col gap-4 well p-4">
+            <div className="flex flex-col gap-4 rounded-md bg-surface-hover p-4">
               <div>
                 <p className="text-base text-ink">数据对应关系</p>
                 <p className="text-sm text-ink-sub">
@@ -389,18 +389,18 @@ export function VulnSourceFormModal({
             ) : null}
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
-          </ModalBody>
-          <ModalFooter>
+          </DrawerBody>
+          <DrawerFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
             <Button type="submit" variant="primary" loading={submitting}>
               {editing ? '保存配置' : '添加来源'}
             </Button>
-          </ModalFooter>
+          </DrawerFooter>
         </form>
-      </ModalContent>
-    </Modal>
+      </DrawerContent>
+    </Drawer>
   )
 }
 

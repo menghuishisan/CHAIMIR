@@ -10,7 +10,7 @@
 // 本页只读 face,不请求 full,也不展示任何判题细节。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import { History, LoaderCircle, Send, Swords, Trophy, TriangleAlert } from 'lucide-react'
 import {
   API_ERROR_CODES,
@@ -45,6 +45,7 @@ import {
 import { useSession } from '../../../../components/RoleGuard'
 import { useAsyncResource, usePagedResource, useTicketedWebSocket } from '../../../../hooks'
 import { useImmersive } from '../../../../layouts/immersive/context'
+import { ContestCountdown } from '../../components/ContestCountdown'
 import { readString } from '../../jsonReaders'
 import { formatDateTime } from '../../../../utils/formatters'
 import { battleRoleLabel, contestStatusLabel } from '../../../../utils/labels/contest'
@@ -129,7 +130,11 @@ export default function StudentContestWorkspacePage() {
         description={problems.error?.message}
         traceId={problems.error?.traceId}
         fullScreen={false}
-        actions={<Button variant="on-dark" onClick={problems.reload}>重新读取</Button>}
+        actions={
+          <Button variant="on-dark" onClick={problems.reload}>
+            重新读取
+          </Button>
+        }
       />
     )
   }
@@ -160,9 +165,27 @@ interface ContestWorkbenchProps {
 
 /**
  * ContestWorkbench 持有当前赛题、实操环境与提交状态。
+ * 当前赛题写在地址的 problem 参数里:赛事详情的赛题行直接链到某一题,刷新后仍是这题;
+ * 参数不属于本场赛题时回到第一题(地址可被手改,属外部输入)。
  */
 function ContestWorkbench({ contest, problems }: ContestWorkbenchProps) {
-  const [problemId, setProblemId] = useState(problems[0].id)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requested = searchParams.get('problem')
+  const problemId = problems.some((item) => item.id === requested)
+    ? (requested as string)
+    : problems[0].id
+  const setProblemId = useCallback(
+    (next: string) =>
+      setSearchParams(
+        (previous) => {
+          const params = new URLSearchParams(previous)
+          params.set('problem', next)
+          return params
+        },
+        { replace: true }
+      ),
+    [setSearchParams]
+  )
   const problem = useAsyncResource(
     () => api.contest.getProblem(contest.id, problemId),
     [contest.id, problemId]
@@ -232,7 +255,9 @@ function ContestWorkbenchSession({
       contest.mode === ContestMode.SOLVE
         ? api.contest
             .getMyContestRecords()
-            .then((records: ContestRecord[]) => records.find((record) => record.contest_id === contest.id))
+            .then((records: ContestRecord[]) =>
+              records.find((record) => record.contest_id === contest.id)
+            )
         : Promise.resolve(undefined),
     [contest.id, contest.mode],
     () => false
@@ -446,51 +471,54 @@ function ContestWorkbenchSession({
           title={title}
           subtitle={contest.name}
           progress={
-            contest.mode !== ContestMode.SOLVE
-              ? undefined
-              : ownRecord.status === 'success' && ownRecord.data
-                ? (
-                    <ChainProgress
-                      onDark
-                      size="sm"
-                      label="已解题数"
-                      total={problems.length}
-                      done={Math.min(ownRecord.data.solved_count, problems.length)}
-                    />
-                  )
-                : ownRecord.status === 'error'
-                  ? (
-                      <span className="text-xs text-on-dark-danger">
-                        个人解题进度暂时读不到
-                        {ownRecord.error?.traceId ? ` · 报障编号 ${ownRecord.error.traceId}` : ''}
-                      </span>
-                    )
-                  : undefined
+            contest.mode !== ContestMode.SOLVE ? undefined : ownRecord.status === 'success' &&
+              ownRecord.data ? (
+              <ChainProgress
+                onDark
+                size="sm"
+                label="已解题数"
+                total={problems.length}
+                done={Math.min(ownRecord.data.solved_count, problems.length)}
+              />
+            ) : ownRecord.status === 'error' ? (
+              <span className="text-xs text-on-dark-danger">
+                个人解题进度暂时读不到
+                {ownRecord.error?.traceId ? ` · 报障编号 ${ownRecord.error.traceId}` : ''}
+              </span>
+            ) : undefined
           }
           cta={
-            spec.kind === 'battle' ? (
-              <Button
-                variant="seal"
-                size="sm"
-                leftIcon={Swords}
-                loading={busy}
-                disabled={!answerable || !sandboxReady || role === undefined || !allowedBattleRoles.includes(role)}
-                onClick={() => void submitBattle()}
-              >
-                提交参战
-              </Button>
-            ) : (
-              <Button
-                variant="seal"
-                size="sm"
-                leftIcon={Send}
-                loading={busy}
-                disabled={!answerable || !submissionReady}
-                onClick={() => void submitSolve()}
-              >
-                提交答案
-              </Button>
-            )
+            <div className="flex items-center gap-3">
+              {answerable ? <ContestCountdown endAt={contest.end_at} /> : null}
+              {spec.kind === 'battle' ? (
+                <Button
+                  variant="seal"
+                  size="sm"
+                  leftIcon={Swords}
+                  loading={busy}
+                  disabled={
+                    !answerable ||
+                    !sandboxReady ||
+                    role === undefined ||
+                    !allowedBattleRoles.includes(role)
+                  }
+                  onClick={() => void submitBattle()}
+                >
+                  提交参战
+                </Button>
+              ) : (
+                <Button
+                  variant="seal"
+                  size="sm"
+                  leftIcon={Send}
+                  loading={busy}
+                  disabled={!answerable || !submissionReady}
+                  onClick={() => void submitSolve()}
+                >
+                  提交答案
+                </Button>
+              )}
+            </div>
           }
         />
       }
@@ -735,7 +763,7 @@ function ProblemStage({
         <label className="flex flex-col gap-1">
           <span className="text-sm text-on-dark">你的答案</span>
           <Input
-            variant="underline"
+            variant="dark"
             value={answer}
             disabled={!answerable}
             placeholder="按题面要求填写"

@@ -118,7 +118,8 @@ export default function SsoCallbackPage() {
       <AuthPanel>
         <div className="flex flex-col items-center gap-4">
           <Icon icon={LoaderCircle} size="lg" className="animate-spin text-accent" />
-          <p className="text-sm text-on-dark-sub">正在完成学校统一认证</p>
+          <p className="text-base text-on-dark">正在完成学校统一认证</p>
+          <p className="text-sm text-on-dark-sub">认证通过后会自动进入平台,请稍候。</p>
         </div>
       </AuthPanel>
     )
@@ -127,7 +128,7 @@ export default function SsoCallbackPage() {
   return (
     <AuthPanel>
       <div className="w-full max-w-sm">
-        <AuthHeading title="学校统一认证" description={`学校代号 ${tenantCode}`} />
+        <AuthHeading title="学校统一认证" description={`学校代号 ${tenantCode} · 用本校的统一身份认证账号登录`} />
 
         {/* 主通路是去学校的认证系统:这是一次离站导航,不是本页表单的提交。
             用玉不用朱砂 —— 认证页的主 CTA 是全页最大色块,朱砂只留给品牌章与落印(§1.2) */}
@@ -143,7 +144,11 @@ export default function SsoCallbackPage() {
         </Button>
 
         {/* 两种方式的分界:文字提示即层级,不做分隔线(FE-6 过渡靠密度) */}
-        <p className="mt-8 text-xs uppercase text-on-dark-faint">或使用学校目录账号</p>
+        <div className="mt-8 flex items-center gap-3 text-sm text-on-dark-sub">
+          <span aria-hidden="true" className="h-px flex-1 bg-dark-line" />
+          <span>或用学校目录账号登录</span>
+          <span aria-hidden="true" className="h-px flex-1 bg-dark-line" />
+        </div>
 
         <form onSubmit={handleLdapSubmit} noValidate>
           <AuthTextField
@@ -176,7 +181,7 @@ export default function SsoCallbackPage() {
         </form>
 
         <AuthQuietLink to="/auth/login" icon={ArrowLeft}>
-          返回其他登录方式
+          用手机号登录
         </AuthQuietLink>
       </div>
     </AuthPanel>

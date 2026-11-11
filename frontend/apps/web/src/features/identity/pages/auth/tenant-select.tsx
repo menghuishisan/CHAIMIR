@@ -3,12 +3,12 @@
 
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { ArrowLeft, Building2 } from 'lucide-react'
-import { Button, Icon } from '@chaimir/ui'
+import { ArrowLeft, ChevronRight, LoaderCircle } from 'lucide-react'
+import { Button, Icon, TenantCrest } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { loginEntryPath, persistLoginTokens } from '../../../../utils/authSession'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { AuthFormError, AuthHeading, AuthPanel, AuthQuietAction } from '../../components/AuthUI'
+import { AuthFormBrand, AuthFormError, AuthHeading, AuthPanel, AuthQuietAction } from '../../components/AuthUI'
 import { clearPendingTenantLogin, getPendingTenantLogin } from './pendingLogin'
 
 /**
@@ -64,12 +64,13 @@ export default function TenantSelectPage() {
   if (!pending || pending.tenants.length === 0) {
     return (
       <AuthPanel>
+        <AuthFormBrand />
         <div className="w-full max-w-sm">
           <AuthHeading
-            title="需要重新登录"
-            description="登录状态已失效(页面刷新会清除待选学校信息),请返回登录页重新认证。"
+            title="登录状态已失效,请重新登录"
+            description="为了安全,待选学校的信息不会保留到刷新之后。回到登录页重新输入即可。"
           />
-          <Button variant="on-dark" size="md" leftIcon={ArrowLeft} className="mt-7" onClick={backToLogin}>
+          <Button variant="primary" size="lg" leftIcon={ArrowLeft} className="mt-7 w-full" onClick={backToLogin}>
             返回登录
           </Button>
         </div>
@@ -79,10 +80,11 @@ export default function TenantSelectPage() {
 
   return (
     <AuthPanel>
+      <AuthFormBrand />
       <div className="w-full max-w-sm">
         <AuthHeading
-          title="选择你的学校"
-          description="这个手机号绑定了多个学校,请选择本次要进入的学校。"
+          title="选择要进入的学校"
+          description="这个手机号在几所学校都有账号,选一所继续登录。"
         />
 
         <AuthFormError message={error} />
@@ -96,16 +98,19 @@ export default function TenantSelectPage() {
                   type="button"
                   disabled={submittingTenantId !== null}
                   onClick={() => handleSelect(tenant.tenant_id)}
-                  className="pressable flex w-full items-center gap-3 rounded-lg border border-dark-line bg-dark-surface px-4 py-3 text-left hover:border-on-dark-accent-line hover:bg-dark-elevated disabled:pointer-events-none disabled:opacity-50"
+                  aria-busy={submitting || undefined}
+                  className="pressable flex w-full items-center gap-3 rounded-lg bg-dark-elevated px-4 py-3.5 text-left hover:bg-dark-surface focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-60"
                 >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-on-dark-accent-soft">
-                    <Icon icon={Building2} size="sm" className="text-accent" />
-                  </span>
+                  <TenantCrest name={tenant.name} size="sm" onDark />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-base font-medium text-on-dark">{tenant.name}</span>
                     <span className="block font-mono text-xs text-on-dark-sub">{tenant.code}</span>
                   </span>
-                  {submitting ? <span className="text-xs text-on-dark-sub">正在进入…</span> : null}
+                  {submitting ? (
+                    <Icon icon={LoaderCircle} size="sm" className="shrink-0 animate-spin text-accent" label="正在进入" />
+                  ) : (
+                    <Icon icon={ChevronRight} size="sm" className="shrink-0 text-on-dark-sub" />
+                  )}
                 </button>
               </li>
             )
@@ -113,7 +118,7 @@ export default function TenantSelectPage() {
         </ul>
 
         <AuthQuietAction icon={ArrowLeft} onClick={backToLogin}>
-          返回登录
+          换个账号登录
         </AuthQuietAction>
       </div>
     </AuthPanel>

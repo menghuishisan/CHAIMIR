@@ -1182,7 +1182,7 @@ function ChainPanel({ sandboxId, workspaceApi, operations, runtimeInstances }: C
         <label className="flex flex-col gap-1">
           <span className="text-xs text-on-dark-sub">查询目标</span>
           <Input
-            variant="underline"
+            variant="dark"
             value={target}
             placeholder="合约地址或状态键"
             className="font-mono text-sm"
@@ -1321,7 +1321,7 @@ function CommandPanel({ sandboxId, workspaceApi, tools, available, onReload }: C
       <label className="flex flex-col gap-1">
         <span className="text-xs text-on-dark-sub">命令与参数(按空格分隔)</span>
         <Input
-          variant="underline"
+          variant="dark"
           value={commandLine}
           disabled={!toolReady}
           placeholder="forge test"

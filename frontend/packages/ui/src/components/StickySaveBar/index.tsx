@@ -7,6 +7,9 @@
  *
  * 墨色底:它浮在光面之上、跨越整块内容区,用墨底与纸面区分层级 ——
  * 光面上再放一块近白条会与下方的抬起片糊在一起。
+ *
+ * 只在有未保存的改动、或正在保存时出现(设计 §7.5):没有改动时一条「所有改动已保存」常驻底部只是噪音,
+ * 保存成功的反馈由调用方的短提示给出。
  */
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
@@ -37,6 +40,7 @@ export function StickySaveBar({
   className,
 }: StickySaveBarProps) {
   const isDirty = dirtyCount > 0;
+  if (!isDirty && !saving) return null;
   return (
     <div
       // sticky 贴在滚动容器底部;z-sticky 走令牌阶(§2.4),不写裸数字
@@ -51,17 +55,13 @@ export function StickySaveBar({
     >
       <div className="min-w-0">
         <span className="tabular-nums">
-          {saving
-            ? "正在保存…"
-            : isDirty
-              ? `有 ${dirtyCount} 处改动未保存`
-              : "所有改动已保存"}
+          {saving ? "正在保存…" : `有 ${dirtyCount} 处改动未保存`}
         </span>
         {hint && <span className="ml-3 text-on-dark-sub">{hint}</span>}
       </div>
       <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-        {/* 无改动时不给「放弃」:没有可放弃的东西,留着只会让人怀疑自己漏改了什么 */}
-        {isDirty && !saving ? discardAction : null}
+        {/* 保存中不给「放弃」:提交已经发出,此时放弃只会让界面与服务端对不上 */}
+        {saving ? null : discardAction}
         {saveAction}
       </div>
     </div>

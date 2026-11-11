@@ -14,7 +14,6 @@ import { Plus, Server, Settings2 } from 'lucide-react'
 import { RuntimeSelftestStatus, RuntimeStatus, type SandboxRuntime } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   Card,
@@ -91,10 +90,8 @@ export default function PlatformRuntimesPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="链运行时"
         description="学生做实验和答题时使用的链环境。填写配置后还要登记镜像、预拉取并自检通过,才会开放给学校。"
-        icon={Server}
         actions={
           <Button variant="primary" leftIcon={Plus} onClick={() => setFormTarget({})}>
             登记运行时
@@ -124,8 +121,7 @@ export default function PlatformRuntimesPage() {
 
       <PageSection title="运行时列表" description="按状态筛选。点进详情做镜像登记、预拉取与自检。">
         <div className="flex flex-col gap-4">
-          {/* 数据区是一排 RuntimeCard(已是抬起片),筛选走 bare 无底形态,避免片里套片(§6.5.2) */}
-          <FilterBar label="运行时筛选" bare>
+          <FilterBar label="运行时筛选">
             <FilterField label="运行时状态" group>
               <SegmentedControl
                 aria-label="按运行时状态筛选"

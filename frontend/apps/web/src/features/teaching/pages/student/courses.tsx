@@ -1,238 +1,173 @@
-// 我的课程页(学生侧栏首入口,/student/courses)。
-// 数据只用 GET /teaching/courses?role=student 真实返回的字段:完成率需要课时总数,
-// 只有单课程 outline 才同时给出总数与进度,按课程逐个调用会让一页产生二十次请求,
-// 因此完成率放在课程详情页(见 docs/前端后端功能对齐清单.md §6.6)。
+// 我的课程(学生登录后的第一页,/student/courses)。设计 §7.2:
+// 学生来这里是为了找到正在上的课进入学习,偶尔用邀请码加入新课;一学期 3–8 门。
+// 所以主体是卡片网格(整卡链向课程详情),状态分段写进地址;网格末尾一张「加入新课程」小卡。
+// 学习进度需要课时总数,只有单课程 outline 同时给出;逐门课请求会让一页发二十次请求,
+// 因此进度只在课程详情显示(数据缺口见设计 §10,第 16 批补齐)。
 
-import { useCallback, useId, useState } from 'react'
-import { useNavigate } from 'react-router'
-import { BookOpen, TicketCheck } from 'lucide-react'
+import { useCallback, useEffect, useId, useState } from 'react'
+import { Link, useNavigate } from 'react-router'
+import { BookOpen, Plus, TicketCheck } from 'lucide-react'
 import { CourseStatus, type Course } from '@chaimir/api-client'
 import {
-  Badge,
-  Breadcrumb,
   Button,
   Callout,
-  DataPanel,
-  FilterBar,
-  FilterField,
+  Card,
+  CoverImage,
   FormField,
+  Icon,
   Input,
-  MetricStrip,
-  PageHeader,
-  PageScaffold,
-  Pagination,
   Modal,
   ModalBody,
   ModalContent,
   ModalDescription,
   ModalHeader,
   ModalTitle,
+  PageHeader,
+  PageScaffold,
+  Pagination,
   SegmentedControl,
+  Skeleton,
   StatusIndicator,
-  Table,
+  cn,
   toast,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource, useResourceTotal } from '../../../../hooks'
+import { ResourceError } from '../../../../components/ResourceState'
+import { usePagedResource, useResourceTotal, useUrlState } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
-import { formatDate } from '../../../../utils/formatters'
-import {
-  courseStatusLabel,
-  courseTypeLabel,
-  teachingDifficultyLabel,
-} from '../../../../utils/labels/teaching'
+import { formatDateRange } from '../../../../utils/formatters'
+import { courseStatusLabel, courseTypeLabel } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { CourseIdentityCell } from '../../components/CourseIdentityCell'
+import { courseTypeCover } from '../../coursePresentation'
 import { courseStatusTone } from '../../statusPresentation'
 
-/** 状态筛选项:值为空串表示不过滤(后端 status=0 即不过滤,由调用处转换)。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
+/** 状态分段;空串表示全部 */
+const STATUS_SEGMENTS = [
   { value: String(CourseStatus.RUNNING), label: '进行中' },
   { value: String(CourseStatus.PUBLISHED), label: '待开课' },
   { value: String(CourseStatus.ENDED), label: '已结课' },
+  { value: 'all', label: '全部' },
 ] as const
+
+/** 地址参数:status 不传时由页面按「有进行中的课就看进行中,否则看全部」决定 */
+const COURSES_QUERY = {
+  status: { defaultValue: '', allowed: ['', ...STATUS_SEGMENTS.map((item) => item.value)] },
+} as const
+
+/** 每页课程数:一学期 3–8 门,一页放得下,超过一页才出分页 */
+const PAGE_SIZE = 24
 
 /**
  * StudentCoursesPage 呈现已加入课程,并提供邀请码加入入口。
  */
 export default function StudentCoursesPage() {
   const navigate = useNavigate()
-  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [query, setQuery] = useUrlState(COURSES_QUERY)
   const [joinOpen, setJoinOpen] = useState(false)
+  const [highlightedIds, setHighlightedIds] = useState<ReadonlySet<string>>(new Set())
+
+  // 默认分段:有进行中的课就看进行中,否则看全部(设计 §7.2);用服务端全量计数判断
+  const runningCount = useResourceTotal(
+    (params) => api.teaching.getCourses({ role: 'student', status: CourseStatus.RUNNING, ...params }),
+    [],
+    0,
+  )
+  const defaultStatus = runningCount === undefined ? undefined : runningCount > 0 ? String(CourseStatus.RUNNING) : 'all'
+  const status = query.status || defaultStatus
 
   const courses = usePagedResource<Course>(
     (params) =>
       api.teaching.getCourses({
         role: 'student',
-        status: statusFilter ? (Number(statusFilter) as CourseStatus) : undefined,
+        status: status && status !== 'all' ? (Number(status) as CourseStatus) : undefined,
         ...params,
       }),
-    [statusFilter],
+    [status ?? 'pending'],
+    { pageSize: PAGE_SIZE, urlPageKey: 'page' },
   )
 
-  // 指标带取服务端全量口径,不随下方状态筛选变化。
-  // 「学分合计」需要跨全部课程求和,服务端没有这个聚合,故不做这张卡 ——
-  // 原先带的「以当前页课程累计」只是给错数加了个说明(规范 §6.5);每门课的学分在行内可见。
-  const totalCount = useResourceTotal(
-    (params) => api.teaching.getCourses({ role: 'student', ...params }),
-    [],
-    courses.refreshVersion,
-  )
-  const runningCount = useResourceTotal(
-    (params) =>
-      api.teaching.getCourses({ role: 'student', status: CourseStatus.RUNNING, ...params }),
-    [],
-    courses.refreshVersion,
-  )
-  const endedCount = useResourceTotal(
-    (params) => api.teaching.getCourses({ role: 'student', status: CourseStatus.ENDED, ...params }),
-    [],
-    courses.refreshVersion,
-  )
+  /** 加入成功:加入接口不返回课程编号,无法直接跳转;刷新列表并短暂高亮新出现的课程 */
+  const handleJoined = useCallback(() => {
+    const before = new Set((courses.data?.list ?? []).map((course) => course.id))
+    setJoinOpen(false)
+    setQuery({ status: 'all' })
+    courses.reload()
+    setPendingHighlight(before)
+  }, [courses, setQuery])
+  const [pendingHighlight, setPendingHighlight] = useState<Set<string> | null>(null)
+  useEffect(() => {
+    if (!pendingHighlight || courses.status !== 'success' || !courses.data) return
+    const fresh = courses.data.list.filter((course) => !pendingHighlight.has(course.id)).map((course) => course.id)
+    setPendingHighlight(null)
+    if (fresh.length === 0) return
+    setHighlightedIds(new Set(fresh))
+    const timer = window.setTimeout(() => setHighlightedIds(new Set()), 2400)
+    return () => window.clearTimeout(timer)
+  }, [courses.data, courses.status, pendingHighlight])
 
-  const columns: TableColumn<Course>[] = [
-    {
-      key: 'name',
-      header: '课程',
-      render: (course) => <CourseIdentityCell course={course} />,
-    },
-    {
-      key: 'type',
-      header: '类型',
-      render: (course) => (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge tone="neutral">{courseTypeLabel(course.type)}</Badge>
-          <Badge tone="jade">{teachingDifficultyLabel(course.difficulty)}</Badge>
-        </div>
-      ),
-    },
-    { key: 'credits', header: '学分', align: 'right', mono: true },
-    {
-      key: 'schedule',
-      header: '开课时间',
-      render: (course) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDate(course.start_at)} — {formatDate(course.end_at)}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (course) => (
-        <StatusIndicator tone={courseStatusTone(course.status)} label={courseStatusLabel(course.status)} />
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (course) => (
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/student/courses/${course.id}`)}>
-          进入学习
-        </Button>
-      ),
-    },
-  ]
+  const list = courses.data?.list ?? []
+  const showGrid = courses.status === 'success' || (courses.status === 'loading' && list.length > 0)
+  const filtered = status !== 'all'
 
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '学习区' }]} />}
         title="我的课程"
-        description="这里是你已加入的课程。进入课程可以查看章节课时、作业和学习进度。"
-        icon={BookOpen}
         actions={
-          <Button variant="outline" leftIcon={TicketCheck} onClick={() => setJoinOpen(true)}>
+          <Button variant="secondary" leftIcon={TicketCheck} onClick={() => setJoinOpen(true)}>
             加入课程
           </Button>
         }
       />
 
-      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是课程列表,不是这三个数字 */}
-      <MetricStrip
-        label="课程总量摘要"
-        className="mb-5"
-        items={[
-          { label: '已加入', value: totalCount ?? '—', hint: '本学期及历史全部课程' },
-          { label: '进行中', value: runningCount ?? '—', hint: '正在上课的课程数' },
-          { label: '已结课', value: endedCount ?? '—', hint: '成绩已可查看' },
-        ]}
-      />
-
-      <div className="min-w-0">
-        {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
-        <DataPanel
-          label="课程列表"
-          filter={
-            <FilterBar label="课程筛选">
-              <FilterField label="课程状态" group>
-                <SegmentedControl
-                  aria-label="按课程状态筛选"
-                  size="sm"
-                  options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-                  value={statusFilter}
-                  onValueChange={setStatusFilter}
-                />
-              </FilterField>
-            </FilterBar>
-          }
-          footer={
-            <Pagination
-              page={courses.page}
-              pageSize={courses.pageSize}
-              total={courses.total}
-              onPageChange={courses.setPage}
-            />
-          }
-        >
-            <ResourceState
-              resource={courses}
-              emptyIcon={BookOpen}
-              emptyTitle="还没有加入任何课程"
-              emptyDescription="向老师索取课程邀请码,填入后即可开始学习。"
-              emptyAction={
-                <Button variant="primary" leftIcon={TicketCheck} onClick={() => setJoinOpen(true)}>
-                  加入课程
-                </Button>
-              }
-              skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-            >
-              {(page) => (
-                <Table
-                  columns={columns}
-                  data={page.list}
-                  rowKey={(course) => course.id}
-                  elevated={false}
-                  onRowClick={(course) => navigate(`/student/courses/${course.id}`)}
-                  // <md 换行卡(§6.4.1 规则 3):课程名一行、学期与学分一行,状态在右
-                  mobileCard={(course) => ({
-                    title: course.name,
-                    meta: `${course.semester} · ${course.credits} 学分`,
-                    badge: (
-                      <StatusIndicator
-                        tone={courseStatusTone(course.status)}
-                        label={courseStatusLabel(course.status)}
-                      />
-                    ),
-                    action: (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => navigate(`/student/courses/${course.id}`)}
-                      >
-                        进入
-                      </Button>
-                    ),
-                  })}
-                />
-              )}
-            </ResourceState>
-        </DataPanel>
+      <div className="mb-5">
+        <SegmentedControl
+          aria-label="按课程状态筛选"
+          options={STATUS_SEGMENTS.map((item) => ({ value: item.value, label: item.label }))}
+          value={status ?? ''}
+          onValueChange={(value) => setQuery({ status: value })}
+        />
       </div>
+
+      {courses.status === 'error' ? (
+        <ResourceError
+          message={courses.error?.message ?? '课程暂时读取不到'}
+          traceId={courses.error?.traceId}
+          onRetry={courses.reload}
+        />
+      ) : courses.status === 'empty' ? (
+        filtered && status !== undefined ? (
+          <EmptyFiltered onShowAll={() => setQuery({ status: 'all' })} onJoin={() => setJoinOpen(true)} />
+        ) : (
+          <EmptyNoCourses onJoined={handleJoined} />
+        )
+      ) : showGrid ? (
+        <>
+          <ul className="card-grid gap-4" aria-busy={courses.status === 'loading' || undefined}>
+            {list.map((course) => (
+              <li key={course.id}>
+                <CourseCard course={course} highlighted={highlightedIds.has(course.id)} onOpen={navigate} />
+              </li>
+            ))}
+            <li>
+              <button
+                type="button"
+                onClick={() => setJoinOpen(true)}
+                className="pressable flex size-full min-h-40 flex-col items-center justify-center gap-2 rounded-lg bg-surface-hover text-ink-sub transition-colors duration-fast hover:bg-primary-soft hover:text-primary focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+              >
+                <Icon icon={Plus} size="lg" />
+                <span className="text-base font-medium">加入新课程</span>
+                <span className="text-sm">用老师给的邀请码</span>
+              </button>
+            </li>
+          </ul>
+          <div className="mt-6">
+            <Pagination page={courses.page} pageSize={courses.pageSize} total={courses.total} onPageChange={courses.setPage} />
+          </div>
+        </>
+      ) : (
+        <CourseGridSkeleton />
+      )}
 
       <Modal open={joinOpen} onOpenChange={setJoinOpen}>
         <ModalContent size="sm">
@@ -241,16 +176,111 @@ export default function StudentCoursesPage() {
             <ModalDescription>老师会给出一串课程邀请码,填入后即可加入。</ModalDescription>
           </ModalHeader>
           <ModalBody>
-            <JoinCourseForm
-              onJoined={() => {
-                setJoinOpen(false)
-                courses.reload()
-              }}
-            />
+            <JoinCourseForm onJoined={handleJoined} />
           </ModalBody>
         </ModalContent>
       </Modal>
     </PageScaffold>
+  )
+}
+
+interface CourseCardProps {
+  course: Course
+  highlighted: boolean
+  onOpen: (path: string) => void
+}
+
+/**
+ * CourseCard 一门课:纸材质封面条与课程类型题识(列表不逐行换取真实封面,规范 §1.3)、课程名、
+ * 学期 · 学分 · 类型、状态、开课区间;整卡是一个链向课程详情的真实链接。
+ */
+function CourseCard({ course, highlighted, onOpen }: CourseCardProps) {
+  const cover = courseTypeCover(course.type)
+  const href = `/student/courses/${course.id}`
+  return (
+    <Card
+      interactive
+      className={cn('flex h-full flex-col overflow-hidden', highlighted && 'outline-2 outline-offset-2 outline-accent')}
+    >
+      <CoverImage
+        id={course.id}
+        name={course.name}
+        glyph={cover.glyph}
+        accent={cover.accent}
+        className="aspect-auto h-24 rounded-none"
+      />
+      <div className="flex flex-1 flex-col gap-2 p-5">
+        <div className="flex items-start justify-between gap-3">
+          <Link
+            to={href}
+            onClick={(event) => {
+              if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+              event.preventDefault()
+              onOpen(href)
+            }}
+            className="card-link line-clamp-2 text-lg font-bold text-ink"
+          >
+            {course.name}
+          </Link>
+          <StatusIndicator tone={courseStatusTone(course.status)} label={courseStatusLabel(course.status)} />
+        </div>
+        <p className="text-sm text-ink-sub">
+          {course.semester} · {course.credits} 学分 · {courseTypeLabel(course.type)}
+        </p>
+        <p className="mt-auto pt-2 font-mono text-xs tabular-nums text-ink-sub">{formatDateRange(course.start_at, course.end_at)}</p>
+      </div>
+    </Card>
+  )
+}
+
+/** CourseGridSkeleton 与真实卡片同形的骨架(规范 §6.5.3 三态) */
+function CourseGridSkeleton() {
+  return (
+    <ul className="card-grid gap-4" aria-busy="true" aria-label="正在读取课程">
+      {Array.from({ length: 3 }, (_, index) => (
+        <li key={index} className="overflow-hidden rounded-lg bg-surface shadow-xs">
+          <div className="h-24 skeleton-shimmer" />
+          <div className="flex flex-col gap-3 p-5">
+            <Skeleton variant="title" width="half" />
+            <Skeleton variant="line" lines={2} />
+          </div>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** EmptyFiltered 筛选结果为空:这个状态下没有课,给「看全部课程」 */
+function EmptyFiltered({ onShowAll, onJoin }: { onShowAll: () => void; onJoin: () => void }) {
+  return (
+    <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-14 text-center shadow-xs">
+      <p className="text-md font-semibold text-ink">这里暂时没有课程</p>
+      <p className="mt-1.5 text-sm text-ink-sub">切换到「全部」看看已经加入的其他课程,或用邀请码加入新课。</p>
+      <div className="mt-5 flex flex-wrap justify-center gap-3">
+        <Button variant="outline" onClick={onShowAll}>
+          看全部课程
+        </Button>
+        <Button variant="secondary" leftIcon={TicketCheck} onClick={onJoin}>
+          加入课程
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** EmptyNoCourses 还没有加入任何课程:整页空状态里直接放邀请码输入框(设计 §7.2) */
+function EmptyNoCourses({ onJoined }: { onJoined: () => void }) {
+  return (
+    <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-16 text-center shadow-xs">
+      <div className="mb-4 flex size-12 items-center justify-center rounded-full bg-primary-soft text-primary">
+        <Icon icon={BookOpen} size="lg" />
+      </div>
+      <p className="text-lg font-bold text-ink">还没有加入课程</p>
+      <p className="mt-1.5 max-w-md text-sm text-ink-sub">老师会给你一串邀请码,填入后即可加入课程开始学习。</p>
+      <div className="mt-6 w-full max-w-sm text-left">
+        <JoinCourseForm onJoined={onJoined} />
+      </div>
+    </div>
   )
 }
 
@@ -260,8 +290,7 @@ interface JoinCourseFormProps {
 }
 
 /**
- * JoinCourseForm 是页面级动作表单:邀请码加入课程。
- * 邀请码是一次性短表单,提交即完成,无跨步骤中间态,故不落草稿(FE-7 只约束多步骤流程)。
+ * JoinCourseForm 邀请码加入课程:只有邀请码一个字段,提交即完成,无跨步骤中间态,故不落草稿(FE-7)。
  */
 function JoinCourseForm({ onJoined }: JoinCourseFormProps) {
   const fieldId = useId()
@@ -301,20 +330,15 @@ function JoinCourseForm({ onJoined }: JoinCourseFormProps) {
           id={fieldId}
           value={inviteCode}
           autoComplete="off"
-          placeholder="请输入邀请码"
+          spellCheck={false}
+          placeholder="输入老师给的邀请码"
           invalid={Boolean(errors.inviteCode)}
           onChange={(event) => setInviteCode(event.target.value)}
           onBlur={() => validate(['inviteCode'])}
         />
       </FormField>
       {submitError ? <Callout tone="danger" className="mt-4">{submitError}</Callout> : null}
-      <Button
-        type="submit"
-        variant="primary"
-        leftIcon={TicketCheck}
-        loading={submitting}
-        className="mt-4 w-full"
-      >
+      <Button type="submit" variant="primary" leftIcon={TicketCheck} loading={submitting} className="mt-4 w-full">
         加入课程
       </Button>
     </form>

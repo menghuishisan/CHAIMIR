@@ -13,7 +13,6 @@ import { Building, CircleSlash, ExternalLink, Search, ShieldCheck } from 'lucide
 import { TenantStatus, type Tenant } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   DataPanel,
@@ -189,10 +188,8 @@ export default function PlatformSchoolsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '租户' }]} />}
         title="学校管理"
         description="平台上已开通的学校。停用与到期会立即影响该校师生登录,调整前请确认。"
-        icon={Building}
       />
 
       {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是学校列表 */}

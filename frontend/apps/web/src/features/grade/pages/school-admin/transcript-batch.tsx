@@ -1,4 +1,4 @@
-// 批量成绩单(成绩审核页内区块)。
+// 批量成绩单(成绩审核页页头的次要入口,右侧大抽屉,设计 §7.5)。
 //
 // 出成绩单的前提是成绩已锁定,故归到成绩审核页而不是单独放侧栏。
 // 后端 GenerateTranscriptBatch 一次最多 200 人,超出直接拒绝 —— 界面按班级选人并显示计数,
@@ -22,14 +22,17 @@ import {
   Badge,
   Button,
   Callout,
-  Card,
-  CardBody,
-  CardHeader,
   Checkbox,
   DataPanel,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   Empty,
   FormField,
-  PageSection,
   SegmentedControl,
   Select,
   Skeleton,
@@ -41,6 +44,7 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
+import { collectAllPages } from '../../../../utils/allPages'
 import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { formatDateTime } from '../../../../utils/formatters'
 import { transcriptScopeLabel } from '../../../../utils/labels/grade'
@@ -50,9 +54,9 @@ import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 const BATCH_LIMIT = 200
 
 /**
- * TranscriptBatchSection 按班级批量生成成绩单。
+ * TranscriptBatchDrawer 按班级批量生成成绩单;生成后在抽屉里逐份下载。
  */
-export function TranscriptBatchSection() {
+export function TranscriptBatchDrawer({ onClose }: { onClose: () => void }) {
   const [classId, setClassId] = useState('')
   const [scope, setScope] = useState(String(TranscriptScope.FULL))
   const [semesterId, setSemesterId] = useState('')
@@ -69,14 +73,12 @@ export function TranscriptBatchSection() {
   const students = useAsyncResource(
     () =>
       classId
-        ? api.identity.getAccounts({
-            role: BaseIdentity.STUDENT,
-            class_id: classId,
-            status: AccountStatus.ACTIVE,
-            page: 1,
-            size: PAGINATION_MAX_SIZE,
-          })
-        : Promise.resolve({ list: [], total: 0, page: 1, size: PAGINATION_MAX_SIZE }),
+        ? collectAllPages(
+            (params) =>
+              api.identity.getAccounts({ role: BaseIdentity.STUDENT, class_id: classId, status: AccountStatus.ACTIVE, ...params }),
+            PAGINATION_MAX_SIZE,
+          ).then((list) => ({ list }))
+        : Promise.resolve({ list: [] as Account[] }),
     [classId],
     (value) => value.list.length === 0,
   )
@@ -171,20 +173,16 @@ export function TranscriptBatchSection() {
   ]
 
   return (
-    <PageSection
-      title="批量成绩单"
-      description="按班级为学生生成成绩单。成绩单反映已锁定的成绩,未审核通过的课程不计入。"
-    >
-      <div className="flex flex-col gap-4">
-        <Card>
-          <CardHeader
-            title="生成设置"
-            description={`一次最多 ${BATCH_LIMIT} 份。生成后在下方逐份下载。`}
-            actions={
-              selected.size > 0 ? <Badge tone="jade">已选 {selected.size} 人</Badge> : null
-            }
-          />
-          <CardBody className="flex flex-col gap-4">
+    <Drawer open onOpenChange={(open) => !open && !working && onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader>
+          <DrawerTitle>批量生成成绩单</DrawerTitle>
+          <DrawerDescription>
+            按班级为学生生成成绩单,一次最多 {BATCH_LIMIT} 份。成绩单只包含已锁定的成绩,未审核通过的课程不计入。
+          </DrawerDescription>
+        </DrawerHeader>
+        <DrawerBody className="flex flex-col gap-4">
+          <div className="flex flex-col gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField label="班级" htmlFor="transcript-class" required error={errors.class}>
                 <Select
@@ -264,7 +262,7 @@ export function TranscriptBatchSection() {
                           清空
                         </Button>
                       </div>
-                      <div className="flex max-h-72 flex-col gap-2 overflow-y-auto well p-3">
+                      <div className="flex max-h-72 flex-col gap-2 overflow-y-auto rounded-md bg-surface-hover p-3">
                         {page.list.map((account: Account) => (
                           <Checkbox
                             key={account.id}
@@ -290,21 +288,7 @@ export function TranscriptBatchSection() {
             )}
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
-
-            <div className="flex items-center gap-2">
-              <Button
-                variant="primary"
-                leftIcon={FileText}
-                loading={working}
-                disabled={selected.size === 0}
-                onClick={() => void generate()}
-              >
-                生成 {selected.size > 0 ? `${selected.size} 份` : ''}成绩单
-              </Button>
-              <span className="text-sm text-ink-sub">成绩单带学校电子签章,内容按已锁定成绩生成。</span>
-            </div>
-          </CardBody>
-        </Card>
+          </div>
 
         {/*
           列表型页内子视图走 DataPanel 片段(§6.5.5 B):批量结果是一次性产出,
@@ -342,7 +326,17 @@ export function TranscriptBatchSection() {
             />
           </DataPanel>
         ) : null}
-      </div>
-    </PageSection>
+        </DrawerBody>
+        <DrawerFooter>
+          <span className="mr-auto text-sm text-ink-sub">{selected.size > 0 ? `已选 ${selected.size} 人` : '还没有选学生'}</span>
+          <Button variant="outline" disabled={working} onClick={onClose}>
+            关闭
+          </Button>
+          <Button variant="primary" leftIcon={FileText} loading={working} disabled={selected.size === 0} onClick={() => void generate()}>
+            生成 {selected.size > 0 ? `${selected.size} 份` : ''}成绩单
+          </Button>
+        </DrawerFooter>
+      </DrawerContent>
+    </Drawer>
   )
 }

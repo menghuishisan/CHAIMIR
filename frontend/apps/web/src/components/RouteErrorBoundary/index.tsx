@@ -3,10 +3,10 @@
 // 1) 路由变化必须重置错误态 —— 否则一次出错后同壳内所有后续页面都停留在错误屏(S5);
 // 2) 只展示后端 trace_id;前端不生成任何编号 —— 前端随机号运维查不到,等于把用户挡在门外。
 
-import React from 'react'
+import React, { useEffect } from 'react'
 import { TriangleAlert } from 'lucide-react'
 import { Button } from '@chaimir/ui'
-import { useLocation } from 'react-router'
+import { useLocation, useRouteError } from 'react-router'
 import { AppStatusScreen } from '../AppStatusScreen'
 import { errorDiagnostics, traceIdOf } from '../../utils/userFacingError'
 
@@ -55,23 +55,40 @@ export class RenderErrorBoundary extends React.Component<RouteErrorBoundaryProps
 
   render(): React.ReactNode {
     if (this.state.failed) {
-      return (
-        <AppStatusScreen
-          icon={TriangleAlert}
-          tone="danger"
-          title="页面加载出现问题"
-          description="这个页面暂时无法显示,可以重新加载再试一次。"
-          traceId={this.state.traceId}
-          actions={
-            <Button variant="primary" onClick={() => window.location.reload()}>
-              重新加载
-            </Button>
-          }
-        />
-      )
+      return <RenderFailureScreen traceId={this.state.traceId} />
     }
     return this.props.children
   }
+}
+
+/** RenderFailureScreen 是渲染失败时的整屏提示:不展示错误原文,只给后端签发的报障编号 */
+function RenderFailureScreen({ traceId }: { traceId?: string }) {
+  return (
+    <AppStatusScreen
+      icon={TriangleAlert}
+      tone="danger"
+      title="页面加载出现问题"
+      description="这个页面暂时无法显示,可以重新加载再试一次。"
+      traceId={traceId}
+      actions={
+        <Button variant="primary" onClick={() => window.location.reload()}>
+          重新加载
+        </Button>
+      }
+    />
+  )
+}
+
+/**
+ * RootRouteError 是根路由的 errorElement:接住根边界之外(如 Tooltip 宿主自身)的渲染错误,
+ * 与类边界同一张提示屏并同样留下结构化记录,代替路由库会显示错误原文的默认页。
+ */
+export function RootRouteError() {
+  const error = useRouteError()
+  useEffect(() => {
+    console.error('页面渲染失败', { error: errorDiagnostics(error), boundary: 'root-route' })
+  }, [error])
+  return <RenderFailureScreen traceId={traceIdOf(error)} />
 }
 
 /**

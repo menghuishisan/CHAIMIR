@@ -9,7 +9,6 @@
 import { Save } from 'lucide-react'
 import { BackupStatus, type BackupRecord } from '@chaimir/api-client'
 import {
-  Breadcrumb,
   DataPanel,
   MetricStrip,
   PageHeader,
@@ -107,10 +106,8 @@ export default function PlatformBackupsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="备份记录"
         description="系统备份由底层定时任务或受控运维流程执行，在此核对执行状态与快照大小。"
-        icon={Save}
       />
 
       {/*

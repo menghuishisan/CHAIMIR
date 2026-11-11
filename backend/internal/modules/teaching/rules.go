@@ -11,6 +11,7 @@ import (
 	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/question"
 )
 
 // validateCourseRequest 校验课程创建和编辑输入。
@@ -109,11 +110,7 @@ func validateAssignmentRequest(req AssignmentRequest) (AssignmentRequest, time.T
 	for i := range req.Items {
 		req.Items[i].ItemCode = strings.TrimSpace(req.Items[i].ItemCode)
 		req.Items[i].ItemVersion = strings.TrimSpace(req.Items[i].ItemVersion)
-		req.Items[i].JudgerCode = strings.TrimSpace(req.Items[i].JudgerCode)
-		if req.Items[i].ItemCode == "" || req.Items[i].ItemVersion == "" || req.Items[i].Score <= 0 || req.Items[i].Seq <= 0 || !validGradingMode(req.Items[i].GradingMode) {
-			return AssignmentRequest{}, time.Time{}, apperr.ErrTeachingAssignmentInvalid
-		}
-		if req.Items[i].GradingMode == GradingModeAuto && req.Items[i].JudgerCode == "" {
+		if req.Items[i].ItemCode == "" || req.Items[i].ItemVersion == "" || req.Items[i].Score <= 0 || req.Items[i].Seq <= 0 {
 			return AssignmentRequest{}, time.Time{}, apperr.ErrTeachingAssignmentInvalid
 		}
 	}
@@ -130,10 +127,20 @@ func validateDraftRequest(req DraftRequest) (DraftRequest, error) {
 
 // validateSubmissionRequest 校验正式提交输入。
 func validateSubmissionRequest(req SubmitAssignmentRequest) (SubmitAssignmentRequest, error) {
-	if req.ContentRef == nil {
+	if req.Answers == nil {
 		return SubmitAssignmentRequest{}, apperr.ErrTeachingSubmissionInvalid
 	}
 	return req, nil
+}
+
+// validateTheoryStudentAnswer 使用锁定题面的唯一定义校验作答,保留未填完的空格。
+func validateTheoryStudentAnswer(answer any, body map[string]any) bool {
+	definition, err := question.Decode(body, false)
+	if err != nil {
+		return false
+	}
+	_, err = definition.Normalize(answer, true)
+	return err == nil
 }
 
 // validateGradeRequest 校验教师批改输入。
@@ -145,22 +152,9 @@ func validateGradeRequest(req GradeSubmissionRequest) (GradeSubmissionRequest, e
 	return req, nil
 }
 
-// validateGradeScoreAgainstAssignment 校验批改分数不超过当前作业题目总分。
-func validateGradeScoreAgainstAssignment(score int32, items []AssignmentItem) error {
-	if score < 0 {
-		return apperr.ErrTeachingSubmissionInvalid
-	}
-	var maximum int64
-	for _, item := range items {
-		if item.Score <= 0 {
-			return apperr.ErrTeachingAssignmentInvalid
-		}
-		maximum += int64(item.Score)
-	}
-	if maximum <= 0 || int64(score) > maximum {
-		return apperr.ErrTeachingSubmissionInvalid
-	}
-	return nil
+// manualMaximumScore 从服务端提交元信息读取本次作业的人工题总分。
+func manualMaximumScore(content map[string]any) int32 {
+	return jsonx.Int32FromAny(content["manual_max_score"], 0)
 }
 
 // validateProgressRequest 校验学习进度输入。
@@ -385,11 +379,6 @@ func validLessonContentType(value int16) bool {
 // validLatePolicy 校验迟交策略。
 func validLatePolicy(value int16) bool {
 	return value >= LatePolicyReject && value <= LatePolicyNoPenalty
-}
-
-// validGradingMode 校验题目评分方式。
-func validGradingMode(value int16) bool {
-	return value == GradingModeAuto || value == GradingModeManual
 }
 
 // validGradeSource 校验成绩来源类型。

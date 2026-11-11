@@ -16,7 +16,6 @@ import { useMemo } from 'react'
 import { ExternalLink, Monitor } from 'lucide-react'
 import type { MonitoringPanel } from '@chaimir/api-client'
 import {
-  Breadcrumb,
   Button,
   GuidePanel,
   PageHeader,
@@ -69,10 +68,8 @@ export default function PlatformMonitoringPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="监控面板"
         description="基础设施层的实时监控入口。面板由运维在部署时配置,这里只做受控跳转。"
-        icon={Monitor}
       />
 
       <ResourceState

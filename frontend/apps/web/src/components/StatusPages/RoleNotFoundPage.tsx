@@ -4,6 +4,7 @@
 import { useNavigate } from 'react-router'
 import { Compass } from 'lucide-react'
 import { Button, Empty } from '@chaimir/ui'
+import { usePageLocation } from '../../hooks'
 
 interface RoleNotFoundPageProps {
   /** 本角色区的首页落点,由所属区的懒加载壳传入(壳层不查全角色清单,见铁律 2) */
@@ -16,12 +17,15 @@ interface RoleNotFoundPageProps {
 export function RoleNotFoundPage({ homePath }: RoleNotFoundPageProps) {
   const navigate = useNavigate()
 
+  usePageLocation([{ label: '页面不存在' }])
+
   return (
-    <div className="flex min-h-96 items-center justify-center px-6 py-16">
+    <div className="flex min-h-96 items-center justify-center px-6">
       <Empty
         icon={Compass}
-        title="页面不存在"
-        description="地址可能有误,请从左侧导航进入需要的功能,或先回到首页。"
+        title="这个页面不存在"
+        description="地址可能输错了。可以从左侧导航进入需要的功能,或先回到首页。"
+        size="page"
         action={
           <Button variant="primary" onClick={() => navigate(homePath, { replace: true })}>
             回到首页

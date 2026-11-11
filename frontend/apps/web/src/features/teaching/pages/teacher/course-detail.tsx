@@ -1,62 +1,65 @@
-// 课程详情页(教师深页,/teacher/courses/:courseId)。
-// 一页承载课程编辑入口、章节课时、选课成员、作业管理、讨论公告与课程成绩六件事 ——
-// 它们都以同一门课程为上下文,拆成六个侧栏项会让教师在页面间来回跳。
+// 课程详情页(教师深页,/teacher/courses/:courseId)。设计 §7.4:
+// 页头为课程名 + 状态 + 一行属性(学期 · 学分 · 类型 · 选课人数 · 开课区间)+ 邀请码复制;右侧主按钮与更多菜单。
+// 下方标签「章节课时 / 作业 / 成员 / 讨论与公告 / 成绩」,标签带计数,当前标签写进地址。
+// 主操作按状态:草稿为「发布课程」(章节为空时提醒先加内容);已发布或进行中为「复制邀请码」;
+// 已结课不显示主按钮。一页承载同一门课的全部维护工作,拆成多个侧栏项会让教师在页面间来回跳。
 
+import { useCallback, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
+import { Book, ClipboardCopy, ClipboardList, Layers, MessageSquare, MoreHorizontal, Pencil, Send, Users } from 'lucide-react'
+import { CourseStatus, TENANT_MODULE, type CourseOutline } from '@chaimir/api-client'
 import {
-  Book,
-  ClipboardList,
-  Layers,
-  MessageSquare,
-  Pencil,
-  Send,
-  Users,
-} from 'lucide-react'
-import { useState } from 'react'
-import { TENANT_MODULE, type CourseOutline } from '@chaimir/api-client'
-import {
-  Breadcrumb,
   Button,
-  MetricStrip,
-  ObjectIdentity,
+  Callout,
+  IconButton,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuTrigger,
+  Modal,
+  ModalContent,
+  ModalDescription,
+  ModalFooter,
+  ModalHeader,
+  ModalTitle,
   PageHeader,
   PageScaffold,
+  Skeleton,
   StatusIndicator,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
+  toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
-import { formatDate } from '../../../../utils/formatters'
-import {
-  courseStatusLabel,
-  courseTypeLabel,
-  courseVisibilityLabel,
-  teachingDifficultyLabel,
-} from '../../../../utils/labels/teaching'
-import { courseStatusTone } from '../../statusPresentation'
+import { useSession } from '../../../../components/RoleGuard/session'
+import { locationLabel, useAsyncResource, usePageLocation, useUrlState } from '../../../../hooks'
+import { copyText } from '../../../../utils/clipboard'
+import { formatDateRange } from '../../../../utils/formatters'
+import { courseStatusLabel, courseTypeLabel } from '../../../../utils/labels/teaching'
+import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { CourseFormModal } from '../../components/CourseFormModal'
-import { CourseChapters } from './course-chapters'
-import { CourseMembers } from './course-members'
+import { CourseGrades } from '../../components/CourseGrades'
+import { courseStatusTone } from '../../statusPresentation'
 import { CourseAssignments } from './course-assignments'
 import { CourseBoard } from './course-board'
-import { CourseGrades } from '../../components/CourseGrades'
-import { useSession } from '../../../../components/RoleGuard/session'
+import { CourseChapters } from './course-chapters'
+import { CourseMembers } from './course-members'
+
+/** 地址参数:tab 是当前标签 */
+const DETAIL_QUERY = {
+  tab: { defaultValue: 'chapters', allowed: ['chapters', 'assignments', 'members', 'board', 'grades'] },
+} as const
 
 /**
  * TeacherCourseDetailPage 读取课程大纲并按任务分区呈现管理能力。
  */
 export default function TeacherCourseDetailPage() {
   const { courseId = '' } = useParams<{ courseId: string }>()
-
-  const outline = useAsyncResource(
-    () => api.teaching.getCourseOutline(courseId),
-    [courseId],
-    () => false,
-  )
+  const outline = useAsyncResource(() => api.teaching.getCourseOutline(courseId), [courseId], () => false)
+  usePageLocation([{ label: locationLabel(outline, (data) => data.course.name, '课程详情') }])
 
   return (
     <PageScaffold>
@@ -65,6 +68,13 @@ export default function TeacherCourseDetailPage() {
         emptyIcon={Book}
         emptyTitle="课程不可用"
         emptyDescription="这门课程可能已被删除,请回到课程管理查看。"
+        skeleton={
+          <div aria-busy="true" className="flex flex-col gap-4">
+            <Skeleton variant="title" width="half" />
+            <Skeleton variant="line" width="third" />
+            <Skeleton variant="block" />
+          </div>
+        }
       >
         {(data) => <CourseDetailContent courseId={courseId} outline={data} onRefresh={outline.reload} />}
       </ResourceState>
@@ -72,125 +82,129 @@ export default function TeacherCourseDetailPage() {
   )
 }
 
-interface CourseDetailContentProps {
+/**
+ * CourseDetailContent 渲染课程页头、主操作与五个管理标签。
+ */
+function CourseDetailContent({
+  courseId,
+  outline,
+  onRefresh,
+}: {
   courseId: string
   outline: CourseOutline
   onRefresh: () => void
-}
-
-/**
- * CourseDetailContent 渲染课程头部、指标带与六个管理分区。
- */
-function CourseDetailContent({ courseId, outline, onRefresh }: CourseDetailContentProps) {
+}) {
   const navigate = useNavigate()
   const { me } = useSession()
   const gradesEnabled = me.enabled_modules.includes(TENANT_MODULE.GRADE)
+  const [query, setQuery] = useUrlState(DETAIL_QUERY)
+  const tab = !gradesEnabled && query.tab === 'grades' ? 'chapters' : query.tab
   const [editOpen, setEditOpen] = useState(false)
+  const [publishOpen, setPublishOpen] = useState(false)
+  const [publishing, setPublishing] = useState(false)
+  const [actionError, setActionError] = useState<string>()
   const course = outline.course
 
-  // 进度统计走教师专用接口:大纲里的 progress 是本人视角,教师需要全班聚合
-  const stats = useAsyncResource(
-    () => api.teaching.getProgressStats(courseId),
-    [courseId],
-    () => false,
-  )
-  const progressStats = stats.status === 'success' ? stats.data : null
+  // 选课人数取教师专用的全班统计;读不到时页头不显示这一项
+  const stats = useAsyncResource(() => api.teaching.getProgressStats(courseId), [courseId], () => false)
+  const memberCount = stats.data?.member_count
+  const inviteCode = course.invite_code
+  const canShareInvite = Boolean(inviteCode) && (course.status === CourseStatus.PUBLISHED || course.status === CourseStatus.RUNNING)
+
+  const copyInvite = useCallback(() => {
+    if (!inviteCode) return
+    void copyText(inviteCode, { what: '邀请码', operation: 'teaching.course.copyInviteCode' }).then((ok) => {
+      if (ok) toast.success('邀请码已复制,发给学生即可加入')
+    })
+  }, [inviteCode])
+
+  const publish = useCallback(async () => {
+    setPublishing(true)
+    setActionError(undefined)
+    try {
+      await api.teaching.publishCourse(courseId)
+      toast.success('课程已发布,学生可以用邀请码加入')
+      setPublishOpen(false)
+      onRefresh()
+    } catch (error) {
+      setActionError(userFacingErrorMessage(error, '课程没有发布成功,请稍后重试。'))
+    } finally {
+      setPublishing(false)
+    }
+  }, [courseId, onRefresh])
 
   return (
     <>
-      {/*
-        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的课程名承担,
-        故 PageHeader 只出面包屑 —— 一页只该有一个 h1(§6.5.0 通则 1)。
-        面包屑末节到「课程管理」为止,不再重复课程名。
-      */}
       <PageHeader
-        kicker={
-          <Breadcrumb
-            items={[
-              { label: '教学' },
-              { label: '课程管理', href: '/teacher/courses' },
-            ]}
-          />
-        }
-      />
-
-      {/*
-        对象身份区:课程名 + 状态 + 关键属性横排 + 对象级动作。
-        属性用横排而不是 Stat 大卡 —— 学分、学期、课程类型是**属性**不是指标,
-        套上 Display 字号会用排数字的方式排正文(§2.3)。
-        全班进度那三个数字是真指标,放在下方的分组里(它们要与课时列表对照着看)。
-      */}
-      <ObjectIdentity
-        name={course.name}
-        status={
-          <StatusIndicator
-            tone={courseStatusTone(course.status)}
-            label={courseStatusLabel(course.status)}
-          />
-        }
-        subtitle={course.description || '还没有填写课程简介。'}
-        actions={
-          <Button variant="outline" leftIcon={Pencil} onClick={() => setEditOpen(true)}>
-            编辑课程
-          </Button>
-        }
-        properties={[
-          { label: '学分', value: course.credits },
-          { label: '学期', value: course.semester },
-          { label: '课程类型', value: courseTypeLabel(course.type) },
-          { label: '难度', value: teachingDifficultyLabel(course.difficulty) },
-          { label: '可见范围', value: courseVisibilityLabel(course.visibility) },
-          {
-            label: '开课区间',
-            value: `${formatDate(course.start_at)} — ${formatDate(course.end_at)}`,
-          },
+        title={course.name}
+        status={<StatusIndicator tone={courseStatusTone(course.status)} label={courseStatusLabel(course.status)} />}
+        meta={[
+          { value: course.semester },
+          { value: `${course.credits} 学分` },
+          { value: courseTypeLabel(course.type) },
+          { label: '选课', value: memberCount !== undefined ? `${memberCount} 人` : undefined },
+          { value: formatDateRange(course.start_at, course.end_at) },
           {
             label: '邀请码',
-            value: course.invite_code ? (
-              <span className="font-mono">{course.invite_code}</span>
-            ) : (
-              '未启用'
-            ),
+            value: canShareInvite && inviteCode ? (
+              <span className="inline-flex items-center gap-1">
+                <span className="font-mono">{inviteCode}</span>
+                <IconButton variant="ghost" size="sm" icon={ClipboardCopy} aria-label="复制邀请码" onClick={copyInvite} />
+              </span>
+            ) : undefined,
           },
         ]}
+        actions={
+          <>
+            {course.status === CourseStatus.DRAFT ? (
+              <Button variant="seal" leftIcon={Send} onClick={() => setPublishOpen(true)}>
+                发布课程
+              </Button>
+            ) : canShareInvite ? (
+              <Button variant="primary" leftIcon={ClipboardCopy} onClick={copyInvite}>
+                复制邀请码
+              </Button>
+            ) : null}
+            <Menu>
+              <MenuTrigger asChild>
+                <IconButton variant="outline" icon={MoreHorizontal} aria-label="更多操作" />
+              </MenuTrigger>
+              <MenuContent align="end">
+                <MenuItem icon={Pencil} onSelect={() => setEditOpen(true)}>
+                  编辑课程
+                </MenuItem>
+              </MenuContent>
+            </Menu>
+          </>
+        }
       />
 
-      {/* 全班进度摘要:三项都取教师专用聚合接口,不是大纲里的本人视角(§6.5.4 全量口径) */}
-      <MetricStrip
-        label="全班进度摘要"
-        className="mt-4 mb-5"
-        items={[
-          { label: '选课人数', value: progressStats?.member_count, hint: '在读成员' },
-          {
-            label: '课时数',
-            value: progressStats?.lesson_count,
-            hint: '已编排的课时',
-          },
-          {
-            label: '累计完成课时',
-            value: progressStats?.completed_count,
-            hint: '全班累计的课时完成次数',
-          },
-        ]}
-      />
+      {actionError ? (
+        <Callout tone="danger" className="mb-4">
+          {actionError}
+        </Callout>
+      ) : null}
 
-      <Tabs defaultValue="chapters">
-        <TabsList>
-          <TabsTrigger value="chapters" icon={Layers}>
+      <Tabs value={tab} onValueChange={(value) => setQuery({ tab: value })}>
+        <TabsList aria-label="课程管理">
+          <TabsTrigger value="chapters" icon={Layers} count={outline.lessons.length}>
             章节课时
           </TabsTrigger>
           <TabsTrigger value="assignments" icon={ClipboardList}>
-            作业管理
+            作业
           </TabsTrigger>
-          <TabsTrigger value="members" icon={Users}>
-            选课成员
+          <TabsTrigger value="members" icon={Users} count={memberCount}>
+            成员
           </TabsTrigger>
           <TabsTrigger value="board" icon={MessageSquare}>
             讨论与公告
           </TabsTrigger>
-          {gradesEnabled ? <TabsTrigger value="grades" icon={Send}>课程成绩</TabsTrigger> : null}
+          {gradesEnabled ? (
+            <TabsTrigger value="grades" icon={Send}>
+              成绩
+            </TabsTrigger>
+          ) : null}
         </TabsList>
-
         <TabsContent value="chapters">
           <CourseChapters courseId={courseId} outline={outline} onChanged={onRefresh} />
         </TabsContent>
@@ -198,7 +212,9 @@ function CourseDetailContent({ courseId, outline, onRefresh }: CourseDetailConte
           <CourseAssignments
             courseId={courseId}
             outline={outline}
-            onOpenGrading={(assignmentId: string) => navigate(`/teacher/grading?assignment=${assignmentId}`)}
+            onOpenGrading={(assignmentId: string) =>
+              navigate(`/teacher/grading?course=${courseId}&assignment=${assignmentId}`)
+            }
           />
         </TabsContent>
         <TabsContent value="members">
@@ -207,7 +223,11 @@ function CourseDetailContent({ courseId, outline, onRefresh }: CourseDetailConte
         <TabsContent value="board">
           <CourseBoard courseId={courseId} />
         </TabsContent>
-        {gradesEnabled ? <TabsContent value="grades"><CourseGrades courseId={courseId} /></TabsContent> : null}
+        {gradesEnabled ? (
+          <TabsContent value="grades">
+            <CourseGrades courseId={courseId} />
+          </TabsContent>
+        ) : null}
       </Tabs>
 
       {editOpen ? (
@@ -220,6 +240,28 @@ function CourseDetailContent({ courseId, outline, onRefresh }: CourseDetailConte
           }}
         />
       ) : null}
+
+      <Modal open={publishOpen} onOpenChange={(open) => (publishing ? undefined : setPublishOpen(open))}>
+        <ModalContent size="sm">
+          <ModalHeader>
+            <ModalTitle>发布「{course.name}」?</ModalTitle>
+            <ModalDescription>发布后学生可以用邀请码加入,课程基础信息将不能再随意修改。</ModalDescription>
+          </ModalHeader>
+          {outline.lessons.length === 0 ? (
+            <div className="px-6">
+              <Callout tone="warning">这门课还没有课时,学生加入后会看到一门空课。建议先在「章节课时」里加上内容。</Callout>
+            </div>
+          ) : null}
+          <ModalFooter>
+            <Button variant="outline" disabled={publishing} onClick={() => setPublishOpen(false)}>
+              取消
+            </Button>
+            <Button variant="seal" loading={publishing} onClick={() => void publish()}>
+              发布课程
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </>
   )
 }

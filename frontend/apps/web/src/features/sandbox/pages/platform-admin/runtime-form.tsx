@@ -558,7 +558,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                 onValueChange={setStatus}
               />
             </FormField>
-            <section className="well flex flex-col gap-3 p-3">
+            <section className="rounded-md bg-surface-hover flex flex-col gap-3 p-3">
               <h3 className="text-sm font-medium text-ink">主环境</h3>
               <div className="grid gap-3 sm:grid-cols-3">
                 <FormField label="工作区目录" error={errors.workspaceDir}>
@@ -591,7 +591,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                 onChange={(ports) => updateForm('ports', ports)}
               />
             </section>
-            <section className="well flex flex-col gap-3 p-3">
+            <section className="rounded-md bg-surface-hover flex flex-col gap-3 p-3">
               <h3 className="text-sm font-medium text-ink">附加组件</h3>
               <SidecarEditor
                 sidecars={form.sidecars}
@@ -599,7 +599,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                 onChange={(sidecars) => updateForm('sidecars', sidecars)}
               />
             </section>
-            <section className="well flex flex-col gap-3 p-3">
+            <section className="rounded-md bg-surface-hover flex flex-col gap-3 p-3">
               <h3 className="text-sm font-medium text-ink">工作区操作</h3>
               <div className="grid gap-3 sm:grid-cols-2">
                 <FormField label="学生工作区执行目标" htmlFor={`${fieldId}-workspace-target`} helper="填写已声明的 Pod/容器,学生终端与文件操作使用此处。">
@@ -640,7 +640,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                 ) : null}
               </fieldset>
             </section>
-            <section className="well flex flex-col gap-3 p-3">
+            <section className="rounded-md bg-surface-hover flex flex-col gap-3 p-3">
               <h3 className="text-sm font-medium text-ink">私有判题归档</h3>
               <FormField label="私有归档执行目标" htmlFor={`${fieldId}-archive-target`} error={errors.privateArchive}>
                 <Input id={`${fieldId}-archive-target`} value={form.privateArchive.execTarget} invalid={Boolean(errors.privateArchive)}
@@ -649,7 +649,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
               <ArgvEditor label="私有归档解包命令" value={form.privateArchive.unpackTar}
                 onChange={(unpackTar) => updateForm('privateArchive', { ...form.privateArchive, unpackTar })} />
             </section>
-            <section className="well flex flex-col gap-3 p-3">
+            <section className="rounded-md bg-surface-hover flex flex-col gap-3 p-3">
               <h3 className="text-sm font-medium text-ink">标准链能力命令</h3>
               <FormField label="重置方式" htmlFor={`${fieldId}-reset-strategy`}>
                 <Select id={`${fieldId}-reset-strategy`} value={form.resetStrategy || 'command'} options={[
@@ -707,7 +707,7 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                 ))}
               </div>
             </section>
-            <section className="well flex flex-col gap-3 p-3">
+            <section className="rounded-md bg-surface-hover flex flex-col gap-3 p-3">
               <h3 className="text-sm font-medium text-ink">数据卷域</h3>
               <VolumeEditor
                 volumes={form.volumes}

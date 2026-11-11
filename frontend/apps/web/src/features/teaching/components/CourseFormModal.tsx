@@ -13,17 +13,17 @@ import {
 } from '@chaimir/api-client'
 import {
   Button,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   Callout,
   CoverImage,
   FormField,
   Input,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
   Select,
   Textarea,
   toast,
@@ -59,7 +59,8 @@ export interface CourseFormModalProps {
   /** 传入即为编辑模式;缺省为新建 */
   course?: Course
   onClose: () => void
-  onSaved: () => void
+  /** 保存成功;参数是保存后的课程(新建时调用方据此进入新课程详情) */
+  onSaved: (course: Course) => void
 }
 
 /**
@@ -128,14 +129,11 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
         cover_ref: coverRef === '' ? undefined : coverRef,
       }
       try {
-        if (editing) {
-          await api.teaching.updateCourse(course.id, payload)
-          toast.success('课程已更新')
-        } else {
-          await api.teaching.createCourse(payload)
-          toast.success('课程已创建为草稿')
-        }
-        onSaved()
+        const saved = editing
+          ? await api.teaching.updateCourse(course.id, payload)
+          : await api.teaching.createCourse(payload)
+        toast.success(editing ? '课程已更新' : '课程已创建为草稿')
+        onSaved(saved)
       } catch (error) {
         setFormError(
           userFacingErrorMessage(error, editing ? '课程更新失败,请稍后重试。' : '课程创建失败,请稍后重试。'),
@@ -177,18 +175,18 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
   )
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="lg">
-        <ModalHeader>
-          <ModalTitle>{editing ? '编辑课程' : '新建课程'}</ModalTitle>
-          <ModalDescription>
+    <Drawer open onOpenChange={(open) => !open && onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader>
+          <DrawerTitle>{editing ? '编辑课程' : '新建课程'}</DrawerTitle>
+          <DrawerDescription>
             {editing
               ? '修改课程基础信息。已发布课程的部分字段可能受后端状态限制。'
               : '新建后为草稿状态,补齐章节课时再发布给学生。'}
-          </ModalDescription>
-        </ModalHeader>
-        <form onSubmit={submit} noValidate>
-          <ModalBody className="flex flex-col gap-4">
+          </DrawerDescription>
+        </DrawerHeader>
+        <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
+          <DrawerBody className="flex flex-col gap-4">
             <FormField label="课程名称" htmlFor={`${fieldId}-name`} required error={errors.name}>
               <Input
                 id={`${fieldId}-name`}
@@ -326,18 +324,18 @@ export function CourseFormModal({ course, onClose, onSaved }: CourseFormModalPro
             </FormField>
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
-          </ModalBody>
-          <ModalFooter>
+          </DrawerBody>
+          <DrawerFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
             <Button type="submit" variant="primary" loading={submitting}>
               {editing ? '保存修改' : '创建课程'}
             </Button>
-          </ModalFooter>
+          </DrawerFooter>
         </form>
-      </ModalContent>
-    </Modal>
+      </DrawerContent>
+    </Drawer>
   )
 }
 

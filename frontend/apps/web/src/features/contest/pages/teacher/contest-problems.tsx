@@ -8,7 +8,7 @@
 // 答案黑盒:题面正文与判题配置不在本页展开,只呈现标题、分值与类型 ——
 // 教师编排需要的是"选哪道题、值多少分",不需要在这里读答案。
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus, Swords, Target } from 'lucide-react'
 import {
   ContestMode,
@@ -57,13 +57,15 @@ import { battleEntryRoles, battleRuntimeConfig } from '../../rules'
 export interface ContestProblemsProps {
   contest: Contest
   readOnly?: boolean
+  /** 赛题数量读到或变化时通知父页(详情页据此判断能否发布);读取失败时不通知 */
+  onCountChange?: (count: number) => void
 }
 
 /**
  * ContestProblems 管理赛题清单。
  * 后端按 (赛事, 题目, 版本) 唯一约束做 upsert,故"编辑"与"新增"是同一个提交动作。
  */
-export function ContestProblems({ contest, readOnly = false }: ContestProblemsProps) {
+export function ContestProblems({ contest, readOnly = false, onCountChange }: ContestProblemsProps) {
   const [modal, setModal] = useState<{ problem?: ContestProblem } | undefined>()
 
   const problems = useAsyncResource(
@@ -71,6 +73,10 @@ export function ContestProblems({ contest, readOnly = false }: ContestProblemsPr
     [contest.id],
     (value) => value.length === 0
   )
+  const problemCount = problems.status === 'success' || problems.status === 'empty' ? (problems.data ?? []).length : undefined
+  useEffect(() => {
+    if (problemCount !== undefined) onCountChange?.(problemCount)
+  }, [onCountChange, problemCount])
 
   const isBattle = contest.mode === ContestMode.BATTLE
   const totalScore = (problems.data ?? []).reduce((sum, item) => sum + item.score, 0)
@@ -404,7 +410,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
               </FormField>
             </div>
 
-            <div className="flex flex-col gap-3 well p-4">
+            <div className="flex flex-col gap-3 rounded-md bg-surface-hover p-4">
               <Checkbox
                 checked={dynamicEnabled}
                 label="按通过队数递减分值(动态分)"
@@ -455,7 +461,7 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
             </div>
 
             {isBattle ? (
-              <div className="flex flex-col gap-4 well p-4">
+              <div className="flex flex-col gap-4 rounded-md bg-surface-hover p-4">
                 <FormField label="对抗规则" required helper="决定这道题怎么判胜负">
                   <SegmentedControl
                     aria-label="对抗规则"

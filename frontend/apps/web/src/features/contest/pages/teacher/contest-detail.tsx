@@ -1,25 +1,23 @@
-// 赛事详情页(教师深页,/teacher/contests/:contestId)。
-//
-// 一页承载赛事配置、赛题编排、防作弊审查与归档快照四件事 ——
-// 它们都以同一场赛事为上下文,拆成四个侧栏项会让教师在页面间来回跳
-// (对齐清单 §3.2:竞赛配置是流程编辑页、竞赛出题与防作弊审查是深页)。
-//
-// 教师侧没有单场赛事的读取接口(学生单读接口有非草稿门槛,草稿态赛事正是教师要编排的),
-// 故从 teacher 组的列表里定位 —— 与实验编排向导同一做法。
+// 赛事详情页(教师深页,/teacher/contests/:contestId)。设计 §7.4:
+// 页头为赛事名 + 状态 + 一行属性;右侧主按钮是赛程的「下一步」(与列表页同一套判定与确认),
+// 编辑赛事在更多菜单;页头下方赛程条(与学生端详情同一组件);标签「赛题编排 / 防作弊审查 / 归档榜单」
+// 写进地址;草稿提示「发布前至少添加一道赛题」,没有赛题时「发布」不可用并写原因。
+// 单读走 teacher 组接口:它没有非草稿门槛,草稿态赛事正是教师要编排的。
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useParams } from 'react-router'
-import { Archive, Pencil, ShieldAlert, Swords, Trophy } from 'lucide-react'
+import { Archive, MoreVertical, Pencil, ShieldAlert, Swords, Trophy } from 'lucide-react'
 import { ContestMode, ContestStatus, type Contest, type ResultSnapshot } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
-  Button,
   Callout,
   DataPanel,
-  DescriptionList,
   Empty,
-  ObjectIdentity,
+  IconButton,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuTrigger,
   PageHeader,
   PageScaffold,
   PageSection,
@@ -33,7 +31,7 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
+import { useAsyncResource, usePageLocation, locationLabel, useUrlState } from '../../../../hooks'
 import { formatDateTime, formatScore } from '../../../../utils/formatters'
 import {
   contestModeLabel,
@@ -44,8 +42,15 @@ import {
 import { isContestLeaderboardFrozen } from '../../rules'
 import { contestStatusTone } from '../../statusPresentation'
 import { ContestFormModal } from '../../components/ContestFormModal'
+import { ContestNextStepButton } from '../../components/ContestNextStep'
+import { ContestTimeline } from '../../components/ContestTimeline'
 import { ContestProblems } from './contest-problems'
 import { ContestCheat } from './contest-cheat'
+
+/** 地址参数:tab 是当前标签 */
+const DETAIL_QUERY = {
+  tab: { defaultValue: 'problems', allowed: ['problems', 'cheat', 'snapshot'] },
+} as const
 
 /**
  * TeacherContestDetailPage 读取赛事本体并按任务分区呈现管理能力。
@@ -59,6 +64,8 @@ export default function TeacherContestDetailPage() {
     [contestId],
     () => false
   )
+
+  usePageLocation([{ label: locationLabel(contest, (data) => data.name, '赛事详情') }])
 
   return (
     <PageScaffold>
@@ -80,108 +87,71 @@ interface ContestDetailContentProps {
 }
 
 /**
- * ContestDetailContent 渲染赛事头部、指标带与四个管理分区。
+ * ContestDetailContent 渲染赛事页头(下一步 + 更多菜单)、赛程条与三个管理标签。
+ * 赛题数量由赛题标签读取后回报:没有赛题时「发布」不可用(后端也会拒绝),标签上带数量。
  */
 function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps) {
+  const [query, setQuery] = useUrlState(DETAIL_QUERY)
   const [editOpen, setEditOpen] = useState(false)
+  const [problemCount, setProblemCount] = useState<number>()
 
   const archived = contest.status === ContestStatus.ARCHIVED
   const isDraft = contest.status === ContestStatus.DRAFT
-  const contestEditable =
-    contest.status === ContestStatus.DRAFT || contest.status === ContestStatus.SIGNUP
-
-  // 赛制、参赛形式、封榜时长与赛程都是赛事静态属性,统一进这张属性表,不占指标位(规范 §6.5)
-  const scheduleItems = useMemo(
-    () => [
-      { term: '赛制', description: contestModeLabel(contest.mode) },
-      { term: '参赛形式', description: teamModeLabel(contest.team_mode) },
-      {
-        term: '封榜时长',
-        description: contest.freeze_minutes > 0 ? `${contest.freeze_minutes} 分钟` : '不封榜',
-      },
-      { term: '报名开始', description: formatDateTime(contest.signup_start), mono: true },
-      { term: '报名截止', description: formatDateTime(contest.signup_end), mono: true },
-      { term: '比赛开始', description: formatDateTime(contest.start_at), mono: true },
-      { term: '比赛结束', description: formatDateTime(contest.end_at), mono: true },
-    ],
-    [contest]
-  )
+  // 报名开始后赛程与赛制已对学生公开,只在草稿与报名中允许修改(沿用现有门槛)
+  const contestEditable = isDraft || contest.status === ContestStatus.SIGNUP
+  const freezeText = contest.freeze_minutes > 0 ? `封榜 ${contest.freeze_minutes} 分钟` : '不封榜'
 
   return (
     <>
-      {/*
-        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的赛事名承担,
-        故页面头只出面包屑,末节到「赛事组织」为止(§6.5.0 通则 1)。
-      */}
       <PageHeader
-        kicker={
-          <Breadcrumb
-            items={[{ label: '实践' }, { label: '赛事组织', href: '/teacher/contests' }]}
-          />
+        title={contest.name}
+        status={<StatusIndicator tone={contestStatusTone(contest.status)} label={contestStatusLabel(contest.status)} />}
+        meta={[
+          { value: contestModeLabel(contest.mode) },
+          { value: teamModeLabel(contest.team_mode) },
+          ...(contest.match_mode ? [{ label: '对局方式', value: matchModeLabel(contest.match_mode) }] : []),
+          { value: freezeText },
+        ]}
+        actions={
+          <div className="flex items-center gap-2">
+            <ContestNextStepButton
+              contest={contest}
+              placement="header"
+              onDone={onRefresh}
+              publishBlocker={problemCount === 0 ? '先添加至少一道赛题才能发布' : undefined}
+            />
+            <Menu>
+              <MenuTrigger asChild>
+                <IconButton variant="outline" icon={MoreVertical} aria-label="更多操作" />
+              </MenuTrigger>
+              <MenuContent align="end">
+                <MenuItem icon={Pencil} disabled={!contestEditable} onSelect={() => setEditOpen(true)}>
+                  {contestEditable ? '编辑赛事' : archived ? '编辑赛事(归档后只读)' : '编辑赛事(开赛后不能修改)'}
+                </MenuItem>
+              </MenuContent>
+            </Menu>
+          </div>
         }
       />
 
-      {/*
-        对象身份区:赛事名 + 状态 + 关键属性横排 + 对象级动作。
-        赛制、参赛形式、封榜时长都是赛事静态属性,横排在这里;完整赛程留在下方属性表 ——
-        七个时间点摊进身份区会把「一眼看清这是什么赛事」变成读时刻表(§6.5.3 第 ④:超过 6 项应当下沉)。
-      */}
-      <ObjectIdentity
-        name={contest.name}
-        status={
-          <StatusIndicator
-            tone={contestStatusTone(contest.status)}
-            label={contestStatusLabel(contest.status)}
-          />
-        }
-        subtitle={`${formatDateTime(contest.start_at)} — ${formatDateTime(contest.end_at)}`}
-        actions={
-          contestEditable ? (
-            <Button variant="outline" leftIcon={Pencil} onClick={() => setEditOpen(true)}>
-              编辑赛事
-            </Button>
-          ) : (
-            <Badge tone="neutral">{archived ? '归档后只读' : '赛事开始后只读'}</Badge>
-          )
-        }
-        properties={[
-          { label: '赛制', value: contestModeLabel(contest.mode) },
-          { label: '参赛形式', value: teamModeLabel(contest.team_mode) },
-          ...(contest.match_mode
-            ? [{ label: '对局方式', value: matchModeLabel(contest.match_mode) }]
-            : []),
-          {
-            label: '封榜时长',
-            value: contest.freeze_minutes > 0 ? `${contest.freeze_minutes} 分钟` : '不封榜',
-          },
-          { label: '报名截止', value: formatDateTime(contest.signup_end) },
-        ]}
-      />
+      <ContestTimeline contest={contest} className="mb-6" />
 
       {isDraft ? (
-        <Callout tone="info" title="这场赛事还是草稿" className="mt-4">
-          编排好赛题后回到赛事组织发布,发布后学生才能看到并报名。
+        <Callout tone="info" className="mb-6">
+          {problemCount === 0
+            ? '这场赛事还是草稿。发布前至少添加一道赛题,发布后学生才能看到并报名。'
+            : '这场赛事还是草稿。编排好赛题后点右上角「发布」,发布后学生才能看到并报名。'}
         </Callout>
       ) : null}
       {isContestLeaderboardFrozen(contest.status) ? (
-        <Callout tone="warning" className="mt-4">
-          当前处于封榜期,榜单暂停更新。封榜结束后名次会一次性揭晓。
+        <Callout tone="warning" className="mb-6">
+          当前处于封榜期,榜单对学生暂停更新,比赛结束后名次一次性揭晓。
         </Callout>
       ) : null}
 
-      <PageSection
-        title="完整赛程"
-        description="报名与比赛的四个时间点,以及赛制细节。"
-        className="mt-6"
-      >
-        <div className="rounded-lg bg-surface p-5 shadow-xs">
-          <DescriptionList dense columns={2} items={scheduleItems} />
-        </div>
-      </PageSection>
-
-      <Tabs defaultValue="problems">
-        <TabsList>
-          <TabsTrigger value="problems" icon={Swords}>
+      <Tabs value={query.tab} onValueChange={(value) => setQuery({ tab: value })}>
+        <TabsList aria-label="赛事管理">
+          <TabsTrigger value="problems" icon={Swords} count={problemCount}>
             赛题编排
           </TabsTrigger>
           <TabsTrigger value="cheat" icon={ShieldAlert}>
@@ -192,8 +162,9 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="problems">
-          <ContestProblems contest={contest} readOnly={!isDraft} />
+        {/* 赛题标签始终挂载(forceMount):页头「发布」需要它回报的赛题数量,切到其他标签时仅隐藏 */}
+        <TabsContent value="problems" forceMount className="data-[state=inactive]:hidden">
+          <ContestProblems contest={contest} readOnly={!isDraft} onCountChange={setProblemCount} />
         </TabsContent>
 
         <TabsContent value="cheat">

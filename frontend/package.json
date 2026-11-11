@@ -6,6 +6,7 @@
   "scripts": {
     "build": "turbo run build",
     "lint": "turbo run lint",
+    "test": "pnpm -r --if-present run test",
     "lint:frontend-standards": "node ../scripts/audit/check-frontend-standards.mjs",
     "audit:repo": "node ../scripts/audit/index.mjs",
     "type-check": "turbo run type-check",

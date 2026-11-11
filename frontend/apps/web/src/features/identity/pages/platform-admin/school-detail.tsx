@@ -13,7 +13,6 @@ import { Building, Gauge, Save } from 'lucide-react'
 import { API_ERROR_CODES, ApiError, TenantStatus, type SandboxQuota, type Tenant } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   Card,
@@ -23,7 +22,6 @@ import {
   FormField,
   Input,
   MetricStrip,
-  ObjectIdentity,
   PageHeader,
   PageScaffold,
   PageSection,
@@ -35,7 +33,7 @@ import { api } from '../../../../app/api'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { TENANT_MODULE_LABELS } from '../../../../utils/labels/identity'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
+import { useAsyncResource, usePageLocation, locationLabel } from '../../../../hooks'
 import { formatDate, formatDateTime } from '../../../../utils/formatters'
 import {
   authModeLabel,
@@ -66,23 +64,10 @@ export default function PlatformSchoolDetailPage() {
     (value) => value === null
   )
 
+  usePageLocation([{ label: locationLabel(tenant, (data) => (data ? data.display_name || data.name : ''), '学校详情') }])
+
   return (
     <PageScaffold>
-      {/*
-        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的学校名承担,
-        故页面头只出面包屑,末节到「学校管理」为止(§6.5.0 通则 1)。
-      */}
-      <PageHeader
-        kicker={
-          <Breadcrumb
-            items={[
-              { label: '租户' },
-              { label: '学校管理', href: '/platform-admin/schools' },
-            ]}
-          />
-        }
-      />
-
       <ResourceState
         resource={tenant}
         emptyIcon={Building}
@@ -116,15 +101,15 @@ function SchoolOverview({ tenant, onBack }: { tenant: Tenant; onBack: () => void
         对象身份区:学校名 + 服务状态 + 关键属性横排。
         状态、到期与部署形态都是租户静态属性,横排在这里;其余属性下沉到开通信息表(§6.5.3 第 ④)。
       */}
-      <ObjectIdentity
-        name={tenant.display_name || tenant.name}
+      <PageHeader
+        title={tenant.display_name || tenant.name}
         status={
           <StatusIndicator
             tone={tenantStatusTone(tenant.status)}
             label={tenantStatusLabel(tenant.status)}
           />
         }
-        subtitle={
+        description={
           tenant.display_name
             ? `学校全名 ${tenant.name} · 短名 ${tenant.code}`
             : `短名 ${tenant.code}(未设置对外显示名)`
@@ -134,7 +119,7 @@ function SchoolOverview({ tenant, onBack }: { tenant: Tenant; onBack: () => void
             返回学校列表
           </Button>
         }
-        properties={[
+        meta={[
           { label: '部署形态', value: deployModeLabel(tenant.deploy_mode) },
           { label: '登录方式', value: authModeLabel(tenant.auth_mode) },
           {

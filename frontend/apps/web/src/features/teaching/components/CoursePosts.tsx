@@ -163,7 +163,7 @@ function CoursePostCard({ post, canModerate, onChanged, onReply, onDelete }: Cou
           <div className="flex items-center gap-2">
             {post.is_pinned ? <Badge tone="jade">置顶</Badge> : null}
             {post.parent_id ? <Badge tone="neutral">回复</Badge> : null}
-            <span className="font-mono text-xs tabular-nums text-ink-faint">{formatShortDateTime(post.created_at)}</span>
+            <span className="font-mono text-xs tabular-nums text-ink-sub">{formatShortDateTime(post.created_at)}</span>
           </div>
           {canModerate ? (
             <div className="flex items-center gap-1">
@@ -174,7 +174,7 @@ function CoursePostCard({ post, canModerate, onChanged, onReply, onDelete }: Cou
         </div>
         {post.parent_id ? (
           <blockquote className="whitespace-pre-wrap break-words border-l-2 border-primary pl-3 text-sm text-ink-sub">
-            <span className="mb-1 block text-xs text-ink-faint">回复的内容</span>
+            <span className="mb-1 block text-xs text-ink-sub">回复的内容</span>
             {post.parent_content ?? '原讨论已移除'}
           </blockquote>
         ) : null}

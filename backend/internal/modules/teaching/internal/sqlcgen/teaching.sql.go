@@ -23,7 +23,7 @@ WHERE id IN (
     LIMIT $2
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
 `
 
 type ClaimJudgeOutboxParams struct {
@@ -63,9 +63,6 @@ func (q *Queries) ClaimJudgeOutbox(ctx context.Context, arg ClaimJudgeOutboxPara
 			&i.StudentID,
 			&i.ItemCode,
 			&i.ItemVersion,
-			&i.JudgerCode,
-			&i.CodeStorageKey,
-			&i.CodeHash,
 			&i.ExtraInput,
 			&i.SourceRef,
 			&i.Status,
@@ -99,7 +96,7 @@ WHERE id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
 `
 
 type ClaimJudgeOutboxAcrossTenantsParams struct {
@@ -137,9 +134,6 @@ func (q *Queries) ClaimJudgeOutboxAcrossTenants(ctx context.Context, arg ClaimJu
 			&i.StudentID,
 			&i.ItemCode,
 			&i.ItemVersion,
-			&i.JudgerCode,
-			&i.CodeStorageKey,
-			&i.CodeHash,
 			&i.ExtraInput,
 			&i.SourceRef,
 			&i.Status,
@@ -242,7 +236,7 @@ SET status = 3,
     lease_until = NULL
 WHERE (tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now())
    OR (tenant_id = $1 AND id = $2 AND status = 3)
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
 `
 
 type CompleteJudgeOutboxParams struct {
@@ -266,9 +260,6 @@ func (q *Queries) CompleteJudgeOutbox(ctx context.Context, arg CompleteJudgeOutb
 		&i.StudentID,
 		&i.ItemCode,
 		&i.ItemVersion,
-		&i.JudgerCode,
-		&i.CodeStorageKey,
-		&i.CodeHash,
 		&i.ExtraInput,
 		&i.SourceRef,
 		&i.Status,
@@ -647,21 +638,19 @@ func (q *Queries) CreateAssignment(ctx context.Context, arg CreateAssignmentPara
 }
 
 const createAssignmentItem = `-- name: CreateAssignmentItem :one
-INSERT INTO assignment_item (id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
-RETURNING id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code, created_at
+INSERT INTO assignment_item (id, tenant_id, assignment_id, item_code, item_version, score, seq, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+RETURNING id, tenant_id, assignment_id, item_code, item_version, score, seq, created_at
 `
 
 type CreateAssignmentItemParams struct {
-	ID           int64       `json:"id"`
-	TenantID     int64       `json:"tenant_id"`
-	AssignmentID int64       `json:"assignment_id"`
-	ItemCode     string      `json:"item_code"`
-	ItemVersion  string      `json:"item_version"`
-	Score        int32       `json:"score"`
-	Seq          int32       `json:"seq"`
-	GradingMode  int16       `json:"grading_mode"`
-	JudgerCode   pgtype.Text `json:"judger_code"`
+	ID           int64  `json:"id"`
+	TenantID     int64  `json:"tenant_id"`
+	AssignmentID int64  `json:"assignment_id"`
+	ItemCode     string `json:"item_code"`
+	ItemVersion  string `json:"item_version"`
+	Score        int32  `json:"score"`
+	Seq          int32  `json:"seq"`
 }
 
 func (q *Queries) CreateAssignmentItem(ctx context.Context, arg CreateAssignmentItemParams) (AssignmentItem, error) {
@@ -673,8 +662,6 @@ func (q *Queries) CreateAssignmentItem(ctx context.Context, arg CreateAssignment
 		arg.ItemVersion,
 		arg.Score,
 		arg.Seq,
-		arg.GradingMode,
-		arg.JudgerCode,
 	)
 	var i AssignmentItem
 	err := row.Scan(
@@ -685,8 +672,6 @@ func (q *Queries) CreateAssignmentItem(ctx context.Context, arg CreateAssignment
 		&i.ItemVersion,
 		&i.Score,
 		&i.Seq,
-		&i.GradingMode,
-		&i.JudgerCode,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -977,9 +962,9 @@ func (q *Queries) CreateGradeWeight(ctx context.Context, arg CreateGradeWeightPa
 }
 
 const createJudgeOutbox = `-- name: CreateJudgeOutbox :one
-INSERT INTO submission_judge_outbox (id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 1, 0, NULL, NULL, NULL, now(), now(), '', NULL)
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
+INSERT INTO submission_judge_outbox (id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, 0, NULL, NULL, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
 `
 
 type CreateJudgeOutboxParams struct {
@@ -994,9 +979,6 @@ type CreateJudgeOutboxParams struct {
 	StudentID        int64  `json:"student_id"`
 	ItemCode         string `json:"item_code"`
 	ItemVersion      string `json:"item_version"`
-	JudgerCode       string `json:"judger_code"`
-	CodeStorageKey   string `json:"code_storage_key"`
-	CodeHash         string `json:"code_hash"`
 	ExtraInput       []byte `json:"extra_input"`
 	SourceRef        string `json:"source_ref"`
 }
@@ -1014,9 +996,6 @@ func (q *Queries) CreateJudgeOutbox(ctx context.Context, arg CreateJudgeOutboxPa
 		arg.StudentID,
 		arg.ItemCode,
 		arg.ItemVersion,
-		arg.JudgerCode,
-		arg.CodeStorageKey,
-		arg.CodeHash,
 		arg.ExtraInput,
 		arg.SourceRef,
 	)
@@ -1033,9 +1012,6 @@ func (q *Queries) CreateJudgeOutbox(ctx context.Context, arg CreateJudgeOutboxPa
 		&i.StudentID,
 		&i.ItemCode,
 		&i.ItemVersion,
-		&i.JudgerCode,
-		&i.CodeStorageKey,
-		&i.CodeHash,
 		&i.ExtraInput,
 		&i.SourceRef,
 		&i.Status,
@@ -1768,6 +1744,7 @@ const getSubmission = `-- name: GetSubmission :one
 SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 FROM submission
 WHERE tenant_id = $1 AND id = $2
+FOR UPDATE
 `
 
 type GetSubmissionParams struct {
@@ -1802,6 +1779,7 @@ SELECT s.id, s.tenant_id, s.assignment_id, s.student_id, s.attempt_no, s.content
 FROM submission s
 JOIN submission_judge_outbox o ON o.tenant_id = s.tenant_id AND o.submission_id = s.id
 WHERE o.tenant_id = $1 AND o.source_ref = $2
+FOR UPDATE OF s
 `
 
 type GetSubmissionBySourceRefParams struct {
@@ -1974,7 +1952,7 @@ func (q *Queries) ListAssignmentGradeSourceScores(ctx context.Context, arg ListA
 }
 
 const listAssignmentItems = `-- name: ListAssignmentItems :many
-SELECT id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code, created_at
+SELECT id, tenant_id, assignment_id, item_code, item_version, score, seq, created_at
 FROM assignment_item
 WHERE tenant_id = $1 AND assignment_id = $2
 ORDER BY seq ASC
@@ -2002,8 +1980,6 @@ func (q *Queries) ListAssignmentItems(ctx context.Context, arg ListAssignmentIte
 			&i.ItemVersion,
 			&i.Score,
 			&i.Seq,
-			&i.GradingMode,
-			&i.JudgerCode,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -2623,7 +2599,7 @@ func (q *Queries) ListGradeWeights(ctx context.Context, arg ListGradeWeightsPara
 }
 
 const listJudgeOutboxBySubmission = `-- name: ListJudgeOutboxBySubmission :many
-SELECT id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
 FROM submission_judge_outbox
 WHERE tenant_id = $1 AND submission_id = $2
 ORDER BY id ASC
@@ -2655,9 +2631,6 @@ func (q *Queries) ListJudgeOutboxBySubmission(ctx context.Context, arg ListJudge
 			&i.StudentID,
 			&i.ItemCode,
 			&i.ItemVersion,
-			&i.JudgerCode,
-			&i.CodeStorageKey,
-			&i.CodeHash,
 			&i.ExtraInput,
 			&i.SourceRef,
 			&i.Status,
@@ -3286,7 +3259,7 @@ UPDATE submission_judge_outbox
 SET last_error = $3, completed_at = $4, status = 3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND source_ref = $2 AND status IN (2, 3, 4)
   AND (completed_at IS NULL OR (completed_at = $4 AND last_error = $3))
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkJudgeOutboxFailedResultParams struct {
@@ -3316,9 +3289,6 @@ func (q *Queries) MarkJudgeOutboxFailedResult(ctx context.Context, arg MarkJudge
 		&i.StudentID,
 		&i.ItemCode,
 		&i.ItemVersion,
-		&i.JudgerCode,
-		&i.CodeStorageKey,
-		&i.CodeHash,
 		&i.ExtraInput,
 		&i.SourceRef,
 		&i.Status,
@@ -3339,7 +3309,7 @@ UPDATE submission_judge_outbox
 SET score = $3, last_error = NULL, completed_at = $4, status = 3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND source_ref = $2 AND status IN (2, 3, 4)
   AND (completed_at IS NULL OR (completed_at = $4 AND score = $3))
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
 `
 
 type MarkJudgeOutboxResultParams struct {
@@ -3369,9 +3339,6 @@ func (q *Queries) MarkJudgeOutboxResult(ctx context.Context, arg MarkJudgeOutbox
 		&i.StudentID,
 		&i.ItemCode,
 		&i.ItemVersion,
-		&i.JudgerCode,
-		&i.CodeStorageKey,
-		&i.CodeHash,
 		&i.ExtraInput,
 		&i.SourceRef,
 		&i.Status,
@@ -3676,7 +3643,7 @@ UPDATE submission_judge_outbox
 SET status = CASE WHEN retry_count >= $5 THEN 4 ELSE 1 END,
     last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
 `
 
 type RetryJudgeOutboxParams struct {
@@ -3708,9 +3675,6 @@ func (q *Queries) RetryJudgeOutbox(ctx context.Context, arg RetryJudgeOutboxPara
 		&i.StudentID,
 		&i.ItemCode,
 		&i.ItemVersion,
-		&i.JudgerCode,
-		&i.CodeStorageKey,
-		&i.CodeHash,
 		&i.ExtraInput,
 		&i.SourceRef,
 		&i.Status,
@@ -4302,7 +4266,15 @@ func (q *Queries) UpdateLesson(ctx context.Context, arg UpdateLessonParams) (Les
 
 const updateSubmissionAutoScore = `-- name: UpdateSubmissionAutoScore :one
 UPDATE submission
-SET auto_score = $3, final_score = $4, status = 3
+SET auto_score = $3,
+    final_score = CASE
+        WHEN COALESCE((content_ref->>'manual_max_score')::integer, 0) > 0 AND manual_score IS NULL THEN NULL
+        ELSE $4
+    END,
+    status = CASE
+        WHEN COALESCE((content_ref->>'manual_max_score')::integer, 0) > 0 AND manual_score IS NULL THEN 2
+        ELSE 3
+    END
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 `
@@ -4378,23 +4350,38 @@ func (q *Queries) UpdateSubmissionJudgeRef(ctx context.Context, arg UpdateSubmis
 
 const updateSubmissionManualGrade = `-- name: UpdateSubmissionManualGrade :one
 UPDATE submission
-SET manual_score = $3, final_score = $4, comment = $5, status = 3
+SET manual_score = $3,
+    final_score = CASE
+        WHEN auto_score IS NULL AND EXISTS (
+            SELECT 1 FROM submission_judge_outbox o
+            WHERE o.tenant_id = $1 AND o.submission_id = $2
+        ) THEN NULL
+        ELSE $4
+    END,
+    comment = $5,
+    status = CASE
+        WHEN auto_score IS NULL AND EXISTS (
+            SELECT 1 FROM submission_judge_outbox o
+            WHERE o.tenant_id = $1 AND o.submission_id = $2
+        ) THEN status
+        ELSE 3
+    END
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 `
 
 type UpdateSubmissionManualGradeParams struct {
-	TenantID    int64       `json:"tenant_id"`
-	ID          int64       `json:"id"`
-	ManualScore pgtype.Int4 `json:"manual_score"`
-	FinalScore  pgtype.Int4 `json:"final_score"`
-	Comment     pgtype.Text `json:"comment"`
+	TenantID     int64       `json:"tenant_id"`
+	SubmissionID int64       `json:"submission_id"`
+	ManualScore  pgtype.Int4 `json:"manual_score"`
+	FinalScore   pgtype.Int4 `json:"final_score"`
+	Comment      pgtype.Text `json:"comment"`
 }
 
 func (q *Queries) UpdateSubmissionManualGrade(ctx context.Context, arg UpdateSubmissionManualGradeParams) (Submission, error) {
 	row := q.db.QueryRow(ctx, updateSubmissionManualGrade,
 		arg.TenantID,
-		arg.ID,
+		arg.SubmissionID,
 		arg.ManualScore,
 		arg.FinalScore,
 		arg.Comment,

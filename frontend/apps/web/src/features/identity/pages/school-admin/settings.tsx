@@ -1,4 +1,7 @@
-// 租户配置页(校管侧栏,/school-admin/settings)。
+// 学校配置页(校管侧栏,/school-admin/settings)。设计 §7.5:
+// 分组配置页(展示信息 / 业务模块 / 登录与开通),左侧分组目录(滚动时高亮当前分组)+ 右侧表单 +
+// 有改动才出现的保存条。校徽选好即生效;业务模块开关旁说明「关闭后师生看不到,数据不删除」;
+// 启用统一认证时链到认证配置。
 //
 // 学校的展示信息与开通策略:显示名、校徽、登录方式、是否用激活码开通账号。
 // 认证方式选了 CAS/LDAP 后还要在认证配置页填服务器参数 —— 两页分工明确:
@@ -14,7 +17,6 @@ import { AuthMode, type Tenant } from '@chaimir/api-client'
 import {
   AnchorNav,
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   Card,
@@ -36,7 +38,7 @@ import {
 import { api } from '../../../../app/api'
 import { ImageUploadField } from '../../../../components/ImageUploadField'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
+import { useActiveAnchor, useAsyncResource } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDate } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -51,6 +53,7 @@ const SETTINGS_GROUPS = [
   { id: 'settings-modules', label: '业务模块' },
   { id: 'settings-auth', label: '登录与开通' },
 ]
+const SETTINGS_GROUP_IDS = SETTINGS_GROUPS.map((group) => group.id)
 
 /**
  * SchoolAdminSettingsPage 维护学校展示信息与开通策略。
@@ -64,12 +67,7 @@ export default function SchoolAdminSettingsPage() {
 
   return (
     <PageScaffold>
-      <PageHeader
-        kicker={<Breadcrumb items={[{ label: '系统配置' }]} />}
-        title="学校配置"
-        description="学校的展示信息、启用的业务模块、登录方式与账号开通策略。"
-        icon={Settings}
-      />
+      <PageHeader title="学校配置" />
 
       <ResourceState
         resource={tenant}
@@ -100,6 +98,7 @@ interface SettingsContentProps {
 function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
   const navigate = useNavigate()
   const { reload: reloadSession } = useSession()
+  const [activeGroup, setActiveGroup] = useActiveAnchor(SETTINGS_GROUP_IDS)
 
   const [displayName, setDisplayName] = useState(tenant.display_name ?? tenant.name)
   // 校徽是即时生效的:上传或移除当场落库,响应就是新的配置视图,故这里只存可显示的图。
@@ -203,26 +202,17 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
         归族:配置表单族(§6.5.3 第 ③)。左侧分组锚点 + 右侧分组表单 + 底部粘性保存条。
         保存条常显解决的是「改完中间某一项要滚到最底才能存,而且不知道改了几处」。
       */}
-      <div className="mb-4 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
-          <p className="text-sm font-medium text-ink">未保存改动</p>
-          <p className="mt-1 text-lg font-medium text-ink">{dirtyCount} 项</p>
-          <p className="mt-1 text-xs text-ink-sub">保存条会在页面底部同步显示。</p>
-        </div>
-        <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
-          <p className="text-sm font-medium text-ink">已启用模块</p>
-          <p className="mt-1 text-lg font-medium text-ink">{modules.length} 项</p>
-          <p className="mt-1 text-xs text-ink-sub">关闭模块不会删除已有数据。</p>
-        </div>
-        <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
-          <p className="text-sm font-medium text-ink">当前登录方式</p>
-          <p className="mt-1 text-lg font-medium text-ink">{authModeLabel(authModeValue)}</p>
-          <p className="mt-1 text-xs text-ink-sub">需要外部认证时请继续完成认证配置。</p>
-        </div>
-      </div>
-      <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
         <div className="min-w-0 lg:w-48 lg:shrink-0">
-          <AnchorNav label="学校配置分组" items={SETTINGS_GROUPS} />
+          <AnchorNav
+            label="学校配置分组"
+            items={SETTINGS_GROUPS}
+            activeId={activeGroup}
+            onSelect={(id) => {
+              setActiveGroup(id)
+              document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            }}
+          />
         </div>
 
         <form onSubmit={submit} noValidate className="flex min-w-0 flex-1 flex-col gap-4">
@@ -233,7 +223,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
             />
             <CardBody className="flex flex-col gap-4">
               {/* 只读档案进井(§6.5.3 第 ③:只读信息与可改字段分层) */}
-              <div className="well p-4">
+              <div className="rounded-md bg-surface-hover p-4">
                 <DescriptionList dense columns={2} items={profileItems} />
               </div>
 
@@ -289,7 +279,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
           <Card id="settings-modules" className="scroll-mt-20">
             <CardHeader
               title="业务模块"
-              description="关掉的模块对师生不可见。已有数据不会删除,重新开启即恢复。"
+              description="关闭后师生看不到,数据不删除;重新开启即恢复。"
             />
             <CardBody>
               <FormField label="启用的业务模块" required error={errors.modules}>
@@ -298,7 +288,10 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                     <div key={option.value} className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="text-base text-ink">{option.label}</div>
-                        <p className="text-xs text-ink-sub">{option.description}</p>
+                        <p className="text-xs text-ink-sub">
+                          {option.description}
+                          {modules.includes(option.value) ? '' : '(已关闭:师生看不到,数据不删除)'}
+                        </p>
                       </div>
                       <Switch
                         checked={modules.includes(option.value)}
@@ -362,7 +355,7 @@ function SettingsContent({ tenant, onSaved }: SettingsContentProps) {
                 </Callout>
               ) : null}
 
-              <div className="flex flex-col gap-3 well p-4">
+              <div className="flex flex-col gap-3 rounded-md bg-surface-hover p-4">
                 <Checkbox
                   checked={enableActivation}
                   label="允许用激活码开通账号"

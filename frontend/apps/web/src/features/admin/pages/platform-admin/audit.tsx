@@ -75,7 +75,6 @@ export default function PlatformAuditPage() {
   return (
     <AuditLogPage
       idPrefix="platform-audit"
-      breadcrumbItems={[{ label: '底层资源' }, { label: '平台审计' }]}
       title="平台审计"
       description="全平台敏感操作与安全事件审计记录，涵盖平台与各租户操作。只支持多维查询与安全导出，禁止篡改。"
       actionOptions={ACTION_OPTIONS}

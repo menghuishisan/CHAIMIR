@@ -16,14 +16,14 @@ export function NotFoundPage() {
   return (
     <AppStatusScreen
       icon={Compass}
-      title="页面不存在"
-      description="你访问的地址不存在或已经移动。"
+      title="这个页面不存在"
+      description="地址可能输错了,或者这个页面已经移动。"
       actions={
         <Button
           variant="primary"
           onClick={() => navigate(hasSession ? '/' : '/auth/login', { replace: true })}
         >
-          {hasSession ? '回到平台' : '前往登录'}
+          {hasSession ? '回到我的首页' : '去登录'}
         </Button>
       }
     />

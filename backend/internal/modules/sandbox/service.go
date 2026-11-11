@@ -349,7 +349,7 @@ func (s *Service) resolveSandboxCreateDependencies(ctx context.Context, tx TxSto
 		}
 		// 冻结快照保存的是组合编译后的声明;执行前统一按实例编码物化 Pod
 		// 及所有 exec target,确保重启恢复和历史快照都指向真实运行时拓扑。
-		runtime.AdapterSpec = materializeRuntimeTopology(frozen.InstanceCode, frozenAdapter)
+		runtime.AdapterSpec = MaterializeRuntimeTopology(frozen.InstanceCode, frozenAdapter)
 		runtime.AdapterLevel = frozen.AdapterLevel
 		runtime.CapabilityImpl = frozen.CapabilityImpl
 		runtime.PluginRef = frozen.PluginRef
@@ -796,7 +796,7 @@ func (s *Service) planForExistingSandbox(ctx context.Context, sb Sandbox) (Creat
 			if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &frozenAdapter); err != nil {
 				return apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
 			}
-			runtime.AdapterSpec = materializeRuntimeTopology(frozen.InstanceCode, frozenAdapter)
+			runtime.AdapterSpec = MaterializeRuntimeTopology(frozen.InstanceCode, frozenAdapter)
 			runtime.AdapterLevel = frozen.AdapterLevel
 			runtime.CapabilityImpl = frozen.CapabilityImpl
 			runtime.PluginRef = frozen.PluginRef
@@ -1140,7 +1140,7 @@ func workspaceRuntimeSnapshot(sb Sandbox) (Runtime, RuntimeImage, error) {
 	return Runtime{
 		ID: frozen.RuntimeID, Code: frozen.Code, Eco: frozen.Eco,
 		AdapterLevel: frozen.AdapterLevel, CapabilityImpl: frozen.CapabilityImpl, PluginRef: frozen.PluginRef,
-		AdapterSpec: materializeRuntimeTopology(frozen.InstanceCode, adapter),
+		AdapterSpec: MaterializeRuntimeTopology(frozen.InstanceCode, adapter),
 	}, RuntimeImage{ID: frozen.ImageID, RuntimeID: frozen.RuntimeID, Version: frozen.ImageVersion, ImageURL: frozen.ImageURL}, nil
 }
 

@@ -504,7 +504,7 @@ func (a teachingAPI) createAssignment(c *gin.Context) {
 		return
 	}
 	var req AssignmentRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingAssignmentInvalid) {
+	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingAssignmentInvalid) {
 		return
 	}
 	out, err := a.svc.CreateAssignment(c.Request.Context(), courseID, req)
@@ -518,7 +518,7 @@ func (a teachingAPI) updateAssignment(c *gin.Context) {
 		return
 	}
 	var req AssignmentRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingAssignmentInvalid) {
+	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingAssignmentInvalid) {
 		return
 	}
 	out, err := a.svc.UpdateAssignment(c.Request.Context(), id, req)
@@ -566,7 +566,7 @@ func (a teachingAPI) saveDraft(c *gin.Context) {
 		return
 	}
 	var req DraftRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingDraftInvalid) {
+	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingDraftInvalid) {
 		return
 	}
 	out, err := a.svc.SaveDraft(c.Request.Context(), id, req)
@@ -590,7 +590,7 @@ func (a teachingAPI) submitAssignment(c *gin.Context) {
 		return
 	}
 	var req SubmitAssignmentRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingSubmissionInvalid) {
+	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingSubmissionInvalid) {
 		return
 	}
 	out, err := a.svc.SubmitAssignment(c.Request.Context(), id, req)
@@ -627,7 +627,7 @@ func (a teachingAPI) gradeSubmission(c *gin.Context) {
 		return
 	}
 	var req GradeSubmissionRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingSubmissionInvalid) {
+	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingSubmissionInvalid) {
 		return
 	}
 	out, err := a.svc.GradeSubmission(c.Request.Context(), id, req)

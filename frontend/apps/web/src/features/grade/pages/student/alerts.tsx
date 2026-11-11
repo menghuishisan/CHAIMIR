@@ -1,79 +1,48 @@
-// 学业预警页(学生侧栏,/student/alerts)。
-// GET /grade-center/warnings 的 student_id 缺省即本人(后端 ListWarnings 在缺省时填会话账号,
-// 并校验学生只能读自己),前端不传该参数 —— 不把身份放进可传参位置。
-// 预警明细 detail 是后端按类型写入的开放对象:只呈现已登记的键,未登记键不猜语义。
+// 学业预警页(学生侧栏,/student/alerts)。设计 §7.2:
+// 待确认的预警排在最前,每条一张白卡(学期、预警类型与说明、建议下一步、「我已知悉」);
+// 已确认的折叠在下方「已确认(n)」。「收到预警怎么办」三步说明放在有待确认预警时的卡片内,
+// 给「打开成绩中心」。没有预警时用积极的话:「目前没有学业预警」。分页只在超过一页时出现。
+//
+// GET /grade-center/warnings 的 student_id 缺省即本人(后端在缺省时填会话账号,并校验学生只能读自己),
+// 前端不传该参数。预警明细 detail 是后端按类型写入的开放对象:只呈现已登记的键,未登记键不猜语义。
+// 一个学生的预警通常 0–3 条:待确认与已确认分两次按状态读取,各自分页。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router'
-import { CheckCheck, GraduationCap, ShieldCheck, TriangleAlert } from 'lucide-react'
-import { GradeWarningStatus, type GradeWarning, type Semester } from '@chaimir/api-client'
-import {
-  Badge,
-  Breadcrumb,
-  Button,
-  Callout,
-  Card,
-  CardBody,
-  CardHeader,
-  DataPanel,
-  DescriptionList,
-  FilterBar,
-  FilterField,
-  MetricStrip,
-  PageBody,
-  PageHeader,
-  PageScaffold,
-  Pagination,
-  SegmentedControl,
-  StatusIndicator,
-  Table,
-  toast,
-  type TableColumn,
-} from '@chaimir/ui'
+import { Link } from 'react-router'
+import { CheckCheck, ChevronDown, GraduationCap, ShieldCheck, TriangleAlert } from 'lucide-react'
+import { GradeWarningStatus, GradeWarningType, type GradeWarning } from '@chaimir/api-client'
+import { Button, buttonVariants, Callout, cn, Icon, PageHeader, PageScaffold, Pagination, Skeleton, toast } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
-import { formatShortDateTime } from '../../../../utils/formatters'
-import {
-  gradeWarningDetailTerm,
-  gradeWarningStatusLabel,
-  gradeWarningTypeLabel,
-} from '../../../../utils/labels/grade'
+import { ResourceError } from '../../../../components/ResourceState'
+import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { formatRelativeOccurrence, formatDateTime } from '../../../../utils/formatters'
+import { gradeWarningDetailTerm, gradeWarningTypeLabel } from '../../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { gradeWarningStatusTone } from '../../statusPresentation'
-
-/** 状态筛选项:值为空串表示不过滤。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(GradeWarningStatus.PENDING), label: '待确认' },
-  { value: String(GradeWarningStatus.ACKNOWLEDGED), label: '已确认' },
-] as const
 
 /**
  * StudentAlertsPage 列出本人学业预警并提供确认。
  */
 export default function StudentAlertsPage() {
-  const navigate = useNavigate()
   const [ackingId, setAckingId] = useState<string>()
   const [actionError, setActionError] = useState<string>()
-  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [showAcknowledged, setShowAcknowledged] = useState(false)
 
-  const warnings = usePagedResource<GradeWarning>(
-    (params) =>
-      api.grade.listWarnings({
-        status: statusFilter ? (Number(statusFilter) as GradeWarningStatus) : undefined,
-        ...params,
-      }),
-    [statusFilter],
+  const pending = usePagedResource<GradeWarning>(
+    (params) => api.grade.listWarnings({ status: GradeWarningStatus.PENDING, ...params }),
+    [],
+    { urlPageKey: 'page' },
+  )
+  const acknowledged = usePagedResource<GradeWarning>(
+    (params) => api.grade.listWarnings({ status: GradeWarningStatus.ACKNOWLEDGED, ...params }),
+    [],
   )
   const semesters = useAsyncResource(() => api.grade.listSemesters(), [], () => false)
-
   const semesterName = useMemo(
-    () => new Map((semesters.data ?? []).map((semester: Semester) => [semester.id, semester.name])),
+    () => new Map((semesters.data ?? []).map((semester) => [semester.id, semester.name])),
     [semesters.data],
   )
 
-  /** ackWarning 确认预警:确认表示学生已知悉,不改变成绩本身。 */
+  /** ackWarning 确认预警:确认表示学生已知悉,不改变成绩本身 */
   const ackWarning = useCallback(
     async (warning: GradeWarning) => {
       setAckingId(warning.id)
@@ -81,250 +50,181 @@ export default function StudentAlertsPage() {
       try {
         await api.grade.ackWarning(warning.id)
         toast.success('已确认这条预警')
-        warnings.reload()
+        pending.reload()
+        acknowledged.reload()
       } catch (error) {
         setActionError(userFacingErrorMessage(error, '确认没有成功,请稍后重试。'))
       } finally {
         setAckingId(undefined)
       }
     },
-    [warnings],
+    [acknowledged, pending],
   )
 
-  // 指标带取服务端全量口径:预警会跨多页,用当前页数出来的「待确认」是错数
-  const totalCount = useResourceTotal((params) => api.grade.listWarnings(params), [], warnings.refreshVersion)
-  const pendingCount = useResourceTotal(
-    (params) => api.grade.listWarnings({ status: GradeWarningStatus.PENDING, ...params }),
-    [],
-    warnings.refreshVersion,
-  )
-  const acknowledgedCount = useResourceTotal(
-    (params) => api.grade.listWarnings({ status: GradeWarningStatus.ACKNOWLEDGED, ...params }),
-    [],
-    warnings.refreshVersion,
-  )
-
-  const columns: TableColumn<GradeWarning>[] = [
-    {
-      key: 'type',
-      header: '预警类型',
-      render: (warning) => (
-        <span className="font-medium text-ink">{gradeWarningTypeLabel(warning.type)}</span>
-      ),
-    },
-    {
-      key: 'semester_id',
-      header: '学期',
-      render: (warning) => (
-        <span className="text-ink-sub">{semesterName.get(warning.semester_id) ?? '—'}</span>
-      ),
-    },
-    {
-      key: 'detail',
-      header: '明细',
-      render: (warning) => <WarningDetail detail={warning.detail} />,
-    },
-    {
-      key: 'created_at',
-      header: '预警时间',
-      render: (warning) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatShortDateTime(warning.created_at)}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (warning) => (
-        <StatusIndicator
-          tone={gradeWarningStatusTone(warning.status)}
-          label={gradeWarningStatusLabel(warning.status)}
-        />
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (warning) =>
-        warning.status === GradeWarningStatus.PENDING ? (
-          <Button
-            variant="outline"
-            size="sm"
-            leftIcon={CheckCheck}
-            loading={ackingId === warning.id}
-            onClick={() => void ackWarning(warning)}
-          >
-            我已知悉
-          </Button>
-        ) : (
-          <span className="text-sm text-ink-faint">已确认</span>
-        ),
-    },
-  ]
+  const loading = pending.status === 'loading' && !pending.data
+  const pendingList = pending.data?.list ?? []
+  const acknowledgedTotal = acknowledged.total ?? 0
+  const nothing = pending.status === 'empty' && acknowledged.status === 'empty'
 
   return (
     <PageScaffold>
-      <PageHeader
-        kicker={<Breadcrumb items={[{ label: '学业区' }]} />}
-        title="学业预警"
-        description="学校根据你的成绩情况发出的提醒。确认后表示你已知悉,建议同时联系辅导员或任课老师。"
-        icon={TriangleAlert}
-      />
+      <div className="max-w-3xl">
+        <PageHeader
+          title="学业预警"
+          meta={pending.total !== undefined && pending.total > 0 ? [{ value: `${pending.total} 条待确认` }] : undefined}
+        />
 
-      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是预警记录与「该怎么办」,不是三个数字 */}
-      <MetricStrip
-        label="预警总量摘要"
-        className="mb-5"
-        items={[
-          { label: '全部预警', value: totalCount ?? '—', hint: '不受下方筛选影响' },
-          { label: '待确认', value: pendingCount ?? '—', hint: '确认后不再提示' },
-          { label: '已确认', value: acknowledgedCount ?? '—', hint: '你已知悉的提醒' },
-        ]}
-      />
-
-      <PageBody rail={<AlertGuidanceCard onOpenGrades={() => navigate('/student/grades')} />}>
         {actionError ? (
           <Callout tone="danger" className="mb-4">
             {actionError}
           </Callout>
         ) : null}
 
-        {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
-        <DataPanel
-          label="预警记录"
-          filter={
-            <FilterBar label="预警筛选">
-              <FilterField label="确认状态" group>
-                <SegmentedControl
-                  aria-label="按确认状态筛选"
-                  size="sm"
-                  options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-                  value={statusFilter}
-                  onValueChange={setStatusFilter}
-                />
-              </FilterField>
-            </FilterBar>
-          }
-          footer={
-            <Pagination
-              page={warnings.page}
-              pageSize={warnings.pageSize}
-              total={warnings.total}
-              onPageChange={warnings.setPage}
-            />
-          }
-        >
-          <ResourceState
-            resource={warnings}
-            emptyIcon={ShieldCheck}
-            emptyTitle={statusFilter ? '这个状态下没有预警' : '没有学业预警'}
-            emptyDescription={
-              statusFilter
-                ? '换个状态看看,或查看全部预警。'
-                : '你的学业情况正常。保持下去,继续按课程节奏推进即可。'
-            }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-          >
-            {(page) => (
-              <Table
-                columns={columns}
-                data={page.list}
-                rowKey={(item) => item.id}
-                elevated={false}
-                // <md 换行卡(§6.4.1 规则 3):预警类型一行、学期与时间一行,状态在右
-                mobileCard={(item) => ({
-                  title: gradeWarningTypeLabel(item.type),
-                  meta: `${semesterName.get(item.semester_id) ?? '未登记学期'} · ${formatShortDateTime(item.created_at)}`,
-                  badge: (
-                    <StatusIndicator
-                      tone={gradeWarningStatusTone(item.status)}
-                      label={gradeWarningStatusLabel(item.status)}
-                    />
-                  ),
-                  action:
-                    item.status === GradeWarningStatus.PENDING ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        leftIcon={CheckCheck}
-                        loading={ackingId === item.id}
-                        onClick={() => void ackWarning(item)}
-                      >
-                        我已知悉
-                      </Button>
-                    ) : undefined,
-                })}
-              />
+        {pending.status === 'error' ? (
+          <ResourceError
+            message={pending.error?.message ?? '预警暂时读取不到'}
+            traceId={pending.error?.traceId}
+            onRetry={pending.reload}
+          />
+        ) : loading ? (
+          <div aria-busy="true" className="flex flex-col gap-4">
+            <Skeleton variant="block" />
+          </div>
+        ) : nothing ? (
+          <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-14 text-center shadow-xs">
+            <Icon icon={ShieldCheck} size="lg" className="text-primary" />
+            <p className="mt-3 text-md font-semibold text-ink">目前没有学业预警</p>
+            <p className="mt-1.5 text-sm text-ink-sub">继续保持。学校发出预警时会显示在这里,并通过站内通知告诉你。</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-4">
+            {pendingList.length > 0 ? (
+              <>
+                <GuidanceCard />
+                {pendingList.map((warning) => (
+                  <WarningCard
+                    key={warning.id}
+                    warning={warning}
+                    semester={semesterName.get(warning.semester_id)}
+                    acking={ackingId === warning.id}
+                    onAck={() => void ackWarning(warning)}
+                  />
+                ))}
+                <Pagination page={pending.page} pageSize={pending.pageSize} total={pending.total} onPageChange={pending.setPage} />
+              </>
+            ) : (
+              <p className="flex items-center gap-2 text-sm text-ink-sub">
+                <Icon icon={ShieldCheck} size="sm" className="text-primary" />
+                没有待确认的预警。
+              </p>
             )}
-          </ResourceState>
-        </DataPanel>
-      </PageBody>
+
+            {acknowledgedTotal > 0 ? (
+              <section aria-labelledby="acknowledged-title" className="mt-4">
+                <button
+                  type="button"
+                  id="acknowledged-title"
+                  aria-expanded={showAcknowledged}
+                  onClick={() => setShowAcknowledged((value) => !value)}
+                  className="flex items-center gap-1.5 rounded-md text-sm font-medium text-ink-sub hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                >
+                  <Icon icon={ChevronDown} size="sm" className={cn('transition-transform duration-fast', showAcknowledged ? '' : '-rotate-90')} />
+                  已确认({acknowledgedTotal})
+                </button>
+                {showAcknowledged ? (
+                  <div className="mt-3 flex flex-col gap-3">
+                    {(acknowledged.data?.list ?? []).map((warning) => (
+                      <WarningCard key={warning.id} warning={warning} semester={semesterName.get(warning.semester_id)} />
+                    ))}
+                    <Pagination
+                      page={acknowledged.page}
+                      pageSize={acknowledged.pageSize}
+                      total={acknowledged.total}
+                      onPageChange={acknowledged.setPage}
+                    />
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+          </div>
+        )}
+      </div>
     </PageScaffold>
   )
 }
 
-/**
- * WarningDetail 呈现预警明细。
- * detail 是开放对象:只显示已登记键(gradeWarningDetailTerm),
- * 未登记键不显示 —— 把内部键名抛到界面上等于让学生读数据库字段。
- */
-function WarningDetail({ detail }: { detail: Record<string, unknown> }) {
-  const entries = Object.entries(detail).flatMap(([key, value]) => {
+/** nextStepFor 按预警类型给出一句建议 */
+function nextStepFor(warning: GradeWarning): string {
+  return warning.type === GradeWarningType.FAILED_COURSE
+    ? '尽快联系任课老师,了解补考或重修安排。'
+    : '看看哪几门课拉低了绩点,和辅导员或任课老师一起定个补救计划。'
+}
+
+/** WarningCard 一条预警:类型、学期与发出时间、明细、建议下一步;待确认的带「我已知悉」 */
+function WarningCard({
+  warning,
+  semester,
+  acking,
+  onAck,
+}: {
+  warning: GradeWarning
+  semester: string | undefined
+  acking?: boolean
+  onAck?: () => void
+}) {
+  const pendingAck = onAck !== undefined
+  const details = Object.entries(warning.detail).flatMap(([key, value]) => {
     const term = gradeWarningDetailTerm(key)
-    if (!term) return []
-    if (typeof value !== 'string' && typeof value !== 'number') return []
-    return [{ term, value: String(value) }]
+    if (!term || (typeof value !== 'string' && typeof value !== 'number')) return []
+    return [`${term} ${value}`]
   })
-
-  if (entries.length === 0) return <span className="text-ink-sub">—</span>
-
   return (
-    <div className="flex flex-wrap gap-1.5">
-      {entries.map((entry) => (
-        <Badge key={entry.term} tone="neutral">
-          {entry.term} {entry.value}
-        </Badge>
-      ))}
-    </div>
+    <article className={cn('rounded-lg bg-surface p-5 shadow-xs', !pendingAck && 'opacity-80')}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="flex items-center gap-2 text-md font-semibold text-ink">
+            {pendingAck ? <Icon icon={TriangleAlert} size="sm" className="text-warning" /> : null}
+            {gradeWarningTypeLabel(warning.type)}
+          </h2>
+          <p className="mt-0.5 text-sm text-ink-sub">
+            {semester ? `${semester} · ` : ''}
+            <time dateTime={warning.created_at} title={formatDateTime(warning.created_at)}>
+              {formatRelativeOccurrence(warning.created_at)}
+            </time>
+            发出
+          </p>
+        </div>
+        {pendingAck ? (
+          <Button variant="primary" size="sm" leftIcon={CheckCheck} loading={acking} onClick={onAck}>
+            我已知悉
+          </Button>
+        ) : (
+          <span className="text-sm text-ink-sub">已确认</span>
+        )}
+      </div>
+      {details.length > 0 ? <p className="mt-3 text-sm text-ink">{details.join(' · ')}</p> : null}
+      {pendingAck ? <p className="mt-2 text-sm text-ink-sub">建议:{nextStepFor(warning)}</p> : null}
+    </article>
   )
 }
 
-/**
- * AlertGuidanceCard 给出收到预警后的具体下一步。
- * 空态与列表都需要引导:预警页最重要的不是列出问题,而是告诉学生该做什么。
- */
-function AlertGuidanceCard({ onOpenGrades }: { onOpenGrades: () => void }) {
-  const items = useMemo(
-    () => [
-      { term: '第一步', description: '在成绩中心确认是哪几门课程分数偏低' },
-      { term: '第二步', description: '联系任课老师了解补救方式(补考、重修或补交作业)' },
-      { term: '第三步', description: '如对成绩有疑问,在成绩中心提交申诉' },
-    ],
-    [],
-  )
-
+/** GuidanceCard 收到预警怎么办:三步说明 + 打开成绩中心;说清「我已知悉」不改变成绩 */
+function GuidanceCard() {
   return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader title="收到预警怎么办" description="按这三步处理,不要只是点确认。" />
-        <CardBody className="flex flex-col gap-4">
-          <DescriptionList dense items={items} />
-          <Button variant="primary" leftIcon={GraduationCap} onClick={onOpenGrades}>
-            打开成绩中心
-          </Button>
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader title="关于确认" />
-        <CardBody>
-          <Callout tone="info">
-            点「我已知悉」只表示你看到了这条提醒,不会改变成绩,也不代表问题已经解决。
-          </Callout>
-        </CardBody>
-      </Card>
-    </div>
+    <section aria-labelledby="alert-guidance-title" className="rounded-lg bg-warning-bg p-5">
+      <h2 id="alert-guidance-title" className="text-md font-semibold text-ink">
+        收到预警怎么办
+      </h2>
+      <ol className="mt-3 flex list-decimal flex-col gap-1.5 pl-5 text-sm text-ink">
+        <li>在成绩中心确认是哪几门课程分数偏低;</li>
+        <li>联系任课老师了解补救方式(补考、重修或补交作业);</li>
+        <li>对成绩有疑问时,在成绩中心对那门课提出申诉。</li>
+      </ol>
+      <p className="mt-3 text-sm text-ink-sub">点「我已知悉」只表示你看到了这条提醒,不会改变成绩,也不代表问题已经解决。</p>
+      <Link to="/student/grades" className={`${buttonVariants({ variant: 'secondary', size: 'sm' })} mt-4`}>
+        <Icon icon={GraduationCap} size="sm" />
+        打开成绩中心
+      </Link>
+    </section>
   )
 }

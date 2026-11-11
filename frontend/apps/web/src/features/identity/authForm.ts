@@ -5,6 +5,7 @@
 // 账号是否存在、验证码是否有效、激活码是否在有效期内一律由服务端裁决,前端不复刻。
 
 import { useCallback, useEffect, useState } from 'react'
+import { passwordRuleStates } from './passwordRules'
 
 /** 手机号格式:与后端 identity ValidatePhone 的大陆手机号口径一致。 */
 const PHONE_PATTERN = /^1[3-9]\d{9}$/
@@ -19,9 +20,10 @@ const SMS_RESEND_SECONDS = 60
 /** 密码类字段在文案里的称呼:首次设置叫「密码」,改密与重置叫「新密码」 */
 type PasswordNoun = '密码' | '新密码'
 
-/** isPasswordStrong 与后端 ValidatePassword 保持同一强度口径,供所有身份表单复用。 */
+/** isPasswordStrong 与后端 ValidatePassword 保持同一强度口径(规则唯一定义在 passwordRules.ts),供所有身份表单复用。 */
 export function isPasswordStrong(value: string): boolean {
-  return value.length >= 8 && /[A-Za-z]/.test(value) && /\d/.test(value)
+  const rules = passwordRuleStates(value)
+  return rules.minLength && rules.letter && rules.digit
 }
 
 /**

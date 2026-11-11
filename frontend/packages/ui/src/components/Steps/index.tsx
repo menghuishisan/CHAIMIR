@@ -3,6 +3,7 @@
  * 横向排布:完成步=玉实底圆点 + 对勾,当前步=玉描边 + 玉浅底外圈 + aria-current,
  * 未来步=墨描边;连接线完成段染玉色。步骤状态由文字 + 图标双通道表达,色非唯一。
  */
+import type { ReactNode } from "react";
 import { Check } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Icon } from "../../lib/icon";
@@ -20,10 +21,12 @@ export interface StepsProps {
   steps: StepItem[];
   /** 当前步下标(0 起);之前为完成,之后为未来 */
   current: number;
+  /** 传入时已完成的步骤可点回去(按钮);当前步与未来步不可点 */
+  onSelect?: (index: number) => void;
   className?: string;
 }
 
-export function Steps({ steps, current, className }: StepsProps) {
+export function Steps({ steps, current, onSelect, className }: StepsProps) {
   return (
     <div className="min-w-0 max-w-full overflow-x-auto pb-1">
       <ol className={cn("flex min-w-max items-center", className)}>
@@ -43,7 +46,10 @@ export function Steps({ steps, current, className }: StepsProps) {
                   className={cn("mx-3 h-px min-w-4 flex-1", i <= current ? "bg-primary" : "bg-line")}
                 />
               )}
-              <span className="flex items-center gap-2">
+              <StepWrapper
+                onSelect={isDone && onSelect ? () => onSelect(i) : undefined}
+                label={`回到第 ${i + 1} 步:${step.label}`}
+              >
                 {/* 步骤圆点:完成=实底对勾 / 当前=描边+外圈 / 未来=灰描边序号 */}
                 {isDone ? (
                   <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-on-dark">
@@ -74,11 +80,34 @@ export function Steps({ steps, current, className }: StepsProps) {
                     <span className="text-xs text-ink-sub">{step.description}</span>
                   )}
                 </span>
-              </span>
+              </StepWrapper>
             </li>
           );
         })}
       </ol>
     </div>
+  );
+}
+
+/** StepWrapper 可点的完成步是按钮,其余是普通容器 */
+function StepWrapper({
+  onSelect,
+  label,
+  children,
+}: {
+  onSelect: (() => void) | undefined;
+  label: string;
+  children: ReactNode;
+}) {
+  if (!onSelect) return <span className="flex items-center gap-2">{children}</span>;
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-label={label}
+      className="flex items-center gap-2 rounded-md text-left transition-opacity duration-fast hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+    >
+      {children}
+    </button>
   );
 }

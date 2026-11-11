@@ -278,12 +278,12 @@ RETURNING id, tenant_id, course_id, title, chapter_id, due_at, max_attempts, lat
 DELETE FROM assignment_item WHERE tenant_id = $1 AND assignment_id = $2;
 
 -- name: CreateAssignmentItem :one
-INSERT INTO assignment_item (id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
-RETURNING id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code, created_at;
+INSERT INTO assignment_item (id, tenant_id, assignment_id, item_code, item_version, score, seq, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+RETURNING id, tenant_id, assignment_id, item_code, item_version, score, seq, created_at;
 
 -- name: ListAssignmentItems :many
-SELECT id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code, created_at
+SELECT id, tenant_id, assignment_id, item_code, item_version, score, seq, created_at
 FROM assignment_item
 WHERE tenant_id = $1 AND assignment_id = $2
 ORDER BY seq ASC;
@@ -302,16 +302,18 @@ RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, jud
 -- name: GetSubmission :one
 SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 FROM submission
-WHERE tenant_id = $1 AND id = $2;
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE;
 
 -- name: GetSubmissionBySourceRef :one
 SELECT s.id, s.tenant_id, s.assignment_id, s.student_id, s.attempt_no, s.content_ref, s.judge_task_ref, s.auto_score, s.manual_score, s.final_score, s.comment, s.is_late, s.status, s.submitted_at
 FROM submission s
 JOIN submission_judge_outbox o ON o.tenant_id = s.tenant_id AND o.submission_id = s.id
-WHERE o.tenant_id = $1 AND o.source_ref = $2;
+WHERE o.tenant_id = $1 AND o.source_ref = $2
+FOR UPDATE OF s;
 
 -- name: ListJudgeOutboxBySubmission :many
-SELECT id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
 FROM submission_judge_outbox
 WHERE tenant_id = $1 AND submission_id = $2
 ORDER BY id ASC;
@@ -341,7 +343,22 @@ WHERE tenant_id = $1
 
 -- name: UpdateSubmissionManualGrade :one
 UPDATE submission
-SET manual_score = $3, final_score = $4, comment = $5, status = 3
+SET manual_score = $3,
+    final_score = CASE
+        WHEN auto_score IS NULL AND EXISTS (
+            SELECT 1 FROM submission_judge_outbox o
+            WHERE o.tenant_id = $1 AND o.submission_id = $2
+        ) THEN NULL
+        ELSE $4
+    END,
+    comment = $5,
+    status = CASE
+        WHEN auto_score IS NULL AND EXISTS (
+            SELECT 1 FROM submission_judge_outbox o
+            WHERE o.tenant_id = $1 AND o.submission_id = $2
+        ) THEN status
+        ELSE 3
+    END
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at;
 
@@ -353,14 +370,22 @@ RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, jud
 
 -- name: UpdateSubmissionAutoScore :one
 UPDATE submission
-SET auto_score = $3, final_score = $4, status = 3
+SET auto_score = $3,
+    final_score = CASE
+        WHEN COALESCE((content_ref->>'manual_max_score')::integer, 0) > 0 AND manual_score IS NULL THEN NULL
+        ELSE $4
+    END,
+    status = CASE
+        WHEN COALESCE((content_ref->>'manual_max_score')::integer, 0) > 0 AND manual_score IS NULL THEN 2
+        ELSE 3
+    END
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at;
 
 -- name: CreateJudgeOutbox :one
-INSERT INTO submission_judge_outbox (id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 1, 0, NULL, NULL, NULL, now(), now(), '', NULL)
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+INSERT INTO submission_judge_outbox (id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, 0, NULL, NULL, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: ClaimJudgeOutbox :many
 UPDATE submission_judge_outbox
@@ -374,7 +399,7 @@ WHERE id IN (
     LIMIT $2
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: ClaimJudgeOutboxAcrossTenants :many
 UPDATE submission_judge_outbox
@@ -387,7 +412,7 @@ WHERE id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: CompleteJudgeOutbox :one
 UPDATE submission_judge_outbox
@@ -398,14 +423,14 @@ SET status = 3,
     lease_until = NULL
 WHERE (tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now())
    OR (tenant_id = $1 AND id = $2 AND status = 3)
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: RetryJudgeOutbox :one
 UPDATE submission_judge_outbox
 SET status = CASE WHEN retry_count >= @max_attempts THEN 4 ELSE 1 END,
     last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: ExhaustExpiredJudgeOutbox :execrows
 UPDATE submission_judge_outbox
@@ -435,14 +460,14 @@ UPDATE submission_judge_outbox
 SET score = $3, last_error = NULL, completed_at = $4, status = 3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND source_ref = $2 AND status IN (2, 3, 4)
   AND (completed_at IS NULL OR (completed_at = $4 AND score = $3))
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: MarkJudgeOutboxFailedResult :one
 UPDATE submission_judge_outbox
 SET last_error = $3, completed_at = $4, status = 3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND source_ref = $2 AND status IN (2, 3, 4)
   AND (completed_at IS NULL OR (completed_at = $4 AND last_error = $3))
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: UpsertSubmissionDraft :one
 INSERT INTO submission_draft (id, tenant_id, assignment_id, student_id, content, updated_at)

@@ -4,17 +4,19 @@
 // 旧前端「编辑多题作业静默丢弃第 2 题及以后」正是把题目当单值处理造成的。
 
 import { useCallback, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router'
 import { ClipboardList, FileCheck2, MoreVertical, Pencil, Plus, Send } from 'lucide-react'
 import {
   AssignmentStatus,
-  GradingMode,
   LatePolicy,
+  ContentType,
   type Assignment,
   type AssignmentItemInput,
   type AssignmentRequest,
   type CourseOutline,
 } from '@chaimir/api-client'
 import {
+  Badge,
   Button,
   Callout,
   DataPanel,
@@ -47,10 +49,10 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { ContentItemPicker } from '../../../content/components/ContentItemPicker'
 import { useAsyncResource, usePagedResource } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
-import { formatDateTime } from '../../../../utils/formatters'
+import { formatDateTime, formatRelativeDeadline } from '../../../../utils/formatters'
+import { ASSIGNMENT_DUE_TONE } from '../../statusPresentation'
 import {
   assignmentStatusLabel,
-  gradingModeLabel,
   latePolicyLabel,
 } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -66,6 +68,9 @@ export interface CourseAssignmentsProps {
  * CourseAssignments 管理课程作业。
  */
 export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAssignmentsProps) {
+  const navigate = useNavigate()
+  /** onOpenGradingHref 整行链接的本页跳转(中键与 Ctrl/⌘ 点击仍在新标签页打开) */
+  const onOpenGradingHref = (href: string) => navigate(href)
   const [formOpen, setFormOpen] = useState<{ assignment?: Assignment } | undefined>()
   const [publishTarget, setPublishTarget] = useState<Assignment>()
   const [working, setWorking] = useState(false)
@@ -97,16 +102,25 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
     {
       key: 'title',
       header: '作业',
+      primary: true,
       render: (assignment) => <span className="font-medium text-ink">{assignment.title}</span>,
     },
     {
       key: 'due_at',
-      header: '截止时间',
-      render: (assignment) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDateTime(assignment.due_at)}
-        </span>
-      ),
+      header: '截止',
+      render: (assignment) => {
+        const deadline = formatRelativeDeadline(assignment.due_at)
+        return (
+          <span className="flex flex-col">
+            <Badge tone={ASSIGNMENT_DUE_TONE[deadline.urgency]} className="self-start">
+              {deadline.text}
+            </Badge>
+            <span className="mt-0.5 whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
+              {formatDateTime(assignment.due_at)}
+            </span>
+          </span>
+        )
+      },
     },
     { key: 'max_attempts', header: '可提交次数', align: 'right', mono: true },
     {
@@ -131,7 +145,12 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
       header: '操作',
       align: 'right',
       render: (assignment) => (
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-1">
+          {assignment.status === AssignmentStatus.DRAFT ? (
+            <Button variant="secondary" size="sm" onClick={() => setPublishTarget(assignment)}>
+              发布
+            </Button>
+          ) : null}
           <AssignmentActionMenu
             assignment={assignment}
             onEdit={() => setFormOpen({ assignment })}
@@ -203,6 +222,9 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
                 data={page.list}
                 rowKey={(item) => item.id}
                 elevated={false}
+                // 整行链向批改中心并带上这份作业(设计 §7.4)
+                getRowHref={(item) => `/teacher/grading?course=${courseId}&assignment=${item.id}`}
+                onNavigate={(href) => onOpenGradingHref(href)}
                 // <md 换行卡(§6.4.1 规则 3):作业名一行、截止时间与可提交次数一行,发布状态在右
                 mobileCard={(item) => ({
                   title: item.title,
@@ -353,8 +375,6 @@ function AssignmentForm({ courseId, assignment, outline, onClose, onSaved }: Ass
         item_version: item.item_version,
         score: item.score,
         seq: item.seq,
-        grading_mode: item.grading_mode,
-        judger_code: item.judger_code ?? '',
       }))
     )
   }
@@ -419,20 +439,30 @@ function AssignmentForm({ courseId, assignment, outline, onClose, onSaved }: Ass
         <ContentItemPicker
           selectedCodes={new Set(items.map((item) => item.item_code))}
           targetName="作业"
+          type={ContentType.THEORY_QUESTION}
           onClose={() => setPickerOpen(false)}
-          onPick={(picked) => {
-            setItems((current) => [
-              ...current,
-              ...picked.map((item, index) => ({
-                item_code: item.code,
-                item_version: item.version,
-                score: 10,
-                seq: current.length + index + 1,
-                grading_mode: GradingMode.MANUAL,
-                judger_code: '',
-              })),
-            ])
-            setPickerOpen(false)
+          onPick={async (picked) => {
+            setWorking(true)
+            setFormError(undefined)
+            try {
+              const faces = await Promise.all(
+                picked.map((item) => api.content.getItemFace(item.code, item.version))
+              )
+              setItems((current) => [
+                ...current,
+                ...picked.map((item, index) => ({
+                  item_code: item.code,
+                  item_version: item.version,
+                  score: Number(faces[index].body.max_score),
+                  seq: current.length + index + 1,
+                })),
+              ])
+              setPickerOpen(false)
+            } catch (error) {
+              setFormError(userFacingErrorMessage(error, '题目详情没有读取成功,请重试。'))
+            } finally {
+              setWorking(false)
+            }
           }}
         />
       </PageSection>
@@ -442,10 +472,10 @@ function AssignmentForm({ courseId, assignment, outline, onClose, onSaved }: Ass
   return (
     <PageSection
       title={editing ? '编辑作业' : '新建作业'}
-      description="从题库选题组成作业。客观题与编程题自动判分,主观题由你批改。"
+      description="从题库选择理论题。选择、判断和填空题自动判分,简答题由你批改。"
     >
       <form onSubmit={submit} noValidate>
-        <div className="flex flex-col gap-4 rounded-xl bg-surface p-5">
+        <div className="flex flex-col gap-4 rounded-lg bg-surface p-5 shadow-xs">
           <FormField label="作业标题" htmlFor="assignment-title" required error={errors.title}>
             <Input
               id="assignment-title"
@@ -533,17 +563,10 @@ interface AssignmentItemsEditorProps {
 }
 
 /**
- * AssignmentItemsEditor 从题库选题并设置每题分值与判分方式。
+ * AssignmentItemsEditor 从题库选择理论题,题目分值由 M5 锁定版本决定。
  * 题目按 code + version 锁定版本(后端要求),题目列表全量保留,不静默丢弃。
  */
 function AssignmentItemsEditor({ items, onChange, onOpenPicker }: AssignmentItemsEditorProps) {
-  const updateItem = useCallback(
-    (index: number, patch: Partial<AssignmentItemInput>) => {
-      onChange(items.map((item, i) => (i === index ? { ...item, ...patch } : item)))
-    },
-    [items, onChange]
-  )
-
   const removeItem = useCallback(
     (index: number) => onChange(items.filter((_, i) => i !== index)),
     [items, onChange]
@@ -566,7 +589,7 @@ function AssignmentItemsEditor({ items, onChange, onOpenPicker }: AssignmentItem
         <Empty
           icon={ClipboardList}
           title="还没有题目"
-          description="从题库选题后设置每题分值。"
+          description="从题库选题,分值跟随题目版本。"
           action={
             <Button
               type="button"
@@ -584,7 +607,7 @@ function AssignmentItemsEditor({ items, onChange, onOpenPicker }: AssignmentItem
           {items.map((item, index) => (
             <div
               key={`${item.item_code}-${item.item_version}`}
-              className="flex flex-wrap items-end gap-3 well p-3"
+              className="flex flex-wrap items-end gap-3 rounded-md bg-surface-hover p-3"
             >
               <div className="min-w-0 flex-1">
                 <div className="truncate text-base text-ink">
@@ -594,34 +617,10 @@ function AssignmentItemsEditor({ items, onChange, onOpenPicker }: AssignmentItem
                   版本 {item.item_version}
                 </div>
               </div>
-              <FormField label="分值" htmlFor={`item-score-${index}`} className="mb-0 w-24">
-                <Input
-                  id={`item-score-${index}`}
-                  type="number"
-                  min="1"
-                  value={String(item.score)}
-                  onChange={(event) =>
-                    updateItem(index, { score: Number(event.target.value) || 0 })
-                  }
-                />
-              </FormField>
-              <FormField label="判分方式" htmlFor={`item-mode-${index}`} className="mb-0 w-36">
-                <Select
-                  id={`item-mode-${index}`}
-                  size="sm"
-                  options={[
-                    { value: String(GradingMode.AUTO), label: gradingModeLabel(GradingMode.AUTO) },
-                    {
-                      value: String(GradingMode.MANUAL),
-                      label: gradingModeLabel(GradingMode.MANUAL),
-                    },
-                  ]}
-                  value={String(item.grading_mode)}
-                  onValueChange={(value) =>
-                    updateItem(index, { grading_mode: Number(value) as GradingMode })
-                  }
-                />
-              </FormField>
+              <div className="w-24 pb-2">
+                <div className="text-xs text-ink-sub">本题分值</div>
+                <div className="font-mono text-sm tabular-nums text-ink">{item.score} 分</div>
+              </div>
               <Button type="button" variant="ghost" size="sm" onClick={() => removeItem(index)}>
                 移除
               </Button>

@@ -63,10 +63,10 @@ export function Select({
         aria-label={ariaLabel}
         aria-invalid={invalid || undefined}
         className={cn(
-          "inline-flex min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50",
+          "inline-flex pointer-coarse:min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50",
           onDark
-            ? "border-dark-line bg-dark-elevated text-on-dark data-[placeholder]:text-on-dark-faint hover:border-on-dark-faint"
-            : "border-line-strong bg-surface text-ink data-[placeholder]:text-ink-faint hover:border-ink-faint",
+            ? "border-dark-control bg-dark-elevated text-on-dark data-[placeholder]:text-on-dark-sub hover:border-on-dark-sub"
+            : "border-line-control bg-surface text-ink data-[placeholder]:text-ink-sub hover:border-ink-sub",
           isSm ? "h-8 text-sm" : "h-9 text-base",
           // 错误态:hover 同样保持危险色(显式覆盖基类 hover),避免误导为已修复
           invalid && "border-danger hover:border-danger",

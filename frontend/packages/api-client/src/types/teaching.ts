@@ -8,7 +8,6 @@ import type {
   CourseType,
   CourseVisibility,
   GradeSource,
-  GradingMode,
   JoinMode,
   LatePolicy,
   LessonContentType,
@@ -197,8 +196,6 @@ export interface AssignmentItemInput {
   item_version: string
   score: number
   seq: number
-  grading_mode: GradingMode
-  judger_code: string
 }
 
 export interface AssignmentItem {
@@ -207,8 +204,6 @@ export interface AssignmentItem {
   item_version: string
   score: number
   seq: number
-  grading_mode: GradingMode
-  judger_code?: string
   /**
    * 以下四个字段是 M6 从 M5 题面视角展开的题目信息(见 service_assignment.go
    * GetAssignmentForStudent),因此 type / difficulty 是 M5 的内容枚举而非教学枚举。
@@ -233,6 +228,9 @@ export interface Draft {
   exists: boolean
 }
 
+/** TheoryAnswer 保留理论题的文本、布尔值和有序答案数组。 */
+export type TheoryAnswer = string | boolean | string[]
+
 /** DraftSave 是服务端草稿保存成功后的固定响应。 */
 export interface DraftSave {
   updated_at: string
@@ -244,6 +242,7 @@ export interface Submission {
   student_id: SnowflakeID
   attempt_no: number
   content: Record<string, unknown>
+  manual_max_score: number
   judge_task_ref?: string
   auto_score?: number
   manual_score?: number
@@ -255,7 +254,7 @@ export interface Submission {
 }
 
 export interface SubmitRequest {
-  content_ref: Record<string, unknown>
+  answers: Record<string, TheoryAnswer>
 }
 
 export interface CourseMember {

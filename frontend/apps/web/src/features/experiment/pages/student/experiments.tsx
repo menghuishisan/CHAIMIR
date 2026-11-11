@@ -1,87 +1,97 @@
-// 实验实训页(学生侧栏,/student/experiments)。
+// 实验实训页(学生侧栏,/student/experiments)。设计 §7.2:
+// 页头 + 一行工具条(按课程筛选、搜索);卡片网格,卡片显示实验名、所属课程(用学生自己的课程列表解析)、
+// 个人或小组、是否要交报告、阶段数与检查点数;整卡链向实验详情,卡内「进入实验」直接创建或恢复
+// 实验环境并进入工作台。课程筛选与搜索写进地址。
+//
 // 列表走学生专用投影 GET /experiment/student/experiments —— teacher 组的实验读取
 // 会返回 init_code_ref/judger_code/extra_input,那是答案链路,学生不可用。
 // 「进入实验」调 POST /experiments/{id}/instances:该接口对已有活跃实例幂等(见对齐清单 §6.8),
 // 因此不做「开始 / 继续」二态判断,一个按钮既创建也恢复。
+// 「个人或小组」「是否交报告」的全量计数来自接口分组计数,只在页头一行属性里说明;接口不接受这两项筛选,
+// 用当前页切片筛选会漏掉别的页,故不做成筛选。
 
-import { useCallback, useState } from 'react'
-import { useNavigate } from 'react-router'
-import { FlaskConical, MoreVertical, Play } from 'lucide-react'
-import { ExperimentCollabMode, type StudentExperiment } from '@chaimir/api-client'
+import { useCallback, useMemo, useState } from 'react'
+import { Link, useNavigate } from 'react-router'
+import { FlaskConical, Play, Users } from 'lucide-react'
+import { ExperimentCollabMode, PAGINATION_MAX_SIZE, type StudentExperiment } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
-  DataPanel,
-  FilterBar,
-  FilterField,
-  IconButton,
-  Input,
-  MetricStrip,
-  Menu,
-  MenuContent,
-  MenuItem,
-  MenuTrigger,
+  Card,
+  Icon,
   PageHeader,
   PageScaffold,
   Pagination,
-  Table,
-  type TableColumn,
+  Select,
+  Skeleton,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource } from '../../../../hooks'
+import { ResourceError } from '../../../../components/ResourceState'
+import { SearchBox } from '../../../../components/SearchBox'
+import { useAsyncResource, usePagedResource, useUrlState } from '../../../../hooks'
 import { facetCount } from '../../../../utils/facets'
-import {
-  experimentCollabModeLabel,
-} from '../../../../utils/labels/experiment'
+import { experimentCollabModeLabel } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { ExperimentIdentityCell, ExperimentStatusCell } from '../../components/ExperimentTableCells'
+
+/** 地址参数:course 是课程编号(空为全部课程),q 是搜索词 */
+const EXPERIMENTS_QUERY = {
+  course: { defaultValue: '' },
+  q: { defaultValue: '' },
+} as const
+
+/** 课程筛选里「全部课程」的取值(Select 不接受空串作选项值) */
+const ALL_COURSES = 'all'
 
 /**
  * StudentExperimentsPage 列出可做实验并提供进入入口。
  */
 export default function StudentExperimentsPage() {
   const navigate = useNavigate()
+  const [query, setQuery] = useUrlState(EXPERIMENTS_QUERY)
   const [enteringId, setEnteringId] = useState<string>()
   const [actionError, setActionError] = useState<string>()
-  const [keyword, setKeyword] = useState('')
-  const [submittedKeyword, setSubmittedKeyword] = useState('')
 
   const experiments = usePagedResource<StudentExperiment>(
     (params) =>
       api.experiment.getPublishedExperiments({
         ...params,
-        keyword: submittedKeyword || undefined,
+        course_id: query.course || undefined,
+        keyword: query.q || undefined,
       }),
-    [submittedKeyword],
+    [query.course, query.q],
+    { urlPageKey: 'page' },
+  )
+  // 学生自己的课程:用于筛选项与卡片上的课程名;一学期几门课,一页取完
+  const courses = useAsyncResource(
+    () => api.teaching.getCourses({ role: 'student', size: PAGINATION_MAX_SIZE }),
+    [],
+    () => false,
+  )
+  const courseName = useMemo(
+    () => new Map((courses.data?.list ?? []).map((course) => [course.id, course.name])),
+    [courses.data],
+  )
+  const courseOptions = useMemo(
+    () => [
+      { value: ALL_COURSES, label: '全部课程' },
+      ...(courses.data?.list ?? []).map((course) => ({ value: course.id, label: course.name })),
+    ],
+    [courses.data],
   )
 
-  const handleSearch = useCallback(() => {
-    setSubmittedKeyword(keyword.trim())
-  }, [keyword])
-
-  // 协作形态与报告要求取后端 facets:全量分组计数,不用当前页切片去数(§6.5.4)
-  const facets = experiments.total === undefined ? undefined : experiments.data?.facets
-  const groupCount = facetCount(
-    facets,
-    'collab_mode',
-    ExperimentCollabMode.GROUP,
-  )
+  // 全量分组计数(与当前筛选同口径),不用当前页切片去数
+  const facets = experiments.status === 'success' ? experiments.data?.facets : undefined
+  const groupCount = facetCount(facets, 'collab_mode', ExperimentCollabMode.GROUP)
   const reportCount = facetCount(facets, 'require_report', true)
 
   /**
    * enterExperiment 创建或恢复实例后进入沉浸式工作台。
-   * 小组实验必须带 my_group_id:后端按组成员关系校验,未分组时不发请求(该字段是学生
+   * 小组实验必须带 my_group_id:后端按组成员关系校验,未分组时按钮本身不可用(该字段是学生
    * 获取自身 group_id 的唯一来源,见 M7 接口设计 §3.1)。
    */
   const enterExperiment = useCallback(
     async (experiment: StudentExperiment) => {
-      if (experiment.collab_mode === ExperimentCollabMode.GROUP && !experiment.my_group_id) {
-        setActionError('这个实验需要分组完成,请等老师把你分到小组后再进入。')
-        return
-      }
       setEnteringId(experiment.id)
       setActionError(undefined)
       try {
@@ -98,93 +108,39 @@ export default function StudentExperimentsPage() {
     [navigate],
   )
 
-  const columns: TableColumn<StudentExperiment>[] = [
-    {
-      key: 'name',
-      header: '实验',
-      render: (experiment) => <ExperimentIdentityCell experiment={experiment} />,
-    },
-    {
-      key: 'collab_mode',
-      header: '完成方式',
-      render: (experiment) => (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge tone="neutral">{experimentCollabModeLabel(experiment.collab_mode)}</Badge>
-          {experiment.collab_mode === ExperimentCollabMode.GROUP && !experiment.my_group_id ? (
-            <Badge tone="warning">等待分组</Badge>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      key: 'checkpoints',
-      header: '检查点',
-      align: 'right',
-      mono: true,
-      render: (experiment) => experiment.components.checkpoints.length,
-    },
-    {
-      key: 'require_report',
-      header: '实验报告',
-      render: (experiment) => (
-        <span className="text-ink-sub">{experiment.require_report ? '需要提交' : '不需要'}</span>
-      ),
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (experiment) => <ExperimentStatusCell experiment={experiment} />,
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (experiment) => (
-        <div className="flex justify-end gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate(`/student/experiments/${experiment.id}`)}
-          >
-            查看详情
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            leftIcon={Play}
-            loading={enteringId === experiment.id}
-            onClick={() => void enterExperiment(experiment)}
-          >
-            进入实验
-          </Button>
-        </div>
-      ),
-    },
-  ]
+  const filtered = query.course !== '' || query.q !== ''
+  const list = experiments.data?.list ?? []
 
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '学习区' }]} />}
         title="实验实训"
-        description="进入实验会为你准备独立的实验环境,中途退出后再进入可以接着做。"
-        icon={FlaskConical}
+        meta={
+          experiments.total !== undefined
+            ? [
+                { value: `共 ${experiments.total} 个实验` },
+                { label: '小组实验', value: groupCount },
+                { label: '需交报告', value: reportCount },
+              ]
+            : undefined
+        }
       />
 
-      {/*
-        归族:资源列表族(§6.5.3 第 ①)。指标退为一行内联摘要:
-        「小组实验/需交报告」走后端聚合契约(facets.collab_mode / facets.require_report),
-        是全量口径而非当前页切片(§6.5.4)。
-      */}
-      <MetricStrip
-        label="实验总量摘要"
-        className="mb-5"
-        items={[
-          { label: '可做实验', value: experiments.total, hint: '已发布给你的' },
-          { label: '小组实验', value: groupCount, hint: '要先加入小组' },
-          { label: '需交报告', value: reportCount, hint: '做完还要写报告' },
-        ]}
-      />
+      <div className="mb-5 flex flex-wrap items-center gap-3">
+        <Select
+          aria-label="按课程筛选"
+          value={query.course || ALL_COURSES}
+          onValueChange={(value) => setQuery({ course: value === ALL_COURSES ? '' : value })}
+          options={courseOptions}
+          className="w-full sm:w-64"
+        />
+        <SearchBox
+          label="搜索实验"
+          placeholder="搜索实验名称或说明"
+          value={query.q}
+          onSearch={(value) => setQuery({ q: value })}
+        />
+      </div>
 
       {actionError ? (
         <Callout tone="danger" className="mb-4">
@@ -192,85 +148,121 @@ export default function StudentExperimentsPage() {
         </Callout>
       ) : null}
 
-      {/* 数据表与分页同处一块抬起片(§6.5.2)。关键词由学生投影接口按名称或说明筛选。 */}
-      <DataPanel
-        label="实验列表"
-        filter={
-          <FilterBar label="实验筛选" onSubmit={handleSearch} submitLabel="搜索">
-            <FilterField label="关键词" htmlFor="student-experiment-keyword">
-              <Input
-                id="student-experiment-keyword"
-                value={keyword}
-                onChange={(event) => setKeyword(event.target.value)}
-                placeholder="搜索实验名称或说明"
-              />
-            </FilterField>
-          </FilterBar>
-        }
-        footer={
-          <Pagination
-            page={experiments.page}
-            pageSize={experiments.pageSize}
-            total={experiments.total}
-            onPageChange={experiments.setPage}
-          />
-        }
-      >
-        <ResourceState
-          resource={experiments}
-          emptyIcon={FlaskConical}
-          emptyTitle={submittedKeyword ? '没有匹配的实验' : '暂无可做的实验'}
-          emptyDescription={
-            submittedKeyword
-              ? '换个关键词试试。'
-              : '老师发布实验后会显示在这里,你可以直接进入实验环境动手做。'
-          }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-        >
-          {(page) => (
-            <Table
-              columns={columns}
-              data={page.list}
-              rowKey={(item) => item.id}
-              elevated={false}
-              // <md 换行卡(§6.4.1 规则 3):实验名一行、完成方式与检查点一行,进入按钮在右
-              mobileCard={(item) => ({
-                title: item.name,
-                meta: `${experimentCollabModeLabel(item.collab_mode)} · ${item.components.checkpoints.length} 个检查点 · ${item.require_report ? '需交报告' : '免交报告'}`,
-                badge: <ExperimentStatusCell experiment={item} />,
-                action: (
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      leftIcon={Play}
-                      loading={enteringId === item.id}
-                      onClick={() => void enterExperiment(item)}
-                    >
-                      进入
-                    </Button>
-                    <Menu>
-                      <MenuTrigger asChild>
-                        <IconButton
-                          variant="ghost"
-                          size="sm"
-                          icon={MoreVertical}
-                          aria-label={`${item.name} 的更多操作`}
-                        />
-                      </MenuTrigger>
-                      <MenuContent align="end">
-                        <MenuItem onSelect={() => navigate(`/student/experiments/${item.id}`)}>
-                          查看详情
-                        </MenuItem>
-                      </MenuContent>
-                    </Menu>
-                  </div>
-                ),
-              })}
+      {experiments.status === 'error' ? (
+        <ResourceError
+          message={experiments.error?.message ?? '实验暂时读取不到'}
+          traceId={experiments.error?.traceId}
+          onRetry={experiments.reload}
+        />
+      ) : experiments.status === 'empty' ? (
+        <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-14 text-center shadow-xs">
+          <Icon icon={FlaskConical} size="lg" className="text-ink-faint" />
+          <p className="mt-3 text-md font-semibold text-ink">
+            {filtered ? '没有符合条件的实验' : '还没有可以做的实验'}
+          </p>
+          <p className="mt-1.5 text-sm text-ink-sub">
+            {filtered ? '换个课程或关键词试试。' : '老师发布实验后会显示在这里,可以直接进入实验环境动手做。'}
+          </p>
+          {filtered ? (
+            <Button variant="outline" className="mt-5" onClick={() => setQuery({ course: '', q: '' })}>
+              看全部实验
+            </Button>
+          ) : null}
+        </div>
+      ) : experiments.status === 'loading' && list.length === 0 ? (
+        <ExperimentGridSkeleton />
+      ) : (
+        <>
+          <ul className="card-grid gap-4" aria-busy={experiments.status === 'loading' || undefined}>
+            {list.map((experiment) => (
+              <li key={experiment.id}>
+                <ExperimentCard
+                  experiment={experiment}
+                  courseName={experiment.course_id ? courseName.get(experiment.course_id) : undefined}
+                  entering={enteringId === experiment.id}
+                  onEnter={() => void enterExperiment(experiment)}
+                />
+              </li>
+            ))}
+          </ul>
+          <div className="mt-6">
+            <Pagination
+              page={experiments.page}
+              pageSize={experiments.pageSize}
+              total={experiments.total}
+              onPageChange={experiments.setPage}
             />
-          )}
-        </ResourceState>
-      </DataPanel>
+          </div>
+        </>
+      )}
     </PageScaffold>
+  )
+}
+
+interface ExperimentCardProps {
+  experiment: StudentExperiment
+  courseName: string | undefined
+  entering: boolean
+  onEnter: () => void
+}
+
+/**
+ * ExperimentCard 一个实验:实验名(链向详情,整卡可点)、所属课程、个人或小组、是否交报告、阶段与检查点数;
+ * 「进入实验」浮在整卡链接之上单独可点。小组实验未分组时按钮不可用并写明原因。
+ */
+function ExperimentCard({ experiment, courseName, entering, onEnter }: ExperimentCardProps) {
+  const group = experiment.collab_mode === ExperimentCollabMode.GROUP
+  const waitingGroup = group && !experiment.my_group_id
+  const { stages, checkpoints } = experiment.components
+  return (
+    <Card interactive className="flex h-full flex-col gap-3 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <Link
+          to={`/student/experiments/${experiment.id}`}
+          className="card-link line-clamp-2 text-lg font-bold text-ink"
+        >
+          {experiment.name}
+        </Link>
+        <Badge tone={group ? 'info' : 'neutral'} className="shrink-0">
+          {group ? <Icon icon={Users} size="xs" /> : null}
+          {experimentCollabModeLabel(experiment.collab_mode)}
+        </Badge>
+      </div>
+      {courseName ? <p className="truncate text-sm text-ink-sub">{courseName}</p> : null}
+      {experiment.description ? (
+        <p className="line-clamp-2 text-sm text-ink-sub">{experiment.description}</p>
+      ) : null}
+      <p className="text-sm text-ink-sub">
+        {stages.length} 个阶段 · {checkpoints.length} 个检查点 · {experiment.require_report ? '需交报告' : '不用交报告'}
+      </p>
+      <div className="relative z-base mt-auto flex flex-wrap items-center gap-3 pt-2">
+        <Button
+          variant="secondary"
+          size="sm"
+          leftIcon={Play}
+          loading={entering}
+          disabled={waitingGroup}
+          onClick={onEnter}
+        >
+          进入实验
+        </Button>
+        {waitingGroup ? <span className="text-sm text-warning">等待老师分组后才能开始</span> : null}
+      </div>
+    </Card>
+  )
+}
+
+/** ExperimentGridSkeleton 与真实卡片同形的骨架 */
+function ExperimentGridSkeleton() {
+  return (
+    <ul className="card-grid gap-4" aria-busy="true" aria-label="正在读取实验">
+      {Array.from({ length: 3 }, (_, index) => (
+        <li key={index} className="flex flex-col gap-3 rounded-lg bg-surface p-5 shadow-xs">
+          <Skeleton variant="title" width="half" />
+          <Skeleton variant="line" lines={2} />
+          <Skeleton variant="line" width="third" />
+        </li>
+      ))}
+    </ul>
   )
 }

@@ -1,4 +1,6 @@
-// 题目表单弹层(题库内容页与共享资源库共用)。
+// 题目编辑大抽屉(题库内容页)。设计 §7.4:右侧大抽屉,上方是题面,下方是判题配置与附件,
+// 底部固定「保存草稿 / 保存并发布」。已发布版本不可变(后端只改草稿),调用方先建新版本草稿再打开本抽屉;
+// 从已被引用的版本建出来时说明「修改会生成新版本,已布置的作业和实验不受影响」。
 //
 // 正文按内容类型渲染显式字段:实验模板填概述与步骤,竞赛题填场景,理论题填题干与选项。
 // 答案、判题配置与 flag 通过 sensitive_fields 声明剥离路径 —— 学生取题面时后端按此过滤。
@@ -17,19 +19,20 @@ import {
   Button,
   Callout,
   Checkbox,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   FormField,
   Input,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
   SegmentedControl,
   Select,
   Skeleton,
   Textarea,
+  cn,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -60,6 +63,9 @@ const BODY_KEYS = {
   question: 'question',
   options: 'options',
   answer: 'answer',
+  questionType: 'q_type',
+  maxScore: 'max_score',
+  blankCount: 'blank_count',
   explanation: 'explanation',
   /** 实操题的环境声明:M2 组合契约,竞赛按它编译并起环境 */
   composition: 'composition',
@@ -79,18 +85,29 @@ const SENSITIVE_PATHS_BY_TYPE: Record<ContentType, string[]> = {
   [ContentType.THEORY_QUESTION]: ['answer', 'explanation'],
 }
 
+const THEORY_QUESTION_TYPES = [
+  { value: 'single_choice', label: '单选题' },
+  { value: 'multiple_choice', label: '多选题' },
+  { value: 'true_false', label: '判断题' },
+  { value: 'fill_blank', label: '填空题' },
+  { value: 'short_answer', label: '简答题' },
+] as const
+
 export interface ContentItemFormModalProps {
-  /** 传入即为编辑模式;缺省为新建 */
+  /** 传入即为编辑模式(只能是草稿);缺省为新建 */
   item?: ContentItem
+  /** 这份草稿是从哪个已发布版本建出来的(用于说明已布置的作业和实验不受影响) */
+  derivedFrom?: { version: string; usageCount: number }
   onClose: () => void
-  onSaved: () => void
+  /** 保存成功;published 表示已经一并发布 */
+  onSaved: (saved: { published: boolean }) => void
 }
 
 /**
  * ContentItemFormModal 承载题目创建与编辑。
  * 编辑时先取全量正文(教师有权限读 full),否则无法把已有答案回填到表单。
  */
-export function ContentItemFormModal({ item, onClose, onSaved }: ContentItemFormModalProps) {
+export function ContentItemFormModal({ item, derivedFrom, onClose, onSaved }: ContentItemFormModalProps) {
   const editing = item !== undefined
 
   const snapshot = useAsyncResource(
@@ -101,51 +118,50 @@ export function ContentItemFormModal({ item, onClose, onSaved }: ContentItemForm
 
   if (editing && snapshot.status === 'loading') {
     return (
-      <Modal open onOpenChange={(open) => !open && onClose()}>
-        <ModalContent size="xl">
-          <ModalHeader>
-            <ModalTitle>编辑题目</ModalTitle>
-            <ModalDescription>正在读取题目正文…</ModalDescription>
-          </ModalHeader>
-          <ModalBody>
-            <Skeleton variant="line" lines={6} />
-          </ModalBody>
-        </ModalContent>
-      </Modal>
+      <Drawer open onOpenChange={(open) => !open && onClose()}>
+        <DrawerContent size="wide">
+          <DrawerHeader>
+            <DrawerTitle>{item.title}</DrawerTitle>
+            <DrawerDescription>正在读取题目正文…</DrawerDescription>
+          </DrawerHeader>
+          <DrawerBody>
+            <Skeleton variant="line" lines={8} />
+          </DrawerBody>
+        </DrawerContent>
+      </Drawer>
     )
   }
 
   if (editing && snapshot.status === 'error') {
     return (
-      <Modal open onOpenChange={(open) => !open && onClose()}>
-        <ModalContent size="sm">
-          <ModalHeader>
-            <ModalTitle>暂时打不开这道题</ModalTitle>
-            <ModalDescription>{snapshot.error?.message}</ModalDescription>
-          </ModalHeader>
-          <ModalBody>
+      <Drawer open onOpenChange={(open) => !open && onClose()}>
+        <DrawerContent size="wide">
+          <DrawerHeader>
+            <DrawerTitle>暂时打不开这道题</DrawerTitle>
+            <DrawerDescription>{snapshot.error?.message}</DrawerDescription>
+          </DrawerHeader>
+          <DrawerBody>
             {snapshot.error?.traceId ? (
-              <p className="font-mono text-xs text-ink-faint">
-                如需帮助,请提供编号 {snapshot.error.traceId}
-              </p>
+              <p className="font-mono text-xs text-ink-sub">如需帮助,请提供编号 {snapshot.error.traceId}</p>
             ) : null}
-          </ModalBody>
-          <ModalFooter>
+          </DrawerBody>
+          <DrawerFooter>
             <Button variant="outline" onClick={onClose}>
               关闭
             </Button>
             <Button variant="primary" onClick={snapshot.reload}>
               重新加载
             </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+          </DrawerFooter>
+        </DrawerContent>
+      </Drawer>
     )
   }
 
   return (
     <ItemForm
       item={item}
+      derivedFrom={derivedFrom}
       snapshot={snapshot.data ?? undefined}
       onClose={onClose}
       onSaved={onSaved}
@@ -155,15 +171,16 @@ export function ContentItemFormModal({ item, onClose, onSaved }: ContentItemForm
 
 interface ItemFormProps {
   item?: ContentItem
+  derivedFrom?: { version: string; usageCount: number }
   snapshot?: ContentItemSnapshot
   onClose: () => void
-  onSaved: () => void
+  onSaved: (saved: { published: boolean }) => void
 }
 
 /**
  * ItemForm 渲染题目表单本体。
  */
-function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
+function ItemForm({ item, derivedFrom, snapshot, onClose, onSaved }: ItemFormProps) {
   const fieldId = useId()
   const editing = item !== undefined
   // 正文快照只读一次即定型:包进 useMemo,避免每次渲染都换一个新对象引用
@@ -187,7 +204,19 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
     readString(body, BODY_KEYS.statement) || readString(body, BODY_KEYS.question),
   )
   const [options, setOptions] = useState(readStringArray(body, BODY_KEYS.options).join('\n'))
-  const [answer, setAnswer] = useState(readString(body, BODY_KEYS.answer))
+  const [questionType, setQuestionType] = useState(
+    readString(body, BODY_KEYS.questionType) || 'single_choice',
+  )
+  const [maxScore, setMaxScore] = useState(String(body[BODY_KEYS.maxScore] ?? 10))
+  const [blankCount, setBlankCount] = useState(String(body[BODY_KEYS.blankCount] ?? 1))
+  const [answer, setAnswer] = useState(() => {
+    const current = body[BODY_KEYS.answer]
+    if (typeof current === 'boolean') return String(current)
+    if (Array.isArray(current) && current.every((value) => typeof value === 'string')) {
+      return current.join('\n')
+    }
+    return readString(body, BODY_KEYS.answer)
+  })
   const [explanation, setExplanation] = useState(readString(body, BODY_KEYS.explanation))
   const savedComposition = useMemo(
     () => readScenarioNeutralSpec(body, BODY_KEYS.composition),
@@ -199,7 +228,8 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
   const [attachments, setAttachments] = useState<ContentAttachment[]>(readAttachments(body))
 
   const [formError, setFormError] = useState<string>()
-  const [submitting, setSubmitting] = useState(false)
+  // 正在进行的保存方式:只保存草稿,或保存后立即发布
+  const [submitting, setSubmitting] = useState<'draft' | 'publish'>()
 
   const categories = useAsyncResource(() => api.content.listCategories(), [], () => false)
   const typeValue = Number(type) as ContentType
@@ -242,8 +272,18 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
     return {
       ...shared,
       [BODY_KEYS.statement]: statement.trim(),
-      [BODY_KEYS.options]: splitLines(options),
-      [BODY_KEYS.answer]: answer.trim(),
+      [BODY_KEYS.questionType]: questionType,
+      [BODY_KEYS.maxScore]: Number(maxScore),
+      ...(questionType === 'single_choice' || questionType === 'multiple_choice'
+        ? { [BODY_KEYS.options]: splitLines(options) }
+        : {}),
+      ...(questionType === 'fill_blank' ? { [BODY_KEYS.blankCount]: Number(blankCount) } : {}),
+      [BODY_KEYS.answer]:
+        questionType === 'multiple_choice' || questionType === 'fill_blank'
+          ? splitLines(answer)
+          : questionType === 'true_false'
+            ? answer === 'true'
+            : answer.trim(),
       [BODY_KEYS.explanation]: explanation.trim(),
     }
   }, [
@@ -253,6 +293,9 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
     declaration,
     envEnabled,
     explanation,
+    questionType,
+    maxScore,
+    blankCount,
     item?.code,
     options,
     savedComposition,
@@ -273,7 +316,36 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
 
     if (typeValue === ContentType.THEORY_QUESTION) {
       next.statement = statement.trim() === '' ? '请输入题干' : null
-      next.answer = answer.trim() === '' ? '请填写答案,它对学生不可见' : null
+      next.maxScore =
+        !Number.isInteger(Number(maxScore)) || Number(maxScore) <= 0 ? '请输入大于 0 的整数分值' : null
+      if (questionType === 'single_choice' || questionType === 'multiple_choice') {
+        const choiceList = splitLines(options)
+        next.options =
+          choiceList.length < 2 || new Set(choiceList).size !== choiceList.length
+            ? '至少填写两个不同选项'
+            : null
+      }
+      if (questionType === 'fill_blank') {
+        const count = Number(blankCount)
+        next.blankCount = !Number.isInteger(count) || count <= 0 ? '请输入空格数量' : null
+      }
+      if (questionType === 'true_false') {
+        next.answer = answer === 'true' || answer === 'false' ? null : '请选择正确答案'
+      } else if (questionType === 'single_choice') {
+        next.answer = splitLines(options).includes(answer) ? null : '请从选项中选择标准答案'
+      } else if (questionType === 'multiple_choice' || questionType === 'fill_blank') {
+        next.answer =
+          splitLines(answer).length === 0
+            ? '请填写标准答案'
+            : questionType === 'multiple_choice' &&
+                splitLines(answer).some((value) => !splitLines(options).includes(value))
+              ? '多选答案必须来自选项'
+              : questionType === 'fill_blank' && splitLines(answer).length !== Number(blankCount)
+                ? '答案数量必须与空格数量一致'
+                : null
+      } else {
+        next.answer = answer.trim() === '' ? '请填写答案,它对学生不可见' : null
+      }
     }
     if (typeValue === ContentType.CONTEST_PROBLEM) {
       next.statement = statement.trim() === '' ? '请输入题面' : null
@@ -284,14 +356,17 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
     }
 
     return next
-  }, [answer, code, declaration, editing, envEnabled, statement, summary, title, typeValue, version]))
+  }, [answer, blankCount, code, declaration, editing, envEnabled, maxScore, options, questionType, statement, summary, title, typeValue, version]))
 
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
+  /**
+   * save 保存草稿;publish 时保存成功后立即发布。
+   * 发布失败时草稿已经保存:关闭抽屉并在列表里继续(不重复创建),错误文案说清楚已保存。
+   */
+  const save = useCallback(
+    async (mode: 'draft' | 'publish') => {
       if (!validate()) return
 
-      setSubmitting(true)
+      setSubmitting(mode)
       setFormError(undefined)
       const common = {
         title: title.trim(),
@@ -303,26 +378,42 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
         body: buildBody(),
         sensitive_fields: SENSITIVE_PATHS_BY_TYPE[typeValue],
       }
+      let savedId: string
       try {
         if (editing) {
-          await api.content.updateItem(item.id, common)
-          toast.success('题目已更新')
+          savedId = (await api.content.updateItem(item.id, common)).id
         } else {
-          await api.content.createItem({
-            code: code.trim(),
-            version: version.trim(),
-            type: typeValue,
-            ...common,
-          })
-          toast.success('题目已创建为草稿')
+          savedId = (
+            await api.content.createItem({
+              code: code.trim(),
+              version: version.trim(),
+              type: typeValue,
+              ...common,
+            })
+          ).id
         }
-        onSaved()
       } catch (error) {
         setFormError(
-          userFacingErrorMessage(error, editing ? '题目更新失败,请稍后重试。' : '题目创建失败,请稍后重试。'),
+          userFacingErrorMessage(error, editing ? '题目保存失败,请稍后重试。' : '题目创建失败,请稍后重试。'),
         )
+        setSubmitting(undefined)
+        return
+      }
+      if (mode === 'draft') {
+        toast.success(editing ? '草稿已保存' : '题目已创建为草稿')
+        setSubmitting(undefined)
+        onSaved({ published: false })
+        return
+      }
+      try {
+        await api.content.publishItem(savedId)
+        toast.success('题目已发布,可以在作业、实验与竞赛里引用')
+        onSaved({ published: true })
+      } catch (error) {
+        toast.error(userFacingErrorMessage(error, '草稿已保存,但发布没有成功,请稍后在列表里重新发布。'))
+        onSaved({ published: false })
       } finally {
-        setSubmitting(false)
+        setSubmitting(undefined)
       }
     },
     [
@@ -351,17 +442,35 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
     [categories.data],
   )
 
+  const composingBlocked = typeValue === ContentType.CONTEST_PROBLEM && envEnabled && compositionDeclarationError(declaration) !== undefined
+
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>{editing ? '编辑题目' : '新建题目'}</ModalTitle>
-          <ModalDescription>
-            答案与判题配置对学生不可见。发布后正文不宜再改,需要修改请建新版本。
-          </ModalDescription>
-        </ModalHeader>
-        <form onSubmit={submit} noValidate>
-          <ModalBody className="flex flex-col gap-4">
+    <Drawer open onOpenChange={(open) => !open && submitting === undefined && onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader>
+          <DrawerTitle>{editing ? item.title || '编辑题目' : '新建题目'}</DrawerTitle>
+          <DrawerDescription>
+            {editing ? `${item.code} · 版本 ${item.version} · 草稿。` : ''}
+            答案与判题配置对学生不可见;发布后这个版本就不能再改了。
+          </DrawerDescription>
+        </DrawerHeader>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            void save('draft')
+          }}
+          noValidate
+          className="flex min-h-0 flex-1 flex-col"
+        >
+          <DrawerBody className="flex flex-col gap-4">
+            {derivedFrom ? (
+              <Callout tone="info">
+                {derivedFrom.usageCount > 0
+                  ? `这是从版本 ${derivedFrom.version} 建出的新版本。修改会生成新版本,已布置的作业和实验(${derivedFrom.usageCount} 处)仍然使用旧版本,不受影响。`
+                  : `这是从版本 ${derivedFrom.version} 建出的新版本。旧版本保持不变,发布后新引用会用到新版本。`}
+              </Callout>
+            ) : null}
+            <SectionTitle>基本信息</SectionTitle>
             {!editing ? (
               <div className="grid gap-4 sm:grid-cols-2">
                 <FormField
@@ -478,8 +587,8 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
               />
             </FormField>
 
-            <div className="flex flex-col gap-4 well p-4">
-              <div className="text-sm font-medium text-ink">题目正文</div>
+            <SectionTitle className="mt-2">题面</SectionTitle>
+            <div className="flex flex-col gap-4">
 
               {typeValue === ContentType.EXPERIMENT_TEMPLATE ? (
                 <>
@@ -551,7 +660,8 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
                     />
                   </FormField>
 
-                  <div className="flex flex-col gap-4 well p-4">
+                  <div className="flex flex-col gap-4 rounded-md bg-surface-hover p-4">
+                    <p className="text-sm font-medium text-ink">实操环境</p>
                     <Checkbox
                       checked={envEnabled}
                       label="这道题需要实操环境(学生要写代码或操作链上合约)"
@@ -599,36 +709,135 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
                       onChange={(event) => setStatement(event.target.value)}
                     />
                   </FormField>
-                  <FormField
-                    label="选项"
-                    htmlFor={`${fieldId}-options`}
-                    helper="每行一个选项。留空表示简答题"
-                  >
-                    <Textarea
-                      id={`${fieldId}-options`}
-                      value={options}
-                      rows={4}
-                      onChange={(event) => setOptions(event.target.value)}
-                    />
-                  </FormField>
-                  <FormField
-                    label="答案"
-                    htmlFor={`${fieldId}-answer`}
-                    required
-                    error={errors.answer}
-                    helper="答案对学生不可见,只用于自动判分"
-                  >
-                    <Input
-                      id={`${fieldId}-answer`}
-                      value={answer}
-                      invalid={Boolean(errors.answer)}
-                      onChange={(event) => setAnswer(event.target.value)}
-                    />
-                  </FormField>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <FormField label="题目类型" htmlFor={`${fieldId}-q-type`} required>
+                      <Select
+                        id={`${fieldId}-q-type`}
+                        options={THEORY_QUESTION_TYPES.map((value) => value)}
+                        value={questionType}
+                        onValueChange={(value) => setQuestionType(value)}
+                      />
+                    </FormField>
+                    <FormField label="满分" htmlFor={`${fieldId}-max-score`} required error={errors.maxScore}>
+                      <Input
+                        id={`${fieldId}-max-score`}
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={maxScore}
+                        invalid={Boolean(errors.maxScore)}
+                        onChange={(event) => setMaxScore(event.target.value)}
+                      />
+                    </FormField>
+                  </div>
+                  {questionType === 'single_choice' || questionType === 'multiple_choice' ? (
+                    <FormField
+                      label="选项"
+                      htmlFor={`${fieldId}-options`}
+                      helper="每行填写一个选项"
+                      required
+                      error={errors.options}
+                    >
+                      <Textarea
+                        id={`${fieldId}-options`}
+                        value={options}
+                        rows={4}
+                        invalid={Boolean(errors.options)}
+                        onChange={(event) => setOptions(event.target.value)}
+                      />
+                    </FormField>
+                  ) : null}
+                  {questionType === 'fill_blank' ? (
+                    <FormField
+                      label="空格数量"
+                      htmlFor={`${fieldId}-blank-count`}
+                      required
+                      error={errors.blankCount}
+                    >
+                      <Input
+                        id={`${fieldId}-blank-count`}
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={blankCount}
+                        invalid={Boolean(errors.blankCount)}
+                        onChange={(event) => setBlankCount(event.target.value)}
+                      />
+                    </FormField>
+                  ) : null}
+                  {questionType === 'single_choice' ? (
+                    <FormField label="标准答案" htmlFor={`${fieldId}-answer`} required error={errors.answer}>
+                      <Select
+                        id={`${fieldId}-answer`}
+                        options={splitLines(options).map((value) => ({ value, label: value }))}
+                        value={answer}
+                        onValueChange={setAnswer}
+                      />
+                    </FormField>
+                  ) : questionType === 'true_false' ? (
+                    <FormField label="标准答案" htmlFor={`${fieldId}-answer`} required error={errors.answer}>
+                      <Select
+                        id={`${fieldId}-answer`}
+                        options={[
+                          { value: 'true', label: '正确' },
+                          { value: 'false', label: '错误' },
+                        ]}
+                        value={answer}
+                        onValueChange={setAnswer}
+                      />
+                    </FormField>
+                  ) : (
+                    <FormField
+                      label="标准答案"
+                      htmlFor={`${fieldId}-answer`}
+                      required
+                      error={errors.answer}
+                      helper={
+                        questionType === 'multiple_choice' || questionType === 'fill_blank'
+                          ? '每行填写一个答案,学生看不到标准答案'
+                          : questionType === 'short_answer'
+                            ? '简答题由教师批改,学生看不到参考答案'
+                            : '学生看不到标准答案'
+                      }
+                    >
+                      {questionType === 'multiple_choice' ? (
+                        <div className="flex flex-col gap-2">
+                          {splitLines(options).map((option) => (
+                            <Checkbox
+                              key={option}
+                              label={option}
+                              checked={splitLines(answer).includes(option)}
+                              onCheckedChange={(checked) => {
+                                const selected = new Set(splitLines(answer))
+                                if (checked === true) selected.add(option)
+                                else selected.delete(option)
+                                setAnswer([...selected].join('\n'))
+                              }}
+                            />
+                          ))}
+                        </div>
+                      ) : questionType === 'fill_blank' ? (
+                        <Textarea
+                          id={`${fieldId}-answer`}
+                          value={answer}
+                          rows={Math.min(Math.max(Number(blankCount) || 2, 2), 8)}
+                          invalid={Boolean(errors.answer)}
+                          onChange={(event) => setAnswer(event.target.value)}
+                        />
+                      ) : (
+                        <Input
+                          id={`${fieldId}-answer`}
+                          value={answer}
+                          invalid={Boolean(errors.answer)}
+                          onChange={(event) => setAnswer(event.target.value)}
+                        />
+                      )}
+                    </FormField>
+                  )}
                   <FormField
                     label="解析"
                     htmlFor={`${fieldId}-explanation`}
-                    helper="解析同样对学生不可见,便于出题人之间交流"
+                    helper="解析对学生不可见"
                   >
                     <Textarea
                       id={`${fieldId}-explanation`}
@@ -640,6 +849,10 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
                 </>
               ) : null}
 
+            </div>
+
+            <SectionTitle className="mt-2">附件</SectionTitle>
+            <div className="flex flex-col gap-4">
               {/* 附件三种类型共用:题面配图、说明文档、示例数据都走这里,学生取题面时可见 */}
               <FormField
                 label="正文附件"
@@ -658,19 +871,38 @@ function ItemForm({ item, snapshot, onClose, onSaved }: ItemFormProps) {
             </div>
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
-          </ModalBody>
-          <ModalFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+          </DrawerBody>
+          <DrawerFooter>
+            <Button type="button" variant="ghost" disabled={submitting !== undefined} onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="primary" loading={submitting} disabled={typeValue === ContentType.CONTEST_PROBLEM && envEnabled && compositionDeclarationError(declaration) !== undefined}>
-              {editing ? '保存修改' : '创建题目'}
+            <Button
+              type="submit"
+              variant="outline"
+              loading={submitting === 'draft'}
+              disabled={composingBlocked || submitting === 'publish'}
+            >
+              保存草稿
             </Button>
-          </ModalFooter>
+            <Button
+              type="button"
+              variant="seal"
+              loading={submitting === 'publish'}
+              disabled={composingBlocked || submitting === 'draft'}
+              onClick={() => void save('publish')}
+            >
+              保存并发布
+            </Button>
+          </DrawerFooter>
         </form>
-      </ModalContent>
-    </Modal>
+      </DrawerContent>
+    </Drawer>
   )
+}
+
+/** SectionTitle 抽屉里一组字段的小标题;后续分组由调用方加上边距与上一组拉开 */
+function SectionTitle({ children, className }: { children: string; className?: string }) {
+  return <h3 className={cn('text-sm font-semibold text-ink', className)}>{children}</h3>
 }
 
 /** readString 从正文里读字符串字段;非字符串回空串(不把对象塞进文本控件)。 */

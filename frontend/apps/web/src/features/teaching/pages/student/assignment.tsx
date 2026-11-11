@@ -1,78 +1,158 @@
-// 作业作答页(深页,/student/courses/:courseId/assignments/:assignmentId)。
+// 作业作答页(深页,/student/courses/:courseId/assignments/:assignmentId)。设计 §7.2:
+// 页头为作业名 + 截止倒计时 + 一行属性(截止时间 · 可提交次数 · 迟交规则),右侧「历次提交」;
+// ≥lg 左侧答题卡(已作答实底、当前题描边、可跳转),右侧题目卡片依次排列;底部固定操作条
+// (保存状态、已作答 n / m、立即保存、提交作业)。不能再提交时(次数用完,或截止后不接收)页面只读,
+// 操作条换成一句原因和「查看结果」;截止后仍接收的作业照常作答,提交按迟交处理。
 //
 // FE-7 服务端草稿:进入先拉服务端草稿,编辑按 60 秒定时 + 失焦即时写回服务端,
 // 服务端草稿是权威;本地只保留尚未同步的编辑态与最近同步标记,
-// 服务端读写失败时不用本地内容替代草稿进入提交链路(规范 §6.6)。
+// 服务端读写失败时不用本地内容替代草稿进入提交链路(规范 §6.6)。有未保存改动时离开页面先提醒。
 //
 // 答案黑盒:题面经 M6 → M5 GetContentFace 取得,答案/判题配置已在后端剥离,
 // 前端不做二次过滤也不请求 full 内容(铁律 1 + 对齐清单 §6.4)。
 //
-// 编程题的代码归档由沉浸式工作台在沙箱内保存后产出 code_storage_key(阶段 5),
-// 本页承载客观题与主观题作答;编程题在此说明去处,不在页面里让用户手填对象存储键。
+// 作业只引用 M5 理论题;题型和答案结构决定作答控件与判分路径。
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
-import { ClipboardList, FileText, Send } from 'lucide-react'
-import { GradingMode, type AssignmentDetail, type AssignmentItem } from '@chaimir/api-client'
+import { Link, useNavigate, useParams } from 'react-router'
+import { ClipboardList, History, Info } from 'lucide-react'
+import type { AssignmentDetail, TheoryAnswer } from '@chaimir/api-client'
 import {
-  AnchorNav,
   Badge,
-  Breadcrumb,
   Button,
+  buttonVariants,
   Callout,
-  Card,
-  CardBody,
-  CardHeader,
-  DescriptionList,
-  FormField,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
+  Icon,
   PageHeader,
   PageScaffold,
-  RadioGroup,
-  RadioItem,
-  StickySaveBar,
-  Textarea,
+  Skeleton,
   toast,
+  useReducedMotion,
   type AutosaveState,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
-import { formatDateTime, formatRelativeDeadline, formatTime } from '../../../../utils/formatters'
-import { contentDifficultyLabel } from '../../../../utils/labels/content'
+import { UnsavedChangesGuard } from '../../../../components/UnsavedChangesGuard'
+import { useActiveAnchor, useAsyncResource, usePageLocation, locationLabel } from '../../../../hooks'
+import { formatDateTime, formatRelativeDeadline } from '../../../../utils/formatters'
 import { latePolicyLabel } from '../../../../utils/labels/teaching'
 import { errorDiagnostics, userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { ASSIGNMENT_DUE_TONE } from '../../statusPresentation'
-import { itemStatement, itemChoices } from './assignment-item'
+import { submissionWindow } from '../../submissionWindow'
+import {
+  draftAnswers,
+  serializeAnswers,
+  isAssignmentAnswer,
+  isAnswerEmpty,
+  type AssignmentAnswers as AnswerMap,
+} from '../../assignment-answers'
+import { AnswerSheet } from '../../components/assignment/AnswerSheet'
+import {
+  AssignmentActionBar,
+  AssignmentClosedBar,
+} from '../../components/assignment/AssignmentActionBar'
+import {
+  QuestionCard,
+  questionAnchorId,
+  questionHeadingId,
+} from '../../components/assignment/QuestionCard'
+import { SubmitConfirmModal } from '../../components/assignment/SubmitConfirmModal'
 
 /** 服务端草稿定时写回间隔:与 M6 接口设计 §6.2「自动每 60s」一致。 */
 const DRAFT_AUTOSAVE_INTERVAL_MS = 60_000
 
-/** AnswerMap 是按题目编号索引的作答内容,提交与草稿共用同一形状。 */
-type AnswerMap = Record<string, string>
+interface LocalAssignmentDraft {
+  studentId: string
+  assignmentId: string
+  serverUpdatedAt: string | null
+  answers: AnswerMap
+}
+
+/** localDraftKey 将未同步作答限定到当前学生和作业。 */
+function localDraftKey(studentId: string, assignmentId: string) {
+  return `chaimir:teaching-draft:${studentId}:${assignmentId}`
+}
+
+/** readLocalDraft 只读取归属和结构均有效的本机记录,显式报告恢复失败。 */
+function readLocalDraft(
+  studentId: string,
+  assignmentId: string
+): { draft?: LocalAssignmentDraft; failed: boolean } {
+  try {
+    const raw = window.localStorage.getItem(localDraftKey(studentId, assignmentId))
+    if (!raw) return { failed: false }
+    const parsed = JSON.parse(raw) as Partial<LocalAssignmentDraft>
+    if (
+      parsed.studentId !== studentId ||
+      parsed.assignmentId !== assignmentId ||
+      !(parsed.serverUpdatedAt === null || typeof parsed.serverUpdatedAt === 'string') ||
+      !parsed.answers ||
+      typeof parsed.answers !== 'object' ||
+      Array.isArray(parsed.answers) ||
+      Object.values(parsed.answers).some((value) => !isAssignmentAnswer(value))
+    ) {
+      return { failed: true }
+    }
+    return { draft: parsed as LocalAssignmentDraft, failed: false }
+  } catch {
+    return { failed: true }
+  }
+}
+
+/** writeLocalDraft 仅保存尚未写入服务端草稿的编辑。 */
+function writeLocalDraft(key: string, draft: LocalAssignmentDraft) {
+  window.localStorage.setItem(key, JSON.stringify(draft))
+}
 
 /**
- * StudentAssignmentPage 读取作业题面与服务端草稿。
+ * StudentAssignmentPage 读取作业题面、服务端草稿与已提交次数。
  */
 export default function StudentAssignmentPage() {
-  const { courseId = '', assignmentId = '' } = useParams<{ courseId: string; assignmentId: string }>()
+  const { courseId = '', assignmentId = '' } = useParams<{
+    courseId: string
+    assignmentId: string
+  }>()
 
-  // 题面与草稿一次读齐:草稿要按题目编号铺回表单,缺任一方都无法进入可编辑状态
+  // 题面、草稿与已提交次数一次读齐:草稿要按题目编号铺回表单,提交次数决定还能不能作答
   const view = useAsyncResource(
     () =>
       Promise.all([
         api.teaching.getAssignment(assignmentId),
         api.teaching.getDraft(assignmentId),
-      ]).then(([detail, draft]) => ({ detail, draft })),
+        // 只用总数:后端按身份只回本人提交,总数即已用提交次数
+        api.teaching.getSubmissions(assignmentId, { page: 1, size: 1 }),
+      ]).then(([detail, draft, submissions]) => {
+        const local = readLocalDraft(draft.student_id, assignmentId)
+        const serverUpdatedAt = draft.exists ? draft.updated_at : null
+        const hasLocalConflict = Boolean(
+          local.draft && local.draft.serverUpdatedAt !== serverUpdatedAt
+        )
+        return {
+          detail,
+          draft,
+          attemptsUsed: submissions.total,
+          localDraft: local.draft,
+          hasLocalConflict,
+          localStorageUnavailable: local.failed,
+        }
+      }),
     [assignmentId],
-    () => false,
+    () => false
   )
+  // 课程名只用于顶栏位置;读不到时顶栏用通用名称,不影响作答
+  const outline = useAsyncResource(
+    () => api.teaching.getCourseOutline(courseId),
+    [courseId],
+    () => false
+  )
+
+  usePageLocation([
+    {
+      label: locationLabel(outline, (data) => data.course.name, '课程详情'),
+      to: `/student/courses/${courseId}`,
+    },
+    { label: locationLabel(view, (data) => data.detail.assignment.title, '作业') },
+  ])
 
   return (
     <PageScaffold>
@@ -81,14 +161,28 @@ export default function StudentAssignmentPage() {
         emptyIcon={ClipboardList}
         emptyTitle="作业内容暂未开放"
         emptyDescription="老师还没有为这次作业添加题目。"
+        skeleton={<AssignmentSkeleton />}
       >
         {(data) => (
           <AssignmentForm
+            key={assignmentId + ':' + data.draft.student_id}
             courseId={courseId}
             assignmentId={assignmentId}
             detail={data.detail}
-            initialAnswers={draftAnswers(data.draft.content)}
+            attemptsUsed={data.attemptsUsed}
+            studentId={data.draft.student_id}
+            serverAnswers={draftAnswers(data.draft.content, data.detail.items)}
+            initialAnswers={draftAnswers(
+              data.draft.content,
+              data.detail.items,
+              data.hasLocalConflict ? undefined : data.localDraft?.answers
+            )}
             draftUpdatedAt={data.draft.exists ? data.draft.updated_at : undefined}
+            localDraftKey={localDraftKey(data.draft.student_id, assignmentId)}
+            pendingLocalAnswers={data.hasLocalConflict ? data.localDraft?.answers : undefined}
+            localDraftConflict={data.hasLocalConflict}
+            localDraftNeedsRestore={Boolean(data.localDraft && !data.hasLocalConflict)}
+            localStorageUnavailable={data.localStorageUnavailable}
           />
         )}
       </ResourceState>
@@ -96,99 +190,266 @@ export default function StudentAssignmentPage() {
   )
 }
 
-/**
- * draftAnswers 把服务端草稿正文收敛成表单可用的作答表。
- * 草稿正文是开放对象(后端只校验非空),只接受字符串值 —— 其他类型无法回填到文本控件,
- * 静默转字符串会让用户看到不是自己写的内容。
- */
-function draftAnswers(content: Record<string, unknown>): AnswerMap {
-  const answers: AnswerMap = {}
-  for (const [itemId, value] of Object.entries(content)) {
-    if (typeof value === 'string') answers[itemId] = value
-  }
-  return answers
+/** AssignmentSkeleton 与真实内容同形:页头、左侧答题卡、右侧题目卡 */
+function AssignmentSkeleton() {
+  return (
+    <div aria-busy="true" className="flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <Skeleton variant="title" width="half" />
+        <Skeleton variant="line" width="third" />
+      </div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
+        <div className="lg:w-60 lg:shrink-0">
+          <Skeleton variant="block" />
+        </div>
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          <Skeleton variant="block" />
+          <Skeleton variant="block" />
+        </div>
+      </div>
+    </div>
+  )
 }
 
 interface AssignmentFormProps {
   courseId: string
   assignmentId: string
   detail: AssignmentDetail
+  /** 已用提交次数(本人在这份作业下的提交总数) */
+  attemptsUsed: number
+  studentId: string
+  serverAnswers: AnswerMap
   initialAnswers: AnswerMap
   draftUpdatedAt: string | undefined
+  localDraftKey: string
+  pendingLocalAnswers?: AnswerMap
+  localDraftConflict: boolean
+  localDraftNeedsRestore: boolean
+  localStorageUnavailable: boolean
 }
 
 /**
- * AssignmentForm 承载作答、草稿自动保存与提交。
+ * AssignmentForm 承载作答、草稿自动保存与提交;不能再提交时只读。
  */
 function AssignmentForm({
   courseId,
   assignmentId,
   detail,
+  attemptsUsed,
+  studentId,
+  serverAnswers,
   initialAnswers,
   draftUpdatedAt,
+  localDraftKey: localKey,
+  pendingLocalAnswers,
+  localDraftConflict,
+  localDraftNeedsRestore,
+  localStorageUnavailable,
 }: AssignmentFormProps) {
   const navigate = useNavigate()
-  const [answers, setAnswers] = useState<AnswerMap>(initialAnswers)
-  const [autosaveState, setAutosaveState] = useState<AutosaveState>('idle')
+  const assignment = detail.assignment
+  // 还能不能提交:与服务端提交校验同口径(次数用完,或截止后不接收即只读)
+  const submitState = submissionWindow({
+    dueAt: assignment.due_at,
+    latePolicy: assignment.late_policy,
+    maxAttempts: assignment.max_attempts,
+    attemptsUsed,
+  })
+  const readOnly = !submitState.open
+  // 只读时不恢复本机记录、不再写服务端草稿,页面显示服务器上的作答
+  const restoreLocal = localDraftNeedsRestore && !readOnly
+  const [answers, setAnswers] = useState<AnswerMap>(
+    localDraftNeedsRestore && !restoreLocal ? serverAnswers : initialAnswers
+  )
+  const [autosaveState, setAutosaveState] = useState<AutosaveState>(
+    restoreLocal ? 'saving' : 'idle'
+  )
   const [savedAt, setSavedAt] = useState<Date | undefined>(
-    draftUpdatedAt ? new Date(draftUpdatedAt) : undefined,
+    draftUpdatedAt ? new Date(draftUpdatedAt) : undefined
   )
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string>()
+  const [recoveryConflict, setRecoveryConflict] = useState(localDraftConflict && !readOnly)
+  const [localCacheError, setLocalCacheError] = useState(localStorageUnavailable)
   /** 已落库的作答快照:与当前作答逐题比对,得出「有几处改动未保存」 */
-  const [savedAnswers, setSavedAnswers] = useState<AnswerMap>(initialAnswers)
+  const [savedAnswers, setSavedAnswers] = useState<AnswerMap>(serverAnswers)
 
   // 未同步标记:只有真正改动过才写服务端,避免定时器空跑
-  const dirtyRef = useRef(false)
+  const dirtyRef = useRef(restoreLocal)
+  const editVersionRef = useRef(restoreLocal ? 1 : 0)
+  const inFlightSaveRef = useRef<Promise<boolean> | null>(null)
+  const serverUpdatedAtRef = useRef(draftUpdatedAt ?? null)
   const answersRef = useRef(answers)
   answersRef.current = answers
 
-  const assignment = detail.assignment
   const deadline = formatRelativeDeadline(assignment.due_at)
-  const hasProgrammingItem = detail.items.some((item) => item.grading_mode === GradingMode.AUTO)
+  const hasShortAnswer = detail.items.some((item) => item.body?.q_type === 'short_answer')
 
   /** saveDraft 把当前作答写回服务端草稿;服务端成功才认为已保存。 */
-  const saveDraft = useCallback(async () => {
-    if (!dirtyRef.current) return
-    setAutosaveState('saving')
-    try {
-      const result = await api.teaching.saveDraft(assignmentId, { content: answersRef.current })
-      dirtyRef.current = false
-      // 快照与写回体取同一份引用:保存后「未保存改动数」必然归零,不会因异步竞态错算
-      setSavedAnswers(answersRef.current)
-      setSavedAt(new Date(result.updated_at))
-      setAutosaveState('saved')
-    } catch (error) {
-      // 保存失败必须让用户看见:草稿以服务端为权威,失败意味着这次编辑还没落库
-      setAutosaveState('error')
-      console.error('作业草稿写回失败', {
-        operation: 'teaching.assignment.saveDraft',
-        reason: 'draft-save-failed',
-        error: errorDiagnostics(error),
-      })
-    }
-  }, [assignmentId])
+  const saveDraft = useCallback((): Promise<boolean> => {
+    if (inFlightSaveRef.current) return inFlightSaveRef.current
+    if (!dirtyRef.current) return Promise.resolve(true)
+    const operation = (async () => {
+      while (dirtyRef.current) {
+        const snapshot = { ...answersRef.current }
+        const snapshotVersion = editVersionRef.current
+        setAutosaveState('saving')
+        try {
+          const result = await api.teaching.saveDraft(assignmentId, {
+            content: serializeAnswers(detail.items, snapshot),
+          })
+          setSavedAnswers(snapshot)
+          setSavedAt(new Date(result.updated_at))
+          serverUpdatedAtRef.current = result.updated_at
+          if (snapshotVersion === editVersionRef.current) {
+            dirtyRef.current = false
+            setAutosaveState('saved')
+            try {
+              window.localStorage.removeItem(localKey)
+              setLocalCacheError(false)
+            } catch (error) {
+              setLocalCacheError(true)
+              console.error('已保存作答,但清除本机恢复记录失败', {
+                operation: 'teaching.assignment.clearLocalDraft',
+                error: errorDiagnostics(error),
+              })
+            }
+          } else {
+            try {
+              writeLocalDraft(localKey, {
+                studentId,
+                assignmentId,
+                serverUpdatedAt: result.updated_at,
+                answers: answersRef.current,
+              })
+            } catch (error) {
+              setLocalCacheError(true)
+              console.error('本机作答恢复记录更新失败', {
+                operation: 'teaching.assignment.writeLocalDraft',
+                error: errorDiagnostics(error),
+              })
+            }
+          }
+        } catch (error) {
+          setAutosaveState('error')
+          console.error('作业草稿写回失败', {
+            operation: 'teaching.assignment.saveDraft',
+            reason: 'draft-save-failed',
+            error: errorDiagnostics(error),
+          })
+          return false
+        }
+      }
+      return true
+    })()
+    const tracked = operation.finally(() => {
+      if (inFlightSaveRef.current === tracked) inFlightSaveRef.current = null
+    })
+    inFlightSaveRef.current = tracked
+    return tracked
+  }, [assignmentId, detail.items, localKey, studentId])
+
+  useEffect(() => {
+    if (restoreLocal) void saveDraft()
+  }, [restoreLocal, saveDraft])
 
   // 定时写回:60 秒一轮,与后端接口设计的自动保存节奏一致
   useEffect(() => {
+    if (readOnly) return
     const timer = window.setInterval(() => void saveDraft(), DRAFT_AUTOSAVE_INTERVAL_MS)
     return () => window.clearInterval(timer)
-  }, [saveDraft])
+  }, [readOnly, saveDraft])
 
   /** updateAnswer 记录作答并标记未同步。 */
-  const updateAnswer = useCallback((itemId: string, value: string) => {
+  const updateAnswer = useCallback(
+    (itemId: string, value: TheoryAnswer) => {
+      if (readOnly || submitting || recoveryConflict) return
+      const next = { ...answersRef.current, [itemId]: value }
+      answersRef.current = next
+      editVersionRef.current += 1
+      dirtyRef.current = true
+      setAutosaveState('idle')
+      setAnswers(next)
+      try {
+        writeLocalDraft(localKey, {
+          studentId,
+          assignmentId,
+          serverUpdatedAt: serverUpdatedAtRef.current,
+          answers: next,
+        })
+        setLocalCacheError(false)
+      } catch (error) {
+        setLocalCacheError(true)
+        console.error('本机作答恢复记录写入失败', {
+          operation: 'teaching.assignment.writeLocalDraft',
+          error: errorDiagnostics(error),
+        })
+      }
+    },
+    [assignmentId, localKey, readOnly, recoveryConflict, studentId, submitting]
+  )
+
+  const discardConflictingLocalDraft = useCallback(() => {
+    try {
+      window.localStorage.removeItem(localKey)
+      setLocalCacheError(false)
+      setRecoveryConflict(false)
+    } catch (error) {
+      setLocalCacheError(true)
+      console.error('本机作答恢复记录清除失败', {
+        operation: 'teaching.assignment.clearLocalDraft',
+        error: errorDiagnostics(error),
+      })
+    }
+  }, [localKey])
+
+  const restoreConflictingLocalDraft = useCallback(() => {
+    if (!pendingLocalAnswers) return
+    const next = draftAnswers({}, detail.items, pendingLocalAnswers)
+    answersRef.current = next
+    editVersionRef.current += 1
     dirtyRef.current = true
-    setAutosaveState('idle')
-    setAnswers((current) => ({ ...current, [itemId]: value }))
-  }, [])
+    setAnswers(next)
+    setSavedAnswers(serverAnswers)
+    setRecoveryConflict(false)
+    try {
+      writeLocalDraft(localKey, {
+        studentId,
+        assignmentId,
+        serverUpdatedAt: serverUpdatedAtRef.current,
+        answers: next,
+      })
+      setLocalCacheError(false)
+    } catch (error) {
+      setLocalCacheError(true)
+      console.error('本机作答恢复记录写入失败', {
+        operation: 'teaching.assignment.writeLocalDraft',
+        error: errorDiagnostics(error),
+      })
+    }
+    void saveDraft()
+  }, [
+    assignmentId,
+    detail.items,
+    localKey,
+    pendingLocalAnswers,
+    saveDraft,
+    serverAnswers,
+    studentId,
+  ])
 
   /** submit 正式提交作答。提交前先把草稿落库,确保服务端与页面一致。 */
   const submit = useCallback(async () => {
     setSubmitting(true)
     setSubmitError(undefined)
     try {
-      await api.teaching.submitAssignment(assignmentId, { content_ref: answersRef.current })
+      const submissionAnswers = serializeAnswers(detail.items, answersRef.current)
+      if (!(await saveDraft())) {
+        setSubmitError('作答尚未保存,请重试后再提交。')
+        return
+      }
+      await api.teaching.submitAssignment(assignmentId, { answers: submissionAnswers })
       setConfirmOpen(false)
       toast.success('作业已提交')
       navigate(`/student/courses/${courseId}/assignments/${assignmentId}/submissions`)
@@ -197,245 +458,171 @@ function AssignmentForm({
     } finally {
       setSubmitting(false)
     }
-  }, [assignmentId, courseId, navigate])
+  }, [assignmentId, courseId, detail.items, navigate, saveDraft])
 
-  const answeredCount = detail.items.filter((item) => (answers[item.id] ?? '').trim() !== '').length
+  /** openConfirm 打开提交确认;上一次的失败原因不带进新的一轮 */
+  const openConfirm = useCallback(() => {
+    setSubmitError(undefined)
+    setConfirmOpen(true)
+  }, [])
 
-  /** 未保存改动数:逐题与已落库快照比对 —— 「改了 2 处」比「有改动」信息量更足(§6.5.3 第 ③ 族) */
-  const dirtyCount = useMemo(
-    () =>
-      detail.items.filter((item) => (answers[item.id] ?? '') !== (savedAnswers[item.id] ?? ''))
-        .length,
-    [answers, detail.items, savedAnswers],
-  )
-
-  /** 锚点导航项:每题一个分组,点了跳到那题(§6.5.3 第 ③ 族左侧锚点) */
-  const anchorItems = useMemo(
+  /** 答题卡的格子:判断题选「错误」也是作答,填空题至少填了一空才算 */
+  const sheetItems = useMemo(
     () =>
       detail.items.map((item, index) => ({
-        id: `assignment-item-${item.id}`,
-        label: `第 ${index + 1} 题`,
+        id: item.id,
+        seq: index + 1,
+        answered: !isAnswerEmpty(answers[item.id]),
       })),
-    [detail.items],
+    [answers, detail.items]
   )
+  const answeredCount = sheetItems.filter((item) => item.answered).length
+
+  /** 未保存改动数:逐题与已落库快照比对 —— 「改了 2 题」比「有改动」信息量更足 */
+  const dirtyCount = useMemo(
+    () =>
+      detail.items.filter(
+        (item) =>
+          JSON.stringify(answers[item.id] ?? '') !== JSON.stringify(savedAnswers[item.id] ?? '')
+      ).length,
+    [answers, detail.items, savedAnswers]
+  )
+
+  // 当前题跟随滚动;点答题卡或弹窗里的题号时跳过去,焦点落到那题的标题上
+  const anchorIds = useMemo(
+    () => detail.items.map((item) => questionAnchorId(item.id)),
+    [detail.items]
+  )
+  const [currentAnchor, setCurrentAnchor] = useActiveAnchor(anchorIds)
+  const currentId = detail.items.find((item) => questionAnchorId(item.id) === currentAnchor)?.id
+  const reducedMotion = useReducedMotion()
+  const jumpTo = useCallback(
+    (itemId: string) => {
+      const anchor = questionAnchorId(itemId)
+      setCurrentAnchor(anchor)
+      document
+        .getElementById(anchor)
+        ?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' })
+      document.getElementById(questionHeadingId(itemId))?.focus({ preventScroll: true })
+    },
+    [reducedMotion, setCurrentAnchor]
+  )
+
+  const resultsHref = `/student/courses/${courseId}/assignments/${assignmentId}/submissions`
+  const attemptsText =
+    submitState.remaining > 0
+      ? `还能提交 ${submitState.remaining} 次(共 ${assignment.max_attempts} 次)`
+      : `提交次数已用完(共 ${assignment.max_attempts} 次)`
 
   return (
     <>
-      {/*
-        归族:配置表单族(§6.5.3 第 ③)。本页主体是一批可改字段(逐题作答),
-        故走该族骨架:左侧题目锚点 + 右侧逐题表单 + 底部粘性保存条。
-        保存态常显是这一族的硬要求,也正是 FE-7 要的 —— 学生任何时候都能看到
-        「改了几处、存没存」,而不是把它藏在右栏、窄屏还要滚到最底才看见。
-      */}
       <PageHeader
-        kicker={
-          <Breadcrumb
-            items={[
-              { label: '我的课程', href: '/student/courses' },
-              { label: '课程详情', href: `/student/courses/${courseId}` },
-            ]}
-          />
-        }
         title={assignment.title}
-        description="作答内容每分钟自动保存到服务器,刷新或换设备都能接着写。"
-        icon={ClipboardList}
+        status={<Badge tone={ASSIGNMENT_DUE_TONE[deadline.urgency]}>{deadline.text}</Badge>}
+        meta={[
+          { label: '截止', value: formatDateTime(assignment.due_at) },
+          { value: attemptsText },
+          { value: latePolicyLabel(assignment.late_policy) },
+        ]}
         actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone={ASSIGNMENT_DUE_TONE[deadline.urgency]}>{deadline.text}</Badge>
-            <Button
-              variant="ghost"
-              leftIcon={FileText}
-              onClick={() =>
-                navigate(`/student/courses/${courseId}/assignments/${assignmentId}/submissions`)
-              }
-            >
-              查看历次提交
-            </Button>
-          </div>
+          attemptsUsed > 0 ? (
+            <Link to={resultsHref} className={buttonVariants({ variant: 'ghost' })}>
+              <Icon icon={History} size="sm" />
+              历次提交
+            </Link>
+          ) : undefined
         }
       />
 
-      {/*
-        只读的作业规则单独一块,不混在题目表单里(§6.5.3 第 ③:只读信息与可改字段分开)。
-        这里用抬起片而不是井:它直接落在光面上,而井只能出现在抬起片内部(§6.5.1 红线第 3 条)。
-      */}
-      <div className="mb-5 rounded-lg bg-surface p-4 shadow-xs">
-        <DescriptionList
-          dense
-          columns={3}
-          items={[
-            { term: '截止时间', description: formatDateTime(assignment.due_at), mono: true },
-            { term: '可提交次数', description: assignment.max_attempts, mono: true },
-            { term: '迟交规则', description: latePolicyLabel(assignment.late_policy) },
-          ]}
-        />
-      </div>
-
-      {hasProgrammingItem ? (
-        <Callout tone="info" title="这次作业含编程题" className="mb-5">
-          编程题需要在实验工作台的代码环境里完成并保存代码,再回到这里提交。
+      {recoveryConflict ? (
+        <Callout tone="warning" title="服务器上的作答已有更新" className="mb-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span>本机还保存着另一份没有同步的作答,选一份继续。</span>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={discardConflictingLocalDraft}>
+                使用服务器版本
+              </Button>
+              <Button variant="primary" onClick={restoreConflictingLocalDraft}>
+                保留本机作答
+              </Button>
+            </div>
+          </div>
+        </Callout>
+      ) : null}
+      {localCacheError ? (
+        <Callout tone="warning" className="mb-5">
+          本机恢复记录暂时无法使用,服务器上的作答仍会继续保存。
         </Callout>
       ) : null}
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:gap-6">
-        <div
-          className="min-w-0 lg:sticky lg:w-48 lg:shrink-0 lg:self-start"
-          style={{ top: 'var(--topnav-h)' }}
-        >
-          <AnchorNav label="作业题目" items={anchorItems} />
-        </div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:gap-6">
+        <AnswerSheet
+          items={sheetItems}
+          currentId={currentId}
+          onJump={jumpTo}
+          className="lg:sticky lg:top-4 lg:w-60 lg:shrink-0"
+        />
 
-        <div className="flex min-w-0 flex-1 flex-col gap-4 pb-16 lg:pb-4">
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
+          {hasShortAnswer ? (
+            <p className="flex items-center gap-2 text-sm text-ink-sub">
+              <Icon icon={Info} size="sm" className="shrink-0" />
+              简答题由老师批改,其余题目提交后自动判分。
+            </p>
+          ) : null}
           {detail.items.map((item, index) => (
-            <AssignmentItemCard
+            <QuestionCard
               key={item.id}
               item={item}
               seq={index + 1}
-              value={answers[item.id] ?? ''}
-              onChange={(value) => updateAnswer(item.id, value)}
+              value={answers[item.id]}
+              onChange={(value: TheoryAnswer) => updateAnswer(item.id, value)}
               onBlur={() => void saveDraft()}
+              disabled={readOnly || submitting || recoveryConflict}
             />
           ))}
-
-          {autosaveState === 'error' ? (
-            <Callout tone="danger" title="作答还没有保存到服务器">
-              请点「立即保存」重试,或稍后再试;这段时间请不要关闭页面。
-            </Callout>
-          ) : null}
-          {submitError ? <Callout tone="danger">{submitError}</Callout> : null}
-
-          <StickySaveBar
-            dirtyCount={dirtyCount}
-            saving={autosaveState === 'saving'}
-            hint={`已作答 ${answeredCount} / ${detail.items.length} 题${
-              savedAt ? ` · 上次保存 ${formatTime(savedAt.toISOString())}` : ''
-            }`}
-            saveAction={
-              <>
-                <Button variant="outline" onClick={() => void saveDraft()}>
-                  立即保存
-                </Button>
-                <Button variant="seal" leftIcon={Send} onClick={() => setConfirmOpen(true)}>
-                  提交作业
-                </Button>
-              </>
-            }
-          />
         </div>
       </div>
 
-      <Modal open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <ModalContent size="sm">
-          <ModalHeader>
-            <ModalTitle>确认提交作业</ModalTitle>
-            <ModalDescription>
-              提交后本次作答将进入批改流程。剩余可提交次数会减少一次。
-            </ModalDescription>
-          </ModalHeader>
-          <ModalBody>
-            <DescriptionList
-              dense
-              items={[
-                { term: '已作答题目', description: `${answeredCount} / ${detail.items.length}`, mono: true },
-                { term: '截止时间', description: formatDateTime(assignment.due_at), mono: true },
-                { term: '迟交规则', description: latePolicyLabel(assignment.late_policy) },
-              ]}
-            />
-            {answeredCount < detail.items.length ? (
-              <Callout tone="warning" className="mt-3">
-                还有题目没有作答,提交后未作答的题目按零分计。
-              </Callout>
-            ) : null}
-          </ModalBody>
-          <ModalFooter>
-            <Button variant="outline" onClick={() => setConfirmOpen(false)}>
-              再检查一下
-            </Button>
-            <Button variant="seal" loading={submitting} onClick={() => void submit()}>
-              确认提交
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
-    </>
-  )
-}
+      {readOnly ? (
+        <AssignmentClosedBar
+          reason={submitState.reason ?? ''}
+          resultsHref={attemptsUsed > 0 ? resultsHref : undefined}
+        />
+      ) : (
+        <AssignmentActionBar
+          autosaveState={autosaveState}
+          dirtyCount={dirtyCount}
+          savedAt={savedAt}
+          conflict={recoveryConflict}
+          answered={answeredCount}
+          total={detail.items.length}
+          late={submitState.late}
+          busy={submitting}
+          onSave={() => void saveDraft()}
+          onSubmit={openConfirm}
+        />
+      )}
 
-interface AssignmentItemCardProps {
-  item: AssignmentItem
-  seq: number
-  value: string
-  onChange: (value: string) => void
-  onBlur: () => void
-}
-
-/**
- * AssignmentItemCard 渲染单题题面与作答控件。
- * 选择型题目(题面带选项)用单选,其余用文本作答;题面与选项都来自后端题面视角。
- */
-function AssignmentItemCard({ item, seq, value, onChange, onBlur }: AssignmentItemCardProps) {
-  const statement = itemStatement(item)
-  const choices = itemChoices(item)
-
-  return (
-    // id 供左侧锚点跳转;scroll-mt 让跳转后标题不被吸顶的顶栏盖住
-    <Card id={`assignment-item-${item.id}`} className="scroll-mt-20">
-      <CardHeader
-        title={
-          <span className="flex flex-wrap items-center gap-2">
-            <span className="font-mono text-sm tabular-nums text-ink-sub">第 {seq} 题</span>
-            <span className="min-w-0">{item.title ?? '题目'}</span>
-          </span>
-        }
-        description={`本题 ${item.score} 分`}
-        actions={
-          item.difficulty !== undefined ? (
-            <Badge tone="neutral">{contentDifficultyLabel(item.difficulty)}</Badge>
-          ) : null
-        }
+      <SubmitConfirmModal
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        total={detail.items.length}
+        unanswered={sheetItems.filter((item) => !item.answered)}
+        remainingAfter={Math.max(0, submitState.remaining - 1)}
+        late={submitState.late}
+        latePolicyText={latePolicyLabel(assignment.late_policy)}
+        submitting={submitting}
+        error={submitError}
+        onConfirm={() => void submit()}
+        onJump={jumpTo}
       />
-      <CardBody className="flex flex-col gap-4">
-        {statement ? (
-          <div className="flex flex-col gap-2 text-base leading-relaxed text-ink">
-            {statement.split('\n').map((paragraph, index) =>
-              paragraph.trim() === '' ? null : <p key={index}>{paragraph}</p>,
-            )}
-          </div>
-        ) : (
-          <Callout tone="info">这道题的题面暂未提供,请联系老师确认。</Callout>
-        )}
 
-        {item.grading_mode === GradingMode.AUTO && choices.length === 0 ? (
-          <Callout tone="info" title="这是编程题">
-            请在实验工作台的代码环境中完成并保存代码,保存后回到本页提交。
-          </Callout>
-        ) : choices.length > 0 ? (
-          <FormField label="选择答案" required>
-            <RadioGroup value={value} onValueChange={onChange}>
-              <div className="flex flex-col gap-2">
-                {choices.map((choice, index) => (
-                  <RadioItem
-                    key={index}
-                    value={choice}
-                    label={choice}
-                    onBlur={onBlur}
-                  />
-                ))}
-              </div>
-            </RadioGroup>
-          </FormField>
-        ) : (
-          <FormField label="作答内容" required>
-            <Textarea
-              value={value}
-              rows={6}
-              placeholder="写下你的解答"
-              onChange={(event) => onChange(event.target.value)}
-              onBlur={onBlur}
-            />
-          </FormField>
-        )}
-      </CardBody>
-    </Card>
+      <UnsavedChangesGuard
+        when={!readOnly && dirtyCount > 0}
+        description="不保存就离开,这次的改动会丢失。保存到服务器后,换台设备也能接着写。"
+        onSave={saveDraft}
+      />
+    </>
   )
 }

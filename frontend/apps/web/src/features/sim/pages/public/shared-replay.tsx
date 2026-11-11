@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router'
-import { Info, LoaderCircle, Lock, TriangleAlert } from 'lucide-react'
+import { Info, LoaderCircle, Lock, LogIn, TriangleAlert } from 'lucide-react'
 import {
   Button,
   ChainProgress,
@@ -248,7 +248,7 @@ function ReplayRuntime({ replay }: ReplayRuntimeProps) {
           onExit={exit}
           exitLabel="退出回放"
           title={title}
-          subtitle={descriptor.meta.name}
+          subtitle={`公开回放 · ${descriptor.meta.name}`}
           progress={
             <ChainProgress
               onDark
@@ -257,6 +257,12 @@ function ReplayRuntime({ replay }: ReplayRuntimeProps) {
               total={descriptor.narrative.length}
               done={narrativeProgress(descriptor, snapshot)}
             />
+          }
+          cta={
+            // 公开回放的访客没有会话:顶栏右侧唯一的动作是去登录(设计 §7.1)
+            <Button variant="primary" size="sm" leftIcon={LogIn} onClick={exit}>
+              登录 Chaimir
+            </Button>
           }
         />
       }

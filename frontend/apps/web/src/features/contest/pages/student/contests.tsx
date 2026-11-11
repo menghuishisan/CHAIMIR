@@ -1,234 +1,200 @@
-// 竞赛参赛页(学生侧栏,/student/contests)。
-// 列表走学生专用路由 GET /contest/student/contests(后端只回非草稿赛事)。
-// 「我是否已报名」由 GET /contest/my/contest-records 判定 —— 它是学生侧唯一能取到本人
-// team_id 的接口(对齐清单 §3.1),没有独立的「我的报名」接口。
+// 竞赛参赛页(学生侧栏,/student/contests)。设计 §7.2:
+// 页头 + 分段「报名中 / 进行中 / 已结束 / 全部」+ 搜索;卡片网格,卡片显示赛事名、赛制(解题 / 对抗)、
+// 个人或组队、状态与时间提示(「报名还剩 2 天」「距结束 3 小时」、已结束写日期)、「我已报名」;
+// 整卡链向赛事详情。我已报名且进行中的赛事排在最前。分段与搜索写进地址。
+//
+// 列表走学生专用路由 GET /contest/student/contests(后端只回非草稿赛事)。一个学生能看到的赛事
+// 通常不到二十场,而「进行中」「已结束」各包含两个状态(接口的状态筛选只接受单个状态),
+// 又要把「我已报名且进行中」排在最前 —— 故按每页最大条数取完(只带搜索词),在前端分段、
+// 排序、分页。「我是否已报名」由 GET /contest/my/contest-records 判定(学生侧唯一能取到本人
+// 队伍的接口,对齐清单 §3.1)。
 
-import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router'
-import { Swords } from 'lucide-react'
-import { ContestStatus, type Contest, type ContestRecord } from '@chaimir/api-client'
+import { useMemo } from 'react'
+import { Link, useSearchParams } from 'react-router'
+import { Swords, Users } from 'lucide-react'
+import { PAGINATION_MAX_SIZE, TeamMode, type Contest } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
-  DataPanel,
-  FilterBar,
-  FilterField,
-  Input,
-  MetricStrip,
+  Card,
+  Icon,
   PageHeader,
   PageScaffold,
   Pagination,
   SegmentedControl,
+  Skeleton,
   StatusIndicator,
-  Table,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
-import { formatDateTime, formatRelativeDeadline } from '../../../../utils/formatters'
-import { contestStatusLabel } from '../../../../utils/labels/contest'
-import { ContestIdentityCell, ContestScheduleCell } from '../../components/ContestTableCells'
-import { contestStatusFilterOptions, contestStatusTone } from '../../statusPresentation'
+import { ResourceError } from '../../../../components/ResourceState'
+import { SearchBox } from '../../../../components/SearchBox'
+import { useAsyncResource, useUrlState } from '../../../../hooks'
+import { collectAllPages } from '../../../../utils/allPages'
+import { readPage } from '../../../../utils/urlQuery'
+import { contestModeLabel, contestStatusLabel, teamModeLabel } from '../../../../utils/labels/contest'
+import { contestSegmentOf, sortStudentContests, type ContestSegment } from '../../contestOrder'
+import { contestTimeHint } from '../../contestTimeline'
+import { contestStatusTone } from '../../statusPresentation'
 
-/** 报名进行中的状态:只有此状态下报名入口有效(后端 validateSignupWindow 同口径)。 */
-const SIGNUP_OPEN_STATUS = ContestStatus.SIGNUP
+/** 前端分页的每页卡片数 */
+const PAGE_SIZE = 12
 
-/** 学生可发现的完整赛事状态,与服务端非草稿可见区间一致。 */
-const STATUS_FILTERS = contestStatusFilterOptions(false)
+const SEGMENTS: { value: 'all' | ContestSegment; label: string }[] = [
+  { value: 'signup', label: '报名中' },
+  { value: 'running', label: '进行中' },
+  { value: 'ended', label: '已结束' },
+  { value: 'all', label: '全部' },
+]
+
+/** 地址参数:status 是分段,q 是搜索词 */
+const CONTESTS_QUERY = {
+  status: { defaultValue: 'all', allowed: ['signup', 'running', 'ended', 'all'] },
+  q: { defaultValue: '' },
+} as const
 
 /**
  * StudentContestsPage 列出可参与赛事并标注本人参赛状态。
  */
 export default function StudentContestsPage() {
-  const navigate = useNavigate()
-  const [statusFilter, setStatusFilter] = useState<string>('')
-  const [keyword, setKeyword] = useState('')
-  const [submittedKeyword, setSubmittedKeyword] = useState('')
+  const [query, setQuery] = useUrlState(CONTESTS_QUERY)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const page = readPage(searchParams, 'page')
 
-  const contests = usePagedResource<Contest>(
-    (params) =>
-      api.contest.getStudentContests({
-        status: statusFilter ? (Number(statusFilter) as ContestStatus) : undefined,
-        keyword: submittedKeyword || undefined,
-        ...params,
-      }),
-    [statusFilter, submittedKeyword],
-  )
-
-  const handleSearch = useCallback(() => {
-    setSubmittedKeyword(keyword.trim())
-  }, [keyword])
-  // 战绩同时承担「已报名判定」:有记录说明已在某支队伍里
-  const records = useAsyncResource(() => api.contest.getMyContestRecords(), [contests.refreshVersion], () => false)
-
-  const joinedContestIds = useMemo(
-    () => records.status === 'success' && records.data
-      ? new Set(records.data.map((record: ContestRecord) => record.contest_id))
-      : undefined,
-    [records.data, records.status],
-  )
-
-  // 指标带取服务端全量口径:第 1 页的 20 条里数出来的「报名中 3」在赛事更多时是错数
-  const totalCount = useResourceTotal((params) => api.contest.getStudentContests(params), [], contests.refreshVersion)
-  const signupOpenCount = useResourceTotal(
-    (params) => api.contest.getStudentContests({ status: SIGNUP_OPEN_STATUS, ...params }),
-    [],
-    contests.refreshVersion,
-  )
-  const runningCount = useResourceTotal(
-    (params) => api.contest.getStudentContests({ status: ContestStatus.RUNNING, ...params }),
-    [],
-    contests.refreshVersion,
-  )
-
-  const columns: TableColumn<Contest>[] = [
-    {
-      key: 'name',
-      header: '赛事',
-      render: (contest) => <ContestIdentityCell contest={contest} />,
-    },
-    {
-      key: 'signup',
-      header: '报名时间',
-      render: (contest) => (
-        <div className="flex flex-col gap-1">
-          <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-            {formatDateTime(contest.signup_start)} — {formatDateTime(contest.signup_end)}
-          </span>
-          {contest.status === SIGNUP_OPEN_STATUS ? (
-            <Badge tone="info">{formatRelativeDeadline(contest.signup_end).text}截止报名</Badge>
-          ) : null}
-        </div>
+  const contests = useAsyncResource(
+    () =>
+      collectAllPages(
+        (params) => api.contest.getStudentContests({ ...params, keyword: query.q || undefined }),
+        PAGINATION_MAX_SIZE,
       ),
-    },
-    {
-      key: 'start_at',
-      header: '比赛时间',
-      render: (contest) => <ContestScheduleCell contest={contest} />,
-    },
-    {
-      key: 'status',
-      header: '赛事状态',
-      render: (contest) => (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <StatusIndicator tone={contestStatusTone(contest.status)} label={contestStatusLabel(contest.status)} />
-          {joinedContestIds?.has(contest.id) ? <Badge tone="jade">已报名</Badge> : null}
-        </div>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (contest) => (
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/student/contests/${contest.id}`)}>
-          {joinedContestIds?.has(contest.id) ? '进入赛事' : '查看详情'}
-        </Button>
-      ),
-    },
-  ]
+    [query.q],
+    () => false,
+  )
+  const records = useAsyncResource(() => api.contest.getMyContestRecords(), [], () => false)
+  const joined = useMemo(
+    () => new Set((records.data ?? []).map((record) => record.contest_id)),
+    [records.data],
+  )
+
+  const counts = useMemo(() => {
+    const result = { signup: 0, running: 0, ended: 0, all: 0 }
+    for (const contest of contests.data ?? []) {
+      const segment = contestSegmentOf(contest.status)
+      if (!segment) continue
+      result[segment] += 1
+      result.all += 1
+    }
+    return result
+  }, [contests.data])
+
+  const visible = useMemo(() => {
+    const list = (contests.data ?? []).filter(
+      (contest) => query.status === 'all' || contestSegmentOf(contest.status) === query.status,
+    )
+    return sortStudentContests(list, joined)
+  }, [contests.data, joined, query.status])
+  const pageItems = visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
+  /** setPage 把页码写进地址(替换历史记录,第 1 页不写) */
+  const setPage = (next: number) =>
+    setSearchParams(
+      (previous) => {
+        const params = new URLSearchParams(previous)
+        if (next === 1) params.delete('page')
+        else params.set('page', String(next))
+        return params
+      },
+      { replace: true },
+    )
+
+  const loaded = contests.status === 'success' || contests.status === 'empty'
+  const filtered = query.status !== 'all' || query.q !== ''
 
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '学习区' }]} />}
         title="竞赛参赛"
-        description="报名后进入赛事详情可以看到赛题、榜单和你的队伍。"
-        icon={Swords}
+        meta={records.status === 'success' && joined.size > 0 ? [{ label: '我已报名', value: `${joined.size} 场` }] : undefined}
       />
 
-      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是赛事列表,不是三个数字 */}
-      <MetricStrip
-        label="赛事总量摘要"
-        className="mb-5"
-        items={[
-          { label: '可参与赛事', value: totalCount ?? '—', hint: '不受下方筛选影响' },
-          { label: '报名中', value: signupOpenCount ?? '—', hint: '报名窗口尚未关闭' },
-          { label: '进行中', value: runningCount ?? '—', hint: '正在进行的比赛' },
-          { label: '我已报名', value: joinedContestIds?.size, hint: '按我的战绩判定' },
-        ]}
-      />
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <SegmentedControl
+          aria-label="按赛事状态筛选"
+          options={SEGMENTS.map((segment) => ({
+            value: segment.value,
+            label: segment.label,
+            count: loaded ? counts[segment.value] : undefined,
+          }))}
+          value={query.status}
+          onValueChange={(value) => setQuery({ status: value })}
+        />
+        <SearchBox label="搜索赛事" placeholder="搜索赛事名称" value={query.q} onSearch={(value) => setQuery({ q: value })} />
+      </div>
 
-      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
-      <DataPanel
-        label="赛事列表"
-        filter={
-          <FilterBar label="赛事筛选" onSubmit={handleSearch} submitLabel="搜索">
-            <FilterField label="关键词" htmlFor="student-contest-keyword">
-              <Input
-                id="student-contest-keyword"
-                value={keyword}
-                onChange={(event) => setKeyword(event.target.value)}
-                placeholder="搜索赛事名称"
-              />
-            </FilterField>
-            <FilterField label="赛事状态" group>
-              <SegmentedControl
-                aria-label="按赛事状态筛选"
-                size="sm"
-                options={STATUS_FILTERS}
-                value={statusFilter}
-                onValueChange={setStatusFilter}
-              />
-            </FilterField>
-          </FilterBar>
-        }
-        footer={
-          <Pagination
-            page={contests.page}
-            pageSize={contests.pageSize}
-            total={contests.total}
-            onPageChange={contests.setPage}
-          />
-        }
-      >
-        <ResourceState
-          resource={contests}
-          emptyIcon={Swords}
-          emptyTitle={submittedKeyword || statusFilter ? '没有匹配的赛事' : '暂无可参与的赛事'}
-          emptyDescription={
-            submittedKeyword || statusFilter
-              ? '换个关键词或状态看看。'
-              : '老师发布赛事后会显示在这里,报名窗口开放时即可报名。'
-          }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-        >
-          {(page) => (
-            <Table
-              columns={columns}
-              data={page.list}
-              rowKey={(item) => item.id}
-              elevated={false}
-              onRowClick={(item) => navigate(`/student/contests/${item.id}`)}
-              // <md 换行卡(§6.4.1 规则 3):赛事名一行、比赛时间一行,状态在右
-              mobileCard={(item) => ({
-                title: item.name,
-                meta: `比赛 ${formatDateTime(item.start_at)} 起 · 报名截止 ${formatDateTime(item.signup_end)}`,
-                badge: (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <StatusIndicator
-                      tone={contestStatusTone(item.status)}
-                      label={contestStatusLabel(item.status)}
-                    />
-                    {joinedContestIds?.has(item.id) ? <Badge tone="jade">已报名</Badge> : null}
-                  </div>
-                ),
-                action: (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => navigate(`/student/contests/${item.id}`)}
-                  >
-                    {joinedContestIds?.has(item.id) ? '进入' : '详情'}
-                  </Button>
-                ),
-              })}
-            />
-          )}
-        </ResourceState>
-      </DataPanel>
+      {contests.status === 'error' ? (
+        <ResourceError
+          message={contests.error?.message ?? '赛事暂时读取不到'}
+          traceId={contests.error?.traceId}
+          onRetry={contests.reload}
+        />
+      ) : !loaded ? (
+        <ul className="card-grid gap-4" aria-busy="true" aria-label="正在读取赛事">
+          {Array.from({ length: 3 }, (_, index) => (
+            <li key={index} className="flex flex-col gap-3 rounded-lg bg-surface p-5 shadow-xs">
+              <Skeleton variant="title" width="half" />
+              <Skeleton variant="line" lines={2} />
+            </li>
+          ))}
+        </ul>
+      ) : pageItems.length === 0 ? (
+        <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-14 text-center shadow-xs">
+          <Icon icon={Swords} size="lg" className="text-ink-faint" />
+          <p className="mt-3 text-md font-semibold text-ink">{filtered ? '这里暂时没有赛事' : '还没有可以参加的赛事'}</p>
+          <p className="mt-1.5 text-sm text-ink-sub">
+            {filtered ? '切换到「全部」或换个关键词看看。' : '老师发布赛事后会显示在这里,报名开放时就能报名。'}
+          </p>
+          {filtered ? (
+            <Button variant="outline" className="mt-5" onClick={() => setQuery({ status: 'all', q: '' })}>
+              看全部赛事
+            </Button>
+          ) : null}
+        </div>
+      ) : (
+        <>
+          <ul className="card-grid gap-4" aria-busy={contests.status === 'loading' || undefined}>
+            {pageItems.map((contest) => (
+              <li key={contest.id}>
+                <ContestCard contest={contest} joined={joined.has(contest.id)} />
+              </li>
+            ))}
+          </ul>
+          <div className="mt-6">
+            <Pagination page={page} pageSize={PAGE_SIZE} total={visible.length} onPageChange={setPage} />
+          </div>
+        </>
+      )}
     </PageScaffold>
+  )
+}
+
+/** ContestCard 一场赛事:赛事名(整卡链接)、状态、赛制 · 参赛形式、时间提示、我已报名 */
+function ContestCard({ contest, joined }: { contest: Contest; joined: boolean }) {
+  const hint = contestTimeHint(contest)
+  return (
+    <Card interactive className="flex h-full flex-col gap-2 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <Link to={`/student/contests/${contest.id}`} className="card-link line-clamp-2 text-lg font-bold text-ink">
+          {contest.name}
+        </Link>
+        <StatusIndicator tone={contestStatusTone(contest.status)} label={contestStatusLabel(contest.status)} />
+      </div>
+      <p className="flex items-center gap-1.5 text-sm text-ink-sub">
+        {contest.team_mode === TeamMode.GROUP ? <Icon icon={Users} size="xs" /> : null}
+        {contestModeLabel(contest.mode)} · {teamModeLabel(contest.team_mode)}
+      </p>
+      <div className="mt-auto flex flex-wrap items-center justify-between gap-2 pt-3">
+        <span className="text-sm font-medium tabular-nums text-ink">{hint ?? ''}</span>
+        {joined ? <Badge tone="jade">我已报名</Badge> : null}
+      </div>
+    </Card>
   )
 }

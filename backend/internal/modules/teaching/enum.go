@@ -53,11 +53,6 @@ const (
 )
 
 const (
-	GradingModeAuto   int16 = 1
-	GradingModeManual int16 = 2
-)
-
-const (
 	SubmissionStatusSubmitted int16 = 1
 	SubmissionStatusPending   int16 = 2
 	SubmissionStatusGraded    int16 = 3
