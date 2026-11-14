@@ -74,6 +74,7 @@ export interface CoverImageProps {
   className?: string
 }
 
+/** CoverImage 内容封面:有用户封面用用户封面,没有就按资源编号稳定落到一张纸材底图 */
 export function CoverImage({
   id,
   coverSrc,

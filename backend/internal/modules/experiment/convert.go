@@ -53,6 +53,17 @@ func cloneCompositionInitAssets(items []contracts.CompositionInitAsset) []contra
 	return append([]contracts.CompositionInitAsset(nil), items...)
 }
 
+// applyStudentProgress 把本人进度合并到学生实验列表(返回新切片,不改动传入的列表);没开始过的实验不带进度。
+func applyStudentProgress(items []StudentExperimentDTO, progress map[int64]StudentExperimentProgressDTO) []StudentExperimentDTO {
+	out := append([]StudentExperimentDTO(nil), items...)
+	for i := range out {
+		if item, ok := progress[int64(out[i].ID)]; ok {
+			out[i].MyProgress = &item
+		}
+	}
+	return out
+}
+
 // studentExperimentDTOFromModel 生成不含环境初始化与判题答案的学生实验视图。
 // myGroupID 为该学生在本实验所属小组(0 表示未分组或单人实验),供前端发起实例时携带。
 func studentExperimentDTOFromModel(item Experiment, myGroupID int64) StudentExperimentDTO {

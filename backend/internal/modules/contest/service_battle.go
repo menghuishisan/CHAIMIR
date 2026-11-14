@@ -181,18 +181,20 @@ func (s *Service) ListBattleEntries(ctx context.Context, contestID int64, page, 
 // 学生只见本队对局(时空回溯器要的就是本队记录);赛事组织者与学校管理员见本赛事全部对局
 // (实时监控要看的是「哪一局卡住了」)。同一路由同一查询,只是过滤条件不同 ——
 // 为教师另开一条对局列表会让同一张表存在两份分页查询与两套 DTO。
-func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, page, size int) ([]BattleMatchDTO, int64, int, int, error) {
+// status 按对局状态筛选(0 为全部);facets.status 按状态计数,视角相同、不套用状态筛选。
+func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, status int16, page, size int) ([]BattleMatchDTO, int64, int, int, pagex.Facets, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	organizerTenantID, err := s.resolvePublishedContestTenant(ctx, contestID)
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
 	var matches []BattleMatch
 	var total int64
+	var byStatus pagex.FacetGroup
 	if err := s.store.TenantTx(ctx, organizerTenantID, func(ctx context.Context, tx TxStore) error {
 		contest, err := tx.GetContest(ctx, organizerTenantID, contestID)
 		if err != nil {
@@ -212,16 +214,20 @@ func (s *Service) ListBattleMatches(ctx context.Context, contestID int64, page, 
 			}
 			teamID = team.ID
 		}
-		matches, total, err = tx.ListBattleMatchesForTeam(ctx, organizerTenantID, contestID, teamID, page, size)
+		matches, total, err = tx.ListBattleMatchesForTeam(ctx, organizerTenantID, contestID, teamID, status, page, size)
+		if err != nil {
+			return err
+		}
+		byStatus, err = tx.CountBattleMatchesByStatus(ctx, organizerTenantID, contestID, teamID)
 		return err
 	}); err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	out := make([]BattleMatchDTO, 0, len(matches))
 	for _, match := range matches {
 		out = append(out, battleMatchDTOFromModel(match))
 	}
-	return out, total, page, size, nil
+	return out, total, page, size, pagex.Facets{"status": byStatus}, nil
 }
 
 // GetBattleReplayWindow 返回已完成对局的有序时间窗及窗口前检查点。

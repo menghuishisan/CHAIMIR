@@ -14,6 +14,9 @@ type Querier interface {
 	CompleteJudgeTask(ctx context.Context, arg CompleteJudgeTaskParams) (CompleteJudgeTaskRow, error)
 	CompleteManualJudgeTask(ctx context.Context, arg CompleteManualJudgeTaskParams) (CompleteManualJudgeTaskRow, error)
 	CountJudgeTasks(ctx context.Context, arg CountJudgeTasksParams) (int64, error)
+	// 判题任务的运维分组计数(active=排队/执行中,abnormal=失败;其余状态不在任何分组里):
+	// 套用来源、人工评分与本人范围,不套用 state 筛选;口径与 ListJudgeTasks 一致。
+	CountJudgeTasksByState(ctx context.Context, arg CountJudgeTasksByStateParams) ([]CountJudgeTasksByStateRow, error)
 	CreateJudgeOutbox(ctx context.Context, arg CreateJudgeOutboxParams) (JudgeEventOutbox, error)
 	CreateJudgeTask(ctx context.Context, arg CreateJudgeTaskParams) (CreateJudgeTaskRow, error)
 	CreateSubmissionFingerprint(ctx context.Context, arg CreateSubmissionFingerprintParams) (CreateSubmissionFingerprintRow, error)

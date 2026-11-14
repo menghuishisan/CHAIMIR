@@ -22,13 +22,34 @@ func (s *Service) ListPackages(ctx context.Context, status int16, category, keyw
 	var items []Package
 	var total int64
 	var byCategory map[string]int64
+	var byStatus map[int16]int64
+	var rejections map[int64]string
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
 		items, total, err = tx.ListPackages(ctx, status, strings.TrimSpace(category), strings.TrimSpace(keyword), authorID, limit, offset)
 		if err != nil {
 			return err
 		}
-		byCategory, err = tx.CountPackagesByCategory(ctx, status, strings.TrimSpace(category), strings.TrimSpace(keyword), authorID)
+		byCategory, err = tx.CountPackagesByCategory(ctx, status, strings.TrimSpace(keyword), authorID)
+		if err != nil {
+			return err
+		}
+		// 状态分段计数:套用分类、关键词与作者范围,不套用状态筛选
+		byStatus, err = tx.CountPackagesByStatus(ctx, strings.TrimSpace(category), strings.TrimSpace(keyword), authorID)
+		if err != nil {
+			return err
+		}
+		// 只有作者本人的视角带退回意见:平台与可用场景视角看不到别人的审核意见
+		if authorID == 0 {
+			return nil
+		}
+		rejected := make([]int64, 0, len(items))
+		for _, item := range items {
+			if item.Status == PackageStatusRejected {
+				rejected = append(rejected, item.ID)
+			}
+		}
+		rejections, err = tx.LatestRejections(ctx, rejected)
 		return err
 	}); err != nil {
 		return nil, 0, page, size, nil, lookupError(err, apperr.ErrSimPackageNotFound, apperr.ErrSimPackageQueryFailed)
@@ -39,9 +60,14 @@ func (s *Service) ListPackages(ctx context.Context, status int16, category, keyw
 		if err != nil {
 			return nil, 0, page, size, nil, err
 		}
+		mapped.RejectComment = rejections[item.ID]
 		out = append(out, mapped)
 	}
-	return out, total, page, size, map[string]map[string]int64{"category": byCategory}, nil
+	statusGroup, err := namedFacetGroup(byStatus, packageStatusText)
+	if err != nil {
+		return nil, 0, page, size, nil, err
+	}
+	return out, total, page, size, map[string]map[string]int64{"category": byCategory, "status": statusGroup}, nil
 }
 
 // ListPackageVersions 返回指定 code 的全部版本。
@@ -278,27 +304,71 @@ func (s *Service) PackagePreview(ctx context.Context, accountID, packageID int64
 }
 
 // ListReviews 返回审核分页列表。
-func (s *Service) ListReviews(ctx context.Context, result int16, page, size int) ([]SimPackageReviewResponse, int64, int, int, error) {
+func (s *Service) ListReviews(ctx context.Context, result int16, page, size int) ([]SimPackageReviewResponse, int64, int, int, pagex.Facets, error) {
 	page, size = pagex.Normalize(page, size)
 	limit, offset := pagex.LimitOffset(page, size)
 	var items []ReviewInfo
 	var total int64
+	var byResult map[int16]int64
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
 		items, total, err = tx.ListReviews(ctx, result, limit, offset)
+		if err != nil {
+			return err
+		}
+		byResult, err = tx.CountReviewsByResult(ctx)
 		return err
 	}); err != nil {
-		return nil, 0, page, size, lookupError(err, apperr.ErrSimReviewNotFound, apperr.ErrSimReviewQueryFailed)
+		return nil, 0, page, size, nil, lookupError(err, apperr.ErrSimReviewNotFound, apperr.ErrSimReviewQueryFailed)
+	}
+	submitterIDs := make([]int64, 0, len(items))
+	for _, item := range items {
+		submitterIDs = append(submitterIDs, item.SubmitterID)
+	}
+	// 提交人是各校教师,平台身份经身份契约一次批量解析姓名
+	names, err := s.accountNames(ctx, submitterIDs)
+	if err != nil {
+		return nil, 0, page, size, nil, err
 	}
 	out := make([]SimPackageReviewResponse, 0, len(items))
 	for _, item := range items {
 		mapped, err := reviewInfoToResponse(item)
 		if err != nil {
-			return nil, 0, page, size, err
+			return nil, 0, page, size, nil, err
 		}
+		mapped.SubmitterName = names[item.SubmitterID]
 		out = append(out, mapped)
 	}
-	return out, total, page, size, nil
+	resultGroup, err := namedFacetGroup(byResult, reviewResultText)
+	if err != nil {
+		return nil, 0, page, size, nil, err
+	}
+	return out, total, page, size, pagex.Facets{"result": resultGroup}, nil
+}
+
+// accountNames 一次批量解析账号姓名(去重);读不到的编号不在结果里。
+func (s *Service) accountNames(ctx context.Context, accountIDs []int64) (map[int64]string, error) {
+	seen := map[int64]struct{}{}
+	unique := make([]int64, 0, len(accountIDs))
+	for _, accountID := range accountIDs {
+		if _, ok := seen[accountID]; ok || accountID <= 0 {
+			continue
+		}
+		seen[accountID] = struct{}{}
+		unique = append(unique, accountID)
+	}
+	names := map[int64]string{}
+	if len(unique) == 0 {
+		return names, nil
+	}
+	accounts, err := s.identity.BatchGetAccounts(ctx, unique)
+	if err != nil {
+		return nil, apperr.ErrSimReviewQueryFailed.WithCause(err)
+	}
+	for _, account := range accounts {
+		names[account.AccountID] = account.Name
+	}
+	return names, nil
 }
 
 // ApproveReview 通过审核并上架包,要求四项校验全部通过。

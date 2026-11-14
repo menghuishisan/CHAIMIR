@@ -529,8 +529,8 @@ func (s *Service) ListLadder(ctx context.Context, contestID int64, page, size in
 				return nil
 			}
 			end := min(start+size, len(all))
-			out = all[start:end]
-			return nil
+			out, err = fillLadderTeamNames(ctx, tx, organizerTenantID, contestID, all[start:end])
+			return err
 		}
 		ranks, count, err := tx.ListLadder(ctx, organizerTenantID, contestID, page, size)
 		if err != nil {
@@ -541,11 +541,25 @@ func (s *Service) ListLadder(ctx context.Context, contestID int64, page, size in
 		for _, rank := range ranks {
 			out = append(out, ladderDTOFromModel(rank))
 		}
-		return nil
+		out, err = fillLadderTeamNames(ctx, tx, organizerTenantID, contestID, out)
+		return err
 	}); err != nil {
 		return nil, 0, 0, 0, err
 	}
 	return out, total, page, size, nil
+}
+
+// fillLadderTeamNames 给榜单行填队名:按这一页的队伍编号一次读取(榜单与快照只存 team_id)。
+func fillLadderTeamNames(ctx context.Context, tx TxStore, tenantID, contestID int64, items []LadderDTO) ([]LadderDTO, error) {
+	teamIDs := make([]int64, 0, len(items))
+	for _, item := range items {
+		teamIDs = append(teamIDs, item.TeamID.Int64())
+	}
+	names, err := tx.TeamNames(ctx, tenantID, contestID, teamIDs)
+	if err != nil {
+		return nil, err
+	}
+	return withLadderTeamNames(items, names), nil
 }
 
 // refreshTeamRank 依据已通过提交重算单队成绩并刷新全榜排名。
@@ -563,7 +577,7 @@ func (s *Service) refreshTeamRank(ctx context.Context, tx TxStore, tenantID, con
 
 // pushLeaderboard 通过 M10 统一实时推送排行榜变化。
 func (s *Service) pushLeaderboard(ctx context.Context, tenantID, contestID int64) error {
-	var ranks []LadderRank
+	var items []LadderDTO
 	shouldPush := false
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		contest, err := tx.GetContest(ctx, tenantID, contestID)
@@ -573,7 +587,15 @@ func (s *Service) pushLeaderboard(ctx context.Context, tenantID, contestID int64
 		if contest.Status != ContestStatusRunning {
 			return nil
 		}
-		ranks, _, err = tx.ListLadder(ctx, tenantID, contestID, 1, 50)
+		ranks, _, err := tx.ListLadder(ctx, tenantID, contestID, 1, 50)
+		if err != nil {
+			return err
+		}
+		items = make([]LadderDTO, 0, len(ranks))
+		for _, rank := range ranks {
+			items = append(items, ladderDTOFromModel(rank))
+		}
+		items, err = fillLadderTeamNames(ctx, tx, tenantID, contestID, items)
 		shouldPush = err == nil
 		return err
 	}); err != nil {
@@ -581,10 +603,6 @@ func (s *Service) pushLeaderboard(ctx context.Context, tenantID, contestID int64
 	}
 	if !shouldPush {
 		return nil
-	}
-	items := make([]LadderDTO, 0, len(ranks))
-	for _, rank := range ranks {
-		items = append(items, ladderDTOFromModel(rank))
 	}
 	payload, err := json.Marshal(LeaderboardPushDTO{ContestID: ids.ID(contestID), Items: items})
 	if err != nil {

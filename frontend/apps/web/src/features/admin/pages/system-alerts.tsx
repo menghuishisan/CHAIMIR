@@ -48,7 +48,8 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
-import { type AsyncResourceState, useAsyncResource, usePagedResource, useResourceTotal, useUrlState } from '../../../hooks'
+import { type AsyncResourceState, useAsyncResource, usePagedResource, useUrlState } from '../../../hooks'
+import { segmentCounts as segmentCountsOf } from '../../../utils/facets'
 import { useFormValidation } from '../../../hooks/useFormValidation'
 import { formatDateTime, formatRelativeOccurrence } from '../../../utils/formatters'
 import {
@@ -189,6 +190,7 @@ interface AlertEventsSectionProps {
   ruleName: (ruleId: string) => string | undefined
 }
 
+/** AlertEventsSection 告警事件区:状态与级别筛选、事件表格,以及改变事件状态前的确认弹窗 */
 function AlertEventsSection({ eventScope, status, level, onStatusChange, onLevelChange, ruleName }: AlertEventsSectionProps) {
   const [target, setTarget] = useState<{ event: AlertEvent; status: AlertStatus }>()
   const [working, setWorking] = useState(false)
@@ -222,29 +224,9 @@ function AlertEventsSection({ eventScope, status, level, onStatusChange, onLevel
     }
   }, [events, target])
 
-  // 分段上的数字取服务端全量口径,不随级别筛选变化(§6.5.4)
-  const totalCount = useResourceTotal((params) => api.admin.listAlertEvents(params), [], events.refreshVersion)
-  const pendingCount = useResourceTotal(
-    (params) => api.admin.listAlertEvents({ status: AlertStatus.PENDING, ...params }),
-    [],
-    events.refreshVersion
-  )
-  const handledCount = useResourceTotal(
-    (params) => api.admin.listAlertEvents({ status: AlertStatus.HANDLED, ...params }),
-    [],
-    events.refreshVersion
-  )
-  const ignoredCount = useResourceTotal(
-    (params) => api.admin.listAlertEvents({ status: AlertStatus.IGNORED, ...params }),
-    [],
-    events.refreshVersion
-  )
-  const segmentCounts: Record<string, number | undefined> = {
-    pending: pendingCount,
-    handled: handledCount,
-    ignored: ignoredCount,
-    all: totalCount,
-  }
+  // 分段计数取列表接口的 facets:套用级别筛选,不套用状态筛选
+  const facets = events.status === 'success' || events.status === 'empty' ? events.data?.facets : undefined
+  const segmentCounts = segmentCountsOf(facets, 'status', STATUS_SEGMENTS, (item) => ('status' in item ? item.status : undefined))
 
   return (
     <>

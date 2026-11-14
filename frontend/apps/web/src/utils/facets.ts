@@ -47,3 +47,22 @@ export function facetTopEntries(
     .sort((a, b) => b.count - a.count || a.value.localeCompare(b.value))
     .slice(0, limit)
 }
+
+/**
+ * segmentCounts 把一组分段换成各自的条数:分段取值由 valueOf 给出(「全部」返回 undefined,条数是该组之和)。
+ * 计数来自列表接口的 facets(接口总览「分段计数」),不为每个分段各发一次取总数的请求;
+ * 列表还没读到或接口没返回这一组时,每个分段都是未知。
+ */
+export function segmentCounts<S extends { value: string }>(
+  facets: PageFacets | undefined,
+  key: string,
+  segments: readonly S[],
+  valueOf: (segment: S) => string | number | boolean | undefined,
+): Record<string, number | undefined> {
+  const out: Record<string, number | undefined> = {}
+  for (const segment of segments) {
+    const value = valueOf(segment)
+    out[segment.value] = value === undefined ? facetSum(facets, key) : facetCount(facets, key, value)
+  }
+  return out
+}

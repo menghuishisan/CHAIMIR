@@ -7,7 +7,7 @@
 // 不把它作为裸 JSON 文本域交给用户。
 
 import { useCallback, useId, useMemo, useState } from 'react'
-import { ContestMode, MatchMode, TeamMode, type Contest, type ContestRequest } from '@chaimir/api-client'
+import { ContestMode, ContestStatus, MatchMode, TeamMode, type Contest, type ContestRequest } from '@chaimir/api-client'
 import {
   Button,
   Callout,
@@ -50,6 +50,8 @@ export interface ContestFormModalProps {
 export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModalProps) {
   const fieldId = useId()
   const editing = contest !== undefined
+  // 发布后赛制与参赛形式不能再改:赛题按赛制锁定、报名按参赛形式组队(服务端同样拒绝)
+  const structureLocked = editing && contest.status !== ContestStatus.DRAFT
 
   const [name, setName] = useState(contest?.name ?? '')
   const [mode, setMode] = useState(String(contest?.mode ?? ContestMode.SOLVE))
@@ -189,7 +191,15 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
               />
             </FormField>
 
-            <FormField label="赛制" required helper="解题赛按题目通过数与用时排名;对抗赛按对局胜负积分">
+            <FormField
+              label="赛制"
+              required
+              helper={
+                structureLocked
+                  ? '赛事已发布,赛制不能再改'
+                  : '解题赛按题目通过数与用时排名;对抗赛按对局胜负积分'
+              }
+            >
               <SegmentedControl
                 aria-label="赛制"
                 options={[
@@ -198,10 +208,15 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
                 ]}
                 value={mode}
                 onValueChange={setMode}
+                disabled={structureLocked}
               />
             </FormField>
 
-            <FormField label="参赛形式" required>
+            <FormField
+              label="参赛形式"
+              required
+              helper={structureLocked ? '赛事已发布,参赛形式不能再改' : undefined}
+            >
               <SegmentedControl
                 aria-label="参赛形式"
                 options={[
@@ -210,6 +225,7 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
                 ]}
                 value={teamMode}
                 onValueChange={setTeamMode}
+                disabled={structureLocked}
               />
             </FormField>
 

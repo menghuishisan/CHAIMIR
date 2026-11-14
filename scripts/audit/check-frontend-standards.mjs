@@ -170,7 +170,8 @@ for (const root of roots) {
       // 判据是「圆角 + 四边边框」同时出现 —— 那就是在圈一个盒子;分隔线用的是 border-b/t/l/r,不命中。
       if (
         !isBorderExempt(file) &&
-        /\brounded-(?:sm|md|lg|xl|2xl|3xl|full|pane)\b/.test(line) &&
+        // 裸 rounded(不带尺寸)同样是在画圆角盒子,一并拦下
+        /\brounded(?:-(?:sm|md|lg|xl|2xl|3xl|full|pane))?(?![\w-])/.test(line) &&
         /\bborder\s+border-(?:line|line-strong)\b/.test(line)
       ) {
         addViolation(file, lineNumber, '纸面上的容器不得用边框圈盒(白卡用 bg-surface+shadow-xs,卡内强调块用 bg-surface-hover)', line)

@@ -327,19 +327,17 @@ func (q *Queries) CountSimPackages(ctx context.Context, arg CountSimPackagesPara
 const countSimPackagesByCategory = `-- name: CountSimPackagesByCategory :many
 SELECT category, COUNT(DISTINCT code)::bigint AS count
 FROM sim_package
-WHERE ($1::smallint = 0 OR status = $1)
-  AND ($2::text = '' OR category = $2)
-  AND ($3::text = '' OR code ILIKE '%' || $3 || '%' OR name ILIKE '%' || $3 || '%')
-  AND ($4::bigint = 0 OR (author_type = 2 AND author_id = $4))
+WHERE ($1::smallint = 0 OR status = $1::smallint)
+  AND ($2::text = '' OR code ILIKE '%' || $2::text || '%' OR name ILIKE '%' || $2::text || '%')
+  AND ($3::bigint = 0 OR (author_type = 2 AND author_id = $3::bigint))
 GROUP BY category
 ORDER BY category
 `
 
 type CountSimPackagesByCategoryParams struct {
-	Column1 int16  `json:"column_1"`
-	Column2 string `json:"column_2"`
-	Column3 string `json:"column_3"`
-	Column4 int64  `json:"column_4"`
+	Status   int16  `json:"status"`
+	Keyword  string `json:"keyword"`
+	AuthorID int64  `json:"author_id"`
 }
 
 type CountSimPackagesByCategoryRow struct {
@@ -347,13 +345,9 @@ type CountSimPackagesByCategoryRow struct {
 	Count    int64  `json:"count"`
 }
 
+// 分类分段计数:套用状态、关键词与作者范围,不套用分类筛选(接口总览「分段计数」);按场景去重。
 func (q *Queries) CountSimPackagesByCategory(ctx context.Context, arg CountSimPackagesByCategoryParams) ([]CountSimPackagesByCategoryRow, error) {
-	rows, err := q.db.Query(ctx, countSimPackagesByCategory,
-		arg.Column1,
-		arg.Column2,
-		arg.Column3,
-		arg.Column4,
-	)
+	rows, err := q.db.Query(ctx, countSimPackagesByCategory, arg.Status, arg.Keyword, arg.AuthorID)
 	if err != nil {
 		return nil, err
 	}
@@ -362,6 +356,47 @@ func (q *Queries) CountSimPackagesByCategory(ctx context.Context, arg CountSimPa
 	for rows.Next() {
 		var i CountSimPackagesByCategoryRow
 		if err := rows.Scan(&i.Category, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countSimPackagesByStatus = `-- name: CountSimPackagesByStatus :many
+SELECT status, COUNT(DISTINCT code)::bigint AS count
+FROM sim_package
+WHERE ($1::text = '' OR category = $1::text)
+  AND ($2::text = '' OR code ILIKE '%' || $2::text || '%' OR name ILIKE '%' || $2::text || '%')
+  AND ($3::bigint = 0 OR (author_type = 2 AND author_id = $3::bigint))
+GROUP BY status
+`
+
+type CountSimPackagesByStatusParams struct {
+	Category string `json:"category"`
+	Keyword  string `json:"keyword"`
+	AuthorID int64  `json:"author_id"`
+}
+
+type CountSimPackagesByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 我的仿真场景的状态分段计数:套用分类、关键词与作者范围,不套用状态筛选;按场景去重(同一场景多个版本只算一个)。
+func (q *Queries) CountSimPackagesByStatus(ctx context.Context, arg CountSimPackagesByStatusParams) ([]CountSimPackagesByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countSimPackagesByStatus, arg.Category, arg.Keyword, arg.AuthorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountSimPackagesByStatusRow{}
+	for rows.Next() {
+		var i CountSimPackagesByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -383,6 +418,38 @@ func (q *Queries) CountSimReviews(ctx context.Context, dollar_1 int16) (int64, e
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countSimReviewsByResult = `-- name: CountSimReviewsByResult :many
+SELECT result, COUNT(*)::bigint AS count
+FROM sim_package_review
+GROUP BY result
+`
+
+type CountSimReviewsByResultRow struct {
+	Result int16 `json:"result"`
+	Count  int64 `json:"count"`
+}
+
+// 仿真治理队列的审核结论分段计数(待审核 / 已通过 / 已退回)。
+func (q *Queries) CountSimReviewsByResult(ctx context.Context) ([]CountSimReviewsByResultRow, error) {
+	rows, err := q.db.Query(ctx, countSimReviewsByResult)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountSimReviewsByResultRow{}
+	for rows.Next() {
+		var i CountSimReviewsByResultRow
+		if err := rows.Scan(&i.Result, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const createSimAction = `-- name: CreateSimAction :one
@@ -1030,6 +1097,39 @@ func (q *Queries) GetSimShareByCode(ctx context.Context, code string) (SimShare,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listLatestRejectionsByPackages = `-- name: ListLatestRejectionsByPackages :many
+SELECT DISTINCT ON (package_id) package_id, comment
+FROM sim_package_review
+WHERE package_id = ANY($1::bigint[]) AND result = 3
+ORDER BY package_id, updated_at DESC, id DESC
+`
+
+type ListLatestRejectionsByPackagesRow struct {
+	PackageID int64       `json:"package_id"`
+	Comment   pgtype.Text `json:"comment"`
+}
+
+// 已退回场景的退回意见:当前页每个包最近一次「退回」审核的意见,一次查询;没有退回记录的包不出现。
+func (q *Queries) ListLatestRejectionsByPackages(ctx context.Context, packageIds []int64) ([]ListLatestRejectionsByPackagesRow, error) {
+	rows, err := q.db.Query(ctx, listLatestRejectionsByPackages, packageIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListLatestRejectionsByPackagesRow{}
+	for rows.Next() {
+		var i ListLatestRejectionsByPackagesRow
+		if err := rows.Scan(&i.PackageID, &i.Comment); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listSimActions = `-- name: ListSimActions :many

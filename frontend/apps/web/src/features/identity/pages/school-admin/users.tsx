@@ -55,7 +55,8 @@ import {
 import { api } from '../../../../app/api'
 import { ResourceError } from '../../../../components/ResourceState'
 import { SearchBox } from '../../../../components/SearchBox'
-import { useAsyncResource, usePagedResource, useResourceTotal, useUrlState } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, useUrlState } from '../../../../hooks'
+import { segmentCounts } from '../../../../utils/facets'
 import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
 import { accountStatusLabel, baseIdentityLabel, userRoleLabel } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -171,14 +172,9 @@ export default function SchoolAdminUsersPage() {
     return names
   }, [org.data])
 
-  // 分段上的数字取服务端全量口径,不随身份、班级与搜索变化:它回答「本校账号整体状况」
-  const counts: Record<string, number | undefined> = {
-    pending: useResourceTotal((params) => api.identity.getAccounts({ status: AccountStatus.PENDING, ...params }), [], accounts.refreshVersion),
-    active: useResourceTotal((params) => api.identity.getAccounts({ status: AccountStatus.ACTIVE, ...params }), [], accounts.refreshVersion),
-    disabled: useResourceTotal((params) => api.identity.getAccounts({ status: AccountStatus.DISABLED, ...params }), [], accounts.refreshVersion),
-    archived: useResourceTotal((params) => api.identity.getAccounts({ status: AccountStatus.ARCHIVED, ...params }), [], accounts.refreshVersion),
-    all: useResourceTotal((params) => api.identity.getAccounts(params), [], accounts.refreshVersion),
-  }
+  // 分段计数取列表接口的 facets:套用身份、班级与搜索,不套用状态筛选
+  const facets = accounts.status === 'success' || accounts.status === 'empty' ? accounts.data?.facets : undefined
+  const counts = segmentCounts(facets, 'status', STATUS_SEGMENTS, (segment) => ('status' in segment ? segment.status : undefined))
 
   /** runAction 执行单账号动作;列表重读后勾选随之作废 */
   const runAction = useCallback(async () => {
@@ -358,7 +354,7 @@ export default function SchoolAdminUsersPage() {
           />
           <SearchBox
             label="搜索账号"
-            placeholder="搜索姓名或学工号"
+            placeholder="搜索姓名、学工号或完整手机号"
             value={query.q}
             onSearch={(value) => setQuery({ q: value })}
             className="sm:ml-auto"

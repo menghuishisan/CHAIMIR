@@ -9,6 +9,7 @@ import (
 	"chaimir/internal/modules/identity/internal/sqlcgen"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/pagex"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -25,12 +26,14 @@ type TxStore interface {
 	UseTenant(ctx context.Context, tenantID int64) error
 	GetPlatformAdminByUsername(ctx context.Context, username string) (PlatformAdmin, error)
 	GetPlatformAdminByID(ctx context.Context, id int64) (PlatformAdmin, error)
+	BatchGetPlatformAdminNames(ctx context.Context, ids []int64) ([]PlatformAdmin, error)
 	CreatePlatformAdminIfNotExists(ctx context.Context, input CreatePlatformAdminInput) error
 	UpdatePlatformAdminPassword(ctx context.Context, adminID int64, passwordHash string) error
 	GetTenantByCode(ctx context.Context, code string) (Tenant, error)
 	GetTenantByID(ctx context.Context, id int64) (Tenant, error)
 	ListAllTenants(ctx context.Context) ([]Tenant, error)
 	ListTenants(ctx context.Context, query TenantListQuery) ([]Tenant, int64, error)
+	CountTenantsByStatus(ctx context.Context, keyword string) (pagex.FacetGroup, error)
 	CreateTenant(ctx context.Context, input CreateTenantInput) (Tenant, error)
 	CreateTenantProvisionOutbox(ctx context.Context, item TenantProvisionOutbox) (TenantProvisionOutbox, error)
 	ClaimTenantProvisionOutbox(ctx context.Context, limit, maxAttempts int32, staleBefore, leaseUntil time.Time) ([]TenantProvisionOutbox, error)
@@ -52,6 +55,7 @@ type TxStore interface {
 	GetAccountByPhoneHash(ctx context.Context, tenantID int64, phoneHash string) (Account, error)
 	GetAccountByNo(ctx context.Context, no string) (Account, error)
 	ListAccounts(ctx context.Context, query AccountQuery) ([]Account, int64, error)
+	CountAccountsByStatus(ctx context.Context, query AccountQuery) (pagex.FacetGroup, error)
 	ListClassStudents(ctx context.Context, tenantID, classID int64, page, size int) ([]Account, int64, error)
 	UpdateAccountEditable(ctx context.Context, tenantID, accountID int64, req UpdateAccountRequest) (Account, error)
 	UpdateAccountStatus(ctx context.Context, accountID, tenantID int64, status int16, deleted bool) (Account, error)

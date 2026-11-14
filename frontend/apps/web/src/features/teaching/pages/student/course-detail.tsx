@@ -3,7 +3,7 @@
 // 页头 = 课程名 + 状态 + 一行属性;下方「下一步」卡(进度环 + 下一个课时 + 主按钮 + 累计学习时长);
 // 再往下左主右次:左栏学习路径(按章分段,每节一行,整行链向课时),右栏近期截止、课程公告、讨论入口;
 // 结课后右栏多一张课程评价。标签「学习 / 作业 / 讨论与公告」写进地址。
-// 作业的本人提交状态与授课教师姓名接口拿不到(数据缺口见设计 §10),所以右栏叫「近期截止」。
+// 授课教师姓名随课程大纲返回;作业清单带本人提交情况,所以右栏是「待完成」:还没截止、本人还没交过的作业。
 
 import { useMemo } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
@@ -64,6 +64,7 @@ import {
   courseStatusLabel,
   courseTypeLabel,
   latePolicyLabel,
+  submissionStatusLabel,
   lessonContentTypeLabel,
   teachingDifficultyLabel,
 } from '../../../../utils/labels/teaching'
@@ -152,6 +153,7 @@ function CourseDetailContent({ courseId, outline }: CourseDetailContentProps) {
         title={course.name}
         status={<StatusIndicator tone={courseStatusTone(course.status)} label={courseStatusLabel(course.status)} />}
         meta={[
+          ...(course.teacher_name ? [{ value: `${course.teacher_name} 老师` }] : []),
           { value: course.semester },
           { value: `${course.credits} 学分` },
           { value: courseTypeLabel(course.type) },
@@ -351,11 +353,12 @@ function LearningPath({ courseId, outline }: { courseId: string; outline: Course
   )
 }
 
-/** 右栏近期截止最多显示的作业数 */
+/** 右栏待完成最多显示的作业数 */
 const UPCOMING_LIMIT = 3
 
 /**
- * UpcomingAssignments 右栏「近期截止」:未截止的作业按截止时间取前 3 条,显示倒计时与「去作答」。
+ * UpcomingAssignments 右栏「待完成」:还没截止、本人还没交过的作业,按截止时间取前 3 条,显示倒计时与「去作答」。
+ * 交过的作业不再出现在这里(去「作业」标签看结果)。
  * 一门课 3–10 份作业,一页 100 条读得下,排序在前端做。
  */
 function UpcomingAssignments({ courseId, onShowAll }: { courseId: string; onShowAll: () => void }) {
@@ -368,7 +371,7 @@ function UpcomingAssignments({ courseId, onShowAll }: { courseId: string; onShow
   const upcoming = useMemo(() => {
     const now = Date.now()
     return (assignments.data?.list ?? [])
-      .filter((item) => new Date(item.due_at).getTime() > now)
+      .filter((item) => new Date(item.due_at).getTime() > now && (item.my_submission?.attempts ?? 0) === 0)
       .sort((a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime())
       .slice(0, UPCOMING_LIMIT)
   }, [assignments.data])
@@ -376,7 +379,7 @@ function UpcomingAssignments({ courseId, onShowAll }: { courseId: string; onShow
   return (
     <Card>
       <CardHeader
-        title="近期截止"
+        title="待完成"
         count={assignments.status === 'success' ? upcoming.length : undefined}
         actions={
           <Button variant="ghost" size="sm" onClick={onShowAll}>
@@ -397,7 +400,7 @@ function UpcomingAssignments({ courseId, onShowAll }: { courseId: string; onShow
             </button>
           </p>
         ) : upcoming.length === 0 ? (
-          <p className="px-2 pb-2 text-sm text-ink-sub">没有即将截止的作业。</p>
+          <p className="px-2 pb-2 text-sm text-ink-sub">没有待完成的作业。</p>
         ) : (
           <ul className="flex flex-col gap-2">
             {upcoming.map((assignment) => {
@@ -505,7 +508,8 @@ function DiscussionEntry({ onOpen }: { onOpen: () => void }) {
 }
 
 /**
- * AllAssignments「作业」标签:全部作业,未截止的在前、已截止的沉底;每行链向作答,已截止的链向结果。
+ * AllAssignments「作业」标签:全部作业,未截止的在前、已截止的沉底;每行写明本人交了几次、最近一次的状态。
+ * 还能交的链向作答,已截止或次数用完的链向结果。
  * 学生只会收到已发布作业(服务端按身份过滤)。
  */
 function AllAssignments({ courseId }: { courseId: string }) {
@@ -543,21 +547,29 @@ function AllAssignments({ courseId }: { courseId: string }) {
                 {sorted.map((assignment) => {
                   const deadline = formatRelativeDeadline(assignment.due_at)
                   const overdue = deadline.urgency === 'overdue'
+                  const attempts = assignment.my_submission?.attempts ?? 0
+                  const usedUp = attempts >= assignment.max_attempts
+                  const closed = overdue || usedUp
                   const base = `/student/courses/${courseId}/assignments/${assignment.id}`
                   return (
                     <li key={assignment.id}>
                       <ListRow
-                        href={overdue ? `${base}/submissions` : base}
+                        href={closed ? `${base}/submissions` : base}
                         onNavigate={navigate}
                         leading={
-                          <Icon icon={ClipboardList} size="md" className={cn(overdue ? 'text-ink-faint' : 'text-primary')} />
+                          <Icon icon={ClipboardList} size="md" className={cn(closed ? 'text-ink-faint' : 'text-primary')} />
                         }
                         title={assignment.title}
-                        meta={`${formatDateTime(assignment.due_at)} 截止 · 可交 ${assignment.max_attempts} 次 · ${latePolicyLabel(assignment.late_policy)}`}
+                        meta={`${formatDateTime(assignment.due_at)} 截止 · 已交 ${attempts}/${assignment.max_attempts} 次 · ${latePolicyLabel(assignment.late_policy)}`}
                         trailing={
                           <>
+                            {assignment.my_submission && assignment.my_submission.latest_status !== 0 ? (
+                              <span className="whitespace-nowrap text-sm text-ink-sub">
+                                {submissionStatusLabel(assignment.my_submission.latest_status)}
+                              </span>
+                            ) : null}
                             <Badge tone={ASSIGNMENT_DUE_TONE[deadline.urgency]}>{deadline.text}</Badge>
-                            {overdue ? null : (
+                            {closed || attempts === 0 ? null : (
                               <Button variant="ghost" size="sm" onClick={() => navigate(`${base}/submissions`)}>
                                 看结果
                               </Button>

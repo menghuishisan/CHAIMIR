@@ -11,6 +11,80 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const batchGetCourses = `-- name: BatchGetCourses :many
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+FROM course
+WHERE tenant_id = $1 AND id = ANY($2::bigint[]) AND deleted_at IS NULL
+`
+
+type BatchGetCoursesParams struct {
+	TenantID  int64   `json:"tenant_id"`
+	CourseIds []int64 `json:"course_ids"`
+}
+
+type BatchGetCoursesRow struct {
+	ID          int64              `json:"id"`
+	TenantID    int64              `json:"tenant_id"`
+	TeacherID   int64              `json:"teacher_id"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Type        int16              `json:"type"`
+	Difficulty  int16              `json:"difficulty"`
+	CoverRef    pgtype.Text        `json:"cover_ref"`
+	Semester    string             `json:"semester"`
+	Credits     float64            `json:"credits"`
+	Schedule    []byte             `json:"schedule"`
+	StartAt     pgtype.Timestamptz `json:"start_at"`
+	EndAt       pgtype.Timestamptz `json:"end_at"`
+	InviteCode  string             `json:"invite_code"`
+	Status      int16              `json:"status"`
+	Visibility  int16              `json:"visibility"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
+}
+
+// 按编号一次读取本租户未删除课程,供成绩中心列表随记录下发课程名。
+func (q *Queries) BatchGetCourses(ctx context.Context, arg BatchGetCoursesParams) ([]BatchGetCoursesRow, error) {
+	rows, err := q.db.Query(ctx, batchGetCourses, arg.TenantID, arg.CourseIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BatchGetCoursesRow{}
+	for rows.Next() {
+		var i BatchGetCoursesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.TeacherID,
+			&i.Name,
+			&i.Description,
+			&i.Type,
+			&i.Difficulty,
+			&i.CoverRef,
+			&i.Semester,
+			&i.Credits,
+			&i.Schedule,
+			&i.StartAt,
+			&i.EndAt,
+			&i.InviteCode,
+			&i.Status,
+			&i.Visibility,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimJudgeOutbox = `-- name: ClaimJudgeOutbox :many
 UPDATE submission_judge_outbox
 SET status = 2, retry_count = retry_count + 1, updated_at = now(), lease_token = $3, lease_until = $4::timestamptz
@@ -313,6 +387,49 @@ func (q *Queries) CountAssignmentsByCourse(ctx context.Context, arg CountAssignm
 	return count, err
 }
 
+const countChaptersOfSharedCourses = `-- name: CountChaptersOfSharedCourses :many
+SELECT ch.course_id, COUNT(*)::bigint AS chapter_count
+FROM chapter ch
+JOIN course c ON c.id = ch.course_id AND c.tenant_id = ch.tenant_id
+WHERE ch.course_id = ANY($1::bigint[])
+  AND ch.deleted_at IS NULL
+  AND c.visibility = 2 AND c.status <> 1 AND c.deleted_at IS NULL
+  AND c.tenant_id <> $2::bigint
+GROUP BY ch.course_id
+`
+
+type CountChaptersOfSharedCoursesParams struct {
+	CourseIds       []int64 `json:"course_ids"`
+	ExcludeTenantID int64   `json:"exclude_tenant_id"`
+}
+
+type CountChaptersOfSharedCoursesRow struct {
+	CourseID     int64 `json:"course_id"`
+	ChapterCount int64 `json:"chapter_count"`
+}
+
+// 共享目录预览的章节数:只数此刻仍共享、非草稿、未删除且不属于本校的课程,只返回数量(见 M6 安全设计 §5)。
+// 在受控特权事务里执行:chapter 的行级安全只开放本校。
+func (q *Queries) CountChaptersOfSharedCourses(ctx context.Context, arg CountChaptersOfSharedCoursesParams) ([]CountChaptersOfSharedCoursesRow, error) {
+	rows, err := q.db.Query(ctx, countChaptersOfSharedCourses, arg.CourseIds, arg.ExcludeTenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountChaptersOfSharedCoursesRow{}
+	for rows.Next() {
+		var i CountChaptersOfSharedCoursesRow
+		if err := rows.Scan(&i.CourseID, &i.ChapterCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countCourseAnnouncements = `-- name: CountCourseAnnouncements :one
 SELECT count(*)
 FROM announcement
@@ -402,6 +519,44 @@ func (q *Queries) CountDiscussionPosts(ctx context.Context, arg CountDiscussionP
 	return column_1, err
 }
 
+const countMembersByCourses = `-- name: CountMembersByCourses :many
+SELECT course_id, COUNT(*)::bigint AS member_count
+FROM course_member
+WHERE tenant_id = $1::bigint AND course_id = ANY($2::bigint[])
+GROUP BY course_id
+`
+
+type CountMembersByCoursesParams struct {
+	TenantID  int64   `json:"tenant_id"`
+	CourseIds []int64 `json:"course_ids"`
+}
+
+type CountMembersByCoursesRow struct {
+	CourseID    int64 `json:"course_id"`
+	MemberCount int64 `json:"member_count"`
+}
+
+// 课程卡片的选课人数:一次按当前页课程编号聚合,不逐门课取统计。
+func (q *Queries) CountMembersByCourses(ctx context.Context, arg CountMembersByCoursesParams) ([]CountMembersByCoursesRow, error) {
+	rows, err := q.db.Query(ctx, countMembersByCourses, arg.TenantID, arg.CourseIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountMembersByCoursesRow{}
+	for rows.Next() {
+		var i CountMembersByCoursesRow
+		if err := rows.Scan(&i.CourseID, &i.MemberCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countSharedCourses = `-- name: CountSharedCourses :one
 SELECT COUNT(*)
 FROM course
@@ -468,6 +623,49 @@ func (q *Queries) CountStudentCourses(ctx context.Context, arg CountStudentCours
 	return column_1, err
 }
 
+const countStudentCoursesByStatus = `-- name: CountStudentCoursesByStatus :many
+SELECT c.status, COUNT(*)::bigint AS count
+FROM course c
+JOIN course_member m ON m.tenant_id = c.tenant_id AND m.course_id = c.id
+WHERE c.tenant_id = $1::bigint AND m.student_id = $2::bigint AND c.deleted_at IS NULL
+  AND ($3::smallint = 0
+    OR ($3::smallint = 1 AND c.visibility = 2)
+    OR ($3::smallint = 2 AND c.visibility = 1))
+GROUP BY c.status
+`
+
+type CountStudentCoursesByStatusParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	StudentID int64 `json:"student_id"`
+	IsShared  int16 `json:"is_shared"`
+}
+
+type CountStudentCoursesByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 学生课程列表的状态分段计数,口径同学生课程列表。
+func (q *Queries) CountStudentCoursesByStatus(ctx context.Context, arg CountStudentCoursesByStatusParams) ([]CountStudentCoursesByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countStudentCoursesByStatus, arg.TenantID, arg.StudentID, arg.IsShared)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountStudentCoursesByStatusRow{}
+	for rows.Next() {
+		var i CountStudentCoursesByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countStudentGrades = `-- name: CountStudentGrades :one
 SELECT count(*)
 FROM course_grade g
@@ -486,6 +684,51 @@ func (q *Queries) CountStudentGrades(ctx context.Context, arg CountStudentGrades
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countStudentLessonProgressByCourses = `-- name: CountStudentLessonProgressByCourses :many
+SELECT c.course_id,
+COUNT(l.id)::bigint AS lesson_count,
+       COUNT(p.id) FILTER (WHERE p.status = 3)::bigint AS completed_count
+FROM chapter c
+JOIN lesson l ON l.tenant_id = c.tenant_id AND l.chapter_id = c.id AND l.deleted_at IS NULL
+LEFT JOIN lesson_progress p ON p.tenant_id = l.tenant_id AND p.lesson_id = l.id AND p.student_id = $1::bigint
+WHERE c.tenant_id = $2::bigint AND c.course_id = ANY($3::bigint[]) AND c.deleted_at IS NULL
+GROUP BY c.course_id
+`
+
+type CountStudentLessonProgressByCoursesParams struct {
+	StudentID int64   `json:"student_id"`
+	TenantID  int64   `json:"tenant_id"`
+	CourseIds []int64 `json:"course_ids"`
+}
+
+type CountStudentLessonProgressByCoursesRow struct {
+	CourseID       int64 `json:"course_id"`
+	LessonCount    int64 `json:"lesson_count"`
+	CompletedCount int64 `json:"completed_count"`
+}
+
+// 学生课程卡片的学习进度:当前页每门课的有效课时数与本人学完的课时数,一次聚合。
+// 只数未删除的章节与课时,与课程大纲同口径。
+func (q *Queries) CountStudentLessonProgressByCourses(ctx context.Context, arg CountStudentLessonProgressByCoursesParams) ([]CountStudentLessonProgressByCoursesRow, error) {
+	rows, err := q.db.Query(ctx, countStudentLessonProgressByCourses, arg.StudentID, arg.TenantID, arg.CourseIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountStudentLessonProgressByCoursesRow{}
+	for rows.Next() {
+		var i CountStudentLessonProgressByCoursesRow
+		if err := rows.Scan(&i.CourseID, &i.LessonCount, &i.CompletedCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const countSubmissionsByAssignment = `-- name: CountSubmissionsByAssignment :one
@@ -519,6 +762,95 @@ func (q *Queries) CountSubmissionsByAssignment(ctx context.Context, arg CountSub
 	return column_1, err
 }
 
+const countSubmissionsByStatusAndLate = `-- name: CountSubmissionsByStatusAndLate :many
+SELECT status, is_late, COUNT(*)::bigint AS count
+FROM submission
+WHERE tenant_id = $1::bigint
+  AND assignment_id = $2::bigint
+  AND ($3::bigint = 0 OR student_id = $3::bigint)
+GROUP BY status, is_late
+`
+
+type CountSubmissionsByStatusAndLateParams struct {
+	TenantID     int64 `json:"tenant_id"`
+	AssignmentID int64 `json:"assignment_id"`
+	StudentID    int64 `json:"student_id"`
+}
+
+type CountSubmissionsByStatusAndLateRow struct {
+	Status int16 `json:"status"`
+	IsLate bool  `json:"is_late"`
+	Count  int64 `json:"count"`
+}
+
+// 批改台的分段计数(待批改 / 已出分 / 迟交 是同一组分段):按状态与是否迟交分组,两列都不套用本组筛选。
+func (q *Queries) CountSubmissionsByStatusAndLate(ctx context.Context, arg CountSubmissionsByStatusAndLateParams) ([]CountSubmissionsByStatusAndLateRow, error) {
+	rows, err := q.db.Query(ctx, countSubmissionsByStatusAndLate, arg.TenantID, arg.AssignmentID, arg.StudentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountSubmissionsByStatusAndLateRow{}
+	for rows.Next() {
+		var i CountSubmissionsByStatusAndLateRow
+		if err := rows.Scan(&i.Status, &i.IsLate, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countSubmittersByAssignments = `-- name: CountSubmittersByAssignments :many
+SELECT assignment_id,
+       COUNT(*)::bigint AS submitted_count,
+       COUNT(*) FILTER (WHERE status = 2)::bigint AS pending_count
+FROM (
+  SELECT DISTINCT ON (assignment_id, student_id) assignment_id, student_id, status
+  FROM submission
+  WHERE tenant_id = $1::bigint AND assignment_id = ANY($2::bigint[])
+  ORDER BY assignment_id, student_id, attempt_no DESC
+) latest
+GROUP BY assignment_id
+`
+
+type CountSubmittersByAssignmentsParams struct {
+	TenantID      int64   `json:"tenant_id"`
+	AssignmentIds []int64 `json:"assignment_ids"`
+}
+
+type CountSubmittersByAssignmentsRow struct {
+	AssignmentID   int64 `json:"assignment_id"`
+	SubmittedCount int64 `json:"submitted_count"`
+	PendingCount   int64 `json:"pending_count"`
+}
+
+// 教师作业列表的提交统计:当前页每份作业的已交人数,以及最近一次提交在等老师评分的人数(待批改)。
+// 按学生去重:同一学生交过多次只算一人,待批改看他最近一次提交;口径与批改中心「待批改」同为 status = 2,
+// 自动判题还没回来的(status = 1)不算,免得两处数字对不上。
+func (q *Queries) CountSubmittersByAssignments(ctx context.Context, arg CountSubmittersByAssignmentsParams) ([]CountSubmittersByAssignmentsRow, error) {
+	rows, err := q.db.Query(ctx, countSubmittersByAssignments, arg.TenantID, arg.AssignmentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountSubmittersByAssignmentsRow{}
+	for rows.Next() {
+		var i CountSubmittersByAssignmentsRow
+		if err := rows.Scan(&i.AssignmentID, &i.SubmittedCount, &i.PendingCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countTeacherCourses = `-- name: CountTeacherCourses :one
 SELECT COUNT(*)::bigint
 FROM course
@@ -546,6 +878,48 @@ func (q *Queries) CountTeacherCourses(ctx context.Context, arg CountTeacherCours
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countTeacherCoursesByStatus = `-- name: CountTeacherCoursesByStatus :many
+SELECT status, COUNT(*)::bigint AS count
+FROM course
+WHERE tenant_id = $1::bigint AND teacher_id = $2::bigint AND deleted_at IS NULL
+  AND ($3::smallint = 0
+    OR ($3::smallint = 1 AND visibility = 2)
+    OR ($3::smallint = 2 AND visibility = 1))
+GROUP BY status
+`
+
+type CountTeacherCoursesByStatusParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	TeacherID int64 `json:"teacher_id"`
+	IsShared  int16 `json:"is_shared"`
+}
+
+type CountTeacherCoursesByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 教师课程列表的状态分段计数:套用共享筛选,不套用状态筛选(选中一个分段后其他分段的数字仍可见)。
+func (q *Queries) CountTeacherCoursesByStatus(ctx context.Context, arg CountTeacherCoursesByStatusParams) ([]CountTeacherCoursesByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countTeacherCoursesByStatus, arg.TenantID, arg.TeacherID, arg.IsShared)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountTeacherCoursesByStatusRow{}
+	for rows.Next() {
+		var i CountTeacherCoursesByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const createAnnouncement = `-- name: CreateAnnouncement :one
@@ -3258,7 +3632,7 @@ const markJudgeOutboxFailedResult = `-- name: MarkJudgeOutboxFailedResult :one
 UPDATE submission_judge_outbox
 SET last_error = $3, completed_at = $4, status = 3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND source_ref = $2 AND status IN (2, 3, 4)
-  AND (completed_at IS NULL OR (completed_at = $4 AND last_error = $3))
+  AND (completed_at IS NULL OR completed_at < $4 OR (completed_at = $4 AND last_error = $3))
 RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
 `
 
@@ -3308,7 +3682,7 @@ const markJudgeOutboxResult = `-- name: MarkJudgeOutboxResult :one
 UPDATE submission_judge_outbox
 SET score = $3, last_error = NULL, completed_at = $4, status = 3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND source_ref = $2 AND status IN (2, 3, 4)
-  AND (completed_at IS NULL OR (completed_at = $4 AND score = $3))
+  AND (completed_at IS NULL OR completed_at < $4 OR (completed_at = $4 AND score = $3 AND last_error IS NULL))
 RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
 `
 
@@ -3690,6 +4064,42 @@ func (q *Queries) RetryJudgeOutbox(ctx context.Context, arg RetryJudgeOutboxPara
 	return i, err
 }
 
+const revokeSubmissionAutoScore = `-- name: RevokeSubmissionAutoScore :one
+UPDATE submission
+SET auto_score = NULL,
+    final_score = NULL,
+    status = 1
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
+`
+
+type RevokeSubmissionAutoScoreParams struct {
+	TenantID int64 `json:"tenant_id"`
+	ID       int64 `json:"id"`
+}
+
+func (q *Queries) RevokeSubmissionAutoScore(ctx context.Context, arg RevokeSubmissionAutoScoreParams) (Submission, error) {
+	row := q.db.QueryRow(ctx, revokeSubmissionAutoScore, arg.TenantID, arg.ID)
+	var i Submission
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AssignmentID,
+		&i.StudentID,
+		&i.AttemptNo,
+		&i.ContentRef,
+		&i.JudgeTaskRef,
+		&i.AutoScore,
+		&i.ManualScore,
+		&i.FinalScore,
+		&i.Comment,
+		&i.IsLate,
+		&i.Status,
+		&i.SubmittedAt,
+	)
+	return i, err
+}
+
 const setCourseGradeExportRequestNextCheck = `-- name: SetCourseGradeExportRequestNextCheck :one
 UPDATE course_grade_export_request
 SET next_check_at = $3, updated_at = now()
@@ -4016,6 +4426,51 @@ func (q *Queries) SoftDeleteLesson(ctx context.Context, arg SoftDeleteLessonPara
 		&i.DeletedAt,
 	)
 	return i, err
+}
+
+const summarizeStudentSubmissionsByAssignments = `-- name: SummarizeStudentSubmissionsByAssignments :many
+SELECT DISTINCT ON (assignment_id)
+assignment_id,
+       COUNT(*) OVER (PARTITION BY assignment_id)::bigint AS attempts,
+       status AS latest_status
+FROM submission
+WHERE tenant_id = $1::bigint
+  AND student_id = $2::bigint
+  AND assignment_id = ANY($3::bigint[])
+ORDER BY assignment_id, attempt_no DESC
+`
+
+type SummarizeStudentSubmissionsByAssignmentsParams struct {
+	TenantID      int64   `json:"tenant_id"`
+	StudentID     int64   `json:"student_id"`
+	AssignmentIds []int64 `json:"assignment_ids"`
+}
+
+type SummarizeStudentSubmissionsByAssignmentsRow struct {
+	AssignmentID int64 `json:"assignment_id"`
+	Attempts     int64 `json:"attempts"`
+	LatestStatus int16 `json:"latest_status"`
+}
+
+// 学生作业列表的本人提交情况:当前页每份作业的已用次数与最近一次提交的状态,一次聚合。
+func (q *Queries) SummarizeStudentSubmissionsByAssignments(ctx context.Context, arg SummarizeStudentSubmissionsByAssignmentsParams) ([]SummarizeStudentSubmissionsByAssignmentsRow, error) {
+	rows, err := q.db.Query(ctx, summarizeStudentSubmissionsByAssignments, arg.TenantID, arg.StudentID, arg.AssignmentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SummarizeStudentSubmissionsByAssignmentsRow{}
+	for rows.Next() {
+		var i SummarizeStudentSubmissionsByAssignmentsRow
+		if err := rows.Scan(&i.AssignmentID, &i.Attempts, &i.LatestStatus); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const teachingStats = `-- name: TeachingStats :one

@@ -37,7 +37,8 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceError, ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource, usePageLocation, useResourceTotal, useUrlState } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, usePageLocation, useUrlState } from '../../../../hooks'
+import { segmentCounts } from '../../../../utils/facets'
 import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
 import {
   vulnLevelLabel,
@@ -122,7 +123,12 @@ export default function TeacherVulnWorkshopPage() {
     { urlPageKey: 'page' },
   )
   // 流程说明是否展开看全量:一条漏洞题都没有时展开
-  const totalCount = useResourceTotal((params) => api.contest.listVulnProblems(params), [], problems.refreshVersion)
+  // 两组分段的数字取列表接口的 facets:各组不套用本组筛选,但套用另一组与来源筛选
+  const facets = problems.status === 'success' || problems.status === 'empty' ? problems.data?.facets : undefined
+  const statusCounts = segmentCounts(facets, 'status', STATUS_SEGMENTS, (item) => ('status' in item ? item.status : undefined))
+  const checkCounts = segmentCounts(facets, 'prevalidate_status', CHECK_SEGMENTS, (item) => ('status' in item ? item.status : undefined))
+  // 一条漏洞题都没有时展开流程说明:只在不按任何条件筛选时才能判断「一条都没有」
+  const totalCount = query.source || query.check !== 'all' ? undefined : statusCounts.all
 
   /** finalize 把预验证通过的草稿固化到题库,固化后即可作为赛题引用 */
   const finalize = useCallback(
@@ -253,7 +259,7 @@ export default function TeacherVulnWorkshopPage() {
                 <SegmentedControl
                   aria-label="按状态筛选"
                   size="sm"
-                  options={STATUS_SEGMENTS.map((item) => ({ value: item.value, label: item.label }))}
+                  options={STATUS_SEGMENTS.map((item) => ({ value: item.value, label: item.label, count: statusCounts[item.value] }))}
                   value={query.status}
                   onValueChange={(value) => setQuery({ status: value })}
                 />
@@ -262,7 +268,7 @@ export default function TeacherVulnWorkshopPage() {
                 <SegmentedControl
                   aria-label="按验证结果筛选"
                   size="sm"
-                  options={CHECK_SEGMENTS.map((item) => ({ value: item.value, label: item.label }))}
+                  options={CHECK_SEGMENTS.map((item) => ({ value: item.value, label: item.label, count: checkCounts[item.value] }))}
                   value={query.check}
                   onValueChange={(value) => setQuery({ check: value })}
                 />

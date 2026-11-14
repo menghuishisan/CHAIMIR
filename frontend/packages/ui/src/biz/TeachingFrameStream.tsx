@@ -48,6 +48,7 @@ function groupByTick(entries: FrameStreamEntry[]): TickGroup[] {
   return groups
 }
 
+/** TeachingFrameStream 右侧事件流:一帧里的消息与调用按时刻分组的时间序清单 */
 export function TeachingFrameStream({
   frame,
   selectedElementId,

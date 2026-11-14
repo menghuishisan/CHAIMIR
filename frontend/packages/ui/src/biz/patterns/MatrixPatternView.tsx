@@ -38,6 +38,7 @@ const CELL_EMPHASIS: Record<FrameEmphasis, string> = {
   ghost: "opacity-40",
 };
 
+/** MatrixPatternView 矩阵视图(matrix 模式,如投票矩阵、权限矩阵) */
 export function MatrixPatternView({
   pattern,
   focus,

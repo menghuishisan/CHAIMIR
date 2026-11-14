@@ -34,6 +34,7 @@ import {
   Pagination,
   WorkbenchShell,
   WorkbenchTopbar,
+  type WorkbenchShortcut,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -461,6 +462,33 @@ function ContestWorkbenchSession({
     void refreshSubmission()
   }, [refreshSubmission])
 
+  // 主操作的快捷键(设计 §7.3):与顶栏按钮同一个动作、同样的可用条件;提交中不重复发出
+  const submitShortcuts: WorkbenchShortcut[] =
+    spec.kind === 'battle'
+      ? [
+          {
+            key: 'Enter',
+            mod: true,
+            description: '提交参战',
+            disabled:
+              busy ||
+              !answerable ||
+              !sandboxReady ||
+              role === undefined ||
+              !allowedBattleRoles.includes(role),
+            run: () => void submitBattle(),
+          },
+        ]
+      : [
+          {
+            key: 'Enter',
+            mod: true,
+            description: '提交答案',
+            disabled: busy || !answerable || !submissionReady,
+            run: () => void submitSolve(),
+          },
+        ]
+
   return (
     <WorkbenchShell
       workbench="contest"
@@ -468,6 +496,7 @@ function ContestWorkbenchSession({
         <WorkbenchTopbar
           onExit={exit}
           exitLabel="退出赛场"
+          shortcuts={submitShortcuts}
           title={title}
           subtitle={contest.name}
           progress={
@@ -1003,8 +1032,8 @@ function LadderPanel({ ranks, mode, live, frozen }: LadderPanelProps) {
               key={rank.team_id}
               className="flex items-center justify-between gap-2 rounded-md border border-dark-line bg-dark-surface px-2 py-1.5"
             >
-              <span className="font-mono text-xs tabular-nums text-on-dark-sub">
-                第 {rank.rank} 名
+              <span className="min-w-0 truncate font-mono text-xs tabular-nums text-on-dark-sub">
+                第 {rank.rank} 名 · {rank.team_name}
               </span>
               <span className="font-mono text-xs tabular-nums text-on-dark">
                 {mode === ContestMode.SOLVE

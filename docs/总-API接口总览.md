@@ -24,6 +24,7 @@
 - `code`:0 成功,非 0 业务错误码。
 - `message`:用户向友好文案;技术原因只进入日志,不进入响应体。
 - 分页:请求 `?page=1&size=20`;响应 `data: { list, total, page, size }`(默认 size=20,上限 100)。
+- 分段计数:列表页上方有状态分段(或类别分段)的接口,在同一事务、同一权限范围里另返回 `data.facets`:`{ <键>: { <取值>: 条数 } }`;键名与该分段的筛选参数同名(如 `status`、`is_read`、`channel`、`state`),取值与筛选参数的取值一致,数字按十进制字符串、布尔为 `"true"`/`"false"`。每组分段的计数套用本次请求里的其他全部筛选(含其他分段组),只不套用本组自己的筛选 —— 选中某个分段后,同组其他分段的数字仍然可见;一组分段可以由多列构成(如批改台「待批改 / 已出分 / 迟交」由状态与是否迟交两列构成),这时两列的计数都不套用这一组的筛选;没有记录的取值不返回,前端按 0 显示。前端不得为每个分段各发一次只取总数的请求,也不得对没有该契约的接口猜测 `facets`。
 - HTTP 状态码在业务面恒为 200,交互一律按 `code` 判定;不存在"按状态码分支"的第二套判断。
 - 信封只有两类显式例外:统一文件服务 `GET /download` 流式返回附件,以及运维探针 `/-/healthz`、`/-/readyz`、`/api/healthz`(消费者是 kubelet/网关,判定信号只有状态码,详见 `docs/总-部署架构设计.md` §三 健康探针契约)。除此之外任何接口不得绕过信封。
 
@@ -91,8 +92,8 @@
 - `/platform/applications`、`/platform/tenants`:入驻审核、租户管理 `[平台管理员]`。
 - `/tenant/config`、`/tenant/sso`:租户配置。`POST /tenant/logo` 上传校徽(multipart,**上传即生效**,同一请求内落 `logo_ref` 并返回新的配置视图),`DELETE /tenant/logo` 移除;`PATCH /tenant/config` 不接受 `logo_ref`。`GET /tenant/brand` 是**免鉴权且无参数**的品牌读取口,返回 `{ display_name, logo_image }`,仅 `deploy_mode=school` 下有内容 —— SaaS 登录页面对未确定租户,本无校徽可显示,而带 `tenant_code` 的公开端点会成为廉价的租户枚举通道。校徽以 data URI 内联下发而不签发投放授权:登录页没有会话,授权绑不到账号(详见 M1 接口设计 §4)。
 - `/org/*`:院系/专业/班级。读对教师/学校管理员开放,写只对学校管理员开放;`GET /org/classes/{id}/students?page=&size=` 是教师侧挑选学生的唯一入口,只出编号/姓名/学号并返回 `{list,total,page,size}`。
-- `/accounts/*`:账号导入(预览+提交)、增改停用、授予管理员。**只对学校管理员开放** —— 它是账号目录(带手机号掩码、状态、角色),业务模块与教师端取学生一律走 `/org/classes/{id}/students` 或 `contracts.IdentityService`。账号与组织的未完成导入统一使用`GET /import-previews?type=student|teacher|org&page=&size=`发现、`GET /import-previews/{id}`恢复、`DELETE /import-previews/{id}`明确放弃,仅当前租户本人可用,公开DTO不含原始导入行或初始密码。
-- `/me/*`:个人中心。`GET /me`、`POST /me/password`、`GET /me/sessions` 对租户账号与平台管理员都开放(平台身份走独立分支,只返回姓名/状态/角色);`POST /me/phone` 只对租户账号开放,平台账号无手机号字段。
+- `/accounts/*`:账号导入(预览+提交)、单个读取(`GET /accounts/{id}`,供按编号恢复的筛选条件显示是谁)、增改停用、授予管理员。**只对学校管理员开放** —— 它是账号目录(带手机号掩码、状态、角色),业务模块与教师端取学生一律走 `/org/classes/{id}/students` 或 `contracts.IdentityService`。账号与组织的未完成导入统一使用`GET /import-previews?type=student|teacher|org&page=&size=`发现、`GET /import-previews/{id}`恢复、`DELETE /import-previews/{id}`明确放弃,仅当前租户本人可用,公开DTO不含原始导入行或初始密码。
+- `/me/*`:个人中心。`GET /me`、`POST /me/password`、`GET /me/sessions` 对租户账号与平台管理员都开放(平台身份走独立分支,只返回姓名/状态/角色);`GET /me` 另返回所属学校名称 `tenant_name`(平台账号为空串),`GET /me/sessions` 在发起本次请求的会话上标 `current: true`;`POST /me/phone` 只对租户账号开放,平台账号无手机号字段。
 - 审计:M1 只持有并写入 `audit_log`,不注册查询路由;对外查询与导出统一在 M9 `/admin/audit`、`/admin/audit/export`。
 
 ### 基础横切 transfer `/api/v1/transfer`
@@ -157,16 +158,16 @@
 - `/items/{code}/{version}/full`、`/items/batch`:内部取用 `[内部]`。
 
 ### M6 教学 `/api/v1/teaching`
-- `/courses/*`:课程 CRUD/发布/克隆/共享/邀请码。`POST /courses/cover` 上传封面(multipart,返回 `object_ref`,不绑课程 id —— 先落上传教师的暂存位,随创建/编辑课程提交后由服务端搬到该课程正式位);`POST /courses/{id}/cover/access` 换取封面投放授权(`mode=stream`)。封面只对能看到该课程的人可见,不设公开路径;课程列表缩略图用平台纸材质,不逐行换授权。
+- `/courses/*`:课程 CRUD/发布/克隆/共享/邀请码。`GET /courses` 每门课带授课教师姓名 `teacher_name`,教师视角另带选课人数 `member_count`,学生视角另带本人进度 `my_progress`;都按当前页一次聚合,前端不逐门课取统计。`POST /courses/cover` 上传封面(multipart,返回 `object_ref`,不绑课程 id —— 先落上传教师的暂存位,随创建/编辑课程提交后由服务端搬到该课程正式位);`POST /courses/{id}/cover/access` 换取封面投放授权(`mode=stream`)。封面只对能看到该课程的人可见,不设公开路径;课程列表缩略图用平台纸材质,不逐行换授权。
 - `/chapters`、`/lessons`:章节课时**写入口**(课时关联 M7 实验/M4 仿真);只读一律走 `GET /courses/{id}/outline`,它一次返回课程 + 章节 + 课时 + 本人进度,不再另设章节/课时列表接口。`POST /lessons/{id}/material` 上传视频或附件、`POST /lessons/{id}/material/access` 换取投放授权(视频 `mode=stream` 可续播,附件 `mode=download` 一次性取件)。
 - `/courses/join`、`/members`:选课成员。`POST /courses/{id}/members/batch` 的粒度是一个班级(请求体 `{ class_id }`),学生由 M6 经 `contracts.IdentityService.ListClassStudents` 解析;成员响应带 `student_name`/`student_no`,客户端不再另取账号目录。
-- `/assignments/*`、`/submissions/*`:作业/提交/批改(判题调 M3)。`GET /courses/{id}/assignments?page=&size=` 与 `GET /assignments/{id}/submissions` 师生同路由按身份分视角:授课教师见含草稿全量与全班提交,课程内学生只见已发布作业与本人提交;列表统一返回 `{list,total,page,size}` —— 这两条是学生取得作业编号与提交编号的唯一入口。
+- `/assignments/*`、`/submissions/*`:作业/提交/批改(判题调 M3)。`GET /courses/{id}/assignments?page=&size=` 与 `GET /assignments/{id}/submissions` 师生同路由按身份分视角:授课教师见含草稿全量与全班提交(作业清单每份带 `submission_stats` 已交/待批改人数),课程内学生只见已发布作业与本人提交(每份带 `my_submission` 已用次数与最近一次提交状态);列表统一返回 `{list,total,page,size}` —— 这两条是学生取得作业编号与提交编号的唯一入口。
 - `/posts`、`/announcements`、`/review`:讨论/公告/评价。`GET /courses/{id}/announcements?page=&size=` 返回分页信封;学生本人评价使用`GET /courses/{id}/review`读取、`POST`创建或更新,均要求已加入且课程结课或归档;未评价返回`review:null`。
 - `/courses/{id}/grades/*`:单课程成绩;`GET /courses/{id}/grades?page=&size=` 返回分页信封,`/grades` 只读契约供 M11 聚合;M6 改分后发布 `teaching.grade.updated` 事件。
 
 ### M7 实验 `/api/v1/experiment`
 - `/experiments/*`:配置/校验/发布。
-- `/student/experiments`、`/student/experiments/{id}`:学生可发现的已发布实验列表与单条读取,支持 `keyword` 按名称或说明检索;统一走学生投影(剔除环境初始化与判题内部配置),检查点附带过滤后的公开题面正文。
+- `/student/experiments`、`/student/experiments/{id}`:学生可发现的已发布实验列表与单条读取(列表上开始过的实验带本人进度 `my_progress`),支持 `keyword` 按名称或说明检索;统一走学生投影(剔除环境初始化与判题内部配置),检查点附带过滤后的公开题面正文。
 - `/experiments/{id}/instances`、`/instances/{id}`:实例创建(编排 M2/M4)/工作台/控制;`GET /instances` 为教师/学校管理员的租户内实例监控列表,普通教师仅见本人实验,支持 creating/running/paused/error/released 状态筛选;`/instances/{id}/stages/{stage}/activate` 是阶段资源创建唯一写入口;`/instances/{id}/progress` 返回 M10 订阅元信息。**无手动回收接口**:引擎资源释放走 `finish` 内部回收、后台超时回收、以及订阅 `teaching.course.ended` 的课程结束级联三条自动路径。
 - `/instances/{id}/checkpoints/{cp}/judge`:检查点判分(调 M3)。
 - `/instances/{id}/report`:学生以 `multipart/form-data` 的 `file` 字段上传并提交报告,服务端统一校验后生成对象引用;同路径 `GET` 只返回本人报告的安全批改结果;`/reports/{id}/access`:教师换取一次性报告下载授权;`/reports/{id}/grade`:教师批改报告。
@@ -199,13 +200,13 @@
 - `/push` `[内部]`:实时推送到带租户前缀的 topic。
 - `WS /api/ws`:统一实时通道(订阅 topic)`[租户用户]`;topic 以 `tenant:{tenant_id}` 为根,平台管理员不订阅。
 - `/inbox/*`、`/preferences`:站内信/偏好 `[租户用户]`;`notification`、`notification_preference` 表 `tenant_id NOT NULL`,平台管理员无收件箱。`GET /preferences` 返回 `notification_template` 全量类型与本人设置的合并结果(`type/enabled/force`),不返回模板正文。
-- `POST /announcements`:发布公告 `[平台管理员/学校管理员]`;`GET /announcements`:公告列表 `[租户用户/平台管理员]`;`POST /announcements/{id}/read`:标记已读 `[租户用户]`。
+- `POST /announcements`:发布公告 `[平台管理员/学校管理员]`;`GET /announcements`:公告列表 `[租户用户/平台管理员]`,`facets` 带 `scope`(发布范围)与 `is_read`(本人是否已读),口径为当前身份可见的全部公告;`POST /announcements/{id}/read`:标记已读 `[租户用户]`。
 
 ### M11 成绩中心 `/api/v1/grade-center`
 - `/level-configs`、`/semesters`:等级映射/学期。`GET /students/{id}/grades?semester=&page=&size=` 返回包含当前范围 GPA 摘要和 `{list,total,page,size}` 的分页课程成绩明细。
 - `/reviews/*`:成绩审核(approve 锁定/unlock 解锁);审核流程在 M11,单课程写保护投影由 M6 自管。
 - `/students/{id}/grades`、`/gpa`、`/recompute`:GPA 聚合(只读 M6)。
-- `/appeals/*`:申诉(accept 走解锁→改 M6→重算→重锁)。
+- `/appeals/*`:申诉(accept 走解锁→改 M6→重算→重锁)。`GET /appeals` 师生同路由按身份分视角:学生只见本人申诉,教师见本人任教课程,校管见全校。
 - `/warnings/*`:学业预警。
 - `/transcripts/*`:成绩单 PDF。
 

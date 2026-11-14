@@ -1,29 +1,16 @@
-// 判题器页(平台侧栏,/platform-admin/judges)。
-//
-// 判题器是「怎么判一道题」的实现登记:测试用例、链上断言、flag 比对、静态扫描、
-// 仿真检查点、人工评分六类。教师出题时按编码引用,平台负责登记与自测。
-//
-// 自测通过才代表这个判题器真能跑;自测状态由后端在自测后写入判题器记录。
-// 判题任务列表不在这里:GET /judge/tasks 在 teacher 组,平台身份调用会被拒 ——
-// 任务与重判归教师端批改中心(对齐清单 §3.4)。
+// 判题器(平台侧栏,/platform-admin/judges)。设计 §7.6:
+// 页头 +「登记判题器」;分段按类型(带数字,写进地址);列表行显示名称与短名、类型、是否需要链环境、
+// 判题环境状态(未准备 / 已冻结 / 自检失败)、上次自测结果;整行打开判题器大抽屉,抽屉底部「运行自测」「保存」。
+// 指标条、平铺属性的卡片与常驻说明卡去掉。判题器接口一次返回全部(不分页),计数在本页完成。
 
-import { useCallback, useMemo, useState } from 'react'
-import { ArrowRight, Cpu, Plus, Settings2, ShieldCheck, Timer } from 'lucide-react'
-import { JudgerStatus, JudgerType, type Judger } from '@chaimir/api-client'
+import { useMemo, useState } from 'react'
+import { Cpu, Plus } from 'lucide-react'
+import { JudgerSelftestStatus, JudgerType, type Judger } from '@chaimir/api-client'
 import {
-  Badge,
   Button,
-  Callout,
-  Card,
-  CardBody,
-  CardHeader,
-  DescriptionList,
-  FilterBar,
-  FilterField,
+  ListRow,
   PageHeader,
-  MetricStrip,
   PageScaffold,
-  PageSection,
   SegmentedControl,
   Skeleton,
   StatusIndicator,
@@ -31,288 +18,188 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
-import { formatDateTime } from '../../../../utils/formatters'
+import { useAsyncResource, useUrlState } from '../../../../hooks'
 import { judgerStatusLabel, judgerTypeLabel } from '../../../../utils/labels/judge'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { judgerEnvironment, judgerSelftest } from '../../judgerEnvironment'
 import { JUDGER_TYPES } from '../../options'
 import { getFrozenJudgerSnapshot } from '../../rules'
 import { judgerStatusTone } from '../../statusPresentation'
 import { JudgerFormModal } from './judger-form'
 
-/** 类型筛选项:值为空串表示不过滤。 */
-const TYPE_FILTERS = [
-  { value: '', label: '全部' },
-  ...JUDGER_TYPES.map((type) => ({ value: String(type), label: judgerTypeLabel(type) })),
-] as const
+/** 地址参数:type 分段(all 为全部,其余为类型编号) */
+const JUDGES_QUERY = {
+  type: { defaultValue: 'all', allowed: ['all', ...JUDGER_TYPES.map(String)] },
+} as const
 
-/** 各类判题器的一句话说明:说明它判什么,不解释内部实现。 */
-const TYPE_HINTS: Record<JudgerType, string> = {
-  [JudgerType.TESTCASE]: '跑测试用例,按通过的用例数给分',
-  [JudgerType.ONCHAIN_ASSERT]: '在链上执行断言,检查合约状态是否符合预期',
-  [JudgerType.FLAG]: '比对学生提交的答案口令,用于夺旗类赛题',
-  [JudgerType.STATIC_SCAN]: '静态扫描代码,查找漏洞模式与写法问题',
-  [JudgerType.SIM_CHECKPOINT]: '按仿真过程中的检查点给分',
-  [JudgerType.MANUAL]: '不自动判,由教师在批改中心人工打分',
-  [JudgerType.THEORY_QUESTION]: '按题型校验客观答案,不启动代码运行环境',
-}
-
-/**
- * PlatformJudgesPage 列出判题器并承载登记、修改与自测。
- */
+/** PlatformJudgesPage 判题器清单:按类型分诊,整行打开详情、修改与自测 */
 export default function PlatformJudgesPage() {
-  const [typeFilter, setTypeFilter] = useState<string>('')
-  const [formTarget, setFormTarget] = useState<{ judger?: Judger } | undefined>()
-  const [actionError, setActionError] = useState<string>()
-
-  const judgers = useAsyncResource(() => api.judge.listJudgers(), [], (value) => value.length === 0)
-
-  const list = useMemo(() => judgers.data ?? [], [judgers.data])
-
-  const visible = useMemo(
-    () => (typeFilter ? list.filter((item) => item.type === Number(typeFilter)) : list),
-    [list, typeFilter],
+  const [query, setQuery] = useUrlState(JUDGES_QUERY)
+  const [target, setTarget] = useState<{ judger?: Judger }>()
+  const [testingId, setTestingId] = useState<string>()
+  const judgers = useAsyncResource(
+    () => api.judge.listJudgers(),
+    [],
+    (list) => list.length === 0
   )
+  const all = useMemo(() => judgers.data ?? [], [judgers.data])
+  const loaded = judgers.status === 'success' || judgers.status === 'empty'
 
-  const stats = useMemo(() => {
-    if ((judgers.status !== 'success' && judgers.status !== 'empty') || !judgers.data) return undefined
-    return {
-      total: list.length,
-      available: list.filter((item) => item.status === JudgerStatus.AVAILABLE).length,
-      runtimeBound: list.filter((item) => item.runtime_required).length,
-      manual: list.filter((item) => item.type === JudgerType.MANUAL).length,
+  const counts = useMemo(() => {
+    const result: Record<string, number> = { all: all.length }
+    for (const type of JUDGER_TYPES)
+      result[String(type)] = all.filter((item) => item.type === type).length
+    return result
+  }, [all])
+  const visible =
+    query.type === 'all' ? all : all.filter((item) => String(item.type) === query.type)
+
+  /** runSelftest 按判题器声明真跑一次样例(会创建并回收判题环境),结果写回判题器 */
+  const runSelftest = async (judger: Judger) => {
+    setTestingId(judger.id)
+    try {
+      const updated = await api.judge.runJudgerSelftest(judger.id)
+      toast.success(
+        updated.selftest_status === JudgerSelftestStatus.PASSED
+          ? `「${judger.name}」自测通过`
+          : `「${judger.name}」自测已结束,请查看结果`
+      )
+      judgers.reload()
+      setTarget((current) => (current?.judger?.id === judger.id ? { judger: updated } : current))
+    } catch (error) {
+      toast.error(userFacingErrorMessage(error, '自测没有跑完。请确认判题环境可用后重试。'))
+    } finally {
+      setTestingId(undefined)
     }
-  }, [judgers.data, judgers.status, list])
+  }
 
   return (
     <PageScaffold>
       <PageHeader
         title="判题器"
-        description="判一道题用哪种方式。教师出题时按短名引用,登记后建议先自测一次再开放。"
         actions={
-          <Button variant="primary" leftIcon={Plus} onClick={() => setFormTarget({})}>
+          <Button variant="primary" leftIcon={Plus} onClick={() => setTarget({})}>
             登记判题器
           </Button>
         }
       />
 
-      {/*
-        归族:资源列表族的卡片网格形态(§6.5.3 第 ① 族)。指标降为内联摘要 ——
-        Stat 大卡是看板族才保留的形态,四张大卡在这一族会把卡片网格推到折叠线以下;
-        `<md` 竖排四张大卡更是 §6.4.1 规则 2 明令禁止的。
-        四项由一次取齐的全量判题器算出(接口不分页,故是全量口径,§6.5.4)。
-      */}
-      <MetricStrip
-        label="判题器总量摘要"
-        className="mb-5"
-        items={[
-          { label: '判题器总数', value: stats?.total, hint: '含已停用' },
-          { label: '可用', value: stats?.available, hint: '教师可以引用' },
-          { label: '需要链环境', value: stats?.runtimeBound, hint: '判题时会准备实验环境' },
-          { label: '人工评分', value: stats?.manual, hint: '由教师打分' },
+      <SegmentedControl
+        aria-label="按判题器类型筛选"
+        options={[
+          { value: 'all', label: '全部', count: loaded ? counts.all : undefined },
+          ...JUDGER_TYPES.map((type) => ({
+            value: String(type),
+            label: judgerTypeLabel(type),
+            count: loaded ? counts[String(type)] : undefined,
+          })),
         ]}
+        value={query.type}
+        onValueChange={(value) => setQuery({ type: value })}
+        className="mb-4 max-w-full overflow-x-auto"
       />
 
-      <PageSection
-        title="判题器列表"
-        description="按类型筛选。停用的判题器不会分配新任务,已排队的任务照旧执行完。"
+      <ResourceState
+        resource={judgers}
+        emptyIcon={Cpu}
+        emptyTitle="还没有登记判题器"
+        emptyDescription="登记判题器后,教师才能给题目配上自动判分方式。"
+        emptyAction={
+          <Button variant="primary" leftIcon={Plus} onClick={() => setTarget({})}>
+            登记判题器
+          </Button>
+        }
+        skeleton={<Skeleton variant="line" lines={6} />}
       >
-        <div className="flex flex-col gap-4">
-          <FilterBar label="判题器筛选">
-            <FilterField label="判题器类型" group>
-              <SegmentedControl
-                aria-label="按判题器类型筛选"
-                size="sm"
-                options={TYPE_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-                value={typeFilter}
-                onValueChange={setTypeFilter}
-              />
-            </FilterField>
-          </FilterBar>
+        {() =>
+          visible.length === 0 ? (
+            <p className="rounded-lg bg-surface px-4 py-10 text-center text-sm text-ink-sub shadow-xs">
+              这个类型下没有判题器。
+            </p>
+          ) : (
+            <ul className="divide-y divide-line rounded-lg bg-surface px-2 py-1 shadow-xs">
+              {visible.map((judger) => (
+                <li key={judger.id}>
+                  <JudgerRow
+                    judger={judger}
+                    testing={testingId === judger.id}
+                    onOpen={() => setTarget({ judger })}
+                  />
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </ResourceState>
 
-          {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
-          <ResourceState
-            resource={judgers}
-            emptyIcon={Cpu}
-            emptyTitle="还没有登记判题器"
-            emptyDescription="登记判题器后,教师才能给题目配上自动判分方式。"
-            emptyAction={
-              <Button variant="primary" leftIcon={Plus} onClick={() => setFormTarget({})}>
-                登记判题器
-              </Button>
-            }
-            skeleton={<Skeleton variant="line" lines={4} />}
-          >
-            {() =>
-              visible.length === 0 ? (
-                <Callout tone="info">这个类型下没有判题器,换个类型看看。</Callout>
-              ) : (
-                <div className={visible.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
-                  {visible.map((judger) => (
-                    <JudgerCard
-                      key={judger.id}
-                      judger={judger}
-                      onEdit={() => setFormTarget({ judger })}
-                      onSelftested={judgers.reload}
-                      onError={setActionError}
-                    />
-                  ))}
-                </div>
-              )
-            }
-          </ResourceState>
-
-          <Callout tone="info">
-            人工评分的判题器不执行任何命令,任务会一直停在待评分状态,等教师在批改中心打分。
-          </Callout>
-        </div>
-      </PageSection>
-
-      {formTarget ? (
+      {target ? (
         <JudgerFormModal
-          judger={formTarget.judger}
-          onClose={() => setFormTarget(undefined)}
+          key={target.judger?.id ?? 'new'}
+          judger={target.judger}
+          onClose={() => setTarget(undefined)}
           onSaved={() => {
-            setFormTarget(undefined)
+            setTarget(undefined)
             judgers.reload()
           }}
+          selftest={
+            target.judger
+              ? {
+                  running: testingId === target.judger.id,
+                  onRun: () => void runSelftest(target.judger!),
+                  unavailableReason:
+                    target.judger.type === JudgerType.MANUAL ? '人工评分不需要自测' : undefined,
+                }
+              : undefined
+          }
         />
       ) : null}
     </PageScaffold>
   )
 }
 
-interface JudgerCardProps {
+/** JudgerRow 一个判题器:名称;类型 · 短名 · 是否需要链环境 · 判题环境 · 上次自测;右侧状态 */
+function JudgerRow({
+  judger,
+  testing,
+  onOpen,
+}: {
   judger: Judger
-  onEdit: () => void
-  onSelftested: () => void
-  onError: (message: string) => void
-}
-
-/**
- * JudgerCard 展示单个判题器的运行约束并承载自测。
- * 自测会按判题器声明真跑一次样例,耗时较长,故按钮带 loading。
- */
-function JudgerCard({ judger, onEdit, onSelftested, onError }: JudgerCardProps) {
-  const [testing, setTesting] = useState(false)
-
-  const runSelftest = useCallback(async () => {
-    setTesting(true)
-    try {
-      await api.judge.runJudgerSelftest(judger.id)
-      toast.success('自测已完成,结果已更新')
-      onSelftested()
-    } catch (error) {
-      onError(
-        userFacingErrorMessage(
-          error,
-          '自测没有跑完。请确认执行器与链环境声明可用,然后重试。',
-        ),
-      )
-    } finally {
-      setTesting(false)
-    }
-  }, [judger.id, onError, onSelftested])
-
-  const spec = judger.resource_spec
-  // 组合快照是服务端编译冻结的事实,页面只读展示,不回填成编辑输入(§8.3)
-  const snapshot = getFrozenJudgerSnapshot(spec)
-
-  const items = useMemo(() => {
-    const base = [
-      { term: '判题器短名', description: judger.code, mono: true },
-      { term: '判题实现名称', description: judger.executor_ref, mono: true },
-      {
-        term: '默认超时',
-        description: `${judger.default_timeout_sec} 秒${
-          spec.timeout_sec && spec.timeout_sec > 0 ? `(本判题器覆盖为 ${spec.timeout_sec} 秒)` : ''
-        }`,
-      },
-    ]
-    if (judger.runtime_required || snapshot) {
-      base.push({
-        term: '判题环境',
-        description: snapshot
-          ? (snapshot.runtimes ?? []).map((runtime) => `${runtime.instance_code}: ${runtime.code} · ${runtime.image_version}`).join(' / ')
-          : '判题环境尚未准备完成',
-        mono: true,
-      })
-    }
-    if (snapshot && (snapshot.components?.length ?? 0) > 0) {
-      base.push({
-        term: '环境组件',
-        description: (snapshot.components ?? []).map((item) => item.code).join('、'),
-      })
-    }
-    if (snapshot) {
-      base.push({
-        term: '锁定镜像',
-        description: `${(snapshot.image_closure ?? []).length} 个(发布后不随目录变动)`,
-      })
-    }
-    if (spec.command && spec.command.length > 0) {
-      base.push({ term: '执行命令', description: spec.command.join(' '), mono: true })
-    }
-    if (spec.max_retries && spec.max_retries > 0) {
-      base.push({ term: '失败重试', description: `最多 ${spec.max_retries} 次` })
-    }
-    if (judger.updated_at) {
-      base.push({ term: '最近更新', description: formatDateTime(judger.updated_at), mono: true })
-    }
-    return base
-  }, [judger, snapshot, spec])
-
+  testing: boolean
+  onOpen: () => void
+}) {
+  const environment = judgerEnvironment({
+    runtimeRequired: judger.runtime_required,
+    frozen: getFrozenJudgerSnapshot(judger.resource_spec) !== undefined,
+    selftest: judger.selftest_status,
+  })
+  const selftest = judgerSelftest({ type: judger.type, selftest: judger.selftest_status })
   return (
-    <Card>
-      <CardHeader
-        title={
-          <button
-            type="button"
-            onClick={onEdit}
-            className="group inline-flex items-center gap-1.5 truncate text-left font-semibold text-ink transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            title="编辑判题器配置"
-          >
-            <span>{judger.name}</span>
-            <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-1 text-accent opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
-          </button>
-        }
-        description={judgerTypeLabel(judger.type)}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {judger.runtime_required ? <Badge tone="neutral">需要实验环境</Badge> : null}
-            <StatusIndicator
-              tone={judgerStatusTone(judger.status)}
-              label={judgerStatusLabel(judger.status)}
-            />
-          </div>
-        }
-      />
-      <CardBody className="flex flex-col gap-3">
-        <p className="text-sm text-ink-sub">{TYPE_HINTS[judger.type]}</p>
-        <DescriptionList dense items={items} />
-        <div className="flex flex-wrap items-center gap-2">
-          {judger.type === JudgerType.MANUAL ? (
-            <span className="inline-flex items-center gap-1 text-sm text-ink-sub">
-              <Timer aria-hidden="true" className="size-4" />
-              人工评分不需要自测
-            </span>
-          ) : (
-            <Button
-              variant="outline"
-              size="sm"
-              leftIcon={ShieldCheck}
-              loading={testing}
-              onClick={() => void runSelftest()}
-            >
-              运行自测
-            </Button>
-          )}
-          <Button variant="ghost" size="sm" leftIcon={Settings2} onClick={onEdit}>
-            修改配置
-          </Button>
-        </div>
-      </CardBody>
-    </Card>
+    <ListRow
+      title={judger.name}
+      meta={
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span>
+            {judgerTypeLabel(judger.type)} · <span className="font-mono">{judger.code}</span> ·{' '}
+            {judger.runtime_required ? '需要链环境' : '不需要链环境'}
+          </span>
+          {environment ? (
+            <StatusIndicator appearance="text" tone={environment.tone} label={environment.label} />
+          ) : null}
+          <StatusIndicator
+            appearance="text"
+            tone={testing ? 'neutral' : selftest.tone}
+            label={testing ? '正在自测' : selftest.label}
+            loading={testing}
+          />
+        </span>
+      }
+      trailing={
+        <StatusIndicator
+          tone={judgerStatusTone(judger.status)}
+          label={judgerStatusLabel(judger.status)}
+        />
+      }
+      onSelect={onOpen}
+    />
   )
 }

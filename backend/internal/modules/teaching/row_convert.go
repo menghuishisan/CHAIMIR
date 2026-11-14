@@ -21,6 +21,11 @@ func courseFromGetRow(row sqlcgen.GetCourseByIDRow) (Course, error) {
 	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
 }
 
+// courseFromBatchRow 转换按编号批量读取的课程行。
+func courseFromBatchRow(row sqlcgen.BatchGetCoursesRow) (Course, error) {
+	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
+}
+
 // courseFromCloneableRow 转换跨租户共享课程读取行。
 func courseFromCloneableRow(row sqlcgen.GetCloneableCourseByIDRow) (Course, error) {
 	return courseFromFields(row.ID, row.TenantID, row.TeacherID, row.Name, row.Description, row.Type, row.Difficulty, row.CoverRef, row.Semester, row.Credits, row.Schedule, row.StartAt, row.EndAt, row.InviteCode, row.Status, row.Visibility, row.CreatedAt, row.UpdatedAt)
@@ -117,6 +122,8 @@ func outboxFromRow(row sqlcgen.SubmissionJudgeOutbox) (JudgeOutbox, error) {
 	return outboxFromValues(row.ID, row.TenantID, row.SubmissionID, row.AssignmentItemID, row.AssignmentID, row.SourceOwnerID, row.SourceCourseID, row.SourceScope, row.StudentID, row.ItemCode, row.ItemVersion, row.ExtraInput, row.SourceRef, row.Status, row.RetryCount, row.LastError, row.Score, row.CompletedAt, row.CreatedAt, row.UpdatedAt, row.LeaseToken, row.LeaseUntil)
 }
 
+// outboxFromValues 由判题外发记录的各列组装模型,附加输入解码失败时报错;
+// 不同查询生成的行类型各自取列后都走这里,保证同一张表只有一种转换口径。
 func outboxFromValues(id, tenantID, submissionID, assignmentItemID, assignmentID, sourceOwnerID, sourceCourseID int64, sourceScope string, studentID int64, itemCode, itemVersion string, extraInput []byte, sourceRef string, status int16, retryCount int32, lastError pgtype.Text, score pgtype.Int4, completedAt, createdAt, updatedAt pgtype.Timestamptz, leaseToken string, leaseUntil pgtype.Timestamptz) (JudgeOutbox, error) {
 	extra, err := decodeMap(extraInput)
 	if err != nil {

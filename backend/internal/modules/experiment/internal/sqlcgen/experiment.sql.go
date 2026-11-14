@@ -174,6 +174,45 @@ func (q *Queries) CountExperimentReports(ctx context.Context, arg CountExperimen
 	return column_1, err
 }
 
+const countExperimentReportsByStatus = `-- name: CountExperimentReportsByStatus :many
+SELECT r.status, COUNT(*)::bigint AS count
+FROM experiment_report r
+JOIN experiment_instance i ON i.tenant_id = r.tenant_id AND i.id = r.instance_id
+WHERE r.tenant_id = $1::bigint AND i.experiment_id = $2::bigint
+GROUP BY r.status
+`
+
+type CountExperimentReportsByStatusParams struct {
+	TenantID     int64 `json:"tenant_id"`
+	ExperimentID int64 `json:"experiment_id"`
+}
+
+type CountExperimentReportsByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 实验报告批改台的状态分段计数(待批改 / 已批改),不套用状态筛选。
+func (q *Queries) CountExperimentReportsByStatus(ctx context.Context, arg CountExperimentReportsByStatusParams) ([]CountExperimentReportsByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countExperimentReportsByStatus, arg.TenantID, arg.ExperimentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountExperimentReportsByStatusRow{}
+	for rows.Next() {
+		var i CountExperimentReportsByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countExperiments = `-- name: CountExperiments :one
 SELECT COUNT(*)::bigint
 FROM experiment
@@ -201,6 +240,48 @@ func (q *Queries) CountExperiments(ctx context.Context, arg CountExperimentsPara
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countExperimentsByStatus = `-- name: CountExperimentsByStatus :many
+SELECT status, COUNT(*)::bigint AS count
+FROM experiment
+WHERE tenant_id = $1::bigint
+  AND deleted_at IS NULL
+  AND ($2::bigint = 0 OR course_id = $2::bigint)
+  AND ($3::text = '' OR strpos(lower(name || ' ' || description), lower($3::text)) > 0)
+GROUP BY status
+`
+
+type CountExperimentsByStatusParams struct {
+	TenantID int64  `json:"tenant_id"`
+	CourseID int64  `json:"course_id"`
+	Keyword  string `json:"keyword"`
+}
+
+type CountExperimentsByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 教师实验列表的状态分段计数:套用课程与关键词筛选,不套用状态筛选。
+func (q *Queries) CountExperimentsByStatus(ctx context.Context, arg CountExperimentsByStatusParams) ([]CountExperimentsByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countExperimentsByStatus, arg.TenantID, arg.CourseID, arg.Keyword)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountExperimentsByStatusRow{}
+	for rows.Next() {
+		var i CountExperimentsByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const countPublishedExperimentsByShape = `-- name: CountPublishedExperimentsByShape :many
@@ -267,6 +348,47 @@ func (q *Queries) CountTeacherInstances(ctx context.Context, arg CountTeacherIns
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countTeacherInstancesByStatus = `-- name: CountTeacherInstancesByStatus :many
+SELECT i.status, COUNT(*)::bigint AS count
+FROM experiment_instance i
+JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
+WHERE i.tenant_id = $1::bigint
+  AND ($2::bigint = 0 OR e.author_id = $2::bigint)
+  AND i.status IN (1, 2, 3, 6, 7)
+GROUP BY i.status
+`
+
+type CountTeacherInstancesByStatusParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	TeacherID int64 `json:"teacher_id"`
+}
+
+type CountTeacherInstancesByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 教学监控的实验环境分段计数:范围同 ListTeacherInstances(教师看本人实验,校管 teacher_id=0 看全校),不套用状态筛选。
+func (q *Queries) CountTeacherInstancesByStatus(ctx context.Context, arg CountTeacherInstancesByStatusParams) ([]CountTeacherInstancesByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countTeacherInstancesByStatus, arg.TenantID, arg.TeacherID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountTeacherInstancesByStatusRow{}
+	for rows.Next() {
+		var i CountTeacherInstancesByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const createExperiment = `-- name: CreateExperiment :one
@@ -1592,6 +1714,66 @@ func (q *Queries) ListStudentGroupsForExperiments(ctx context.Context, arg ListS
 	for rows.Next() {
 		var i ListStudentGroupsForExperimentsRow
 		if err := rows.Scan(&i.ExperimentID, &i.GroupID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStudentLatestInstancesForExperiments = `-- name: ListStudentLatestInstancesForExperiments :many
+SELECT DISTINCT ON (i.experiment_id)
+       i.experiment_id,
+       i.status,
+       COALESCE(i.score::float8, 0)::float8 AS score,
+       (SELECT COUNT(*) FROM checkpoint_result r
+         WHERE r.tenant_id = i.tenant_id AND r.instance_id = i.id AND r.passed)::bigint AS passed_checkpoints
+FROM experiment_instance i
+WHERE i.tenant_id = $1::bigint
+  AND i.experiment_id = ANY($2::bigint[])
+  AND (
+    (i.group_id IS NULL AND i.owner_account_id = $3::bigint)
+    OR i.group_id IN (
+      SELECT gm.group_id FROM group_member gm
+      WHERE gm.tenant_id = i.tenant_id AND gm.student_id = $3::bigint
+    )
+  )
+ORDER BY i.experiment_id, i.started_at DESC, i.id DESC
+`
+
+type ListStudentLatestInstancesForExperimentsParams struct {
+	TenantID      int64   `json:"tenant_id"`
+	ExperimentIds []int64 `json:"experiment_ids"`
+	StudentID     int64   `json:"student_id"`
+}
+
+type ListStudentLatestInstancesForExperimentsRow struct {
+	ExperimentID      int64   `json:"experiment_id"`
+	Status            int16   `json:"status"`
+	Score             float64 `json:"score"`
+	PassedCheckpoints int64   `json:"passed_checkpoints"`
+}
+
+// 学生实验卡片的本人进度:当前页每个实验里本人最近一次实验(个人实验看本人,小组实验看本人所在小组),
+// 带状态、得分与已通过的检查点数,一次聚合;从没开始过的实验不出现在结果里。
+func (q *Queries) ListStudentLatestInstancesForExperiments(ctx context.Context, arg ListStudentLatestInstancesForExperimentsParams) ([]ListStudentLatestInstancesForExperimentsRow, error) {
+	rows, err := q.db.Query(ctx, listStudentLatestInstancesForExperiments, arg.TenantID, arg.ExperimentIds, arg.StudentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStudentLatestInstancesForExperimentsRow{}
+	for rows.Next() {
+		var i ListStudentLatestInstancesForExperimentsRow
+		if err := rows.Scan(
+			&i.ExperimentID,
+			&i.Status,
+			&i.Score,
+			&i.PassedCheckpoints,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

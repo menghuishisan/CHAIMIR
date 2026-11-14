@@ -21,6 +21,13 @@ WHERE ($1::smallint = 0 OR status = $1)
 ORDER BY updated_at DESC, id DESC
 LIMIT $4 OFFSET $5;
 
+-- name: ListLatestRejectionsByPackages :many
+-- 已退回场景的退回意见:当前页每个包最近一次「退回」审核的意见,一次查询;没有退回记录的包不出现。
+SELECT DISTINCT ON (package_id) package_id, comment
+FROM sim_package_review
+WHERE package_id = ANY(sqlc.arg(package_ids)::bigint[]) AND result = 3
+ORDER BY package_id, updated_at DESC, id DESC;
+
 -- name: CountSimPackages :one
 SELECT COUNT(*)::bigint
 FROM sim_package
@@ -29,13 +36,22 @@ WHERE ($1::smallint = 0 OR status = $1)
   AND ($3::text = '' OR code ILIKE '%' || $3 || '%' OR name ILIKE '%' || $3 || '%')
   AND ($4::bigint = 0 OR (author_type = 2 AND author_id = $4));
 
+-- name: CountSimPackagesByStatus :many
+-- 我的仿真场景的状态分段计数:套用分类、关键词与作者范围,不套用状态筛选;按场景去重(同一场景多个版本只算一个)。
+SELECT status, COUNT(DISTINCT code)::bigint AS count
+FROM sim_package
+WHERE (sqlc.arg(category)::text = '' OR category = sqlc.arg(category)::text)
+  AND (sqlc.arg(keyword)::text = '' OR code ILIKE '%' || sqlc.arg(keyword)::text || '%' OR name ILIKE '%' || sqlc.arg(keyword)::text || '%')
+  AND (sqlc.arg(author_id)::bigint = 0 OR (author_type = 2 AND author_id = sqlc.arg(author_id)::bigint))
+GROUP BY status;
+
 -- name: CountSimPackagesByCategory :many
+-- 分类分段计数:套用状态、关键词与作者范围,不套用分类筛选(接口总览「分段计数」);按场景去重。
 SELECT category, COUNT(DISTINCT code)::bigint AS count
 FROM sim_package
-WHERE ($1::smallint = 0 OR status = $1)
-  AND ($2::text = '' OR category = $2)
-  AND ($3::text = '' OR code ILIKE '%' || $3 || '%' OR name ILIKE '%' || $3 || '%')
-  AND ($4::bigint = 0 OR (author_type = 2 AND author_id = $4))
+WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(keyword)::text = '' OR code ILIKE '%' || sqlc.arg(keyword)::text || '%' OR name ILIKE '%' || sqlc.arg(keyword)::text || '%')
+  AND (sqlc.arg(author_id)::bigint = 0 OR (author_type = 2 AND author_id = sqlc.arg(author_id)::bigint))
 GROUP BY category
 ORDER BY category;
 
@@ -141,6 +157,12 @@ JOIN sim_package p ON p.id = r.package_id
 WHERE ($1::smallint = 0 OR r.result = $1)
 ORDER BY r.created_at ASC, r.id ASC
 LIMIT $2 OFFSET $3;
+
+-- name: CountSimReviewsByResult :many
+-- 仿真治理队列的审核结论分段计数(待审核 / 已通过 / 已退回)。
+SELECT result, COUNT(*)::bigint AS count
+FROM sim_package_review
+GROUP BY result;
 
 -- name: CountSimReviews :one
 SELECT COUNT(*)::bigint

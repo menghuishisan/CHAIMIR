@@ -6,7 +6,8 @@
 // 学生编号取自服务端会话(useSession 的 /me),不接受任何客户端传参。
 // 课程名:成绩汇总只回 course_id,与学生自己的课程列表做一次映射(一次请求,不逐行取大纲)。
 // 等级与绩点:成绩接口只回总评,按学校默认等级配置换算(与后端绩点计算同一口径,见 gradeLevel.ts)。
-// 申诉只做提交:申诉列表是教师/管理员能力,学生侧看不到处理状态(设计 §10 数据缺口)。
+// 申诉:每门课显示本人最近一次申诉的处理状态(申诉列表按身份分视角,学生只读本人);
+// 还在处理中的课不能再申诉(服务端同样只允许一门课一条进行中的申诉),按钮换成状态。
 // 成绩单由后端同步生成,生成后换一次性授权经统一文件服务下载,用户点一次即可。
 
 import { useCallback, useMemo, useState } from 'react'
@@ -15,7 +16,9 @@ import {
   PAGINATION_DEFAULT_SIZE,
   PAGINATION_MAX_SIZE,
   TranscriptScope,
+  GradeAppealStatus,
   type CourseGrade,
+  type GradeAppeal,
   type GradeSummary,
   type Semester,
 } from '@chaimir/api-client'
@@ -46,19 +49,21 @@ import {
   SegmentedControl,
   Select,
   Skeleton,
+  StatusIndicator,
   Table,
   Textarea,
   toast,
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { collectAllPages } from '../../../../utils/allPages'
 import { ResourceError } from '../../../../components/ResourceState'
 import { useSession } from '../../../../components/RoleGuard'
 import { useAsyncResource, useUrlState } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { formatGpa, formatScore } from '../../../../utils/formatters'
-import { transcriptScopeLabel } from '../../../../utils/labels/grade'
+import { gradeAppealStatusLabel, transcriptScopeLabel } from '../../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { levelForScore } from '../../gradeLevel'
 
@@ -96,13 +101,16 @@ export default function StudentGradesPage() {
   )
   // 课程名与等级映射:读不到时课程列显示通用名、等级与绩点列显示「—」,不影响分数
   const courses = useAsyncResource(
-    () => api.teaching.getCourses({ role: 'student', size: PAGINATION_MAX_SIZE }),
+    () => collectAllPages((params) => api.teaching.getCourses({ role: 'student', ...params }), PAGINATION_MAX_SIZE),
     [],
     () => false,
   )
   const levels = useAsyncResource(() => api.grade.listLevelConfigs(), [], () => false)
+  // 本人申诉:按课程取最近一条;读不到时成绩照常显示,只是不显示申诉状态
+  const appeals = useAsyncResource(() => collectAllPages((params) => api.grade.listAppeals(params), PAGINATION_MAX_SIZE), [], () => false)
+  const latestAppeal = useMemo(() => latestAppealByCourse(appeals.data ?? []), [appeals.data])
   const courseName = useMemo(
-    () => new Map((courses.data?.list ?? []).map((course) => [course.id, course.name])),
+    () => new Map((courses.data ?? []).map((course) => [course.id, course.name])),
     [courses.data],
   )
   const mapping = useMemo(() => levels.data?.find((config) => config.is_default)?.mapping ?? [], [levels.data])
@@ -148,9 +156,7 @@ export default function StudentGradesPage() {
       header: <span className="sr-only">申诉</span>,
       align: 'right',
       render: (grade) => (
-        <Button variant="ghost" size="sm" onClick={() => setAppealCourse(grade)}>
-          申诉
-        </Button>
+        <AppealCell appeal={latestAppeal.get(grade.course_id)} onAppeal={() => setAppealCourse(grade)} />
       ),
     },
   ]
@@ -215,9 +221,7 @@ export default function StudentGradesPage() {
                   title: courseName.get(grade.course_id) ?? '已结束的课程',
                   meta: `${grade.credits} 学分 · 总评 ${formatScore(grade.final_total)}${level ? ` · ${level.grade} · 绩点 ${formatGpa(level.gpa)}` : ''}`,
                   action: (
-                    <Button variant="ghost" size="sm" onClick={() => setAppealCourse(grade)}>
-                      申诉
-                    </Button>
+                    <AppealCell appeal={latestAppeal.get(grade.course_id)} onAppeal={() => setAppealCourse(grade)} />
                   ),
                 }
               }}
@@ -241,6 +245,7 @@ export default function StudentGradesPage() {
         grade={appealCourse}
         courseName={appealCourse ? courseName.get(appealCourse.course_id) : undefined}
         onClose={() => setAppealCourse(undefined)}
+        onSubmitted={appeals.reload}
       />
     </PageScaffold>
   )
@@ -400,16 +405,18 @@ function TranscriptModal({
 
 /**
  * AppealDrawer 对一门课的成绩提出申诉:课程已预先选好,只需填理由。
- * 可申诉范围以本人成绩明细为准(后端同样校验成绩存在与申诉期限);提交后学生侧看不到处理进度,如实说明。
+ * 可申诉范围以本人成绩明细为准(后端同样校验成绩存在与申诉期限);提交后这门课的状态换成「待处理」。
  */
 function AppealDrawer({
   grade,
   courseName,
   onClose,
+  onSubmitted,
 }: {
   grade: CourseGrade | undefined
   courseName: string | undefined
   onClose: () => void
+  onSubmitted: () => void
 }) {
   const [reason, setReason] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -429,7 +436,8 @@ function AppealDrawer({
     setSubmitError(undefined)
     try {
       await api.grade.submitAppeal({ course_id: grade.course_id, reason: reason.trim() })
-      toast.success('申诉已提交,处理结果会通过站内通知告诉你')
+      toast.success('申诉已提交,处理结果会显示在这门课的成绩旁')
+      onSubmitted()
       setReason('')
       onClose()
     } catch (error) {
@@ -437,14 +445,14 @@ function AppealDrawer({
     } finally {
       setSubmitting(false)
     }
-  }, [grade, onClose, reason, validate])
+  }, [grade, onClose, onSubmitted, reason, validate])
 
   return (
     <Drawer open={grade !== undefined} onOpenChange={(open) => (open ? undefined : close())}>
       <DrawerContent>
         <DrawerHeader>
           <DrawerTitle>申诉成绩</DrawerTitle>
-          <DrawerDescription>任课老师会核查你的成绩,处理结果会通过站内通知告诉你。</DrawerDescription>
+          <DrawerDescription>任课老师会核查你的成绩,处理结果会显示在这门课的成绩旁,也会发站内通知。</DrawerDescription>
         </DrawerHeader>
         <DrawerBody className="flex flex-col gap-4">
           {grade ? (
@@ -484,5 +492,44 @@ function AppealDrawer({
         </DrawerFooter>
       </DrawerContent>
     </Drawer>
+  )
+}
+
+/** latestAppealByCourse 每门课只留本人最近一次申诉(列表已按提交时间倒序) */
+function latestAppealByCourse(appeals: readonly GradeAppeal[]): Map<string, GradeAppeal> {
+  const latest = new Map<string, GradeAppeal>()
+  for (const appeal of appeals) {
+    if (!latest.has(appeal.course_id)) latest.set(appeal.course_id, appeal)
+  }
+  return latest
+}
+
+/** 申诉状态的提示色:处理中为警示,通过或已改分为成功,未通过为中性 */
+const APPEAL_TONE: Record<GradeAppealStatus, 'warning' | 'success' | 'neutral'> = {
+  [GradeAppealStatus.PENDING]: 'warning',
+  [GradeAppealStatus.ACCEPTED]: 'warning',
+  [GradeAppealStatus.COMPLETED]: 'success',
+  [GradeAppealStatus.REJECTED]: 'neutral',
+}
+
+/**
+ * AppealCell 成绩行末尾的申诉位:没申诉过或上一次已结束时给「申诉」按钮;
+ * 还在处理中只显示状态(不能重复申诉);已结束的同时显示上一次的结果,处理意见悬停可见。
+ */
+function AppealCell({ appeal, onAppeal }: { appeal: GradeAppeal | undefined; onAppeal: () => void }) {
+  const active = appeal?.status === GradeAppealStatus.PENDING || appeal?.status === GradeAppealStatus.ACCEPTED
+  return (
+    <span className="inline-flex items-center justify-end gap-2">
+      {appeal ? (
+        <span title={appeal.result_comment || undefined}>
+          <StatusIndicator tone={APPEAL_TONE[appeal.status]} label={`申诉${gradeAppealStatusLabel(appeal.status)}`} />
+        </span>
+      ) : null}
+      {active ? null : (
+        <Button variant="ghost" size="sm" onClick={onAppeal}>
+          {appeal ? '再次申诉' : '申诉'}
+        </Button>
+      )}
+    </span>
   )
 }

@@ -189,6 +189,13 @@ export class IdentityApi {
   // ===== 账号管理（学校管理员） =====
 
   /**
+   * 读取本校单个账号(手机号脱敏,与列表项同形),供按编号恢复的筛选条件显示是谁。
+   */
+  async getAccount(accountId: string): Promise<Account> {
+    return this.client.get(`/accounts/${encodePathSegment(accountId)}`)
+  }
+
+  /**
    * 查询当前租户账号列表，供学校管理员按状态、角色、班级和关键词筛选。
    */
   async getAccounts(params?: {

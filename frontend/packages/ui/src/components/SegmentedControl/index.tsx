@@ -52,6 +52,7 @@ const segmentedItemVariants = cva(
   },
 );
 
+/** SegmentedControl 分段切换器(视图或模式切换,可带数量) */
 export function SegmentedControl({
   options,
   value,

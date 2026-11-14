@@ -10,12 +10,9 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { ChevronLeft, CircleCheck, CircleX, FileText, LockOpen, Send } from 'lucide-react'
 import {
-  BaseIdentity,
   BOOL_FILTER,
   type BoolFilter,
   GradeReviewStatus,
-  PAGINATION_MAX_SIZE,
-  type Course,
   type GradeReview,
   type Semester,
 } from '@chaimir/api-client'
@@ -45,9 +42,9 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { type AsyncResourceState, useAsyncResource, usePagedResource, useResourceTotal, useReviewQueue, useUrlState } from '../../../../hooks'
+import { type AsyncResourceState, useAsyncResource, usePagedResource, useReviewQueue, useUrlState } from '../../../../hooks'
+import { segmentCounts as segmentCountsOf } from '../../../../utils/facets'
 import { AccountNameText } from '../../../identity/components/AccountNameText'
-import { useAccountNames } from '../../../identity/useAccountNames'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -58,7 +55,12 @@ import { TranscriptBatchDrawer } from './transcript-batch'
 const APPROVALS_QUERY = {
   status: { defaultValue: 'pending', allowed: ['pending', 'approved', 'rejected', 'all'] },
   locked: { defaultValue: String(BOOL_FILTER.ANY), allowed: [String(BOOL_FILTER.ANY), String(BOOL_FILTER.YES), String(BOOL_FILTER.NO)] },
+  /** 学期编号;空为全部学期 */
+  semester: { defaultValue: '' },
 } as const
+
+/** 学期筛选里「全部学期」的取值(下拉不接受空串作选项值) */
+const ALL_SEMESTERS = 'all'
 
 const STATUS_SEGMENTS = [
   { value: 'pending', label: '待审核', status: GradeReviewStatus.PENDING },
@@ -91,6 +93,7 @@ const ACTION_COPY: Record<ReviewAction, { title: string; description: string; co
     title: '驳回成绩审核',
     description: '驳回后教师可以修改成绩并重新报送。请在意见里写清需要调整什么。',
     confirm: '确认驳回',
+    danger: true,
   },
   unlock: {
     title: '解锁成绩',
@@ -116,56 +119,23 @@ export default function SchoolAdminApprovalsPage() {
       api.grade.listReviews({
         status: statusSegment && 'status' in statusSegment ? statusSegment.status : undefined,
         is_locked: lockedFilter,
+        semester_id: query.semester || undefined,
         ...params,
       }),
-    [query.locked, query.status],
+    [query.locked, query.semester, query.status],
     { urlPageKey: 'page' },
   )
-  // 报送记录只有报送人编号:用本校教师账号解析姓名(设计 §10,校管可以读账号列表)
-  const teachers = useAccountNames(BaseIdentity.TEACHER)
-
-  // 审核记录只回 course_id / semester_id,课程名与学期名在此解析,不把内部编号抛到界面上
-  const courses = useAsyncResource(
-    () => api.teaching.getCourses({ page: 1, size: PAGINATION_MAX_SIZE }),
-    [],
-    () => false,
-  )
-
+  // 报送教师姓名与课程名随审核记录由服务端给出(当前页批量解析);学期名在此解析(学期很少,接口不分页)
   const semesters = useAsyncResource(() => api.grade.listSemesters(), [])
-
-  const courseNameById = useMemo(
-    () => new Map((courses.data?.list ?? []).map((course: Course) => [course.id, course.name])),
-    [courses.data],
-  )
 
   const semesterNameById = useMemo(
     () => new Map((semesters.data ?? []).map((semester: Semester) => [semester.id, semester.name])),
     [semesters.data],
   )
 
-  // 分段上的数字取服务端全量口径,不随锁定筛选变化(§6.5.4)
-  const totalCount = useResourceTotal((params) => api.grade.listReviews(params), [], reviews.refreshVersion)
-  const pendingCount = useResourceTotal(
-    (params) => api.grade.listReviews({ status: GradeReviewStatus.PENDING, ...params }),
-    [],
-    reviews.refreshVersion,
-  )
-  const approvedCount = useResourceTotal(
-    (params) => api.grade.listReviews({ status: GradeReviewStatus.APPROVED, ...params }),
-    [],
-    reviews.refreshVersion,
-  )
-  const rejectedCount = useResourceTotal(
-    (params) => api.grade.listReviews({ status: GradeReviewStatus.REJECTED, ...params }),
-    [],
-    reviews.refreshVersion,
-  )
-  const segmentCounts: Record<string, number | undefined> = {
-    pending: pendingCount,
-    approved: approvedCount,
-    rejected: rejectedCount,
-    all: totalCount,
-  }
+  // 分段计数取列表接口的 facets:套用锁定筛选,不套用状态筛选
+  const facets = reviews.status === 'success' || reviews.status === 'empty' ? reviews.data?.facets : undefined
+  const segmentCounts = segmentCountsOf(facets, 'status', STATUS_SEGMENTS, (segment) => ('status' in segment ? segment.status : undefined))
 
   /**
    * 审阅队列族(§6.5.3 第 ⑤ 族):左队列右详情。
@@ -210,13 +180,25 @@ export default function SchoolAdminApprovalsPage() {
           onValueChange={(value) => setQuery({ status: value })}
           className="max-w-full overflow-x-auto"
         />
-        <Select
-          aria-label="按锁定状态筛选"
-          value={query.locked}
-          onValueChange={(value) => setQuery({ locked: value })}
-          options={LOCKED_FILTERS.map((item) => ({ value: String(item.value), label: item.value === BOOL_FILTER.ANY ? '锁定与否' : item.label }))}
-          className="w-full sm:w-36"
-        />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Select
+            aria-label="按锁定状态筛选"
+            value={query.locked}
+            onValueChange={(value) => setQuery({ locked: value })}
+            options={LOCKED_FILTERS.map((item) => ({ value: String(item.value), label: item.value === BOOL_FILTER.ANY ? '锁定与否' : item.label }))}
+            className="w-full sm:w-36"
+          />
+          <Select
+            aria-label="按学期筛选"
+            value={query.semester || ALL_SEMESTERS}
+            onValueChange={(value) => setQuery({ semester: value === ALL_SEMESTERS ? '' : value })}
+            options={[
+              { value: ALL_SEMESTERS, label: '全部学期' },
+              ...(semesters.data ?? []).map((semester: Semester) => ({ value: semester.id, label: semester.name })),
+            ]}
+            className="w-full sm:w-44"
+          />
+        </div>
       </div>
 
       <QueueDetailLayout
@@ -283,12 +265,12 @@ export default function SchoolAdminApprovalsPage() {
                       >
                         <div className="flex items-center justify-between gap-2">
                           <span className="truncate text-sm font-medium text-ink">
-                            {courseNameById.get(review.course_id) ?? '已归档的课程'}
+                            {review.course_name ?? '已删除的课程'}
                           </span>
                           <GradeReviewStatusCell review={review} />
                         </div>
                         <p className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-ink-sub">
-                          <AccountNameText name={teachers.lookup(review.submitter_id)} compact />
+                          <AccountNameText name={review.submitter_name} compact />
                         </p>
                         <p className="mt-1 text-xs text-ink-sub" title={formatDateTime(review.submitted_at)}>
                           {formatRelativeOccurrence(review.submitted_at)}报送 ·{' '}
@@ -307,8 +289,8 @@ export default function SchoolAdminApprovalsPage() {
           selected ? (
             <ReviewDetailPane
               review={selected}
-              submitter={<AccountNameText name={teachers.lookup(selected.submitter_id)} compact />}
-              courseName={courseNameById.get(selected.course_id) ?? '已归档的课程'}
+              submitter={<AccountNameText name={selected.submitter_name} compact />}
+              courseName={selected.course_name ?? '已删除的课程'}
               semesterName={
                 selected.semester_id
                   ? (semesterNameById.get(selected.semester_id) ?? '未登记学期')
@@ -331,7 +313,7 @@ export default function SchoolAdminApprovalsPage() {
         <ReviewDecisionModal
           review={target.review}
           action={target.action}
-          courseName={courseNameById.get(target.review.course_id) ?? '该课程'}
+          courseName={target.review.course_name ?? '该课程'}
           semesters={semesters}
           onClose={() => setTarget(undefined)}
           onSaved={() => {
@@ -490,7 +472,7 @@ function ReviewDecisionModal({
             取消
           </Button>
           <Button
-            variant={copy.danger ? 'danger' : 'seal'}
+            variant={copy.danger ? 'danger' : 'primary'}
             loading={working}
             disabled={action === 'approve' && semesters.status !== 'success'}
             onClick={() => void submit()}
@@ -570,10 +552,10 @@ function ReviewDetailPane({
       <div className="mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
         {isPending ? (
           <>
-            <Button variant="danger" leftIcon={CircleX} onClick={() => onRequestAction('reject')}>
+            <Button variant="outline" leftIcon={CircleX} onClick={() => onRequestAction('reject')}>
               驳回
             </Button>
-            <Button variant="seal" leftIcon={CircleCheck} onClick={() => onRequestAction('approve')}>
+            <Button variant="primary" leftIcon={CircleCheck} onClick={() => onRequestAction('approve')}>
               通过并锁定
             </Button>
           </>

@@ -150,7 +150,7 @@ export function DashboardAttention({ items }: { items: AttentionItem[] }) {
           <li key={item.key}>
             <Link
               to={item.to}
-              className="group flex items-center justify-between gap-3 rounded-lg bg-surface p-4 shadow-xs transition-shadow duration-fast hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              className="group flex h-full items-center justify-between gap-3 rounded-lg bg-surface p-4 shadow-xs transition-shadow duration-fast hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             >
               <span className="min-w-0">
                 <span className="block text-sm text-ink-sub">{item.label}</span>

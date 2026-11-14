@@ -142,7 +142,7 @@ func (s *Service) CreateContest(ctx context.Context, req ContestRequest) (Contes
 	return contestDTOFromModel(item), nil
 }
 
-// UpdateContest 更新草稿竞赛定义。
+// UpdateContest 更新草稿或报名中的竞赛定义;赛制与参赛形式只在草稿态可改。
 func (s *Service) UpdateContest(ctx context.Context, contestID int64, req ContestRequest) (ContestDTO, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
@@ -156,6 +156,9 @@ func (s *Service) UpdateContest(ctx context.Context, contestID int64, req Contes
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID)
 		if err != nil {
+			return err
+		}
+		if err := contestStructureEditable(current, req); err != nil {
 			return err
 		}
 		current.Name = req.Name
@@ -174,6 +177,18 @@ func (s *Service) UpdateContest(ctx context.Context, contestID int64, req Contes
 		return ContestDTO{}, err
 	}
 	return contestDTOFromModel(item), s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.update", auditTargetContest, item.ID, nil)
+}
+
+// contestStructureEditable 赛制与参赛形式只在草稿态可改:发布后赛题按赛制锁定、报名按参赛形式组队,
+// 改了会让已编排的赛题和已组好的队伍对不上;其余基本信息在报名中仍可改(状态门禁见更新语句)。
+func contestStructureEditable(current Contest, req ContestRequest) error {
+	if current.Status == ContestStatusDraft {
+		return nil
+	}
+	if req.Mode != current.Mode || req.TeamMode != current.TeamMode {
+		return apperr.ErrContestStateInvalid
+	}
+	return nil
 }
 
 // AddProblem 添加或更新竞赛题目引用,并校验 M5 题面可读取。
@@ -440,7 +455,16 @@ func (s *Service) ArchiveContest(ctx context.Context, contestID int64) (ResultSn
 	if err := s.writeAudit(ctx, id.TenantID, id.AccountID, contracts.RoleNumTeacher, "contest.archive", auditTargetContest, contestID, map[string]any{"snapshot_id": snapshot.ID}); err != nil {
 		return ResultSnapshotDTO{}, err
 	}
-	return resultSnapshotDTOFromModel(snapshot, contest.Mode), nil
+	// 快照只存 team_id,返回前按同一快照一次读取队名
+	var names map[int64]string
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		names, err = tx.TeamNames(ctx, id.TenantID, contestID, snapshotTeamIDs(snapshot))
+		return err
+	}); err != nil {
+		return ResultSnapshotDTO{}, err
+	}
+	return resultSnapshotDTOFromModel(snapshot, contest.Mode, names), nil
 }
 
 // RunAutoArchiveOnce 执行一次竞赛自动收尾扫描,供统一 background runner 调用。
@@ -674,6 +698,7 @@ func (s *Service) GetSnapshot(ctx context.Context, contestID int64) (ResultSnaps
 	}
 	var snapshot LadderSnapshot
 	var mode int16
+	var names map[int64]string
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		contest, err := tx.GetContest(ctx, id.TenantID, contestID)
@@ -682,11 +707,15 @@ func (s *Service) GetSnapshot(ctx context.Context, contestID int64) (ResultSnaps
 		}
 		mode = contest.Mode
 		snapshot, err = tx.GetLadderSnapshot(ctx, id.TenantID, contestID, ContestStatusArchived)
+		if err != nil {
+			return err
+		}
+		names, err = tx.TeamNames(ctx, id.TenantID, contestID, snapshotTeamIDs(snapshot))
 		return err
 	}); err != nil {
 		return ResultSnapshotDTO{}, err
 	}
-	return resultSnapshotDTOFromModel(snapshot, mode), nil
+	return resultSnapshotDTOFromModel(snapshot, mode, names), nil
 }
 
 // transitionContest 封装竞赛状态流转、内容引用登记和审计。

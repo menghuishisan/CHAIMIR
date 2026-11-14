@@ -50,6 +50,7 @@ const STYLES: Record<ChartContext, { total: string; label: string; name: string 
   dark: { total: "text-on-dark", label: "text-on-dark-sub", name: "text-on-dark" },
 };
 
+/** ShareDonutChart 占比环图(部分对整体,不超过 5 类) */
 export function ShareDonutChart({
   slices,
   totalLabel,

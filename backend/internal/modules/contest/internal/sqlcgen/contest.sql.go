@@ -399,6 +399,48 @@ func (q *Queries) CountBattleEntriesForTeam(ctx context.Context, arg CountBattle
 	return count, err
 }
 
+const countBattleMatchesByStatus = `-- name: CountBattleMatchesByStatus :many
+SELECT m.status, count(*)::bigint AS count
+FROM battle_match m
+JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
+JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
+WHERE m.tenant_id = $1 AND m.contest_id = $2
+  AND ($3::bigint = 0 OR a.team_id = $3::bigint OR b.team_id = $3::bigint)
+GROUP BY m.status
+`
+
+type CountBattleMatchesByStatusParams struct {
+	TenantID  int64 `json:"tenant_id"`
+	ContestID int64 `json:"contest_id"`
+	TeamID    int64 `json:"team_id"`
+}
+
+type CountBattleMatchesByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 对局列表的状态分段计数:视角与列表相同(组织者全部 / 学生本队),不套用状态筛选。
+func (q *Queries) CountBattleMatchesByStatus(ctx context.Context, arg CountBattleMatchesByStatusParams) ([]CountBattleMatchesByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countBattleMatchesByStatus, arg.TenantID, arg.ContestID, arg.TeamID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountBattleMatchesByStatusRow{}
+	for rows.Next() {
+		var i CountBattleMatchesByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countBattleMatchesForTeam = `-- name: CountBattleMatchesForTeam :one
 SELECT count(*)::bigint
 FROM battle_match m
@@ -406,16 +448,23 @@ JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
 WHERE m.tenant_id = $1 AND m.contest_id = $2
   AND ($3::bigint = 0 OR a.team_id = $3::bigint OR b.team_id = $3::bigint)
+  AND ($4::smallint = 0 OR m.status = $4::smallint)
 `
 
 type CountBattleMatchesForTeamParams struct {
 	TenantID  int64 `json:"tenant_id"`
 	ContestID int64 `json:"contest_id"`
 	TeamID    int64 `json:"team_id"`
+	Status    int16 `json:"status"`
 }
 
 func (q *Queries) CountBattleMatchesForTeam(ctx context.Context, arg CountBattleMatchesForTeamParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countBattleMatchesForTeam, arg.TenantID, arg.ContestID, arg.TeamID)
+	row := q.db.QueryRow(ctx, countBattleMatchesForTeam,
+		arg.TenantID,
+		arg.ContestID,
+		arg.TeamID,
+		arg.Status,
+	)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -595,6 +644,47 @@ func (q *Queries) CountVulnProblems(ctx context.Context, arg CountVulnProblemsPa
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countVulnProblemsByStatus = `-- name: CountVulnProblemsByStatus :many
+SELECT status, prevalidate_status, COUNT(*)::bigint AS count
+FROM vuln_problem
+WHERE tenant_id = $1::bigint
+  AND ($2::bigint = 0 OR source_id = $2::bigint)
+GROUP BY status, prevalidate_status
+`
+
+type CountVulnProblemsByStatusParams struct {
+	TenantID int64 `json:"tenant_id"`
+	SourceID int64 `json:"source_id"`
+}
+
+type CountVulnProblemsByStatusRow struct {
+	Status            int16 `json:"status"`
+	PrevalidateStatus int16 `json:"prevalidate_status"`
+	Count             int64 `json:"count"`
+}
+
+// 漏洞题工坊的两组分段计数:按状态与预验证结果分组;两组都套用来源筛选,各自不套用本组筛选,
+// 但套用另一组的筛选(选了「草稿」后,验证结果的数字只数草稿)。
+func (q *Queries) CountVulnProblemsByStatus(ctx context.Context, arg CountVulnProblemsByStatusParams) ([]CountVulnProblemsByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countVulnProblemsByStatus, arg.TenantID, arg.SourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountVulnProblemsByStatusRow{}
+	for rows.Next() {
+		var i CountVulnProblemsByStatusRow
+		if err := rows.Scan(&i.Status, &i.PrevalidateStatus, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const createBattleEntry = `-- name: CreateBattleEntry :one
@@ -2187,14 +2277,16 @@ JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
 WHERE m.tenant_id = $1 AND m.contest_id = $2
   AND ($3::bigint = 0 OR a.team_id = $3::bigint OR b.team_id = $3::bigint)
+  AND ($4::smallint = 0 OR m.status = $4::smallint)
 ORDER BY m.matched_at DESC, m.id DESC
-LIMIT $5::int OFFSET $4::int
+LIMIT $6::int OFFSET $5::int
 `
 
 type ListBattleMatchesForTeamParams struct {
 	TenantID   int64 `json:"tenant_id"`
 	ContestID  int64 `json:"contest_id"`
 	TeamID     int64 `json:"team_id"`
+	Status     int16 `json:"status"`
 	PageOffset int32 `json:"page_offset"`
 	PageLimit  int32 `json:"page_limit"`
 }
@@ -2206,6 +2298,7 @@ func (q *Queries) ListBattleMatchesForTeam(ctx context.Context, arg ListBattleMa
 		arg.TenantID,
 		arg.ContestID,
 		arg.TeamID,
+		arg.Status,
 		arg.PageOffset,
 		arg.PageLimit,
 	)
@@ -3076,6 +3169,44 @@ func (q *Queries) ListTeamMembers(ctx context.Context, arg ListTeamMembersParams
 			&i.IsLeader,
 			&i.JoinedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTeamNamesByIDs = `-- name: ListTeamNamesByIDs :many
+SELECT id, name
+FROM team
+WHERE tenant_id = $1 AND contest_id = $2 AND id = ANY($3::bigint[])
+`
+
+type ListTeamNamesByIDsParams struct {
+	TenantID  int64   `json:"tenant_id"`
+	ContestID int64   `json:"contest_id"`
+	TeamIds   []int64 `json:"team_ids"`
+}
+
+type ListTeamNamesByIDsRow struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// 榜单与成绩快照只存 team_id:读取时按当前页的队伍编号一次取队名(引用不拷贝,快照里不存名字)。
+func (q *Queries) ListTeamNamesByIDs(ctx context.Context, arg ListTeamNamesByIDsParams) ([]ListTeamNamesByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listTeamNamesByIDs, arg.TenantID, arg.ContestID, arg.TeamIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTeamNamesByIDsRow{}
+	for rows.Next() {
+		var i ListTeamNamesByIDsRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

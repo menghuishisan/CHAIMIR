@@ -53,6 +53,46 @@ func (q *Queries) CountNotifications(ctx context.Context, arg CountNotifications
 	return count, err
 }
 
+const countNotificationsByRead = `-- name: CountNotificationsByRead :many
+SELECT is_read, COUNT(*)::bigint AS count
+FROM notification
+WHERE receiver_id = $1::bigint
+  AND deleted_at IS NULL
+  AND ($2::text = '' OR type = $2::text)
+GROUP BY is_read
+`
+
+type CountNotificationsByReadParams struct {
+	ReceiverID int64  `json:"receiver_id"`
+	Type       string `json:"type"`
+}
+
+type CountNotificationsByReadRow struct {
+	IsRead bool  `json:"is_read"`
+	Count  int64 `json:"count"`
+}
+
+// 收件箱「全部 / 未读」分段计数:套用类型筛选,不套用已读筛选。
+func (q *Queries) CountNotificationsByRead(ctx context.Context, arg CountNotificationsByReadParams) ([]CountNotificationsByReadRow, error) {
+	rows, err := q.db.Query(ctx, countNotificationsByRead, arg.ReceiverID, arg.Type)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountNotificationsByReadRow{}
+	for rows.Next() {
+		var i CountNotificationsByReadRow
+		if err := rows.Scan(&i.IsRead, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countNotificationsBySource = `-- name: CountNotificationsBySource :one
 SELECT COUNT(*)
 FROM notification
@@ -87,37 +127,40 @@ func (q *Queries) CountUnreadNotifications(ctx context.Context, receiverID int64
 	return count, err
 }
 
-const countVisibleAnnouncementsByScope = `-- name: CountVisibleAnnouncementsByScope :many
-SELECT a.scope, COUNT(*)::bigint AS count
+const countVisibleAnnouncementFacets = `-- name: CountVisibleAnnouncementFacets :many
+SELECT a.scope, (r.id IS NOT NULL)::boolean AS is_read, COUNT(*)::bigint AS count
 FROM system_announcement a
+LEFT JOIN announcement_read r ON r.announcement_id = a.id AND r.tenant_id = $1 AND r.account_id = $2
 WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
   AND (a.expire_at IS NULL OR a.expire_at > now())
-  AND (a.scope <> 3 OR a.target_roles && $2::smallint[] OR a.publisher_id = $3)
-GROUP BY a.scope
+  AND (a.scope <> 3 OR a.target_roles && $3::smallint[] OR a.publisher_id = $2)
+GROUP BY a.scope, (r.id IS NOT NULL)
 ORDER BY a.scope
 `
 
-type CountVisibleAnnouncementsByScopeParams struct {
-	TenantID    pgtype.Int8 `json:"tenant_id"`
-	RoleNumbers []int16     `json:"role_numbers"`
-	AccountID   int64       `json:"account_id"`
+type CountVisibleAnnouncementFacetsParams struct {
+	TenantID    int64   `json:"tenant_id"`
+	AccountID   int64   `json:"account_id"`
+	RoleNumbers []int16 `json:"role_numbers"`
 }
 
-type CountVisibleAnnouncementsByScopeRow struct {
-	Scope int16 `json:"scope"`
-	Count int64 `json:"count"`
+type CountVisibleAnnouncementFacetsRow struct {
+	Scope  int16 `json:"scope"`
+	IsRead bool  `json:"is_read"`
+	Count  int64 `json:"count"`
 }
 
-func (q *Queries) CountVisibleAnnouncementsByScope(ctx context.Context, arg CountVisibleAnnouncementsByScopeParams) ([]CountVisibleAnnouncementsByScopeRow, error) {
-	rows, err := q.db.Query(ctx, countVisibleAnnouncementsByScope, arg.TenantID, arg.RoleNumbers, arg.AccountID)
+// 公告列表的两组计数一次取出:按范围、按本人是否已读;可见边界与 ListAnnouncements 相同。
+func (q *Queries) CountVisibleAnnouncementFacets(ctx context.Context, arg CountVisibleAnnouncementFacetsParams) ([]CountVisibleAnnouncementFacetsRow, error) {
+	rows, err := q.db.Query(ctx, countVisibleAnnouncementFacets, arg.TenantID, arg.AccountID, arg.RoleNumbers)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []CountVisibleAnnouncementsByScopeRow{}
+	items := []CountVisibleAnnouncementFacetsRow{}
 	for rows.Next() {
-		var i CountVisibleAnnouncementsByScopeRow
-		if err := rows.Scan(&i.Scope, &i.Count); err != nil {
+		var i CountVisibleAnnouncementFacetsRow
+		if err := rows.Scan(&i.Scope, &i.IsRead, &i.Count); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

@@ -110,6 +110,8 @@ func battleMatchFromRow(row sqlcgen.BattleMatch) (BattleMatch, error) {
 	return battleMatchFromFields(row.ID, row.TenantID, row.ContestID, row.ProblemID, row.EntryAID, row.EntryBID, row.SourceRef, row.ScopeRef, row.SandboxRef, row.JudgeTaskRef, row.ReplayRef, row.Result, row.ScoreDelta, row.Status, row.MatchedAt, row.FinishedAt, row.LeaseUntil, row.LeaseToken, row.AttemptCount)
 }
 
+// battleMatchFromFields 由各对局查询共有的列组装对局模型,积分变化解码失败时报对局错误;
+// 不同查询生成的行类型各自取列后都走这里,保证同一张表只有一种转换口径。
 func battleMatchFromFields(id, tenantID, contestID, problemID, entryAID, entryBID int64, sourceRef, scopeRef string, sandboxRef, judgeTaskRef, replayRef pgtype.Text, result pgtype.Int2, scoreDelta []byte, status int16, matchedAt, finishedAt, leaseUntil pgtype.Timestamptz, leaseToken string, attemptCount int32) (BattleMatch, error) {
 	delta, err := decodeBattleScoreDelta(scoreDelta, apperr.ErrContestBattleMatchFailed)
 	if err != nil {

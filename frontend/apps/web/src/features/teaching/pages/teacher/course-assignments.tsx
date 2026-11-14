@@ -122,6 +122,23 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
         )
       },
     },
+    {
+      key: 'submissions',
+      header: '已交 · 待批改',
+      align: 'right',
+      // 按学生去重的全班统计;草稿作业还没有人能交,写「—」
+      render: (assignment) =>
+        assignment.status === AssignmentStatus.DRAFT || !assignment.submission_stats ? (
+          <span className="text-ink-sub">—</span>
+        ) : (
+          <span className="whitespace-nowrap font-mono tabular-nums">
+            {assignment.submission_stats.submitted_count} 人 ·{' '}
+            <span className={assignment.submission_stats.pending_count > 0 ? 'text-warning' : 'text-ink-sub'}>
+              {assignment.submission_stats.pending_count} 待批改
+            </span>
+          </span>
+        ),
+    },
     { key: 'max_attempts', header: '可提交次数', align: 'right', mono: true },
     {
       key: 'late_policy',
@@ -225,10 +242,15 @@ export function CourseAssignments({ courseId, outline, onOpenGrading }: CourseAs
                 // 整行链向批改中心并带上这份作业(设计 §7.4)
                 getRowHref={(item) => `/teacher/grading?course=${courseId}&assignment=${item.id}`}
                 onNavigate={(href) => onOpenGradingHref(href)}
-                // <md 换行卡(§6.4.1 规则 3):作业名一行、截止时间与可提交次数一行,发布状态在右
+                // <md 换行卡(§6.4.1 规则 3):作业名一行、截止时间与提交情况一行,发布状态在右
                 mobileCard={(item) => ({
                   title: item.title,
-                  meta: `${formatDateTime(item.due_at)} 截止 · 可交 ${item.max_attempts} 次 · ${latePolicyLabel(item.late_policy)}`,
+                  meta: [
+                    `${formatDateTime(item.due_at)} 截止`,
+                    item.submission_stats && item.status !== AssignmentStatus.DRAFT
+                      ? `已交 ${item.submission_stats.submitted_count} 人 · 待批改 ${item.submission_stats.pending_count}`
+                      : `可交 ${item.max_attempts} 次 · ${latePolicyLabel(item.late_policy)}`,
+                  ].join(' · '),
                   badge: (
                     <StatusIndicator
                       tone={item.status === AssignmentStatus.PUBLISHED ? 'success' : 'neutral'}

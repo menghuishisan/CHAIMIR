@@ -96,8 +96,10 @@ type SimPackageResponse struct {
 	ScaleLimit SimScaleLimitResponse `json:"scale_limit"`
 	BundleHash string                `json:"bundle_hash,omitempty"`
 	Status     string                `json:"status"`
-	CreatedAt  time.Time             `json:"created_at"`
-	UpdatedAt  time.Time             `json:"updated_at"`
+	// RejectComment 最近一次退回的审核意见;只在作者本人视角的已退回场景上给出
+	RejectComment string    `json:"reject_comment,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // SimValidationStatusResponse 是一项审核门禁的公开结论。
@@ -145,9 +147,11 @@ type SimReviewPackageResponse struct {
 
 // SimPackageReviewResponse 是审核记录的公开 HTTP 响应。
 type SimPackageReviewResponse struct {
-	ID            ids.ID                      `json:"id"`
-	PackageID     ids.ID                      `json:"package_id"`
-	SubmitterID   ids.ID                      `json:"submitter_id"`
+	ID          ids.ID `json:"id"`
+	PackageID   ids.ID `json:"package_id"`
+	SubmitterID ids.ID `json:"submitter_id"`
+	// SubmitterName 提交教师姓名;只在平台审核列表里给出,账号已移除时为空串
+	SubmitterName string                      `json:"submitter_name,omitempty"`
 	PreviewReport SimValidationReportResponse `json:"preview_report"`
 	ReviewerID    ids.ID                      `json:"reviewer_id,omitempty"`
 	Result        string                      `json:"result"`

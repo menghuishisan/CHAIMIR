@@ -190,7 +190,7 @@ func contractGrade(g CourseGrade) contracts.TeachingCourseGrade {
 
 // contractCourse 将 M6 课程转换为 M11 所需的只读归属摘要。
 func contractCourse(c Course) contracts.TeachingCourseInfo {
-	return contracts.TeachingCourseInfo{TenantID: c.TenantID, CourseID: c.ID, TeacherID: c.TeacherID, Semester: c.Semester, Credits: c.Credits, Status: c.Status}
+	return contracts.TeachingCourseInfo{TenantID: c.TenantID, CourseID: c.ID, Name: c.Name, TeacherID: c.TeacherID, Semester: c.Semester, Credits: c.Credits, Status: c.Status}
 }
 
 // finalTotal 按 M6 规则选择手动覆盖成绩或自动成绩作为最终分。

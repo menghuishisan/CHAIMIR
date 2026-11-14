@@ -12,6 +12,8 @@ type Querier interface {
 	CountContentItems(ctx context.Context, arg CountContentItemsParams) (int64, error)
 	CountPapers(ctx context.Context, tenantID int64) (int64, error)
 	CountPapersByGenMode(ctx context.Context, tenantID int64) ([]CountPapersByGenModeRow, error)
+	// 共享资源库「按题型」分段计数:只数其他学校已发布且共享的题目,套用关键词,不套用题型筛选。
+	CountSharedContentItemsByType(ctx context.Context, keyword string) ([]CountSharedContentItemsByTypeRow, error)
 	CreateContentBody(ctx context.Context, arg CreateContentBodyParams) (ContentBody, error)
 	CreateContentCategory(ctx context.Context, arg CreateContentCategoryParams) (ContentCategory, error)
 	CreateContentItem(ctx context.Context, arg CreateContentItemParams) (ContentItem, error)

@@ -64,6 +64,7 @@ import {
   ModalTitle,
   WorkbenchShell,
   WorkbenchTopbar,
+  type WorkbenchShortcut,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -525,6 +526,20 @@ function ExperimentWorkbench({
   const pendingCheckpoint = checkpoints.find((checkpoint) => !passedIds.has(checkpoint.id))
   const pendingIndex = pendingCheckpoint ? checkpoints.indexOf(pendingCheckpoint) : -1
   const reportSubmitted = report !== undefined
+  // 主操作的快捷键只覆盖判分(设计 §7.3):提交报告要先在弹窗里选文件;
+  // 「完成实验」结束整个实验、收不回,只能点按钮
+  const judgeShortcuts: WorkbenchShortcut[] =
+    !finished && pendingCheckpoint
+      ? [
+          {
+            key: 'Enter',
+            mod: true,
+            description: `判分第 ${pendingIndex + 1} 个检查点`,
+            disabled: !canJudge || judging.judgingId !== undefined,
+            run: () => void judging.judge(pendingCheckpoint.id),
+          },
+        ]
+      : []
 
   return (
     <>
@@ -534,6 +549,7 @@ function ExperimentWorkbench({
           <WorkbenchTopbar
             onExit={onExit}
             exitLabel="保存并退出"
+            shortcuts={judgeShortcuts}
             title={title}
             subtitle={experiment.name}
             progress={

@@ -87,6 +87,14 @@ WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
 ORDER BY triggered_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
+-- name: CountAlertEventsByStatus :many
+-- 告警列表的状态分段计数:套用级别与学校范围,不套用状态筛选。
+SELECT status, count(*)::bigint AS count
+FROM alert_event
+WHERE (sqlc.arg(level)::smallint = 0 OR level = sqlc.arg(level)::smallint)
+  AND ((sqlc.narg(tenant_id)::bigint IS NULL) OR tenant_id = sqlc.narg(tenant_id)::bigint)
+GROUP BY status;
+
 -- name: CountAlertEvents :one
 SELECT count(*)::bigint
 FROM alert_event
@@ -135,6 +143,12 @@ FROM backup_record
 WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
 ORDER BY started_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountBackupRecordsByStatus :many
+-- 备份巡检的状态分段计数(进行中 / 已成功 / 已失败)。
+SELECT status, count(*)::bigint AS count
+FROM backup_record
+GROUP BY status;
 
 -- name: CountBackupRecords :one
 SELECT count(*)::bigint

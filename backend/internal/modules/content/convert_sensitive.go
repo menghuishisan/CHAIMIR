@@ -21,6 +21,10 @@ var defaultSensitivePaths = []string{
 	"hidden_testcases",
 	"flag",
 	"flags",
+	// 漏洞题的复现步骤、利用步骤与判定断言:判题所需内容已写进 judge_config.expectation,题面一律不带
+	"init_steps",
+	"positive_steps",
+	"assertions",
 }
 
 // faceSnapshot 返回剥离敏感字段后的题面快照。

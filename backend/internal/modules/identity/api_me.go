@@ -69,9 +69,13 @@ func (a meAPI) changePhone(c *gin.Context) {
 	httpx.Write(c, struct{}{}, nil)
 }
 
-// sessions 返回当前账号服务端会话列表。
+// sessions 返回当前账号服务端会话列表,并标出发起本次请求的会话。
 func (a meAPI) sessions(c *gin.Context) {
-	out, err := a.svc.ListMySessions(c.Request.Context())
+	sessionID, ok := currentSessionID(c)
+	if !ok {
+		return
+	}
+	out, err := a.svc.ListMySessions(c.Request.Context(), sessionID)
 	if err != nil {
 		httpx.Write(c, struct{}{}, err)
 		return

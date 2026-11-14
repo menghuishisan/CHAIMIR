@@ -100,8 +100,10 @@ type AccountCreateResponse struct {
 }
 
 type MeResponse struct {
-	Account        AccountDTO `json:"account"`
-	EnabledModules []string   `json:"enabled_modules"`
+	Account AccountDTO `json:"account"`
+	// TenantName 是本次会话所属学校的名称;平台账号不属于任何学校,为空串
+	TenantName     string   `json:"tenant_name"`
+	EnabledModules []string `json:"enabled_modules"`
 }
 
 type ChangePasswordRequest struct {
@@ -121,6 +123,8 @@ type SessionDTO struct {
 	Status     int16  `json:"status"`
 	ExpireAt   string `json:"expire_at"`
 	CreatedAt  string `json:"created_at"`
+	// Current 标出发起本次请求的会话,即用户正在用的这台设备
+	Current bool `json:"current"`
 }
 
 type CreateApplicationRequest struct {

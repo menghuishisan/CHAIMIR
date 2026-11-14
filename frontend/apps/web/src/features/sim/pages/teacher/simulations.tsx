@@ -1,7 +1,7 @@
 // 仿真场景页(教师侧栏,/teacher/simulations)。设计 §7.4:
 // 页头 +「提交场景」;默认只看「我提交的」(「全部可用场景」仍可切过去只读浏览);分段按状态(草稿 / 审核中 /
 // 已上架 / 已退回),视角、分段与页码写进地址;列表行显示名称、版本、分类、状态;整行打开「审核报告」抽屉;
-// 已退回的行直接给「更新后重新提交」,退回原因在审核报告里(列表接口不带审核意见,见设计 §10 缺口)。
+// 已退回的行直接写出退回原因(列表随记录给出最近一次退回意见)并给「更新后重新提交」。
 //
 // 「我提交的」与「可用场景」是同一列表接口的两个视角(GET /sim/packages 按 mine 分叉),作者边界由服务端会话判定。
 // 边界:审核通过、驳回、下架、重新上架只在平台管理端;表单也没有「运行方式」—— 教师提交的场景一律
@@ -23,7 +23,8 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceError } from '../../../../components/ResourceState'
-import { usePagedResource, useResourceTotal, useUrlState } from '../../../../hooks'
+import { usePagedResource, useUrlState } from '../../../../hooks'
+import { facetCount, facetSum } from '../../../../utils/facets'
 import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
 import { simCategoryLabel, simPackageStatusLabel } from '../../../../utils/labels/sim'
 import { simPackageStatusTone } from '../../statusPresentation'
@@ -72,30 +73,11 @@ export default function TeacherSimulationsPage() {
     { urlPageKey: 'page' },
   )
 
-  // 分段上的数字取服务端全量口径,固定「我提交的」:它回答「我的场景走到哪一步了」
-  const counts = {
-    all: useResourceTotal((params) => api.sim.getPackages({ mine: true, ...params }), [], packages.refreshVersion),
-    [SIM_PACKAGE_STATUS.DRAFT]: useResourceTotal(
-      (params) => api.sim.getPackages({ mine: true, status: SIM_PACKAGE_STATUS.DRAFT, ...params }),
-      [],
-      packages.refreshVersion,
-    ),
-    [SIM_PACKAGE_STATUS.REVIEWING]: useResourceTotal(
-      (params) => api.sim.getPackages({ mine: true, status: SIM_PACKAGE_STATUS.REVIEWING, ...params }),
-      [],
-      packages.refreshVersion,
-    ),
-    [SIM_PACKAGE_STATUS.PUBLISHED]: useResourceTotal(
-      (params) => api.sim.getPackages({ mine: true, status: SIM_PACKAGE_STATUS.PUBLISHED, ...params }),
-      [],
-      packages.refreshVersion,
-    ),
-    [SIM_PACKAGE_STATUS.REJECTED]: useResourceTotal(
-      (params) => api.sim.getPackages({ mine: true, status: SIM_PACKAGE_STATUS.REJECTED, ...params }),
-      [],
-      packages.refreshVersion,
-    ),
-  } as Record<string, number | undefined>
+  // 分段计数取列表接口的 facets(只在「我提交的」视角有状态分段):套用作者范围,不套用状态筛选
+  const facets = packages.status === 'success' || packages.status === 'empty' ? packages.data?.facets : undefined
+  const counts: Record<string, number | undefined> = mine
+    ? { all: facetSum(facets, 'status'), ...Object.fromEntries(Object.values(SIM_PACKAGE_STATUS).map((status) => [status, facetCount(facets, 'status', status)])) }
+    : {}
 
   const list = packages.data?.list ?? []
   const filtered = mine && query.status !== 'all'
@@ -215,7 +197,7 @@ interface PackageRowProps {
 
 /**
  * PackageRow 一个场景包:名称、版本与分类、更新时间、状态。
- * 已退回的行写「点开查看退回原因」并给「更新后重新提交」;草稿给「更新」。
+ * 已退回的行另起一行写出退回原因(最多两行,全文在审核报告里)并给「更新后重新提交」;草稿给「更新」。
  */
 function PackageRow({ pkg, mine, onOpenReport, onUpdate }: PackageRowProps) {
   const rejected = pkg.status === SIM_PACKAGE_STATUS.REJECTED
@@ -225,7 +207,11 @@ function PackageRow({ pkg, mine, onOpenReport, onUpdate }: PackageRowProps) {
         {simCategoryLabel(pkg.category)} · 版本 {pkg.version}
       </span>
       <span title={formatDateTime(pkg.updated_at)}>· {formatRelativeOccurrence(pkg.updated_at)}更新</span>
-      {mine && rejected ? <span className="text-warning">· 点开查看退回原因</span> : null}
+      {mine && rejected ? (
+        <span className="basis-full text-warning line-clamp-2">
+          {pkg.reject_comment ? `退回原因:${pkg.reject_comment}` : '已退回,点开查看审核报告了解原因'}
+        </span>
+      ) : null}
     </span>
   )
   const trailing = (

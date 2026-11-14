@@ -27,6 +27,7 @@ const STEP_STATUS_TEXT: Record<PipelineStep["status"], string> = {
   failed: "未通过",
 };
 
+/** PipelinePatternView 流程视图(pipeline 模式) */
 export function PipelinePatternView({
   pattern,
   focus,

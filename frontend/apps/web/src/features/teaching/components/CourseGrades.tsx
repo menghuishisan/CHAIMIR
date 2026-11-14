@@ -67,7 +67,7 @@ export function CourseGrades({ courseId }: CourseGradesProps) {
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
-  const weights = useAsyncResource(() => api.teaching.listGradeWeights(courseId), [courseId], () => false)
+  const weights = useAsyncResource(() => api.teaching.listGradeWeights(courseId), [courseId], (value) => value.length === 0)
   const grades = usePagedResource<TeachingCourseGrade>((params) => api.teaching.listGrades(courseId, params), [courseId])
   // 成绩记录只回学生编号:用本课成员列表换成姓名与学号,已退课的显示「已退课学生」
   const names = useCourseMemberNames([courseId])

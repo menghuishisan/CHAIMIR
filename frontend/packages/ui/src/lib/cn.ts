@@ -5,7 +5,7 @@
  * 本库有两类自定义工具类,处理方式不同:
  *
  * **A. 与 Tailwind 同名组的变体**(`rounded-pane`、`text-nav`、`text-stat`、`duration-fast`、`z-sticky`、
- * `animate-*`、`transition-sidebar`、`origin-radix-select`、`w-wb-*`):它们和原生类设同一个属性,
+ * `animate-*`、`transition-sidebar`、`origin-radix-select`、`w-wb-*`、`min-w-popover-trigger`):它们和原生类设同一个属性,
  * 必须登记进对应 classGroup,否则消费方经 className 覆盖时 twMerge 认不出冲突,
  * 胜负会落到样式表生成顺序上(不可控)。**新增此类工具类时必须同步登记到这里。**
  *
@@ -48,7 +48,9 @@ const twMerge = extendTailwindMerge<ChaimirClassGroupId>({
       transition: ["transition-sidebar", "transition-ring"],
       "transform-origin": ["origin-radix-select"],
       // 工作台栏宽(§2.4):设的是 width,必须与 w-* 同组,否则 w-full 覆盖不掉
-      w: ["w-wb-aside", "w-wb-stream", "w-wb-rail", "w-topbar-popover"],
+      w: ["w-wb-aside", "w-wb-stream", "w-wb-rail", "w-topbar-popover", "w-picker-popover"],
+      // 弹出层不窄于触发器:设的是 min-width,与 min-w-* 同组
+      "min-w": ["min-w-popover-trigger"],
       z: [
         {
           z: [
@@ -104,6 +106,7 @@ const twMerge = extendTailwindMerge<ChaimirClassGroupId>({
   },
 });
 
+/** cn 合并类名:clsx 组合条件类,tailwind-merge 去掉冲突的工具类 */
 export function cn(...inputs: ClassValue[]): string {
   return twMerge(clsx(inputs));
 }

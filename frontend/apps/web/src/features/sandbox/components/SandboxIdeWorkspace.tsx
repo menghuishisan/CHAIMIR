@@ -65,6 +65,8 @@ import {
   TabsTrigger,
   Textarea,
   toast,
+  useMediaQuery,
+  useWorkbenchShortcuts,
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
 import { appConfig } from '../../../app/config'
@@ -441,7 +443,7 @@ function SandboxIdeWorkspaceSession({
   return (
     <div className="flex h-full min-h-0 flex-col">
       {instance.resource_usage === null ? (
-        <p role="status" className="shrink-0 px-3 py-2 text-xs text-on-dark-sub">
+        <p className="shrink-0 px-3 py-2 text-xs text-on-dark-sub">
           资源用量暂时无法读取，环境功能可继续使用。
         </p>
       ) : null}
@@ -573,6 +575,9 @@ function SandboxIdeWorkspaceSession({
 
 /* ---------------------------------------------------------------- 代码面板 */
 
+/** 有鼠标或触控板:代码编辑器只在这类设备上可编辑(规范 §7.3) */
+const FINE_POINTER_QUERY = '(any-pointer: fine)'
+
 interface FilesPanelProps {
   sandboxId: string
   workspaceApi: SandboxWorkspaceApi
@@ -596,6 +601,9 @@ function FilesPanel({ sandboxId, workspaceApi, onSaved }: FilesPanelProps) {
   const [confirmReload, setConfirmReload] = useState(false)
   const [panelError, setPanelError] = useState<string>()
   const [editorError, setEditorError] = useState<string>()
+  // 没有鼠标或触控板的设备上编辑器只读(规范 §7.3):代码编辑器不支持移动浏览器的软键盘与输入法,
+  // 在那里改代码容易把文件写坏;查看与保存工作区照常可用
+  const editable = useMediaQuery(FINE_POINTER_QUERY)
 
   const editorHost = useRef<HTMLDivElement>(null)
   const editorRef = useRef<MountedEditor | undefined>(undefined)
@@ -693,6 +701,7 @@ function FilesPanel({ sandboxId, workspaceApi, onSaved }: FilesPanelProps) {
     void mountMonacoEditor(host, {
       value: contentRef.current,
       language,
+      readOnly: !editable,
       onChange: (value) => {
         if (disposed) return
         contentRef.current = value
@@ -721,9 +730,9 @@ function FilesPanel({ sandboxId, workspaceApi, onSaved }: FilesPanelProps) {
       mounted?.dispose()
       editorRef.current = undefined
     }
-    // language 随 openPath 推导,不单独列进依赖
+    // language 随 openPath 推导,不单独列进依赖;换设备输入方式时按当前内容重建(未写入的编辑在 contentRef 里)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileReadVersion, openPath])
+  }, [editable, fileReadVersion, openPath])
 
   /** writeCurrentFile 把编辑内容写回工作区(还没落对象存储)。 */
   const writeCurrentFile = useCallback(async () => {
@@ -752,6 +761,18 @@ function FilesPanel({ sandboxId, workspaceApi, onSaved }: FilesPanelProps) {
       if (mountedRef.current) setBusy(false)
     }
   }, [markDirty, openPath, sandboxId, workspaceApi])
+
+  // 写入当前文件的快捷键与「写入」按钮同一个动作、同样的可用条件(规范 §7.3);
+  // 没有可写入的修改时照样拦下,不让浏览器弹出「另存网页」
+  useWorkbenchShortcuts([
+    {
+      key: 's',
+      mod: true,
+      description: '写入当前文件',
+      disabled: !openPath || !dirty || busy,
+      run: () => void writeCurrentFile(),
+    },
+  ])
 
   /**
    * persistWorkspace 把整个工作区持久化并交出代码引用。
@@ -907,6 +928,12 @@ function FilesPanel({ sandboxId, workspaceApi, onSaved }: FilesPanelProps) {
           </div>
         </div>
 
+        {editable ? null : (
+          <p className="shrink-0 px-3 py-2 text-xs text-on-dark-sub">
+            这台设备没有鼠标或触控板,代码只能查看;改代码请换到电脑上。保存工作区、终端和链操作照常可用。
+          </p>
+        )}
+
         {panelError ? (
           <p role="alert" className="shrink-0 px-3 py-2 text-xs text-on-dark-danger">
             {panelError}
@@ -930,7 +957,9 @@ function FilesPanel({ sandboxId, workspaceApi, onSaved }: FilesPanelProps) {
         {openPath === undefined ? (
           <div className="flex min-h-0 flex-1 items-center justify-center px-6 text-center">
             <p className="text-sm text-on-dark-sub">
-              选一个文件就能开始写。改完先「写入」,再「保存工作区」交给判分。
+              {editable
+                ? '选一个文件就能开始写。改完先「写入」,再「保存工作区」交给判分。'
+                : '选一个文件查看内容。'}
             </p>
           </div>
         ) : (

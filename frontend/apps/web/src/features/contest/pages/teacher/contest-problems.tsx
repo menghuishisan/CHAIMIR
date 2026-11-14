@@ -9,12 +9,10 @@
 // 教师编排需要的是"选哪道题、值多少分",不需要在这里读答案。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Plus, Swords, Target } from 'lucide-react'
+import { Plus, Swords } from 'lucide-react'
 import {
   ContestMode,
   ContentType,
-  ContentStatus,
-  PAGINATION_MAX_SIZE,
   type BattleRule,
   type Contest,
   type ContestProblem,
@@ -38,8 +36,6 @@ import {
   ModalTitle,
   PageSection,
   SegmentedControl,
-  Select,
-  Skeleton,
   Table,
   toast,
   type TableColumn,
@@ -48,7 +44,7 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
-import { toContentItemVersionOptions } from '../../../content/contentItemOptions'
+import { ContentItemSelect } from '../../../content/components/ContentItemSelect'
 import { battleRoleLabel, battleRuleLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { BATTLE_RULES } from '../../options'
@@ -82,7 +78,8 @@ export function ContestProblems({ contest, readOnly = false, onCountChange }: Co
   const totalScore = (problems.data ?? []).reduce((sum, item) => sum + item.score, 0)
 
   const columns: TableColumn<ContestProblem>[] = [
-    { key: 'seq', header: '序号', align: 'right', mono: true },
+    // 序号是窄的数字列:定宽,不把它摊成一大片空白
+    { key: 'seq', header: '序号', align: 'right', mono: true, width: '88px' },
     {
       key: 'title',
       header: '赛题',
@@ -260,28 +257,10 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
       ? '每队衰减需要是大于 0 的整数' : null,
   }))
 
-  // 题目只列已发布的:草稿题目在学生答题时取不到题面
-  const items = useAsyncResource(
-    () =>
-      api.content.getItems({
-        status: ContentStatus.PUBLISHED,
-        page: 1,
-        size: PAGINATION_MAX_SIZE,
-      }),
-    [],
-    () => false
-  )
-
-  const itemOptions = useMemo(
-    () =>
-      toContentItemVersionOptions(
-        items.data?.list ?? [],
-        isBattle
-          ? [ContentType.CONTEST_PROBLEM]
-          : [ContentType.CONTEST_PROBLEM, ContentType.THEORY_QUESTION]
-      ),
-    [isBattle, items.data]
-  )
+  // 引用题目:对抗赛只能引用竞赛题,其他赛制可再引用理论题(ContentItemSelect 只列已发布的题)
+  const itemTypes = isBattle
+    ? [ContentType.CONTEST_PROBLEM]
+    : [ContentType.CONTEST_PROBLEM, ContentType.THEORY_QUESTION]
 
   const entryRoles = useMemo(() => battleEntryRoles(Number(battleRule) as BattleRule), [battleRule])
 
@@ -349,34 +328,23 @@ function ProblemFormModal({ contest, problem, nextSeq, onClose, onSaved }: Probl
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <ResourceState
-              resource={items}
-              emptyIcon={Target}
-              emptyTitle="题库里还没有已发布的题目"
-              emptyDescription="先在题库内容里创建并发布题目,再回来编排赛题。"
-              skeleton={<Skeleton variant="line" lines={2} />}
+            <FormField
+              label="引用题目"
+              htmlFor="problem-item"
+              required
+              error={errors.item}
+              helper="题目按当前版本锁定;换题请新增赛题,已有提交仍绑定原题版本"
             >
-              {() => (
-                <FormField
-                  label="引用题目"
-                  htmlFor="problem-item"
-                  required
-                  error={errors.item}
-                  helper="题目按当前版本锁定;换题请新增赛题,已有提交仍绑定原题版本"
-                >
-                  <Select
-                    id="problem-item"
-                    options={itemOptions}
-                    value={itemRef}
-                    invalid={Boolean(errors.item)}
-                    onBlur={() => validate(['item'])}
-                    placeholder={itemOptions.length > 0 ? '选择题目' : '暂无已发布题目'}
-                    disabled={itemOptions.length === 0 || editing}
-                    onValueChange={setItemRef}
-                  />
-                </FormField>
-              )}
-            </ResourceState>
+              <ContentItemSelect
+                id="problem-item"
+                label="引用题目"
+                value={itemRef === '' ? undefined : { code: itemRef.split('|')[0], version: itemRef.split('|')[1] }}
+                types={itemTypes}
+                invalid={Boolean(errors.item)}
+                disabled={editing}
+                onChange={(item) => setItemRef(`${item.code}|${item.version}`)}
+              />
+            </FormField>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField label="分值" htmlFor="problem-score" required error={errors.score}>

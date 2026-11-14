@@ -13,10 +13,13 @@ import (
 type Querier interface {
 	CountAnnouncements(ctx context.Context, arg CountAnnouncementsParams) (int64, error)
 	CountNotifications(ctx context.Context, arg CountNotificationsParams) (int64, error)
+	// 收件箱「全部 / 未读」分段计数:套用类型筛选,不套用已读筛选。
+	CountNotificationsByRead(ctx context.Context, arg CountNotificationsByReadParams) ([]CountNotificationsByReadRow, error)
 	// 业务事件重投时先识别已持久化的同一收件人集合,避免重复投递被限流当作失败。
 	CountNotificationsBySource(ctx context.Context, arg CountNotificationsBySourceParams) (int64, error)
 	CountUnreadNotifications(ctx context.Context, receiverID int64) (int64, error)
-	CountVisibleAnnouncementsByScope(ctx context.Context, arg CountVisibleAnnouncementsByScopeParams) ([]CountVisibleAnnouncementsByScopeRow, error)
+	// 公告列表的两组计数一次取出:按范围、按本人是否已读;可见边界与 ListAnnouncements 相同。
+	CountVisibleAnnouncementFacets(ctx context.Context, arg CountVisibleAnnouncementFacetsParams) ([]CountVisibleAnnouncementFacetsRow, error)
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (SystemAnnouncement, error)
 	CreateNotification(ctx context.Context, arg CreateNotificationParams) error
 	DeleteExpiredNotifications(ctx context.Context, createdAt pgtype.Timestamptz) error

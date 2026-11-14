@@ -1,21 +1,18 @@
-// 课程讨论与公告(课程详情页内区块,教师视角)。
-// 教师比学生多三个动作:置顶帖子、删除违规帖、发布公告并置顶。
-// 删除是不可逆的,故走确认弹层而不是 window.confirm(规范:危险操作需确认且视觉分离)。
+// 课程「讨论与公告」标签(教师课程详情)。设计 §7.4:与学生侧同一形态,教师多发布公告、置顶公告与帖子、删除违规帖。
+// 公告是列表行(标题、发布时间、置顶标记与置顶开关),点开就地展开全文;下方是讨论流。
 
-import { useCallback, useState } from 'react'
-import { Megaphone, Pin, Send } from 'lucide-react'
+import { useState } from 'react'
+import { Megaphone, Pin, PinOff, Send } from 'lucide-react'
 import type { TeachingAnnouncement } from '@chaimir/api-client'
 import {
   Badge,
   Button,
   Callout,
-  Card,
-  CardBody,
-  CardHeader,
   Checkbox,
   FormField,
   IconButton,
   Input,
+  ListRow,
   Modal,
   ModalBody,
   ModalContent,
@@ -23,7 +20,6 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
-  PageSection,
   Pagination,
   Skeleton,
   Textarea,
@@ -33,7 +29,7 @@ import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { usePagedResource } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
-import { formatShortDateTime } from '../../../../utils/formatters'
+import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { CoursePosts } from '../../components/CoursePosts'
 
@@ -41,105 +37,129 @@ export interface CourseBoardProps {
   courseId: string
 }
 
-/**
- * CourseBoard 组合公告发布与讨论管理。
- */
+/** CourseBoard 公告在上、讨论在下(教师可置顶与删除帖子) */
 export function CourseBoard({ courseId }: CourseBoardProps) {
   return (
-    <>
+    <div className="flex flex-col gap-8">
       <CourseAnnouncements courseId={courseId} />
       <CoursePosts key={courseId} courseId={courseId} canModerate />
-    </>
+    </div>
   )
 }
 
-/**
- * CourseAnnouncements 发布与置顶课程公告。
- */
+/** CourseAnnouncements 课程公告:发布、置顶切换,点开就地展开全文 */
 function CourseAnnouncements({ courseId }: CourseBoardProps) {
   const [composeOpen, setComposeOpen] = useState(false)
-  const [actionError, setActionError] = useState<string>()
+  const [expanded, setExpanded] = useState<string>()
   const [pendingPin, setPendingPin] = useState<string>()
-
-	const announcements = usePagedResource<TeachingAnnouncement>((params) => api.teaching.listAnnouncements(courseId, params), [courseId])
-
-  const togglePin = useCallback(
-    async (announcement: TeachingAnnouncement) => {
-      if (pendingPin) return
-      setPendingPin(announcement.id)
-      setActionError(undefined)
-      try {
-        await api.teaching.pinAnnouncement(announcement.id, !announcement.is_pinned)
-        announcements.reload()
-      } catch (error) {
-        setActionError(userFacingErrorMessage(error, '操作没有完成,请稍后重试。'))
-      } finally {
-        setPendingPin(undefined)
-      }
-    },
-    [announcements, pendingPin],
+  const [actionError, setActionError] = useState<string>()
+  const announcements = usePagedResource<TeachingAnnouncement>(
+    (params) => api.teaching.listAnnouncements(courseId, params),
+    [courseId],
+    { urlPageKey: 'notice_page' }
   )
 
+  /** togglePin 置顶或取消置顶一条公告 */
+  const togglePin = async (announcement: TeachingAnnouncement) => {
+    if (pendingPin) return
+    setPendingPin(announcement.id)
+    setActionError(undefined)
+    try {
+      await api.teaching.pinAnnouncement(announcement.id, !announcement.is_pinned)
+      announcements.reload()
+    } catch (error) {
+      setActionError(userFacingErrorMessage(error, '置顶没有改成功,请稍后重试。'))
+    } finally {
+      setPendingPin(undefined)
+    }
+  }
+
   return (
-    <PageSection
-      title="课程公告"
-      description="公告会显示在学生的课程详情页顶部。"
-      actions={
-        <Button variant="primary" leftIcon={Megaphone} onClick={() => setComposeOpen(true)}>
+    <section aria-labelledby="teacher-announcements-title">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h2 id="teacher-announcements-title" className="text-lg font-semibold text-ink">
+          课程公告
+        </h2>
+        <Button
+          variant="primary"
+          size="sm"
+          leftIcon={Megaphone}
+          onClick={() => setComposeOpen(true)}
+        >
           发布公告
         </Button>
-      }
-    >
-      <div className="flex flex-col gap-4">
-        {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
-        <ResourceState
-          resource={announcements}
-          emptyIcon={Megaphone}
-          emptyTitle="还没有公告"
-          emptyDescription="重要通知发成公告,学生进入课程就能看到。"
-          emptyAction={
-            <Button variant="primary" leftIcon={Megaphone} onClick={() => setComposeOpen(true)}>
-              发布公告
-            </Button>
-          }
-          skeleton={<Skeleton variant="line" lines={3} />}
-        >
-			{(page) => (
-				<div className="flex flex-col gap-3">
-              {page.list.map((announcement) => (
-                <Card key={announcement.id}>
-                  <CardHeader
-                    title={
-                      <span className="flex flex-wrap items-center gap-2">
-                        <span className="min-w-0 truncate">{announcement.title}</span>
-                        {announcement.is_pinned ? <Badge tone="jade">置顶</Badge> : null}
-                      </span>
-                    }
-                    description={formatShortDateTime(announcement.created_at)}
-                    actions={
-                      <IconButton
-                        variant="ghost"
-                        size="sm"
-                        icon={Pin}
-                        aria-label={announcement.is_pinned ? '取消置顶公告' : '置顶公告'}
-                        disabled={Boolean(pendingPin)}
-                        onClick={() => void togglePin(announcement)}
-                      />
-                    }
-                  />
-                  <CardBody>
-                    <p className="whitespace-pre-wrap text-base leading-relaxed text-ink">
-                      {announcement.content}
-                    </p>
-                  </CardBody>
-                </Card>
-					))}
-					<Pagination page={announcements.page} pageSize={announcements.pageSize} total={announcements.total} onPageChange={announcements.setPage} />
-				</div>
-			)}
-        </ResourceState>
       </div>
+      {actionError ? (
+        <Callout tone="danger" className="mb-3">
+          {actionError}
+        </Callout>
+      ) : null}
+      <ResourceState
+        resource={announcements}
+        emptyIcon={Megaphone}
+        emptyTitle="还没有公告"
+        emptyDescription="重要通知发成公告,学生进入课程就能看到。"
+        skeleton={<Skeleton variant="line" lines={3} />}
+      >
+        {(page) => (
+          <>
+            <ul className="divide-y divide-line rounded-lg bg-surface px-2 py-1 shadow-xs">
+              {page.list.map((item) => {
+                const open = expanded === item.id
+                return (
+                  <li key={item.id}>
+                    <ListRow
+                      title={item.title}
+                      leading={
+                        item.is_pinned ? (
+                          <Pin aria-hidden="true" className="size-4 text-primary" />
+                        ) : undefined
+                      }
+                      meta={
+                        <span title={formatDateTime(item.created_at)}>
+                          {formatRelativeOccurrence(item.created_at)}发布
+                        </span>
+                      }
+                      trailing={
+                        <span className="flex items-center gap-1">
+                          {item.is_pinned ? <Badge tone="jade">置顶</Badge> : null}
+                          <IconButton
+                            variant="ghost"
+                            size="sm"
+                            icon={item.is_pinned ? PinOff : Pin}
+                            aria-label={
+                              item.is_pinned
+                                ? `取消置顶公告 ${item.title}`
+                                : `置顶公告 ${item.title}`
+                            }
+                            disabled={Boolean(pendingPin)}
+                            onClick={() => void togglePin(item)}
+                          />
+                        </span>
+                      }
+                      selected={open}
+                      onSelect={() => setExpanded(open ? undefined : item.id)}
+                    />
+                    {open ? (
+                      <p className="whitespace-pre-wrap px-3 pb-4 pt-1 text-base leading-relaxed text-ink">
+                        {item.content}
+                      </p>
+                    ) : null}
+                  </li>
+                )
+              })}
+            </ul>
+            <div className="mt-3">
+              <Pagination
+                page={announcements.page}
+                pageSize={announcements.pageSize}
+                total={announcements.total}
+                onPageChange={announcements.setPage}
+              />
+            </div>
+          </>
+        )}
+      </ResourceState>
 
       {composeOpen ? (
         <AnnouncementComposeModal
@@ -151,7 +171,7 @@ function CourseAnnouncements({ courseId }: CourseBoardProps) {
           }}
         />
       ) : null}
-    </PageSection>
+    </section>
   )
 }
 
@@ -161,9 +181,7 @@ interface AnnouncementComposeModalProps {
   onPosted: () => void
 }
 
-/**
- * AnnouncementComposeModal 发布课程公告。
- */
+/** AnnouncementComposeModal 发布课程公告 */
 function AnnouncementComposeModal({ courseId, onClose, onPosted }: AnnouncementComposeModalProps) {
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -175,35 +193,35 @@ function AnnouncementComposeModal({ courseId, onClose, onPosted }: AnnouncementC
     content: content.trim() ? null : '请输入公告内容',
   }))
 
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (working || !validate()) return
-      setFormError(undefined)
-      setWorking(true)
-      try {
-        await api.teaching.createAnnouncement(courseId, {
-          title: title.trim(),
-          content: content.trim(),
-          is_pinned: pinned,
-        })
-        toast.success('公告已发布')
-        onPosted()
-      } catch (error) {
-        setFormError(userFacingErrorMessage(error, '发布没有成功,请稍后重试。'))
-      } finally {
-        setWorking(false)
-      }
-    },
-    [content, courseId, onPosted, pinned, title, validate, working],
-  )
+  /** submit 发布公告 */
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (working || !validate()) return
+    setFormError(undefined)
+    setWorking(true)
+    try {
+      await api.teaching.createAnnouncement(courseId, {
+        title: title.trim(),
+        content: content.trim(),
+        is_pinned: pinned,
+      })
+      toast.success('公告已发布')
+      onPosted()
+    } catch (error) {
+      setFormError(userFacingErrorMessage(error, '发布没有成功,请稍后重试。'))
+    } finally {
+      setWorking(false)
+    }
+  }
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
+    <Modal open onOpenChange={(open) => !open && !working && onClose()}>
       <ModalContent size="lg">
         <ModalHeader>
           <ModalTitle>发布课程公告</ModalTitle>
-          <ModalDescription>公告发布后学生进入课程即可看到。</ModalDescription>
+          <ModalDescription>
+            发布后学生进入课程就能看到,最新的两条会显示在课程首页右栏。
+          </ModalDescription>
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
@@ -216,13 +234,19 @@ function AnnouncementComposeModal({ courseId, onClose, onPosted }: AnnouncementC
                 onChange={(event) => setTitle(event.target.value)}
               />
             </FormField>
-            <FormField label="公告内容" htmlFor="announcement-content" required error={errors.content}>
+            <FormField
+              label="公告内容"
+              htmlFor="announcement-content"
+              required
+              helper="换行会原样保留"
+              error={errors.content}
+            >
               <Textarea
                 id="announcement-content"
                 value={content}
+                rows={6}
                 invalid={Boolean(errors.content)}
                 onBlur={() => validate(['content'])}
-                rows={6}
                 onChange={(event) => setContent(event.target.value)}
               />
             </FormField>
@@ -234,7 +258,7 @@ function AnnouncementComposeModal({ courseId, onClose, onPosted }: AnnouncementC
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </ModalBody>
           <ModalFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" disabled={working} onClick={onClose}>
               取消
             </Button>
             <Button type="submit" variant="primary" leftIcon={Send} loading={working}>

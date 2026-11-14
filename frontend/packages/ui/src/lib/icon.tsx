@@ -20,6 +20,7 @@ export interface IconProps {
   className?: string;
 }
 
+/** Icon Lucide 图标的统一封装:尺寸走令牌,描边统一 */
 export function Icon({ icon: LucideCmp, size = "md", label, className }: IconProps) {
   return (
     <LucideCmp

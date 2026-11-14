@@ -401,9 +401,11 @@
   --z-ground: 0;
   --z-base: 1;
   --z-sticky: 50;
+  /* 沉浸层排在浮层之下(§2.4):它与日常页互斥挂载,不需要盖住任何日常层;
+     工作台里的菜单、气泡、下拉和弹窗都经 Portal 挂到 body,必须浮在它上面 */
+  --z-immersive: 55;
   --z-dropdown: 60;
   --z-drawer: 80;
-  --z-immersive: 100;
   --z-modal: 120;
   --z-toast: 200;
 
@@ -422,6 +424,10 @@
 
   /* 顶栏弹出层(通知铃铛、任务与下载)的宽度:380,窄屏时不超过视口减去两侧 16 的边距(设计 §7.8) */
   --topbar-popover-w: min(380px, calc(100vw - 32px));
+
+  /* 可搜索选择器(审计操作人等)弹出层的宽度:320,窄屏时同样不超过视口减去两侧 16 的边距;
+     触发器比它宽时(表单里的整宽字段)由 min-w-popover-trigger 撑到与触发器同宽 */
+  --picker-popover-w: min(320px, calc(100vw - 32px));
 
   --t-press: 120ms;
   --t-fast: 160ms;
@@ -482,6 +488,16 @@
 /* ---------- 顶栏弹出层宽度(通知铃铛、任务与下载) ---------- */
 @utility w-topbar-popover {
   width: var(--topbar-popover-w);
+}
+
+/* ---------- 可搜索选择器弹出层宽度 ---------- */
+@utility w-picker-popover {
+  width: var(--picker-popover-w);
+}
+
+/* ---------- 弹出层不窄于触发器(可搜索选择器展开后与输入框左右对齐) ---------- */
+@utility min-w-popover-trigger {
+  min-width: var(--radix-popover-trigger-width);
 }
 
 /* ---------- 竖排文字(§7.1:侧栏收起为竖向把手时,面板名沿把手竖排) ---------- */

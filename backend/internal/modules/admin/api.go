@@ -105,8 +105,8 @@ func (a adminAPI) queryAudit(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := a.svc.QueryAudit(c.Request.Context(), query)
-	httpx.WritePageWithFacets(c, auditLogEntryDTOs(result.List), result.Total, int(result.Page), int(result.Size), result.Facets, err)
+	result, actors, err := a.svc.QueryAuditPage(c.Request.Context(), query)
+	httpx.WritePageWithFacets(c, auditLogEntryDTOs(result.List, actors), result.Total, int(result.Page), int(result.Size), result.Facets, err)
 }
 
 // exportAudit 导出审计 CSV。
@@ -215,8 +215,8 @@ func (a adminAPI) listAlertEvents(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out9, total, p, s, err := a.svc.ListAlertEvents(c.Request.Context(), status, level, page, size)
-	httpx.WritePage(c, out9, total, p, s, err)
+	out9, total, p, s, facets, err := a.svc.ListAlertEvents(c.Request.Context(), status, level, page, size)
+	httpx.WritePageWithFacets(c, out9, total, p, s, facets.Map(), err)
 }
 
 // handleAlertEvent 处理告警事件。
@@ -250,13 +250,18 @@ func (a adminAPI) listBackups(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out11, total, p, s, err := a.svc.ListBackups(c.Request.Context(), status, page, size)
-	httpx.WritePage(c, out11, total, p, s, err)
+	out11, total, p, s, facets, err := a.svc.ListBackups(c.Request.Context(), status, page, size)
+	httpx.WritePageWithFacets(c, out11, total, p, s, facets.Map(), err)
 }
 
 // auditQuery 解析审计中心文档定义的过滤条件。
 func auditQuery(c *gin.Context, page, size int) (contracts.AuditQuery, bool) {
 	actorID, ok := httpx.QueryID(c, "actor_id", false)
+	if !ok {
+		return contracts.AuditQuery{}, false
+	}
+	// tenant_id 只对平台身份生效(按学校筛选);学校身份由服务层固定为本校
+	tenantID, ok := httpx.QueryID(c, "tenant_id", false)
 	if !ok {
 		return contracts.AuditQuery{}, false
 	}
@@ -273,7 +278,7 @@ func auditQuery(c *gin.Context, page, size int) (contracts.AuditQuery, bool) {
 		return contracts.AuditQuery{}, false
 	}
 	queryPage, querySize := pagex.Int32(page, size)
-	return contracts.AuditQuery{ActorID: actorID, Action: strings.TrimSpace(c.Query("action")), TargetType: strings.TrimSpace(c.Query("target_type")), From: from, To: to, Page: queryPage, Size: querySize}, true
+	return contracts.AuditQuery{TenantID: tenantID, ActorID: actorID, Action: strings.TrimSpace(c.Query("action")), TargetType: strings.TrimSpace(c.Query("target_type")), From: from, To: to, Page: queryPage, Size: querySize}, true
 }
 
 // queryRFC3339 解析可选 RFC3339 时间查询参数。
@@ -291,13 +296,15 @@ func queryRFC3339(c *gin.Context, key string) (time.Time, bool) {
 }
 
 // auditLogEntryDTOs 将统一审计契约转换为管理端 HTTP DTO。
-func auditLogEntryDTOs(items []contracts.AuditLogEntry) []AuditLogEntryDTO {
+func auditLogEntryDTOs(items []contracts.AuditLogEntry, actors map[int64]AuditActor) []AuditLogEntryDTO {
 	out := make([]AuditLogEntryDTO, 0, len(items))
 	for _, item := range items {
 		out = append(out, AuditLogEntryDTO{
 			ID:         ids.ID(item.ID),
 			TenantID:   ids.ID(item.TenantID),
 			ActorID:    ids.Format(item.ActorID),
+			ActorName:  actors[item.ActorID].Name,
+			ActorNo:    actors[item.ActorID].No,
 			ActorRole:  item.ActorRole,
 			Action:     item.Action,
 			TargetType: item.TargetType,

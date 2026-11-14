@@ -68,6 +68,7 @@ function EventDot({ tone }: { tone: EventTone }) {
   );
 }
 
+/** EventTimeline 按天分组的事件轴(时间流族) */
 export function EventTimeline({ label, days, className }: EventTimelineProps) {
   return (
     <div aria-label={label} className={cn("min-w-0", className)}>

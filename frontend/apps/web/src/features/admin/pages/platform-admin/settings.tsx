@@ -1,4 +1,6 @@
-// 系统配置页(平台侧栏,/platform-admin/settings)。
+// 系统配置(平台侧栏,/platform-admin/settings)。设计 §7.6:
+// 搜索 + 配置项列表(配置键、说明、当前值摘要,含凭据的只显示「已配置」、最近更新时间);行内「修改」和「变更历史」。
+// 修改弹窗写明「保存后立即对全平台生效」。指标条与每项一张大卡片去掉。
 //
 // 平台级配置的查看与修改。两件事要一起说清:
 //   1. 修改用乐观锁:提交时带上读到的版本号,别人在这期间改过就会冲突并要求重新读取 ——
@@ -16,26 +18,14 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
+import { History, Settings } from 'lucide-react'
+import { AdminScope, type SystemConfig } from '@chaimir/api-client'
 import {
-  History,
-  Save,
-  Settings,
-} from 'lucide-react'
-import {
-  AdminScope,
-  type SystemConfig,
-} from '@chaimir/api-client'
-import {
-  Badge,
   Button,
   Callout,
-  Card,
-  CardBody,
-  CardHeader,
   DescriptionList,
   FormField,
   Input,
-  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -45,7 +35,6 @@ import {
   ModalTitle,
   PageHeader,
   PageScaffold,
-  PageSection,
   Skeleton,
   Textarea,
   toast,
@@ -53,8 +42,9 @@ import {
 import { api } from '../../../../app/api'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
-import { formatDateTime } from '../../../../utils/formatters'
+import { SearchBox } from '../../../../components/SearchBox'
+import { useAsyncResource, useUrlState } from '../../../../hooks'
+import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
 import { configKeyDescription, configKeyLabel } from '../../../../utils/labels/admin'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import {
@@ -65,90 +55,83 @@ import {
   withoutKeys,
 } from '../../configValue'
 
-/**
- * PlatformSettingsPage 承载平台级系统配置的查看与维护。
- */
+/** 地址参数:q 按配置键、名称或说明搜索 */
+const SETTINGS_QUERY = {
+  q: { defaultValue: '' },
+} as const
+
+/** PlatformSettingsPage 平台级配置清单:搜索、看当前值,行内修改或看变更历史 */
 export default function PlatformSettingsPage() {
   const navigate = useNavigate()
+  const [query, setQuery] = useUrlState(SETTINGS_QUERY)
   const [editTarget, setEditTarget] = useState<SystemConfig>()
-
   const configs = useAsyncResource(
     () => api.admin.listConfigs({ scope: AdminScope.GLOBAL }),
     [],
-    (value) => value.length === 0,
+    (list) => list.length === 0
   )
 
-  const stats = useMemo(() => {
-    if ((configs.status !== 'success' && configs.status !== 'empty') || !configs.data) return undefined
-    const list = configs.data
-    return {
-      total: list.length,
-      registered: list.filter((item) => configKeyDescription(item.key) !== undefined).length,
-      withCredentials: list.filter((item) => credentialKeysOf(item.value).length > 0).length,
-    }
-  }, [configs.data, configs.status])
+  // 配置接口一次返回全部平台级配置(几十项),搜索在本页完成
+  const keyword = query.q.trim().toLowerCase()
+  const visible = useMemo(
+    () =>
+      (configs.data ?? []).filter(
+        (config) =>
+          keyword === '' ||
+          config.key.toLowerCase().includes(keyword) ||
+          configKeyLabel(config.key).toLowerCase().includes(keyword) ||
+          (configKeyDescription(config.key) ?? '').toLowerCase().includes(keyword)
+      ),
+    [configs.data, keyword]
+  )
 
   return (
     <PageScaffold>
       <PageHeader
         title="系统配置"
-        description="平台级运行参数。改动立即对全平台生效,每次改动都会留下可回滚的记录。"
+        meta={
+          configs.status === 'success'
+            ? [{ value: `${configs.data?.length ?? 0} 项平台级配置` }]
+            : undefined
+        }
       />
 
-      {/*
-        归族:资源列表族的卡片网格形态(§6.5.3 第 ① 族 + §6.5.2 第二条出路)。
-        指标降为内联摘要;三项由一次取齐的全量配置算出(接口不分页,故是全量口径,§6.5.4)。
-        变更历史是深页而不是弹窗:它是分页数据,而浮层里不出现分页(§6.5.5 A)。
-      */}
-      <MetricStrip
-        label="平台配置摘要"
-        className="mb-5"
-        items={[
-          { label: '配置项', value: stats?.total, hint: '平台级运行参数' },
-          {
-            label: '已登记说明',
-            value: stats?.registered,
-            hint: '其余是使用方自定义的键',
-          },
-          {
-            label: '含凭据字段',
-            value: stats?.withCredentials,
-            hint: '保存时需要重新填写',
-          },
-        ]}
+      <SearchBox
+        label="搜索配置"
+        placeholder="搜索配置名称或配置键"
+        value={query.q}
+        onSearch={(value) => setQuery({ q: value })}
+        className="mb-4"
       />
 
-      <PageSection
-        title="配置项"
-        description="学校自己的配置由该校管理员维护,这里只有平台级配置。"
+      <ResourceState
+        resource={configs}
+        emptyIcon={Settings}
+        emptyTitle="还没有平台级配置"
+        emptyDescription="平台首次写入配置后会出现在这里。学校自己的配置由该校管理员维护。"
+        skeleton={<Skeleton variant="line" lines={6} />}
       >
-        <div className="flex flex-col gap-4">
-          <ResourceState
-            resource={configs}
-            emptyIcon={Settings}
-            emptyDescription="平台首次写入配置后会出现在这里。"
-            emptyTitle="还没有平台级配置"
-            skeleton={<Skeleton variant="line" lines={4} />}
-          >
-            {(items) => (
-              <div className={items.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
-                {items.map((config) => (
-                  <ConfigCard
-                    key={config.id}
-                    config={config}
-                    onEdit={() => setEditTarget(config)}
-                    onHistory={() => navigate(`/platform-admin/settings/${encodeURIComponent(config.key)}/history`)}
-                  />
-                ))}
-              </div>
-            )}
-          </ResourceState>
-
-          <Callout tone="info">
-            两个人同时改同一项时,后提交的一方会看到冲突提示并需要重新读取 —— 不会有人的改动被悄悄覆盖。
-          </Callout>
-        </div>
-      </PageSection>
+        {() =>
+          visible.length === 0 ? (
+            <p className="rounded-lg bg-surface px-4 py-10 text-center text-sm text-ink-sub shadow-xs">
+              没有匹配的配置项,换个关键词试试。
+            </p>
+          ) : (
+            <ul className="divide-y divide-line rounded-lg bg-surface px-4 shadow-xs">
+              {visible.map((config) => (
+                <ConfigRow
+                  key={config.id}
+                  config={config}
+                  onEdit={() => setEditTarget(config)}
+                  onHistory={() =>
+                    navigate(`/platform-admin/settings/${encodeURIComponent(config.key)}/history`)
+                  }
+                />
+              ))}
+            </ul>
+          )
+        }
+      </ResourceState>
 
       {editTarget ? (
         <ConfigEditModal
@@ -160,57 +143,52 @@ export default function PlatformSettingsPage() {
           }}
         />
       ) : null}
-
     </PageScaffold>
   )
 }
 
-interface ConfigCardProps {
+/** ConfigRow 一个配置项:名称与配置键、说明、当前值摘要(凭据只显示「已配置」)、最近更新;行内修改与变更历史 */
+function ConfigRow({
+  config,
+  onEdit,
+  onHistory,
+}: {
   config: SystemConfig
   onEdit: () => void
   onHistory: () => void
-}
-
-/**
- * ConfigCard 展示单个配置项的当前值概要。
- * 凭据字段只显示「已配置」,不显示值也不显示密文。
- */
-function ConfigCard({ config, onEdit, onHistory }: ConfigCardProps) {
+}) {
   const description = configKeyDescription(config.key)
-  const entries = useMemo(() => summarizeValue(config.value), [config.value])
-
+  const entries = summarizeValue(config.value)
+  const summary =
+    entries.length === 0
+      ? '空配置'
+      : entries.map((entry) => `${entry.term}: ${entry.description}`).join(' · ')
   return (
-    <Card>
-      <CardHeader
-        title={configKeyLabel(config.key)}
-        description={description ?? '使用方自定义的配置项'}
-        actions={<Badge tone="neutral">第 {config.version} 版</Badge>}
-      />
-      <CardBody className="flex flex-col gap-3">
-        <DescriptionList
-          dense
-          items={[
-            { term: '配置键', description: config.key, mono: true },
-            { term: '最近更新', description: formatDateTime(config.updated_at), mono: true },
-          ]}
-        />
-
-        {entries.length > 0 ? (
-          <DescriptionList dense columns={2} items={entries} />
-        ) : (
-          <p className="text-sm text-ink-sub">这一项当前是空配置。</p>
-        )}
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" leftIcon={Save} onClick={onEdit}>
-            修改
-          </Button>
-          <Button variant="ghost" size="sm" leftIcon={History} onClick={onHistory}>
-            变更历史
-          </Button>
-        </div>
-      </CardBody>
-    </Card>
+    <li className="flex flex-wrap items-start gap-x-4 gap-y-2 py-4">
+      <span className="min-w-0 flex-1">
+        <span className="flex flex-wrap items-baseline gap-x-2">
+          <span className="text-base font-medium text-ink">{configKeyLabel(config.key)}</span>
+          <span className="font-mono text-xs text-ink-sub">{config.key}</span>
+        </span>
+        {description ? (
+          <span className="mt-0.5 block text-sm text-ink-sub">{description}</span>
+        ) : null}
+        <span className="mt-1 block truncate font-mono text-xs text-ink-sub" title={summary}>
+          {summary}
+        </span>
+        <span className="mt-1 block text-xs text-ink-sub" title={formatDateTime(config.updated_at)}>
+          第 {config.version} 版 · {formatRelativeOccurrence(config.updated_at)}更新
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-1">
+        <Button variant="outline" size="sm" onClick={onEdit}>
+          修改
+        </Button>
+        <Button variant="ghost" size="sm" leftIcon={History} onClick={onHistory}>
+          变更历史
+        </Button>
+      </span>
+    </li>
   )
 }
 
@@ -228,29 +206,31 @@ function ConfigEditModal({ config, onClose, onSaved }: ConfigEditModalProps) {
   const credentialKeys = useMemo(() => credentialKeysOf(config.value), [config.value])
 
   const [valueText, setValueText] = useState(() =>
-    JSON.stringify(withoutKeys(config.value, credentialKeys), null, 2),
+    JSON.stringify(withoutKeys(config.value, credentialKeys), null, 2)
   )
   const [credentials, setCredentials] = useState<Record<string, string>>(() =>
-    Object.fromEntries(credentialKeys.map((key) => [key, ''])),
+    Object.fromEntries(credentialKeys.map((key) => [key, '']))
   )
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
   const parsed = useMemo(() => parseValue(valueText), [valueText])
 
-  const { errors, validate } = useFormValidation(useCallback(() => {
-    const next: Record<string, string | null> = { value: parsed.error ?? null }
-    for (const key of credentialKeys) {
-      const filled = credentials[key]?.trim() ?? ''
-      next[`credential:${key}`] =
-        filled === ''
-          ? '现有值不会显示,保存时必须重新填入完整的值'
-          : filled === MASKED_VALUE
-            ? '这是占位文案,不是真实值,请填入真实内容'
-            : null
-    }
-    return next
-  }, [credentialKeys, credentials, parsed.error]))
+  const { errors, validate } = useFormValidation(
+    useCallback(() => {
+      const next: Record<string, string | null> = { value: parsed.error ?? null }
+      for (const key of credentialKeys) {
+        const filled = credentials[key]?.trim() ?? ''
+        next[`credential:${key}`] =
+          filled === ''
+            ? '现有值不会显示,保存时必须重新填入完整的值'
+            : filled === MASKED_VALUE
+              ? '这是占位文案,不是真实值,请填入真实内容'
+              : null
+      }
+      return next
+    }, [credentialKeys, credentials, parsed.error])
+  )
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -274,14 +254,14 @@ function ConfigEditModal({ config, onClose, onSaved }: ConfigEditModalProps) {
         setFormError(
           userFacingErrorMessage(
             error,
-            '保存没有成功。如果这一项刚被别人改过,请关闭后重新打开再改一次。',
-          ),
+            '保存没有成功。如果这一项刚被别人改过,请关闭后重新打开再改一次。'
+          )
         )
       } finally {
         setWorking(false)
       }
     },
-    [config.key, config.version, credentialKeys, credentials, onSaved, parsed, validate],
+    [config.key, config.version, credentialKeys, credentials, onSaved, parsed, validate]
   )
 
   return (
@@ -290,8 +270,7 @@ function ConfigEditModal({ config, onClose, onSaved }: ConfigEditModalProps) {
         <ModalHeader>
           <ModalTitle>修改{configKeyLabel(config.key)}</ModalTitle>
           <ModalDescription>
-            改动立即对全平台生效,并留下一条可回滚的记录。保存基于第 {config.version} 版,
-            如果这期间别人改过,保存会被拒绝。
+            保存后立即对全平台生效,并留下一条可回滚的记录。如果你打开后别人改过这一项,保存会被拒绝,需要重新打开。
           </ModalDescription>
         </ModalHeader>
         <form onSubmit={submit} noValidate>

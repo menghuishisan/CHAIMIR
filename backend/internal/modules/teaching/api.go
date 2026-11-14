@@ -144,8 +144,8 @@ func (a teachingAPI) listCourses(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListCourses(c.Request.Context(), CourseListFilter{Role: c.Query("role"), Status: status, IsShared: isShared, Page: page, Size: size})
-	httpx.WritePage(c, out, total, p, s, err)
+	out, total, p, s, facets, err := a.svc.ListCourses(c.Request.Context(), CourseListFilter{Role: c.Query("role"), Status: status, IsShared: isShared, Page: page, Size: size})
+	httpx.WritePageWithFacets(c, out, total, p, s, facets.Map(), err)
 }
 
 // listSharedCourses只接受目录关键词与分页，不接受调用方指定租户范围。
@@ -616,8 +616,8 @@ func (a teachingAPI) listSubmissions(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListSubmissions(c.Request.Context(), id, status, isLate, page, size)
-	httpx.WritePage(c, out, total, p, s, err)
+	out, total, p, s, facets, err := a.svc.ListSubmissions(c.Request.Context(), id, status, isLate, page, size)
+	httpx.WritePageWithFacets(c, out, total, p, s, facets.Map(), err)
 }
 
 // gradeSubmission 绑定教师批改请求。

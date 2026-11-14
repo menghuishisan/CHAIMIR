@@ -367,8 +367,9 @@ function PhoneCard({ onChanged }: { onChanged: () => void }) {
 
 /**
  * SessionsSection 登录设备:每个会话一行,显示为「Windows · Chrome 152」(前端解析浏览器信息串,
- * 完整信息串悬停可见)、登录地址、登录时间、状态;有效会话排在前并标「在线」,已退出的折叠。
- * 接口分不出哪个会话是本机(设计 §10);后端没有单条会话吊销接口,退出其他设备靠修改密码。
+ * 完整信息串悬停可见)、登录地址、登录时间、状态;正在用的这台设备排第一并标「这台设备」
+ * (由服务端按本次请求的会话判定,前端不凭设备信息猜),其余有效会话标「在线」,已退出的折叠。
+ * 后端没有单条会话吊销接口,退出其他设备靠修改密码。
  */
 function SessionsSection() {
   const sessions = useAsyncResource(() => api.identity.getSessions(), [])
@@ -376,7 +377,7 @@ function SessionsSection() {
   const list = sessions.data ?? []
   const active = list
     .filter((session) => session.status === SessionStatus.ACTIVE)
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .sort((a, b) => Number(b.current) - Number(a.current) || b.created_at.localeCompare(a.created_at))
   const ended = list
     .filter((session) => session.status !== SessionStatus.ACTIVE)
     .sort((a, b) => b.created_at.localeCompare(a.created_at))
@@ -443,7 +444,7 @@ function SessionsSection() {
   )
 }
 
-/** SessionRow 一个登录会话:设备名(完整信息串悬停可见)、地址与时间、状态 */
+/** SessionRow 一个登录会话:设备名(完整信息串悬停可见)、地址与时间、状态;正在用的这台设备单独标出 */
 function SessionRow({ session }: { session: Session }) {
   const online = session.status === SessionStatus.ACTIVE
   return (
@@ -464,8 +465,10 @@ function SessionRow({ session }: { session: Session }) {
           登录
         </p>
       </div>
-      {online ? (
-        <Badge tone="jade">在线</Badge>
+      {online && session.current ? (
+        <Badge tone="jade">这台设备</Badge>
+      ) : online ? (
+        <Badge tone="neutral">在线</Badge>
       ) : (
         <StatusIndicator tone={sessionStatusTone(session.status)} label={sessionStatusLabel(session.status)} />
       )}

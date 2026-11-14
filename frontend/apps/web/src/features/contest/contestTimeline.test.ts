@@ -34,9 +34,12 @@ test('不封榜时没有封榜节点', () => {
   )
 })
 
+/** 固定「现在」在报名截止之前:阶段判定还看时刻(报名中但已过截止停在报名截止),不能依赖运行测试时的真实时间 */
+const BEFORE_SIGNUP_END = new Date('2026-11-05T10:00:00+08:00')
+
 test('当前阶段以状态为准:报名中停在报名开始,进行中停在开赛,封榜停在封榜,结束与归档停在结束', () => {
   const current = (status: number, freeze = 60) =>
-    contestTimeline({ ...base, status, freeze_minutes: freeze }).find((node) => node.state === 'current')?.key
+    contestTimeline({ ...base, status, freeze_minutes: freeze }, BEFORE_SIGNUP_END).find((node) => node.state === 'current')?.key
   assert.equal(current(SIGNUP), 'signup_start')
   assert.equal(current(RUNNING), 'start')
   assert.equal(current(FROZEN), 'freeze')
@@ -45,7 +48,7 @@ test('当前阶段以状态为准:报名中停在报名开始,进行中停在开
 })
 
 test('当前阶段之前的节点都算已过去,之后的都算未到', () => {
-  const states = contestTimeline({ ...base, status: RUNNING }).map((node) => node.state)
+  const states = contestTimeline({ ...base, status: RUNNING }, BEFORE_SIGNUP_END).map((node) => node.state)
   assert.deepEqual(states, ['done', 'done', 'current', 'upcoming', 'upcoming'])
 })
 

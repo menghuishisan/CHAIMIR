@@ -47,6 +47,15 @@ export interface StudentExperiment {
   status: ExperimentStatus
   created_at: string
   updated_at: string
+  /** 本人最近一次实验的进度;从没开始过的实验不带 */
+  my_progress?: StudentExperimentProgress
+}
+
+/** 本人在一个实验里最近一次实验的进度;小组实验看本人所在小组的实验 */
+export interface StudentExperimentProgress {
+  status: ExperimentInstanceStatus
+  score: number
+  passed_checkpoints: number
 }
 
 export interface StudentComponentConfig {

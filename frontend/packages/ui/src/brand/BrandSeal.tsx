@@ -31,6 +31,7 @@ export interface BrandSealProps {
   className?: string;
 }
 
+/** BrandSeal 独立品牌章(朱砂实心方印) */
 export function BrandSeal({ size = "md", label, animated = false, className }: BrandSealProps) {
   const px = SEAL_SIZE[size];
   const { stroke, dot } = strokeFor(size);

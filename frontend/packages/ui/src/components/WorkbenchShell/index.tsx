@@ -11,6 +11,10 @@
  * 槽位内容的滚动同样归内容自己 —— 壳把面板做成定高的 flex 列,好让「手风琴占满剩余高度 +
  * 操作常驻底部」这类布局成立;壳自己套一层 overflow 会让它们失效。
  *
+ * 快捷键(规范 §7.3):壳持有本台唯一的快捷键登记处与按键监听。顶栏主操作经 WorkbenchTopbar 的
+ * shortcuts 声明,槽位里的部件(播放控制、代码编辑区)用 useWorkbenchShortcuts 声明;
+ * 顶栏「快捷键」按钮列出的就是这份登记,列出的与生效的不会分家。
+ *
  * 使用契约:沉浸态必须独占路由挂载(规范 §7/§4.4 光面退场),不得作为覆盖层叠在
  * 日常页之上——否则背景可被 Tab 穿透与滚动。全屏墨色底层与进出场由沉浸路由壳提供,
  * 本组件填满该壳(不自行 fixed 定位),避免两处争夺同一块全屏层。
@@ -20,12 +24,32 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
+  Keyboard,
   PanelLeftClose,
   PanelRightClose,
 } from "lucide-react";
-import { useCallback, useId, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { cn } from "../../lib/cn";
 import { Icon } from "../../lib/icon";
+import {
+  classifyShortcutFocus,
+  createShortcutRegistry,
+  resolveShortcut,
+  shortcutLabel,
+  type ShortcutRegistry,
+  type ShortcutTarget,
+  type WorkbenchShortcut,
+} from "../../lib/workbenchShortcuts";
+import { Popover, PopoverContent, PopoverTrigger } from "../Popover";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 
 /** 横排断点:与 Tailwind lg(1024px)一致,禁止另造魔法断点 */
@@ -40,6 +64,132 @@ const STORAGE_PREFIX = "chaimir.workbench.";
  * 折叠偏好因此必须按台各存一份 —— 一处收起处处收起等于把四台当成同一台。
  */
 export type WorkbenchId = "experiment" | "sim" | "replay" | "contest";
+
+/* ---------------------------------------------------------------- 快捷键 */
+
+export type { WorkbenchShortcut } from "../../lib/workbenchShortcuts";
+
+/** 本台的快捷键登记处;只由 WorkbenchShell 提供 */
+const ShortcutRegistryContext = createContext<ShortcutRegistry | null>(null);
+
+/** useShortcutRegistry 取所在工作台的登记处;壳外调用属装配错误,直接暴露而非静默失效 */
+function useShortcutRegistry(): ShortcutRegistry {
+  const registry = useContext(ShortcutRegistryContext);
+  if (!registry) {
+    throw new Error("工作台快捷键只能在 WorkbenchShell 内声明");
+  }
+  return registry;
+}
+
+/**
+ * useWorkbenchShortcuts 把一处部件的快捷键登记到所在工作台。
+ * 每次渲染都写入最新的动作与可用性;登记处只在键位、说明或可用性变化时刷新顶栏列表。
+ * 部件卸载时撤下自己那一份。
+ */
+export function useWorkbenchShortcuts(shortcuts: readonly WorkbenchShortcut[] | undefined): void {
+  const registry = useShortcutRegistry();
+  const owner = useId();
+  useEffect(() => {
+    registry.set(owner, shortcuts ?? []);
+  });
+  useEffect(() => () => registry.remove(owner), [owner, registry]);
+}
+
+/** 浮层:弹窗、抽屉与经 Radix 定位的菜单、气泡、下拉 */
+const OVERLAY_SELECTOR = '[role="dialog"], [role="alertdialog"], [data-radix-popper-content-wrapper]';
+
+/** readShortcutTarget 读出焦点元素的特征,归类规则在 lib/workbenchShortcuts 里单独验证 */
+function readShortcutTarget(target: EventTarget | null): ShortcutTarget {
+  if (!(target instanceof Element)) {
+    return { tag: "", contentEditable: false, inEditor: false, inTerminal: false, inOverlay: false };
+  }
+  return {
+    tag: target.tagName,
+    type: target instanceof HTMLInputElement ? target.type : undefined,
+    role: target.getAttribute("role") ?? undefined,
+    contentEditable: target instanceof HTMLElement && target.isContentEditable,
+    inEditor: target.closest(".monaco-editor") !== null,
+    inTerminal: target.closest(".xterm") !== null,
+    inOverlay: target.closest(OVERLAY_SELECTOR) !== null,
+  };
+}
+
+/** useShortcutListener 在窗口上按登记处监听按键,整台只挂一个监听器;交给谁由 resolveShortcut 决定 */
+function useShortcutListener(registry: ShortcutRegistry) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      // 输入法组字中的回车与方向键属于输入法,不是快捷键
+      if (event.defaultPrevented || event.isComposing) return;
+      const keyEvent = {
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+        altKey: event.altKey,
+        repeat: event.repeat,
+        focus: classifyShortcutFocus(readShortcutTarget(event.target)),
+      };
+      const { claimed, run } = resolveShortcut(registry.all(), keyEvent);
+      if (!claimed) return;
+      event.preventDefault();
+      run?.();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [registry]);
+}
+
+/** isMacPlatform 判断是否在 Mac 上(快捷键写 ⌘ 还是 Ctrl) */
+function isMacPlatform(): boolean {
+  return typeof navigator !== "undefined" && /mac|iphone|ipad/i.test(navigator.userAgent);
+}
+
+/**
+ * ShortcutsButton 顶栏「快捷键」:列出本台登记的全部快捷键。
+ * 暂时不可用的项照样列出并写明,不只靠颜色区分(FE-2)。没有鼠标或触控板的设备通常也不接键盘,
+ * 在那里不显示;按宽度判断不对 —— 窄的桌面窗口照样有键盘。
+ */
+function ShortcutsButton() {
+  const registry = useShortcutRegistry();
+  const shortcuts = useSyncExternalStore(registry.subscribe, registry.snapshot, registry.snapshot);
+  if (shortcuts.length === 0) return null;
+  const mac = isMacPlatform();
+  return (
+    <div className="hidden shrink-0 items-center pl-2 any-pointer-fine:flex">
+      <Popover>
+        <PopoverTrigger
+          aria-label="快捷键"
+          className="pressable flex h-8 items-center gap-1.5 rounded-md px-2 text-sm text-on-dark-sub hover:bg-dark-surface hover:text-on-dark focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+        >
+          <Icon icon={Keyboard} size="sm" />
+          <span className="hidden xl:inline">快捷键</span>
+        </PopoverTrigger>
+        <PopoverContent align="end" className="w-picker-popover p-3">
+          <p className="mb-2 text-sm font-semibold text-ink">快捷键</p>
+          <ul className="flex flex-col gap-2">
+            {shortcuts.map((item) => (
+              <li
+                key={`${shortcutLabel(item, mac)} ${item.description}`}
+                className="flex items-center justify-between gap-3 text-sm"
+              >
+                <span className={item.disabled ? "text-ink-sub" : "text-ink"}>
+                  {item.description}
+                  {item.disabled ? <span className="ml-1.5 text-xs">暂不可用</span> : null}
+                </span>
+                <kbd className="shrink-0 rounded-sm bg-surface-sunken px-1.5 py-0.5 font-mono text-xs text-ink">
+                  {shortcutLabel(item, mac)}
+                </kbd>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-xs text-ink-sub">
+            在输入框和代码编辑器里,只有带 {mac ? "⌘" : "Ctrl"} 的组合键生效;终端里的按键都归终端。
+          </p>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
 
 /* ---------------------------------------------------------------- 顶部工作台条 */
 
@@ -58,6 +208,8 @@ export interface WorkbenchTopbarProps {
   progress?: ReactNode;
   /** 单一主 CTA 插槽,靠右 */
   cta?: ReactNode;
+  /** 顶栏这一层的快捷键(通常是主操作);与槽位部件登记的快捷键一起列在「快捷键」里 */
+  shortcuts?: readonly WorkbenchShortcut[];
 }
 
 /**
@@ -72,7 +224,9 @@ export function WorkbenchTopbar({
   titleExtra,
   progress,
   cta,
+  shortcuts,
 }: WorkbenchTopbarProps) {
+  useWorkbenchShortcuts(shortcuts);
   return (
     <header className="flex h-14 shrink-0 items-center border-b border-dark-line bg-dark-bg">
       <button
@@ -90,6 +244,7 @@ export function WorkbenchTopbar({
       </div>
       {titleExtra && <div className="flex shrink-0 items-center gap-1">{titleExtra}</div>}
       <div className="flex min-w-0 flex-1 items-center justify-center overflow-x-auto px-2">{progress}</div>
+      <ShortcutsButton />
       {cta && <div className="flex shrink-0 items-center pl-2 pr-4">{cta}</div>}
     </header>
   );
@@ -294,7 +449,7 @@ export interface WorkbenchShellProps {
 /**
  * WorkbenchShell:沉浸工作台外壳 —— 纵向 topbar / 三区 / footer。
  * 壳本身与主舞台都不产生滚动条,滚动只发生在槽位内容自己声明的容器里。
- * 壳只统一深色令牌、顶条契约、折叠行为、窄屏堆叠与无障碍;哪一侧放什么由该台的主体决定。
+ * 壳只统一深色令牌、顶条契约、折叠行为、窄屏堆叠、快捷键与无障碍;哪一侧放什么由该台的主体决定。
  */
 export function WorkbenchShell({
   workbench,
@@ -309,31 +464,36 @@ export function WorkbenchShell({
   className,
 }: WorkbenchShellProps) {
   const wide = useMediaQuery(DESKTOP_QUERY);
+  // 登记处随壳同生共死:换一台工作台就是一份新的快捷键
+  const [registry] = useState(createShortcutRegistry);
+  useShortcutListener(registry);
 
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col bg-substrate text-on-dark", className)}>
-      {topbar}
-      {/* 三区:宽屏横排(辅助区-舞台-右栏),窄屏纵排,舞台始终 flex-1 优先 */}
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        {left && (
-          <WorkbenchPanel workbench={workbench} side="left" label={leftLabel} wide={wide}>
-            {left}
-          </WorkbenchPanel>
-        )}
-        <main className="flex min-h-0 min-w-0 flex-1 flex-col">{stage}</main>
-        {right && (
-          <WorkbenchPanel
-            workbench={workbench}
-            side="right"
-            label={rightLabel}
-            count={rightCount}
-            wide={wide}
-          >
-            {right}
-          </WorkbenchPanel>
-        )}
+    <ShortcutRegistryContext.Provider value={registry}>
+      <div className={cn("flex min-h-0 flex-1 flex-col bg-substrate text-on-dark", className)}>
+        {topbar}
+        {/* 三区:宽屏横排(辅助区-舞台-右栏),窄屏纵排,舞台始终 flex-1 优先 */}
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+          {left && (
+            <WorkbenchPanel workbench={workbench} side="left" label={leftLabel} wide={wide}>
+              {left}
+            </WorkbenchPanel>
+          )}
+          <main className="flex min-h-0 min-w-0 flex-1 flex-col">{stage}</main>
+          {right && (
+            <WorkbenchPanel
+              workbench={workbench}
+              side="right"
+              label={rightLabel}
+              count={rightCount}
+              wide={wide}
+            >
+              {right}
+            </WorkbenchPanel>
+          )}
+        </div>
+        {footer && <div className="shrink-0 border-t border-dark-line bg-dark-bg">{footer}</div>}
       </div>
-      {footer && <div className="shrink-0 border-t border-dark-line bg-dark-bg">{footer}</div>}
-    </div>
+    </ShortcutRegistryContext.Provider>
   );
 }

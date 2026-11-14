@@ -51,6 +51,7 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { collectAllPages } from '../../../../utils/allPages'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
@@ -100,6 +101,11 @@ export function ContestCheat({ contest, readOnly = false }: ContestCheatProps) {
           {formatDateTime(record.created_at)}
         </span>
       ),
+    },
+    {
+      key: 'team',
+      header: '队伍',
+      render: (record) => <span className="text-ink">{record.team_name ?? '—'}</span>,
     },
     {
       key: 'type',
@@ -254,7 +260,7 @@ function SuspectsCard({ contest, readOnly, onHandle }: SuspectsCardProps) {
   const problems = useAsyncResource(
     () => api.contest.getProblems(contest.id),
     [contest.id],
-    () => false
+    (value) => value.length === 0
   )
 
   const problemOptions = useMemo(
@@ -434,20 +440,20 @@ function CheatRecordModal({ contest, sourceRef, onClose, onSaved }: CheatRecordM
   const [submitting, setSubmitting] = useState(false)
 
   const ladder = useAsyncResource(
-    () => api.contest.getLadder(contest.id, { page: 1, size: PAGINATION_MAX_SIZE }),
+    () => collectAllPages((params) => api.contest.getLadder(contest.id, params), PAGINATION_MAX_SIZE),
     [contest.id],
-    () => false
+    (value) => value.length === 0
   )
 
   const teamOptions = useMemo(
     () =>
-      (ladder.data?.list ?? []).map((rank: LadderRank) => ({
+      (ladder.data ?? []).map((rank: LadderRank) => ({
         value: rank.team_id,
-        // 榜单只回 team_id,按名次与得分标识队伍,不把内部编号当队名显示
+        // 队名随榜单给出,名次与得分帮助核对是哪一支
         label:
           contest.mode === ContestMode.SOLVE
-            ? `第 ${rank.rank} 名 · ${formatScore(rank.score)} 分 · 通过 ${rank.solved_count} 题`
-            : `第 ${rank.rank} 名 · 对抗积分 ${formatScore(rank.score)}`,
+            ? `${rank.team_name} · 第 ${rank.rank} 名 · ${formatScore(rank.score)} 分 · 通过 ${rank.solved_count} 题`
+            : `${rank.team_name} · 第 ${rank.rank} 名 · 对抗积分 ${formatScore(rank.score)}`,
       })),
     [contest.mode, ladder.data]
   )
@@ -515,7 +521,7 @@ function CheatRecordModal({ contest, sourceRef, onClose, onSaved }: CheatRecordM
                   htmlFor="cheat-team"
                   required
                   error={errors.team}
-                  helper="按榜单名次识别队伍;队伍名不在榜单响应里"
+                  helper="按队名选择,名次与得分帮助核对是哪一支"
                 >
                   <Select
                     id="cheat-team"

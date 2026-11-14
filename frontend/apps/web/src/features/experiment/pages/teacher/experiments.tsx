@@ -34,6 +34,7 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { collectAllPages } from '../../../../utils/allPages'
 import { ResourceError } from '../../../../components/ResourceState'
 import { SearchBox } from '../../../../components/SearchBox'
 import { useAsyncResource, usePagedResource, useUrlState } from '../../../../hooks'
@@ -81,8 +82,8 @@ export default function TeacherExperimentsPage() {
     { urlPageKey: 'page' },
   )
   // 所属课程名:用教师自己的课程列表解析(一页取完)
-  const courses = useAsyncResource(() => api.teaching.getCourses({ role: 'teacher', size: PAGINATION_MAX_SIZE }), [], () => false)
-  const courseName = useMemo(() => new Map((courses.data?.list ?? []).map((course) => [course.id, course.name])), [courses.data])
+  const courses = useAsyncResource(() => collectAllPages((params) => api.teaching.getCourses({ role: 'teacher', ...params }), PAGINATION_MAX_SIZE), [], () => false)
+  const courseName = useMemo(() => new Map((courses.data ?? []).map((course) => [course.id, course.name])), [courses.data])
 
   /** validateExperiment 发布前校验:把问题列清楚,而不是让发布直接失败。 */
   const validateExperiment = useCallback(async (experiment: Experiment) => {

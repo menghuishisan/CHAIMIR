@@ -168,6 +168,19 @@ func (t *txStore) CreateAlertEvent(ctx context.Context, id, ruleID, tenantID int
 	return alertEventDTO(row), nil
 }
 
+// CountAlertEventsByStatus 按状态聚合告警(套用级别与学校范围,不套用状态)。
+func (t *txStore) CountAlertEventsByStatus(ctx context.Context, level int16, tenantID int64) (pagex.FacetGroup, error) {
+	rows, err := t.q.CountAlertEventsByStatus(ctx, sqlcgen.CountAlertEventsByStatusParams{Level: level, TenantID: pgtypex.Int8(tenantID)})
+	if err != nil {
+		return nil, err
+	}
+	group := pagex.FacetGroup{}
+	for _, row := range rows {
+		group.Add(row.Status, row.Count)
+	}
+	return group, nil
+}
+
 // ListAlertEvents 查询告警事件和总数。
 func (t *txStore) ListAlertEvents(ctx context.Context, status, level int16, tenantID int64, page, size int) ([]AlertEventDTO, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
@@ -293,6 +306,19 @@ func (t *txStore) SetAuditExportRequestNextCheck(ctx context.Context, tenantID, 
 // DeleteAuditExportRequest 删除已达到 transfer 终态的 M9 导出请求。
 func (t *txStore) DeleteAuditExportRequest(ctx context.Context, tenantID, taskID int64) error {
 	return t.q.DeleteAuditExportRequest(ctx, sqlcgen.DeleteAuditExportRequestParams{TransferTaskID: taskID, TenantID: tenantID})
+}
+
+// CountBackupRecordsByStatus 按状态聚合全部备份记录。
+func (t *txStore) CountBackupRecordsByStatus(ctx context.Context) (pagex.FacetGroup, error) {
+	rows, err := t.q.CountBackupRecordsByStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	group := pagex.FacetGroup{}
+	for _, row := range rows {
+		group.Add(row.Status, row.Count)
+	}
+	return group, nil
 }
 
 // ListBackupRecords 查询备份记录和总数。

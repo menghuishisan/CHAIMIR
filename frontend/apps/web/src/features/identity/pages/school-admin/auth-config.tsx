@@ -1,13 +1,13 @@
 // 认证配置页(校管侧栏,/school-admin/auth-config)。设计 §7.5:
 // 两个分组「学校统一认证(CAS)」「目录服务(LDAP)」上下排列,每组右上角是启用开关和状态(未配置 / 已启用 / 已停用),
-// 下方是参数表单,各自保存(启用开关也随保存生效:LDAP 保存要带绑定密码,单独切开关无法提交)。
+// 下方是参数表单,各自保存(启用开关也随保存生效)。
 //
 // CAS 与 LDAP 各一套配置,后端按 type 分别 upsert。两者的必填项不同
 // (CAS 只要 https 服务器地址;LDAP 要 ldaps 地址 + 绑定账号 + 搜索基准 + 过滤式 + 匹配属性),
 // 故按类型渲染各自的显式字段,不给裸 JSON 文本域。
 //
-// 绑定密码由后端加密保存且不回显(响应里是「已配置」占位)。后端 secureSSOConfig 拒绝空值和占位值,
-// 所以「留空表示不修改」现在做不到:每次保存都要重填密码,界面说明原因(设计 §10 缺口,第 16 批补后端)。
+// 绑定密码由后端加密保存且不回显(响应里是「已配置」占位)。修改已有配置时绑定密码留空表示不修改,
+// 服务端沿用已保存的密文;首次配置必须填写(docs/01-身份与租户/03-接口设计.md)。
 
 import { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router'
@@ -225,8 +225,7 @@ function CasConfigCard({ config, onSaved }: ConfigCardProps) {
 
 /**
  * LdapConfigCard 维护 LDAP 配置。
- * 绑定密码不回显:后端保存后返回占位值,直接提交占位值会被拒绝,
- * 故每次保存都要求重填 —— 界面说明原因,不让管理员以为是 bug。
+ * 绑定密码不回显:修改已有配置时留空表示沿用已保存的密码,填写即替换;首次配置必须填写。
  */
 function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
   const configured = config !== undefined
@@ -248,7 +247,7 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
       ? null
       : '目录服务地址要以 ldaps:// 开头 —— 明文 LDAP 不被接受',
     bindDn: bindDn.trim() === '' ? '请填写绑定账号' : null,
-    bindPassword: bindPassword === '' ? '请填写绑定密码' : null,
+    bindPassword: bindPassword === '' && !configured ? '请填写绑定密码' : null,
     baseDn: baseDn.trim() === '' ? '请填写搜索基准' : null,
     userFilter: userFilter.trim() === ''
       ? '请填写用户过滤式'
@@ -256,7 +255,7 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
         ? '请在用户过滤式中用 {username} 代表登录名'
         : null,
     matchAttribute: matchAttribute.trim() === '' ? '请填写匹配属性' : null,
-  }), [baseDn, bindDn, bindPassword, matchAttribute, url, userFilter]))
+  }), [baseDn, bindDn, bindPassword, configured, matchAttribute, url, userFilter]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -352,11 +351,11 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
             <FormField
               label="绑定密码"
               htmlFor="ldap-bind-password"
-              required
+              required={!configured}
               error={errors.bindPassword}
               helper={
                 configured
-                  ? '已配置,但不会回显;目前每次保存都需要重新填写'
+                  ? '已配置,不会回显;留空表示不修改,填写即替换'
                   : '保存后加密存储,不会回显'
               }
             >

@@ -3,6 +3,7 @@
   get:
     tags: [notify]
     summary: 站内信收件箱
+    description: facets.is_read：已读分段计数，套用类型筛选、不套用已读筛选。
     operationId: notifyInbox
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -64,9 +65,13 @@
   get:
     tags: [notify]
     summary: 系统公告分页列表
+    description: facets.scope 按发布范围计数，facets.is_read 按本人是否已读计数（收件箱公告标签的未读数取 false 一项）；口径是当前身份可见的全部公告，该列表没有筛选参数。平台身份没有已读记录。
     operationId: notifyListAnnouncements
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
+    parameters:
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [notify]

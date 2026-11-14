@@ -458,8 +458,12 @@ func (a contestAPI) listBattleMatches(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListBattleMatches(c.Request.Context(), id, page, size)
-	httpx.WritePage(c, out, total, p, s, err)
+	status, ok := httpx.QueryInt16(c, "status", httpx.QueryIntRule{Default: 0, Min: 0, Max: int64(BattleMatchStatusFailed), HasMax: true})
+	if !ok {
+		return
+	}
+	out, total, p, s, facets, err := a.svc.ListBattleMatches(c.Request.Context(), id, status, page, size)
+	httpx.WritePageWithFacets(c, out, total, p, s, facets.Map(), err)
 }
 
 // getBattleReplayWindow 返回按完成时间排序的回放时间窗和服务端检查点。
@@ -611,8 +615,8 @@ func (a contestAPI) listVulnProblems(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListVulnProblems(c.Request.Context(), sourceID, status, prevalidateStatus, page, size)
-	httpx.WritePage(c, out, total, p, s, err)
+	out, total, p, s, facets, err := a.svc.ListVulnProblems(c.Request.Context(), sourceID, status, prevalidateStatus, page, size)
+	httpx.WritePageWithFacets(c, out, total, p, s, facets.Map(), err)
 }
 
 // importVulnProblem 手动导入漏洞题。

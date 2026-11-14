@@ -40,6 +40,7 @@ import { api } from '../../../../app/api'
 import { ResourceError } from '../../../../components/ResourceState'
 import { usePagedResource, useUrlState } from '../../../../hooks'
 import { copyText } from '../../../../utils/clipboard'
+import { segmentCounts } from '../../../../utils/facets'
 import { formatDateRange } from '../../../../utils/formatters'
 import { courseStatusLabel, courseTypeLabel } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -122,6 +123,9 @@ export default function TeacherCoursesPage() {
     [query.shared, query.status],
     { urlPageKey: 'page' },
   )
+  // 分段计数取列表接口的 facets:套用共享筛选、不套用状态筛选;读取中或失败时不显示数字
+  const facets = courses.status === 'success' || courses.status === 'empty' ? courses.data?.facets : undefined
+  const statusCounts = segmentCounts(facets, 'status', STATUS_SEGMENTS, (segment) => statusOf(segment.value))
 
   /** runStatusAction 执行状态流转并刷新列表。 */
   const runStatusAction = useCallback(async () => {
@@ -197,7 +201,7 @@ export default function TeacherCoursesPage() {
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <SegmentedControl
           aria-label="按课程状态筛选"
-          options={STATUS_SEGMENTS.map((segment) => ({ value: segment.value, label: segment.label }))}
+          options={STATUS_SEGMENTS.map((segment) => ({ value: segment.value, label: segment.label, count: statusCounts[segment.value] }))}
           value={query.status}
           onValueChange={(value) => setQuery({ status: value })}
         />
@@ -333,7 +337,8 @@ export default function TeacherCoursesPage() {
 }
 
 /**
- * TeacherCourseCard 一门课:课程名(整卡链接)、状态、学期 · 学分 · 类型、开课区间、共享标记;
+ * TeacherCourseCard 一门课:课程名(整卡链接)、状态、学期 · 学分 · 类型 · 选课人数、开课区间、共享标记;
+ * 选课人数来自列表接口按当前页一次聚合的 member_count,不逐门课取统计;
  * 已发布或进行中时显示邀请码与复制按钮;更多菜单与复制按钮浮在整卡链接之上单独可点。
  */
 function TeacherCourseCard({ course, menu }: { course: Course; menu: React.ReactNode }) {
@@ -352,7 +357,8 @@ function TeacherCourseCard({ course, menu }: { course: Course; menu: React.React
         {course.visibility === CourseVisibility.SHARED ? <Badge tone="jade">已共享</Badge> : null}
       </div>
       <p className="text-sm text-ink-sub">
-        {course.semester} · {course.credits} 学分 · {courseTypeLabel(course.type)}
+        {course.semester} · {course.credits} 学分 · {courseTypeLabel(course.type)} ·{' '}
+        <span className="tabular-nums">{course.member_count ?? 0} 人选课</span>
       </p>
       <p className="font-mono text-xs tabular-nums text-ink-sub">{formatDateRange(course.start_at, course.end_at)}</p>
       {showInvite && course.invite_code ? (

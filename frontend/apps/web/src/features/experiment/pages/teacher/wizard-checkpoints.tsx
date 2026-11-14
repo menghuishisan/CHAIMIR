@@ -6,7 +6,7 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { Plus, Target, Trash2 } from 'lucide-react'
-import { PAGINATION_MAX_SIZE, type CheckpointConfig } from '@chaimir/api-client'
+import type { CheckpointConfig, JudgerCatalog } from '@chaimir/api-client'
 import {
   Badge,
   Button,
@@ -32,10 +32,10 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
+import { type AsyncResourceState, useAsyncResource } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { judgerTypeLabel } from '../../../../utils/labels/judge'
-import { toContentItemVersionOptions } from '../../../content/contentItemOptions'
+import { ContentItemSelect } from '../../../content/components/ContentItemSelect'
 import type { ExperimentDraft } from './wizard-state'
 
 export interface WizardCheckpointsStepProps {
@@ -49,6 +49,24 @@ export interface WizardCheckpointsStepProps {
  */
 export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpointsStepProps) {
   const [modal, setModal] = useState<{ index?: number } | undefined>()
+  // 判题器目录在这一步读一次:表格把判题器编码换成名称,表单弹窗用它列选项
+  const judgers = useAsyncResource(
+    () => api.judge.getJudgerCatalog(),
+    [],
+    (value) => value.judgers.length === 0
+  )
+  const judgerNames = useMemo(
+    () => new Map((judgers.data?.judgers ?? []).map((item) => [item.code, item.name])),
+    [judgers.data]
+  )
+
+  /** judgerText 表格里判题方式的说法:目录里的名称;目录没读到时先占位,目录里没有的说明已经下线 */
+  const judgerText = (code: string): string => {
+    const name = judgerNames.get(code)
+    if (name) return name
+    if (judgers.status === 'loading') return '…'
+    return judgers.status === 'error' ? '暂时读不到' : '已下线的判题方式'
+  }
 
   const writeCheckpoints = useCallback(
     (checkpoints: CheckpointConfig[]) => {
@@ -72,7 +90,7 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
     {
       key: 'judger',
       header: '判题方式',
-      render: (checkpoint) => <Badge tone="neutral">{checkpoint.judger}</Badge>,
+      render: (checkpoint) => <Badge tone="neutral">{judgerText(checkpoint.judger)}</Badge>,
     },
     {
       key: 'item_code',
@@ -112,7 +130,7 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
               variant="ghost"
               size="sm"
               icon={Trash2}
-              aria-label={`删除检查点 ${checkpoint.id}`}
+              aria-label={`删除检查点 ${index + 1}`}
               onClick={() =>
                 writeCheckpoints(draft.components.checkpoints.filter((_, i) => i !== index))
               }
@@ -163,7 +181,7 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
                 const index = draft.components.checkpoints.indexOf(checkpoint)
                 return {
                   title: `检查点 ${index + 1}`,
-                  meta: `${checkpoint.judger} · ${checkpoint.item_code} · ${checkpoint.item_version}`,
+                  meta: `${judgerText(checkpoint.judger)} · ${checkpoint.item_code} · ${checkpoint.item_version}`,
                   badge: <Badge tone="neutral">{checkpoint.score} 分</Badge>,
                   action: (
                     <div className="flex gap-1">
@@ -174,7 +192,7 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
                         variant="ghost"
                         size="sm"
                         icon={Trash2}
-                        aria-label={`删除检查点 ${checkpoint.id}`}
+                        aria-label={`删除检查点 ${index + 1}`}
                         onClick={() =>
                           writeCheckpoints(
                             draft.components.checkpoints.filter((_, i) => i !== index),
@@ -202,6 +220,7 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
             modal.index !== undefined ? draft.components.checkpoints[modal.index] : undefined
           }
           usedIds={draft.components.checkpoints.map((item) => item.id)}
+          judgers={judgers}
           draft={draft}
           onClose={() => setModal(undefined)}
           onSave={(checkpoint) => {
@@ -223,6 +242,8 @@ export function WizardCheckpointsStep({ draft, errors, onChange }: WizardCheckpo
 interface CheckpointFormModalProps {
   checkpoint?: CheckpointConfig
   usedIds: string[]
+  /** 步级读到的判题器目录 */
+  judgers: AsyncResourceState<JudgerCatalog>
   draft: ExperimentDraft
   onClose: () => void
   onSave: (checkpoint: CheckpointConfig) => void
@@ -235,6 +256,7 @@ function CheckpointFormModal({
   checkpoint,
   usedIds,
   draft,
+  judgers,
   onClose,
   onSave,
 }: CheckpointFormModalProps) {
@@ -248,13 +270,6 @@ function CheckpointFormModal({
     checkpoint?.env_id ? `env:${checkpoint.env_id}` : checkpoint?.sim_id ? `sim:${checkpoint.sim_id}` : '',
   )
 
-  const judgers = useAsyncResource(() => api.judge.getJudgerCatalog(), [], (value) => value.judgers.length === 0)
-  const items = useAsyncResource(
-    () => api.content.getItems({ page: 1, size: PAGINATION_MAX_SIZE }),
-    [],
-    () => false,
-  )
-
   const judgerOptions = useMemo(
     () =>
       (judgers.data?.judgers ?? []).map((item) => ({
@@ -264,7 +279,6 @@ function CheckpointFormModal({
     [judgers.data],
   )
 
-  const itemOptions = useMemo(() => toContentItemVersionOptions(items.data?.list ?? []), [items.data])
 
   const bindOptions = useMemo(
     () => [
@@ -363,38 +377,24 @@ function CheckpointFormModal({
             )}
           </ResourceState>
 
-          <ResourceState
-            resource={items}
-            emptyIcon={Target}
-            emptyTitle="题库里还没有题目"
-            emptyDescription="先在题库内容里创建实验模板或题目,再回来配置检查点。"
-            skeleton={<Skeleton variant="line" lines={2} />}
+          <FormField
+            label="判分依据题目"
+            htmlFor="checkpoint-item"
+            required
+            helper="题目按当前版本锁定,之后题库改动不影响已发布实验"
+            error={errors.item}
           >
-            {() => (
-              <FormField
-                label="判分依据题目"
-                htmlFor="checkpoint-item"
-                required
-                helper="题目按当前版本锁定,之后题库改动不影响已发布实验"
-                error={errors.item}
-              >
-                <Select
-                  id="checkpoint-item"
-                  options={itemOptions}
-                  value={itemCode === '' ? '' : `${itemCode}|${itemVersion}`}
-                  invalid={Boolean(errors.item)}
-                  onBlur={() => validate(['item'])}
-                  placeholder={itemOptions.length > 0 ? '选择题目' : '暂无题目'}
-                  disabled={itemOptions.length === 0}
-                  onValueChange={(value) => {
-                    const [code, version] = value.split('|')
-                    setItemCode(code)
-                    setItemVersion(version)
-                  }}
-                />
-              </FormField>
-            )}
-          </ResourceState>
+            <ContentItemSelect
+              id="checkpoint-item"
+              label="判分依据题目"
+              value={itemCode === '' ? undefined : { code: itemCode, version: itemVersion }}
+              invalid={Boolean(errors.item)}
+              onChange={(item) => {
+                setItemCode(item.code)
+                setItemVersion(item.version)
+              }}
+            />
+          </FormField>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField label="分值" htmlFor="checkpoint-score" required error={errors.score}>

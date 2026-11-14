@@ -65,6 +65,18 @@ type CourseDTO struct {
 	Visibility  int16          `json:"visibility"`
 	CreatedAt   string         `json:"created_at"`
 	UpdatedAt   string         `json:"updated_at"`
+	// TeacherName 授课教师姓名;只在课程列表与课程大纲里给出,账号已注销读不到时为空串
+	TeacherName string `json:"teacher_name,omitempty"`
+	// MemberCount 选课人数;只在教师课程列表里给出
+	MemberCount int64 `json:"member_count,omitempty"`
+	// MyProgress 本人学习进度;只在学生课程列表里给出
+	MyProgress *CourseProgressDTO `json:"my_progress,omitempty"`
+}
+
+// CourseProgressDTO 一门课的本人学习进度:有效课时数与已学完的课时数,与课程大纲同口径。
+type CourseProgressDTO struct {
+	LessonCount    int64 `json:"lesson_count"`
+	CompletedCount int64 `json:"completed_count"`
 }
 
 // SharedCourseDTO仅公开跨租户克隆前的课程目录元数据。
@@ -77,6 +89,8 @@ type SharedCourseDTO struct {
 	Semester    string  `json:"semester"`
 	Credits     float64 `json:"credits"`
 	UpdatedAt   string  `json:"updated_at"`
+	// ChapterCount 章节数,供目录预览写「共 n 章」;只给数量,不给章节内容
+	ChapterCount int64 `json:"chapter_count"`
 }
 
 type CourseRequest struct {
@@ -205,6 +219,23 @@ type AssignmentDTO struct {
 	Status      int16          `json:"status"`
 	CreatedAt   string         `json:"created_at"`
 	UpdatedAt   string         `json:"updated_at"`
+	// SubmissionStats 全班提交统计;只在授课教师读取作业清单时给出
+	SubmissionStats *AssignmentSubmissionStatsDTO `json:"submission_stats,omitempty"`
+	// MySubmission 本人提交情况;只在课程成员读取作业清单时给出
+	MySubmission *MyAssignmentSubmissionDTO `json:"my_submission,omitempty"`
+}
+
+// AssignmentSubmissionStatsDTO 一份作业的全班提交统计,按学生去重:
+// SubmittedCount 交过的人数,PendingCount 最近一次提交在等老师评分的人数(与批改中心「待批改」同口径)。
+type AssignmentSubmissionStatsDTO struct {
+	SubmittedCount int64 `json:"submitted_count"`
+	PendingCount   int64 `json:"pending_count"`
+}
+
+// MyAssignmentSubmissionDTO 本人在一份作业上的提交情况:已用次数与最近一次提交的状态(还没交为 0)。
+type MyAssignmentSubmissionDTO struct {
+	Attempts     int64 `json:"attempts"`
+	LatestStatus int16 `json:"latest_status"`
 }
 
 type AssignmentItemDTO struct {

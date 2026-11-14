@@ -12,6 +12,7 @@ import (
 	"chaimir/internal/modules/judge/internal/sqlcgen"
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/jsonx"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/pgtypex"
 	"chaimir/internal/platform/timex"
 	"chaimir/pkg/apperr"
@@ -41,6 +42,7 @@ type TxStore interface {
 	ListJudgeTasksBySourceRef(ctx context.Context, tenantID int64, sourceRef string) ([]JudgeTask, error)
 	ListRecentJudgeTasksBySubmitterProblem(ctx context.Context, tenantID, submitterTenantID, submitterID int64, problemRef string, windowSeconds int32) ([]JudgeTask, error)
 	ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, state string, modules []string, limit, offset int32) ([]JudgeTaskInfo, int64, error)
+	CountJudgeTasksByState(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, modules []string) (pagex.FacetGroup, error)
 	CancelQueuedJudgeTask(ctx context.Context, tenantID, taskID int64) (JudgeTask, error)
 	ResetJudgeTaskForRejudge(ctx context.Context, tenantID, taskID int64, snapshot JudgeInputSnapshot) (JudgeTask, error)
 	DequeueJudgeTasks(ctx context.Context, limit int32, staleBefore, leaseUntil time.Time, leaseToken string) ([]JudgeTask, error)
@@ -288,6 +290,23 @@ func (s *txStore) ListJudgeTasks(ctx context.Context, tenantID int64, sourceRef 
 	}
 	items, err := taskInfosFromRows(rows)
 	return items, total, err
+}
+
+// CountJudgeTasksByState 按运维分组聚合判题任务(套用来源、人工评分与本人范围,不套用 state);
+// 不属于任何分组的任务(成功、取消)不返回。
+func (s *txStore) CountJudgeTasksByState(ctx context.Context, tenantID int64, sourceRef string, pendingManual bool, sourceOwnerID int64, modules []string) (pagex.FacetGroup, error) {
+	rows, err := s.q.CountJudgeTasksByState(ctx, sqlcgen.CountJudgeTasksByStateParams{TenantID: tenantID, EnabledModules: modules, SourceRef: sourceRef, PendingManual: pendingManual, SourceOwnerID: sourceOwnerID})
+	if err != nil {
+		return nil, err
+	}
+	group := pagex.FacetGroup{}
+	for _, row := range rows {
+		if row.State == "other" {
+			continue
+		}
+		group.Add(row.State, row.Count)
+	}
+	return group, nil
 }
 
 // CancelQueuedJudgeTask 取消排队任务。

@@ -1,253 +1,161 @@
-// 入驻申请页(平台侧栏,/platform-admin/applications)。
-//
-// 学校在公共入驻页提交申请(匿名接口),平台在这里审核。通过即在一个事务里创建租户、
-// 开通首个学校管理员并签发一次性激活码 —— 后果重且不可撤销,故核对资料与填写开通信息
-// 都在详情深页完成,列表页只做「谁在等、谁已处理」的分诊。
-//
-// 后端 GET /platform/applications 回全量列表(不分页),故筛选与统计在本页内完成。
+// 入驻申请(平台侧栏,/platform-admin/applications)。设计 §7.6:
+// 分段「待审核 / 已开通 / 已驳回 / 全部」(默认待审核,带数字)+ 搜索,都写进地址;
+// 列表行显示学校名、机构类型、联系人、提交时间(相对时间)、状态,整行链向申请详情。指标条与常驻说明卡去掉。
+// 申请接口一次返回全部(不分页,数量按设计只有几十到几百),故分段计数与搜索在本页完成。
 
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useNavigate } from 'react-router'
-import { ArrowRight, ExternalLink, Inbox, Search } from 'lucide-react'
+import { Inbox } from 'lucide-react'
 import { ApplicationStatus, type TenantApplication } from '@chaimir/api-client'
 import {
-  Button,
-  Callout,
-  DataPanel,
-  FilterBar,
-  FilterField,
-  Input,
-  MetricStrip,
+  ListRow,
   PageHeader,
   PageScaffold,
   SegmentedControl,
+  Skeleton,
   StatusIndicator,
-  Table,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
-import { formatDateTime } from '../../../../utils/formatters'
-import {
-  applicationStatusLabel,
-  schoolTypeLabel,
-} from '../../../../utils/labels/identity'
+import { SearchBox } from '../../../../components/SearchBox'
+import { useAsyncResource, useUrlState } from '../../../../hooks'
+import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
+import { applicationStatusLabel, schoolTypeLabel } from '../../../../utils/labels/identity'
 import { applicationStatusTone } from '../../statusPresentation'
 
-/** 状态筛选项:值为空串表示不过滤。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(ApplicationStatus.PENDING), label: '待审核' },
-  { value: String(ApplicationStatus.APPROVED), label: '已开通' },
-  { value: String(ApplicationStatus.REJECTED), label: '已驳回' },
+/** 地址参数:status 分段(默认待审核),q 学校名或联系人 */
+const APPLICATIONS_QUERY = {
+  status: { defaultValue: 'pending', allowed: ['pending', 'approved', 'rejected', 'all'] },
+  q: { defaultValue: '' },
+} as const
+
+const STATUS_SEGMENTS = [
+  { value: 'pending', label: '待审核', status: ApplicationStatus.PENDING },
+  { value: 'approved', label: '已开通', status: ApplicationStatus.APPROVED },
+  { value: 'rejected', label: '已驳回', status: ApplicationStatus.REJECTED },
+  { value: 'all', label: '全部' },
 ] as const
 
-/**
- * PlatformApplicationsPage 列出学校入驻申请并进入审核详情。
- */
+/** PlatformApplicationsPage 入驻申请分诊:谁在等、谁已处理,整行进入详情审核 */
 export default function PlatformApplicationsPage() {
   const navigate = useNavigate()
-  const [statusFilter, setStatusFilter] = useState<string>(String(ApplicationStatus.PENDING))
-  const [keyword, setKeyword] = useState('')
-
+  const [query, setQuery] = useUrlState(APPLICATIONS_QUERY)
   const applications = useAsyncResource(
-    () =>
-      api.identity.getApplications(
-        statusFilter ? { status: Number(statusFilter) as ApplicationStatus } : undefined,
-      ),
-    [statusFilter],
+    () => api.identity.getApplications(),
+    [],
+    (list) => list.length === 0
   )
+  const all = useMemo(() => applications.data ?? [], [applications.data])
 
-  const list = useMemo(() => applications.data ?? [], [applications.data])
-
-  const visible = useMemo(() => {
-    const text = keyword.trim().toLowerCase()
-    if (text === '') return list
-    return list.filter(
-      (item) =>
-        item.school_name.toLowerCase().includes(text) ||
-        item.contact_name.toLowerCase().includes(text),
-    )
-  }, [keyword, list])
-
-  // 指标带必须是全量口径,故单独取一份不带状态筛选的清单:
-  // 复用上面这份会让「待审核」在筛「已开通」时变成 0(规范 §6.5)。
-  const allApplications = useAsyncResource(() => api.identity.getApplications(), [])
-  const stats = useMemo(() => {
-    if ((allApplications.status !== 'success' && allApplications.status !== 'empty') || !allApplications.data) return undefined
-    const all = allApplications.data
-    return {
-      pending: all.filter((item) => item.status === ApplicationStatus.PENDING).length,
-      approved: all.filter((item) => item.status === ApplicationStatus.APPROVED).length,
-      rejected: all.filter((item) => item.status === ApplicationStatus.REJECTED).length,
+  const counts = useMemo(() => {
+    const result: Record<string, number> = { all: all.length }
+    for (const segment of STATUS_SEGMENTS) {
+      if ('status' in segment)
+        result[segment.value] = all.filter((item) => item.status === segment.status).length
     }
-  }, [allApplications.data, allApplications.status])
+    return result
+  }, [all])
 
-  const columns: TableColumn<TenantApplication>[] = [
-    {
-      key: 'school_name',
-      header: '学校',
-      render: (item) => (
-        <div className="min-w-0 group flex flex-col">
-          <button
-            type="button"
-            onClick={() => navigate(`/platform-admin/applications/${item.application_id}`)}
-            className="truncate text-left font-medium text-ink underline-offset-4 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 inline-flex items-center gap-1.5"
-            title="查看申请审核详情"
-          >
-            <span className="truncate">{item.school_name}</span>
-            <ArrowRight className="h-3.5 w-3.5 shrink-0 -translate-x-1 text-accent opacity-0 transition-all group-hover:translate-x-0 group-hover:opacity-100" />
-          </button>
-          <div className="truncate text-xs text-ink-sub">{schoolTypeLabel(item.school_type)}</div>
-        </div>
+  const segment = STATUS_SEGMENTS.find((item) => item.value === query.status)
+  const keyword = query.q.trim().toLowerCase()
+  const visible = useMemo(
+    () =>
+      all.filter(
+        (item) =>
+          (!segment || !('status' in segment) || item.status === segment.status) &&
+          (keyword === '' ||
+            item.school_name.toLowerCase().includes(keyword) ||
+            item.contact_name.toLowerCase().includes(keyword))
       ),
-    },
-    {
-      key: 'contact_name',
-      header: '联系人',
-      render: (item) => (
-        <div className="min-w-0">
-          <div className="truncate text-ink">{item.contact_name}</div>
-          <div className="truncate font-mono text-xs text-ink-sub">{item.contact_phone}</div>
-        </div>
-      ),
-    },
-    {
-      key: 'submitted_at',
-      header: '提交时间',
-      render: (item) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDateTime(item.submitted_at)}
-        </span>
-      ),
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (item) => (
-        <div className="flex flex-col gap-1">
-          <StatusIndicator
-            tone={applicationStatusTone(item.status)}
-            label={applicationStatusLabel(item.status)}
-          />
-          {item.reviewed_at ? (
-            <span className="font-mono text-xs text-ink-sub">{formatDateTime(item.reviewed_at)}</span>
-          ) : null}
-        </div>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (item) => (
-        <Button
-          variant="ghost"
-          size="sm"
-          leftIcon={ExternalLink}
-          onClick={() => navigate(`/platform-admin/applications/${item.application_id}`)}
-        >
-          {item.status === ApplicationStatus.PENDING ? '去审核' : '看详情'}
-        </Button>
-      ),
-    },
-  ]
+    [all, keyword, segment]
+  )
+  const loaded = applications.status === 'success' || applications.status === 'empty'
 
   return (
     <PageScaffold>
       <PageHeader
         title="入驻申请"
-        description="学校提交的开通申请。审核通过会创建学校并开通首个管理员账号,请先核对联系人身份。"
+        meta={loaded && counts.pending > 0 ? [{ value: `${counts.pending} 份待审核` }] : undefined}
       />
 
-      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是申请记录 */}
-      <MetricStrip
-        label="申请积压摘要"
-        className="mb-5"
-        items={[
-          {
-            label: '待审核',
-            value: stats?.pending,
-            hint: stats ? (stats.pending > 0 ? '需要你处理' : '暂时没有积压') : undefined,
-          },
-          { label: '已开通', value: stats?.approved, hint: '不受下方筛选影响' },
-          { label: '已驳回', value: stats?.rejected, hint: '学校可重新提交' },
-        ]}
-      />
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <SegmentedControl
+          aria-label="按审核状态筛选"
+          options={STATUS_SEGMENTS.map((item) => ({
+            value: item.value,
+            label: item.label,
+            count: loaded ? counts[item.value] : undefined,
+          }))}
+          value={query.status}
+          onValueChange={(value) => setQuery({ status: value })}
+          className="max-w-full self-start overflow-x-auto"
+        />
+        <SearchBox
+          label="搜索申请"
+          placeholder="搜索学校名或联系人"
+          value={query.q}
+          onSearch={(value) => setQuery({ q: value })}
+        />
+      </div>
 
-      <Callout tone="info" className="mb-4">
-        申请里的联系方式由学校自行填写,开通前请通过其他渠道核实身份 —— 通过后会立刻创建可登录的管理员账号。
-      </Callout>
-
-      {/* 筛选井与数据表同处一块抬起片(§6.5.2) */}
-      <DataPanel
-        label="申请记录"
-        filter={
-          <FilterBar label="申请记录筛选">
-            <FilterField label="审核状态" group>
-              <SegmentedControl
-                aria-label="按审核状态筛选"
-                size="sm"
-                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-                value={statusFilter}
-                onValueChange={setStatusFilter}
-              />
-            </FilterField>
-            <FilterField label="学校名称或联系人" htmlFor="applications-keyword">
-              <Input
-                id="applications-keyword"
-                type="search"
-                autoComplete="off"
-                leftIcon={Search}
-                value={keyword}
-                placeholder="输入关键词"
-                onChange={(event) => setKeyword(event.target.value)}
-              />
-            </FilterField>
-          </FilterBar>
-        }
+      <ResourceState
+        resource={applications}
+        emptyIcon={Inbox}
+        emptyTitle="还没有入驻申请"
+        emptyDescription="学校在入驻页提交申请后会出现在这里。"
+        skeleton={<Skeleton variant="line" lines={6} />}
       >
-          <ResourceState
-            resource={applications}
-            emptyIcon={Inbox}
-            emptyTitle={statusFilter ? '这个状态下没有申请' : '还没有入驻申请'}
-            emptyDescription={
-              statusFilter ? '换个状态看看。' : '学校在公共入驻页提交申请后会出现在这里。'
-            }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-          >
-            {() => (
-              <Table
-                columns={columns}
-                data={visible}
-                rowKey={(item) => item.application_id}
-                elevated={false}
-                empty={<span className="text-sm text-ink-sub">没有匹配的申请,换个关键词看看。</span>}
-                // <md 换行卡(§6.4.1 规则 3):校名一行、联系人与提交时间一行
-                mobileCard={(item) => ({
-                  title: item.school_name,
-                  meta: `${item.contact_name} · ${formatDateTime(item.submitted_at)}`,
-                  badge: (
-                    <StatusIndicator
-                      tone={applicationStatusTone(item.status)}
-                      label={applicationStatusLabel(item.status)}
-                    />
-                  ),
-                  action: (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => navigate(`/platform-admin/applications/${item.application_id}`)}
-                    >
-                      {item.status === ApplicationStatus.PENDING ? '审核' : '详情'}
-                    </Button>
-                  ),
-                })}
-              />
-            )}
-          </ResourceState>
-      </DataPanel>
+        {() =>
+          visible.length === 0 ? (
+            <p className="rounded-lg bg-surface px-4 py-10 text-center text-sm text-ink-sub shadow-xs">
+              {keyword
+                ? '没有匹配的申请,换个学校名或联系人试试。'
+                : query.status === 'pending'
+                  ? '没有待审核的申请。'
+                  : '这个状态下没有申请。'}
+            </p>
+          ) : (
+            <ul className="divide-y divide-line rounded-lg bg-surface px-2 py-1 shadow-xs">
+              {visible.map((item) => (
+                <li key={item.application_id}>
+                  <ApplicationRow application={item} onNavigate={navigate} />
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </ResourceState>
     </PageScaffold>
+  )
+}
+
+/** ApplicationRow 一份申请:学校名;机构类型 · 联系人 · 提交时间;状态在右;整行链向详情 */
+function ApplicationRow({
+  application,
+  onNavigate,
+}: {
+  application: TenantApplication
+  onNavigate: (href: string) => void
+}) {
+  return (
+    <ListRow
+      title={application.school_name}
+      meta={
+        <span>
+          {schoolTypeLabel(application.school_type)} · {application.contact_name} ·{' '}
+          <span title={formatDateTime(application.submitted_at)}>
+            {formatRelativeOccurrence(application.submitted_at)}提交
+          </span>
+        </span>
+      }
+      trailing={
+        <StatusIndicator
+          tone={applicationStatusTone(application.status)}
+          label={applicationStatusLabel(application.status)}
+        />
+      }
+      href={`/platform-admin/applications/${application.application_id}`}
+      onNavigate={onNavigate}
+    />
   )
 }

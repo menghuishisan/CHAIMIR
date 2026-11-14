@@ -26,6 +26,7 @@ export interface StepsProps {
   className?: string;
 }
 
+/** Steps 向导步骤指示 */
 export function Steps({ steps, current, onSelect, className }: StepsProps) {
   return (
     <div className="min-w-0 max-w-full overflow-x-auto pb-1">

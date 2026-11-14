@@ -226,8 +226,8 @@ func (a judgeAPI) listTasks(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, total, p, s, err := a.svc.ListTasks(c.Request.Context(), current.TenantID, current.AccountID, c.Query("source_ref"), c.Query("pending_manual") == "true", c.Query("state"), page, size)
-	httpx.WritePage(c, items, total, p, s, err)
+	items, total, p, s, facets, err := a.svc.ListTasks(c.Request.Context(), current.TenantID, current.AccountID, c.Query("source_ref"), c.Query("pending_manual") == "true", c.Query("state"), page, size)
+	httpx.WritePageWithFacets(c, items, total, p, s, facets.Map(), err)
 }
 
 // getTask 查询单个判题任务状态和结果。

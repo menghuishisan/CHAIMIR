@@ -25,8 +25,13 @@ type Querier interface {
 	// 一个隔离会话一个 Pod,没有这道闸门循环建会话可耗尽节点;浏览器执行的会话不占集群资源故不计入。
 	CountActiveIsolatedSimSessions(ctx context.Context, tenantID int64) (int64, error)
 	CountSimPackages(ctx context.Context, arg CountSimPackagesParams) (int64, error)
+	// 分类分段计数:套用状态、关键词与作者范围,不套用分类筛选(接口总览「分段计数」);按场景去重。
 	CountSimPackagesByCategory(ctx context.Context, arg CountSimPackagesByCategoryParams) ([]CountSimPackagesByCategoryRow, error)
+	// 我的仿真场景的状态分段计数:套用分类、关键词与作者范围,不套用状态筛选;按场景去重(同一场景多个版本只算一个)。
+	CountSimPackagesByStatus(ctx context.Context, arg CountSimPackagesByStatusParams) ([]CountSimPackagesByStatusRow, error)
 	CountSimReviews(ctx context.Context, dollar_1 int16) (int64, error)
+	// 仿真治理队列的审核结论分段计数(待审核 / 已通过 / 已退回)。
+	CountSimReviewsByResult(ctx context.Context) ([]CountSimReviewsByResultRow, error)
 	CreateSimAction(ctx context.Context, arg CreateSimActionParams) (SimActionLog, error)
 	CreateSimPackage(ctx context.Context, arg CreateSimPackageParams) (SimPackage, error)
 	CreateSimPackageReview(ctx context.Context, arg CreateSimPackageReviewParams) (CreateSimPackageReviewRow, error)
@@ -43,6 +48,8 @@ type Querier interface {
 	GetSimSession(ctx context.Context, arg GetSimSessionParams) (SimSession, error)
 	GetSimSessionWithPackage(ctx context.Context, arg GetSimSessionWithPackageParams) (GetSimSessionWithPackageRow, error)
 	GetSimShareByCode(ctx context.Context, code string) (SimShare, error)
+	// 已退回场景的退回意见:当前页每个包最近一次「退回」审核的意见,一次查询;没有退回记录的包不出现。
+	ListLatestRejectionsByPackages(ctx context.Context, packageIds []int64) ([]ListLatestRejectionsByPackagesRow, error)
 	ListSimActions(ctx context.Context, arg ListSimActionsParams) ([]SimActionLog, error)
 	ListSimPackageVersions(ctx context.Context, code string) ([]SimPackage, error)
 	ListSimPackages(ctx context.Context, arg ListSimPackagesParams) ([]SimPackage, error)

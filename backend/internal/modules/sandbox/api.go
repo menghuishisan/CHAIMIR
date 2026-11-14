@@ -171,8 +171,8 @@ func (a sandboxAPI) registerQuotaRoutes(g gin.IRouter, authn *auth.Manager, role
 
 // listRuntimes 返回运行时列表。
 func (a sandboxAPI) listRuntimes(c *gin.Context) {
-	out, err := a.svc.ListRuntimes(c.Request.Context())
-	responses, convertErr := runtimeResponsesFromModels(out)
+	out, availableImages, err := a.svc.ListRuntimes(c.Request.Context())
+	responses, convertErr := runtimeResponsesFromModels(out, availableImages)
 	if err == nil {
 		err = convertErr
 	}

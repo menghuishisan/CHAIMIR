@@ -43,6 +43,7 @@ const STYLES: Record<ChartContext, { value: string; label: string }> = {
   dark: { value: "text-on-dark", label: "text-on-dark-sub" },
 };
 
+/** StreamAreaChart 实时流式面积图(仍在变化的连续时间序列) */
 export function StreamAreaChart({
   data,
   xKey,

@@ -31,6 +31,15 @@ WHERE receiver_id = $1
 ORDER BY created_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
+-- name: CountNotificationsByRead :many
+-- 收件箱「全部 / 未读」分段计数:套用类型筛选,不套用已读筛选。
+SELECT is_read, COUNT(*)::bigint AS count
+FROM notification
+WHERE receiver_id = sqlc.arg(receiver_id)::bigint
+  AND deleted_at IS NULL
+  AND (sqlc.arg(type)::text = '' OR type = sqlc.arg(type)::text)
+GROUP BY is_read;
+
 -- name: CountNotifications :one
 SELECT COUNT(*) FROM notification
 WHERE receiver_id = $1
@@ -110,13 +119,15 @@ WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
   AND (a.expire_at IS NULL OR a.expire_at > now())
   AND (a.scope <> 3 OR a.target_roles && sqlc.arg(role_numbers)::smallint[] OR a.publisher_id = sqlc.arg(account_id));
 
--- name: CountVisibleAnnouncementsByScope :many
-SELECT a.scope, COUNT(*)::bigint AS count
+-- name: CountVisibleAnnouncementFacets :many
+-- 公告列表的两组计数一次取出:按范围、按本人是否已读;可见边界与 ListAnnouncements 相同。
+SELECT a.scope, (r.id IS NOT NULL)::boolean AS is_read, COUNT(*)::bigint AS count
 FROM system_announcement a
-WHERE (a.tenant_id IS NULL OR a.tenant_id = sqlc.arg(tenant_id))
+LEFT JOIN announcement_read r ON r.announcement_id = a.id AND r.tenant_id = $1 AND r.account_id = $2
+WHERE (a.tenant_id IS NULL OR a.tenant_id = $1)
   AND (a.expire_at IS NULL OR a.expire_at > now())
-  AND (a.scope <> 3 OR a.target_roles && sqlc.arg(role_numbers)::smallint[] OR a.publisher_id = sqlc.arg(account_id))
-GROUP BY a.scope
+  AND (a.scope <> 3 OR a.target_roles && sqlc.arg(role_numbers)::smallint[] OR a.publisher_id = $2)
+GROUP BY a.scope, (r.id IS NOT NULL)
 ORDER BY a.scope;
 
 -- name: GetVisibleAnnouncement :one

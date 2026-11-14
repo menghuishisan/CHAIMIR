@@ -7,12 +7,14 @@ import React, { useEffect } from 'react'
 import { TriangleAlert } from 'lucide-react'
 import { Button } from '@chaimir/ui'
 import { useLocation, useRouteError } from 'react-router'
-import { AppStatusScreen } from '../AppStatusScreen'
+import { AppStatusScreen, type AppStatusSurface } from '../AppStatusScreen'
 import { errorDiagnostics, traceIdOf } from '../../utils/userFacingError'
 
 interface RouteErrorBoundaryProps {
   /** 路由标识:变化即重置错误态 */
   routeKey: string
+  /** 失败提示铺在哪一层:默认墨色底层;日常壳只换掉内容区,铺在纸面上 */
+  surface?: AppStatusSurface
   children: React.ReactNode
 }
 
@@ -55,16 +57,27 @@ export class RenderErrorBoundary extends React.Component<RouteErrorBoundaryProps
 
   render(): React.ReactNode {
     if (this.state.failed) {
-      return <RenderFailureScreen traceId={this.state.traceId} />
+      return <RenderFailureScreen traceId={this.state.traceId} surface={this.props.surface} />
     }
     return this.props.children
   }
 }
 
-/** RenderFailureScreen 是渲染失败时的整屏提示:不展示错误原文,只给后端签发的报障编号 */
-function RenderFailureScreen({ traceId }: { traceId?: string }) {
+/**
+ * RenderFailureScreen 是渲染失败时的提示:不展示错误原文,只给后端签发的报障编号。
+ * 墨色底层上占满视口;纸面上只填满内容区,不把整页撑出滚动条。
+ */
+function RenderFailureScreen({
+  traceId,
+  surface = 'substrate',
+}: {
+  traceId?: string
+  surface?: AppStatusSurface
+}) {
   return (
     <AppStatusScreen
+      surface={surface}
+      fullScreen={surface === 'substrate'}
       icon={TriangleAlert}
       tone="danger"
       title="页面加载出现问题"
@@ -94,7 +107,17 @@ export function RootRouteError() {
 /**
  * RouteErrorBoundary 把当前路径作为 routeKey 交给 class 边界,实现「导航即恢复」。
  */
-export function RouteErrorBoundary({ children }: { children: React.ReactNode }) {
+export function RouteErrorBoundary({
+  surface,
+  children,
+}: {
+  surface?: AppStatusSurface
+  children: React.ReactNode
+}) {
   const location = useLocation()
-  return <RenderErrorBoundary routeKey={location.pathname}>{children}</RenderErrorBoundary>
+  return (
+    <RenderErrorBoundary routeKey={location.pathname} surface={surface}>
+      {children}
+    </RenderErrorBoundary>
+  )
 }

@@ -10,7 +10,6 @@ const FACE_FIELDS: readonly { key: string; label: string }[] = [
   { key: 'scenario', label: '场景' },
   { key: 'description', label: '漏洞说明' },
   { key: 'statement', label: '题干' },
-  { key: 'question', label: '题干' },
   { key: 'options', label: '选项' },
   { key: 'contract_source', label: '合约源码' },
   { key: 'fork_block', label: '分叉区块' },
@@ -34,11 +33,10 @@ function linesOf(value: unknown): string[] {
   return []
 }
 
-/** contentFaceSections 按登记顺序输出有内容的题面小节;statement 与旧字段 question 只出一个 */
+/** contentFaceSections 按登记顺序输出有内容的题面小节 */
 export function contentFaceSections(body: Record<string, unknown>): FaceSection[] {
   const sections: FaceSection[] = []
   for (const field of FACE_FIELDS) {
-    if (field.key === 'question' && sections.some((section) => section.key === 'statement')) continue
     const lines = linesOf(body[field.key])
     if (lines.length > 0) sections.push({ key: field.key, label: field.label, lines })
   }

@@ -30,6 +30,7 @@ export interface AnchorNavProps {
   className?: string;
 }
 
+/** AnchorNav 页内分组锚点导航(配置表单族) */
 export function AnchorNav({ label, items, activeId, onSelect, className }: AnchorNavProps) {
   return (
     <nav

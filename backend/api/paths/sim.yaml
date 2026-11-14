@@ -11,7 +11,7 @@
   get:
     tags: [sim]
     summary: 仿真包列表
-    description: 默认只返回已上架包;mine=true 返回当前账号作为作者提交的包，此时 status 可取任一状态，作者边界由服务端会话强制。
+    description: 默认只返回已上架包;mine=true 返回当前账号作为作者提交的包，此时 status 可取任一状态，作者边界由服务端会话强制；mine=true 时已退回的包带 reject_comment（最近一次退回的审核意见）。facets.category 与 facets.status：分类与状态分段计数，按场景去重；每组套用关键词、作者范围与另一组的筛选，不套用本组筛选。
     operationId: simListPackages
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -20,6 +20,8 @@
       - { $ref: "#/components/parameters/KeywordQuery" }
       - { $ref: "#/components/parameters/StatusQuery" }
       - { name: mine, in: query, required: false, schema: { type: string, enum: ["true", "false"] } }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
   post:
     tags: [sim]
@@ -79,6 +81,7 @@
   get:
     tags: [sim]
     summary: 仿真包审核列表
+    description: 每条带提交教师姓名 submitter_name，经身份契约一次批量解析；账号已移除时省略。facets.result：审核结论分段计数。
     operationId: simListReviews
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]

@@ -37,6 +37,7 @@ export interface QueueDetailLayoutProps {
   className?: string;
 }
 
+/** QueueDetailLayout 队列 + 详情双栏骨架(审阅队列族) */
 export function QueueDetailLayout({
   queue,
   detail,

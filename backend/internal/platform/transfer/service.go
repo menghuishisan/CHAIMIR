@@ -124,21 +124,21 @@ func (s *Service) DeletePendingTask(ctx context.Context, tenantID, taskID int64)
 }
 
 // ListTasks 查询当前账号的导入导出任务,返回当前页、总记录数与规范化后的分页参数。
-func (s *Service) ListTasks(ctx context.Context, query TaskListQuery) ([]Task, int64, int, int, error) {
+func (s *Service) ListTasks(ctx context.Context, query TaskListQuery) ([]Task, int64, int, int, pagex.Facets, error) {
 	if query.TenantID < 0 || query.AccountID <= 0 {
-		return nil, 0, 0, 0, apperr.ErrTransferTaskInvalid
+		return nil, 0, 0, 0, nil, apperr.ErrTransferTaskInvalid
 	}
 	if query.Channel != "" {
 		if err := validateChannel(query.Channel); err != nil {
-			return nil, 0, 0, 0, apperr.ErrTransferTaskInvalid.WithCause(err)
+			return nil, 0, 0, 0, nil, apperr.ErrTransferTaskInvalid.WithCause(err)
 		}
 	}
 	if query.Status != "" && !validStatus(query.Status) {
-		return nil, 0, 0, 0, apperr.ErrTransferTaskInvalid
+		return nil, 0, 0, 0, nil, apperr.ErrTransferTaskInvalid
 	}
 	page, size := pagex.Normalize(query.Page, query.Size)
 	limit, offset := pagex.LimitOffset(page, size)
-	items, total, err := s.store.ListTasks(ctx, ListTasksQuery{
+	items, total, byChannel, err := s.store.ListTasks(ctx, ListTasksQuery{
 		TenantID:  query.TenantID,
 		AccountID: query.AccountID,
 		Channel:   query.Channel,
@@ -147,9 +147,9 @@ func (s *Service) ListTasks(ctx context.Context, query TaskListQuery) ([]Task, i
 		Offset:    offset,
 	})
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, 0, 0, nil, err
 	}
-	return items, total, page, size, nil
+	return items, total, page, size, pagex.Facets{"channel": byChannel}, nil
 }
 
 // ClaimTask 原子领取指定任务，模块 worker 只能使用返回的租约完成或失败任务。

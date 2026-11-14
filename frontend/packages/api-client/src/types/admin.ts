@@ -43,6 +43,8 @@ export interface ConfigChangeLog {
   old_value: Record<string, unknown>
   new_value: Record<string, unknown>
   operator_id: SnowflakeID
+  /** 操作人姓名;账号已移除时省略 */
+  operator_name?: string
   created_at: string
 }
 
@@ -136,6 +138,10 @@ export interface AuditLogEntry {
   id: SnowflakeID
   tenant_id?: SnowflakeID
   actor_id: SnowflakeID
+  /** 操作人姓名:学校视角解析本校账号,平台视角只解析平台管理员;系统记录与解析不到的省略 */
+  actor_name?: string
+  /** 操作人学工号,只有学校账号才有 */
+  actor_no?: string
   actor_role: AuditActorRole
   action: string
   target_type: string
@@ -147,6 +153,8 @@ export interface AuditLogEntry {
 }
 
 export interface AuditQueryParams {
+  /** 按学校筛选;只对平台身份生效,学校身份由服务端固定为本校 */
+  tenant_id?: SnowflakeID
   actor_id?: SnowflakeID
   action?: string
   target_type?: string

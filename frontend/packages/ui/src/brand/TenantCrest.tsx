@@ -41,6 +41,7 @@ export interface TenantCrestProps {
   className?: string
 }
 
+/** TenantCrest 租户徽记:有校徽显示校徽,没有就显示学校名首字 */
 export function TenantCrest({
   name,
   logoSrc,

@@ -40,10 +40,8 @@ func (s *Service) Signup(ctx context.Context, contestID int64, req SignupRequest
 		} else if !isNoRows(err) {
 			return err
 		}
+		// 个人赛的队伍名称就是选手在排行榜上的参赛名称,与组队赛一样必填并校验
 		name := strings.TrimSpace(req.TeamName)
-		if contest.TeamMode == TeamModeSolo {
-			name = "个人参赛"
-		}
 		name, err = validateTeamName(name)
 		if err != nil {
 			return err

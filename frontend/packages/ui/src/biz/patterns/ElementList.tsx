@@ -47,6 +47,7 @@ const ROW_EMPHASIS: Record<FrameEmphasis, string> = {
   ghost: "border-l-transparent opacity-40",
 };
 
+/** ElementList 图形化视图的文本化元素清单,作为画布的文本替代 */
 export function ElementList({
   label,
   items,

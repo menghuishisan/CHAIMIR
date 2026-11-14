@@ -15,6 +15,7 @@ export interface ProgressProps {
   className?: string;
 }
 
+/** Progress 线性百分比进度条 */
 export function Progress({ value, label, tone = "primary", className }: ProgressProps) {
   // 非法值(NaN/Infinity)归零后再越界截断,避免填充溢出轨道或渲染异常
   const finite = Number.isFinite(value) ? value : 0;

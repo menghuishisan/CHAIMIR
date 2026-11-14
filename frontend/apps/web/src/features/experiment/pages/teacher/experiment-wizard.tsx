@@ -38,6 +38,7 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { collectAllPages } from '../../../../utils/allPages'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePageLocation, locationLabel } from '../../../../hooks'
@@ -141,8 +142,8 @@ function WizardLoader({ experimentId }: { experimentId: string }) {
     () =>
       Promise.all([
         api.experiment.getExperiment(experimentId),
-        api.teaching.getCourses({ role: 'teacher', page: 1, size: PAGINATION_MAX_SIZE }),
-      ]).then(([experiment, courses]) => ({ experiment, courses: courses.list })),
+        collectAllPages((params) => api.teaching.getCourses({ role: 'teacher', ...params }), PAGINATION_MAX_SIZE),
+      ]).then(([experiment, courses]) => ({ experiment, courses })),
     [experimentId],
     () => false
   )

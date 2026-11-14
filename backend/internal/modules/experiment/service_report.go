@@ -239,14 +239,15 @@ func validateReportObjectRef(bucket string, tenantID, instanceID, studentID int6
 }
 
 // ListReports 查询某实验下的报告列表;status 传 0 表示不按批改状态过滤。
-func (s *Service) ListReports(ctx context.Context, experimentID int64, status int16, page, size int) ([]ReportDTO, int64, int, int, error) {
+func (s *Service) ListReports(ctx context.Context, experimentID int64, status int16, page, size int) ([]ReportDTO, int64, int, int, pagex.Facets, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, 0, 0, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
 	var items []ExperimentReport
 	var total int64
+	var byStatus []statusCount
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		exp, err := tx.GetExperiment(ctx, id.TenantID, experimentID)
 		if err != nil {
@@ -256,19 +257,23 @@ func (s *Service) ListReports(ctx context.Context, experimentID int64, status in
 			return err
 		}
 		items, total, err = tx.ListReports(ctx, id.TenantID, experimentID, status, page, size)
+		if err != nil {
+			return err
+		}
+		byStatus, err = tx.CountReportsByStatus(ctx, id.TenantID, experimentID)
 		return err
 	}); err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, 0, 0, nil, err
 	}
 	profiles, err := s.reportProfiles(ctx, items)
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, 0, 0, nil, err
 	}
 	out := make([]ReportDTO, 0, len(items))
 	for _, item := range items {
 		out = append(out, reportDTOFromModel(item, profiles))
 	}
-	return out, total, page, size, nil
+	return out, total, page, size, statusFacets(byStatus), nil
 }
 
 // IssueReportAccess 校验教师管理权限并签发一次性报告文件下载授权。

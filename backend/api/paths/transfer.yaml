@@ -3,6 +3,7 @@
   get:
     tags: [transfer]
     summary: 查询当前账号可见的导入导出任务
+    description: facets.channel：导入、导出分段计数，本人任务，套用状态筛选、不套用类型筛选。
     operationId: transferListTasks
     x-chaimir-audience: platform-admin-or-user
     security:

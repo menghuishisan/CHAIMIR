@@ -60,6 +60,7 @@ const PAD_TOP = 26;
 const PAD_BOTTOM = 34;
 const NODE_R = 15;
 
+/** TopologyGraph 节点关系拓扑图 */
 export function TopologyGraph({
   nodes,
   edges,

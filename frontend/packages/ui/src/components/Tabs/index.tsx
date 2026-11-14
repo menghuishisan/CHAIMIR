@@ -26,6 +26,7 @@ const TabsValueContext = createContext<string | undefined>(undefined)
 
 export type TabsProps = ComponentPropsWithoutRef<typeof TabsPrimitive.Root>
 
+/** Tabs 选项卡根节点 */
 export function Tabs({ value, defaultValue, onValueChange, children, ...rest }: TabsProps) {
   // 非受控时在本层镜像一份当前值;受控时以外部 value 为准
   const [innerValue, setInnerValue] = useState(defaultValue)
@@ -50,6 +51,7 @@ export function Tabs({ value, defaultValue, onValueChange, children, ...rest }: 
 
 export type TabsListProps = ComponentPropsWithoutRef<typeof TabsPrimitive.List>
 
+/** TabsList 选项卡标签栏 */
 export function TabsList({ className, children, ...rest }: TabsListProps) {
   const activeValue = useContext(TabsValueContext)
   const listRef = useRef<HTMLDivElement>(null)
@@ -109,6 +111,7 @@ export interface TabsTriggerProps extends ComponentPropsWithoutRef<typeof TabsPr
   count?: number
 }
 
+/** TabsTrigger 一个选项卡标签,可带图标与数量 */
 export function TabsTrigger({ icon, count, className, children, ...rest }: TabsTriggerProps) {
   return (
     <TabsPrimitive.Trigger
@@ -131,6 +134,7 @@ export function TabsTrigger({ icon, count, className, children, ...rest }: TabsT
 
 export type TabsContentProps = ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
 
+/** TabsContent 一个选项卡的内容区 */
 export function TabsContent({ className, ...rest }: TabsContentProps) {
   return (
     <TabsPrimitive.Content

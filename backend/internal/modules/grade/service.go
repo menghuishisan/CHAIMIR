@@ -340,20 +340,28 @@ func (s *Service) SubmitReview(ctx context.Context, req ReviewRequest) (ReviewDT
 }
 
 // ListReviews 查询成绩审核分页列表。
-func (s *Service) ListReviews(ctx context.Context, status, isLocked int16, page, size int) ([]ReviewDTO, int64, int, int, error) {
+func (s *Service) ListReviews(ctx context.Context, status, isLocked int16, semesterID int64, page, size int) ([]ReviewDTO, int64, int, int, pagex.Facets, error) {
 	id, err := s.requireSchoolAdmin(ctx)
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
 	var out []ReviewDTO
 	var total int64
+	var byStatus pagex.FacetGroup
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, total, err = tx.ListGradeReviews(ctx, status, isLocked, page, size)
+		out, total, err = tx.ListGradeReviews(ctx, status, isLocked, semesterID, page, size)
+		if err != nil {
+			return err
+		}
+		byStatus, err = tx.CountGradeReviewsByStatus(ctx, isLocked, semesterID)
 		return err
 	})
-	return out, total, page, size, mapGradeReviewErr(err)
+	if err == nil {
+		out, err = s.withReviewNames(ctx, id.TenantID, out)
+	}
+	return out, total, page, size, pagex.Facets{"status": byStatus}, mapGradeReviewErr(err)
 }
 
 // ListOwnReviews 查询当前教师本人提交的成绩审核记录。
@@ -370,6 +378,9 @@ func (s *Service) ListOwnReviews(ctx context.Context, status int16, page, size i
 		out, total, err = tx.ListOwnGradeReviews(ctx, id.AccountID, status, page, size)
 		return err
 	})
+	if err == nil {
+		out, err = s.withReviewNames(ctx, id.TenantID, out)
+	}
 	return out, total, page, size, mapGradeReviewErr(err)
 }
 
@@ -786,31 +797,74 @@ func (s *Service) CreateAppeal(ctx context.Context, req AppealRequest) (AppealDT
 }
 
 // ListAppeals 按服务端角色在分页前限制申诉课程范围,教师不能读取其他教师的申诉。
-func (s *Service) ListAppeals(ctx context.Context, status int16, page, size int) ([]AppealDTO, int64, int, int, error) {
-	id, err := s.requireTeacherAdmin(ctx)
+func (s *Service) ListAppeals(ctx context.Context, status int16, page, size int) ([]AppealDTO, int64, int, int, pagex.Facets, error) {
+	id, err := requireTenantUser(ctx)
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
+	// 角色取自服务端会话:校管优先、其次教师,只有学生身份的看本人
 	actorRole, err := s.gradeActorRole(ctx, id.AccountID)
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
-	query := AppealListQuery{Status: status, AllCourses: actorRole == contracts.RoleNumSchoolAdmin, Page: page, Size: size}
-	if !query.AllCourses {
+	query := appealListScope(appealViewOf(actorRole), id.AccountID)
+	query.Status, query.Page, query.Size = status, page, size
+	if !query.AllCourses && query.StudentID == 0 {
 		query.CourseIDs, err = s.teaching.ListTeacherCourseIDs(ctx, id.TenantID, id.AccountID)
 		if err != nil {
-			return nil, 0, page, size, apperr.ErrGradeForbidden.WithCause(fmt.Errorf("读取教师 %d 的申诉课程范围: %w", id.AccountID, err))
+			return nil, 0, page, size, nil, apperr.ErrGradeForbidden.WithCause(fmt.Errorf("读取教师 %d 的申诉课程范围: %w", id.AccountID, err))
 		}
 	}
 	var out []AppealDTO
 	var total int64
+	var byStatus pagex.FacetGroup
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		out, total, err = tx.ListGradeAppeals(ctx, query)
+		if err != nil {
+			return err
+		}
+		byStatus, err = tx.CountGradeAppealsByStatus(ctx, query)
 		return err
 	})
-	return out, total, page, size, mapGradeAppealErr(err)
+	if err == nil {
+		out, err = s.withAppealNames(ctx, id.TenantID, out)
+	}
+	return out, total, page, size, pagex.Facets{"status": byStatus}, mapGradeAppealErr(err)
+}
+
+// appealView 是读取申诉列表的身份视角。
+type appealView int
+
+const (
+	appealViewStudent appealView = iota + 1
+	appealViewTeacher
+	appealViewSchoolAdmin
+)
+
+// appealViewOf 把成绩中心角色映射为申诉列表视角。
+func appealViewOf(actorRole int16) appealView {
+	switch actorRole {
+	case contracts.RoleNumSchoolAdmin:
+		return appealViewSchoolAdmin
+	case contracts.RoleNumTeacher:
+		return appealViewTeacher
+	default:
+		return appealViewStudent
+	}
+}
+
+// appealListScope 决定一种视角能读的申诉范围:学生只读本人,教师按授课课程(由调用方填课程编号),校管读全校。
+func appealListScope(view appealView, accountID int64) AppealListQuery {
+	switch view {
+	case appealViewSchoolAdmin:
+		return AppealListQuery{AllCourses: true}
+	case appealViewTeacher:
+		return AppealListQuery{}
+	default:
+		return AppealListQuery{StudentID: accountID}
+	}
 }
 
 // AcceptAppeal 受理申诉并解锁对应课程审核。
@@ -824,40 +878,48 @@ func (s *Service) RejectAppeal(ctx context.Context, appealID int64, req AppealDe
 }
 
 // ListWarnings 查询学业预警分页列表;status 传 0 表示不按确认状态过滤。
-func (s *Service) ListWarnings(ctx context.Context, studentID int64, status int16, page, size int) ([]WarningDTO, int64, int, int, error) {
+func (s *Service) ListWarnings(ctx context.Context, studentID int64, status int16, semesterID int64, page, size int) ([]WarningDTO, int64, int, int, pagex.Facets, error) {
 	id, err := requireTenantUser(ctx)
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
 	isAdmin, err := s.roles.HasRole(ctx, id.AccountID, contracts.RoleSchoolAdmin)
 	if err != nil {
-		return nil, 0, page, size, apperr.ErrGradeForbidden.WithCause(err)
+		return nil, 0, page, size, nil, apperr.ErrGradeForbidden.WithCause(err)
 	}
 	if !isAdmin {
 		isStudent, err := s.roles.HasRole(ctx, id.AccountID, contracts.RoleStudent)
 		if err != nil {
-			return nil, 0, page, size, apperr.ErrGradeForbidden.WithCause(err)
+			return nil, 0, page, size, nil, apperr.ErrGradeForbidden.WithCause(err)
 		}
 		// 学生缺省为本人;校管保留 0 作为本租户全校查询范围。
 		if studentID == 0 {
 			studentID = id.AccountID
 		}
 		if !isStudent || studentID != id.AccountID {
-			return nil, 0, page, size, apperr.ErrGradeForbidden
+			return nil, 0, page, size, nil, apperr.ErrGradeForbidden
 		}
 	}
 	if studentID < 0 {
-		return nil, 0, page, size, apperr.ErrGradeForbidden
+		return nil, 0, page, size, nil, apperr.ErrGradeForbidden
 	}
 	var out []WarningDTO
 	var total int64
+	var byStatus pagex.FacetGroup
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		out, total, err = tx.ListAcademicWarnings(ctx, studentID, status, page, size)
+		out, total, err = tx.ListAcademicWarnings(ctx, studentID, status, semesterID, page, size)
+		if err != nil {
+			return err
+		}
+		byStatus, err = tx.CountAcademicWarningsByStatus(ctx, studentID, semesterID)
 		return err
 	})
-	return out, total, page, size, mapGradeWarningErr(err)
+	if err == nil {
+		out, err = s.withWarningNames(ctx, id.TenantID, out)
+	}
+	return out, total, page, size, pagex.Facets{"status": byStatus}, mapGradeWarningErr(err)
 }
 
 // AckWarning 确认本人学业预警。

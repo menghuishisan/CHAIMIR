@@ -11,23 +11,43 @@ import (
 )
 
 type Querier interface {
+	// 按编号一次读取本租户未删除课程,供成绩中心列表随记录下发课程名。
+	BatchGetCourses(ctx context.Context, arg BatchGetCoursesParams) ([]BatchGetCoursesRow, error)
 	ClaimJudgeOutbox(ctx context.Context, arg ClaimJudgeOutboxParams) ([]SubmissionJudgeOutbox, error)
 	ClaimJudgeOutboxAcrossTenants(ctx context.Context, arg ClaimJudgeOutboxAcrossTenantsParams) ([]SubmissionJudgeOutbox, error)
 	ClaimPendingTeachingGradeEventOutbox(ctx context.Context, arg ClaimPendingTeachingGradeEventOutboxParams) ([]TeachingGradeEventOutbox, error)
 	CompleteJudgeOutbox(ctx context.Context, arg CompleteJudgeOutboxParams) (SubmissionJudgeOutbox, error)
 	CountAssignmentSubmissions(ctx context.Context, arg CountAssignmentSubmissionsParams) (int64, error)
 	CountAssignmentsByCourse(ctx context.Context, arg CountAssignmentsByCourseParams) (int64, error)
+	// 共享目录预览的章节数:只数此刻仍共享、非草稿、未删除且不属于本校的课程,只返回数量(见 M6 安全设计 §5)。
+	// 在受控特权事务里执行:chapter 的行级安全只开放本校。
+	CountChaptersOfSharedCourses(ctx context.Context, arg CountChaptersOfSharedCoursesParams) ([]CountChaptersOfSharedCoursesRow, error)
 	CountCourseAnnouncements(ctx context.Context, arg CountCourseAnnouncementsParams) (int64, error)
 	CountCourseGrades(ctx context.Context, arg CountCourseGradesParams) (int64, error)
 	CountCourseLessons(ctx context.Context, arg CountCourseLessonsParams) (int64, error)
 	CountCourseMembers(ctx context.Context, arg CountCourseMembersParams) (int64, error)
 	CountDiscussionPosts(ctx context.Context, arg CountDiscussionPostsParams) (int64, error)
+	// 课程卡片的选课人数:一次按当前页课程编号聚合,不逐门课取统计。
+	CountMembersByCourses(ctx context.Context, arg CountMembersByCoursesParams) ([]CountMembersByCoursesRow, error)
 	CountSharedCourses(ctx context.Context, arg CountSharedCoursesParams) (int64, error)
 	CountStudentAttempts(ctx context.Context, arg CountStudentAttemptsParams) (int64, error)
 	CountStudentCourses(ctx context.Context, arg CountStudentCoursesParams) (int64, error)
+	// 学生课程列表的状态分段计数,口径同学生课程列表。
+	CountStudentCoursesByStatus(ctx context.Context, arg CountStudentCoursesByStatusParams) ([]CountStudentCoursesByStatusRow, error)
 	CountStudentGrades(ctx context.Context, arg CountStudentGradesParams) (int64, error)
+	// 学生课程卡片的学习进度:当前页每门课的有效课时数与本人学完的课时数,一次聚合。
+	// 只数未删除的章节与课时,与课程大纲同口径。
+	CountStudentLessonProgressByCourses(ctx context.Context, arg CountStudentLessonProgressByCoursesParams) ([]CountStudentLessonProgressByCoursesRow, error)
 	CountSubmissionsByAssignment(ctx context.Context, arg CountSubmissionsByAssignmentParams) (int64, error)
+	// 批改台的分段计数(待批改 / 已出分 / 迟交 是同一组分段):按状态与是否迟交分组,两列都不套用本组筛选。
+	CountSubmissionsByStatusAndLate(ctx context.Context, arg CountSubmissionsByStatusAndLateParams) ([]CountSubmissionsByStatusAndLateRow, error)
+	// 教师作业列表的提交统计:当前页每份作业的已交人数,以及最近一次提交在等老师评分的人数(待批改)。
+	// 按学生去重:同一学生交过多次只算一人,待批改看他最近一次提交;口径与批改中心「待批改」同为 status = 2,
+	// 自动判题还没回来的(status = 1)不算,免得两处数字对不上。
+	CountSubmittersByAssignments(ctx context.Context, arg CountSubmittersByAssignmentsParams) ([]CountSubmittersByAssignmentsRow, error)
 	CountTeacherCourses(ctx context.Context, arg CountTeacherCoursesParams) (int64, error)
+	// 教师课程列表的状态分段计数:套用共享筛选,不套用状态筛选(选中一个分段后其他分段的数字仍可见)。
+	CountTeacherCoursesByStatus(ctx context.Context, arg CountTeacherCoursesByStatusParams) ([]CountTeacherCoursesByStatusRow, error)
 	CreateAnnouncement(ctx context.Context, arg CreateAnnouncementParams) (Announcement, error)
 	CreateAssignment(ctx context.Context, arg CreateAssignmentParams) (Assignment, error)
 	CreateAssignmentItem(ctx context.Context, arg CreateAssignmentItemParams) (AssignmentItem, error)
@@ -108,6 +128,7 @@ type Querier interface {
 	PublishAssignment(ctx context.Context, arg PublishAssignmentParams) (Assignment, error)
 	RefreshCourseInviteCode(ctx context.Context, arg RefreshCourseInviteCodeParams) (RefreshCourseInviteCodeRow, error)
 	RetryJudgeOutbox(ctx context.Context, arg RetryJudgeOutboxParams) (SubmissionJudgeOutbox, error)
+	RevokeSubmissionAutoScore(ctx context.Context, arg RevokeSubmissionAutoScoreParams) (Submission, error)
 	SetCourseGradeExportRequestNextCheck(ctx context.Context, arg SetCourseGradeExportRequestNextCheckParams) (CourseGradeExportRequest, error)
 	SetCourseGradesLock(ctx context.Context, arg SetCourseGradesLockParams) (int64, error)
 	SetCourseStatus(ctx context.Context, arg SetCourseStatusParams) (SetCourseStatusRow, error)
@@ -116,6 +137,8 @@ type Querier interface {
 	SoftDeleteCourse(ctx context.Context, arg SoftDeleteCourseParams) (SoftDeleteCourseRow, error)
 	SoftDeleteDiscussionPost(ctx context.Context, arg SoftDeleteDiscussionPostParams) (DiscussionPost, error)
 	SoftDeleteLesson(ctx context.Context, arg SoftDeleteLessonParams) (Lesson, error)
+	// 学生作业列表的本人提交情况:当前页每份作业的已用次数与最近一次提交的状态,一次聚合。
+	SummarizeStudentSubmissionsByAssignments(ctx context.Context, arg SummarizeStudentSubmissionsByAssignmentsParams) ([]SummarizeStudentSubmissionsByAssignmentsRow, error)
 	TeachingStats(ctx context.Context, tenantID int64) (TeachingStatsRow, error)
 	UpdateAssignment(ctx context.Context, arg UpdateAssignmentParams) (Assignment, error)
 	UpdateChapter(ctx context.Context, arg UpdateChapterParams) (Chapter, error)

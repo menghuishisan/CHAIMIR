@@ -5,9 +5,22 @@ import { useState } from 'react'
 import type { TeachingPost } from '@chaimir/api-client'
 import { MessageSquare, Pin, Reply, ThumbsUp, Trash2 } from 'lucide-react'
 import {
-  Badge, Button, Callout, Card, CardBody, IconButton,
-  Modal, ModalBody, ModalContent, ModalDescription, ModalFooter, ModalHeader, ModalTitle,
-  PageSection, Pagination, Skeleton, toast,
+  Badge,
+  Button,
+  Callout,
+  Card,
+  CardBody,
+  IconButton,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalDescription,
+  ModalFooter,
+  ModalHeader,
+  ModalTitle,
+  Pagination,
+  Skeleton,
+  toast,
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
@@ -26,6 +39,7 @@ export function CoursePosts({ courseId, canModerate = false }: CoursePostsProps)
   const posts = usePagedResource<TeachingPost>(
     (params) => api.teaching.listPosts(courseId, params),
     [courseId],
+    { urlPageKey: 'post_page' }
   )
   const [replyTarget, setReplyTarget] = useState<TeachingPost>()
   const [replySubmitting, setReplySubmitting] = useState(false)
@@ -58,7 +72,13 @@ export function CoursePosts({ courseId, canModerate = false }: CoursePostsProps)
   }
 
   return (
-    <PageSection title="课程讨论" description={`共 ${posts.total ?? '—'} 条。可以提出问题,回复老师和同学。`}>
+    <section aria-labelledby="course-posts-title">
+      <h2 id="course-posts-title" className="mb-3 text-lg font-semibold text-ink">
+        讨论与答疑
+        {posts.total ? (
+          <span className="ml-2 text-sm font-normal text-ink-sub">{posts.total} 条</span>
+        ) : null}
+      </h2>
       <div className="flex flex-col gap-4">
         <Card>
           <CardBody>
@@ -87,13 +107,21 @@ export function CoursePosts({ courseId, canModerate = false }: CoursePostsProps)
                   }}
                 />
               ))}
-              <Pagination page={posts.page} pageSize={posts.pageSize} total={posts.total} onPageChange={posts.setPage} />
+              <Pagination
+                page={posts.page}
+                pageSize={posts.pageSize}
+                total={posts.total}
+                onPageChange={posts.setPage}
+              />
             </div>
           )}
         </ResourceState>
       </div>
 
-      <Modal open={replyTarget !== undefined} onOpenChange={(open) => !replySubmitting && !open && setReplyTarget(undefined)}>
+      <Modal
+        open={replyTarget !== undefined}
+        onOpenChange={(open) => !replySubmitting && !open && setReplyTarget(undefined)}
+      >
         <ModalContent size="lg">
           <ModalHeader>
             <ModalTitle>回复讨论</ModalTitle>
@@ -101,29 +129,44 @@ export function CoursePosts({ courseId, canModerate = false }: CoursePostsProps)
           </ModalHeader>
           <ModalBody>
             {replyTarget ? (
-              <CoursePostComposer key={replyTarget.id} courseId={courseId} parent={replyTarget} onPosted={publishComplete} onSubmittingChange={setReplySubmitting} />
+              <CoursePostComposer
+                key={replyTarget.id}
+                courseId={courseId}
+                parent={replyTarget}
+                onPosted={publishComplete}
+                onSubmittingChange={setReplySubmitting}
+              />
             ) : null}
           </ModalBody>
         </ModalContent>
       </Modal>
 
-      <Modal open={deleteTarget !== undefined} onOpenChange={(open) => !working && !open && setDeleteTarget(undefined)}>
+      <Modal
+        open={deleteTarget !== undefined}
+        onOpenChange={(open) => !working && !open && setDeleteTarget(undefined)}
+      >
         <ModalContent size="sm">
           <ModalHeader>
             <ModalTitle>确认删除这条讨论</ModalTitle>
             <ModalDescription>删除后无法恢复。已有回复会保留,但不再显示这条原文。</ModalDescription>
           </ModalHeader>
           <ModalBody>
-            <p className="line-clamp-4 whitespace-pre-wrap break-words text-base text-ink">{deleteTarget?.content}</p>
+            <p className="line-clamp-4 whitespace-pre-wrap break-words text-base text-ink">
+              {deleteTarget?.content}
+            </p>
             {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
           </ModalBody>
           <ModalFooter>
-            <Button variant="outline" disabled={working} onClick={() => setDeleteTarget(undefined)}>取消</Button>
-            <Button variant="danger" loading={working} onClick={() => void deletePost()}>确认删除</Button>
+            <Button variant="outline" disabled={working} onClick={() => setDeleteTarget(undefined)}>
+              取消
+            </Button>
+            <Button variant="danger" loading={working} onClick={() => void deletePost()}>
+              确认删除
+            </Button>
           </ModalFooter>
         </ModalContent>
       </Modal>
-    </PageSection>
+    </section>
   )
 }
 
@@ -163,12 +206,27 @@ function CoursePostCard({ post, canModerate, onChanged, onReply, onDelete }: Cou
           <div className="flex items-center gap-2">
             {post.is_pinned ? <Badge tone="jade">置顶</Badge> : null}
             {post.parent_id ? <Badge tone="neutral">回复</Badge> : null}
-            <span className="font-mono text-xs tabular-nums text-ink-sub">{formatShortDateTime(post.created_at)}</span>
+            <span className="font-mono text-xs tabular-nums text-ink-sub">
+              {formatShortDateTime(post.created_at)}
+            </span>
           </div>
           {canModerate ? (
             <div className="flex items-center gap-1">
-              <IconButton variant="ghost" size="sm" icon={Pin} aria-label={post.is_pinned ? '取消置顶讨论' : '置顶讨论'} disabled={Boolean(pendingAction)} onClick={() => void changePost('pin')} />
-              <IconButton variant="ghost" size="sm" icon={Trash2} aria-label="删除这条讨论" onClick={onDelete} />
+              <IconButton
+                variant="ghost"
+                size="sm"
+                icon={Pin}
+                aria-label={post.is_pinned ? '取消置顶讨论' : '置顶讨论'}
+                disabled={Boolean(pendingAction)}
+                onClick={() => void changePost('pin')}
+              />
+              <IconButton
+                variant="ghost"
+                size="sm"
+                icon={Trash2}
+                aria-label="删除这条讨论"
+                onClick={onDelete}
+              />
             </div>
           ) : null}
         </div>
@@ -180,8 +238,17 @@ function CoursePostCard({ post, canModerate, onChanged, onReply, onDelete }: Cou
         ) : null}
         <p className="whitespace-pre-wrap break-words text-base text-ink">{post.content}</p>
         <div className="flex flex-wrap items-center gap-3">
-          <Button variant="ghost" size="sm" leftIcon={Reply} onClick={onReply}>回复</Button>
-          <Button variant="ghost" size="sm" leftIcon={ThumbsUp} loading={pendingAction === 'like'} disabled={pendingAction === 'pin'} onClick={() => void changePost('like')}>
+          <Button variant="ghost" size="sm" leftIcon={Reply} onClick={onReply}>
+            回复
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            leftIcon={ThumbsUp}
+            loading={pendingAction === 'like'}
+            disabled={pendingAction === 'pin'}
+            onClick={() => void changePost('like')}
+          >
             有帮助 {post.like_count}
           </Button>
         </div>

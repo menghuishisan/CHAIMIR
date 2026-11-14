@@ -170,6 +170,7 @@
   get:
     tags: [content]
     summary: 浏览跨校共享库
+    description: facets.type：共享题目题型分段计数，套用关键词、不套用题型筛选。
     operationId: contentListShared
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]

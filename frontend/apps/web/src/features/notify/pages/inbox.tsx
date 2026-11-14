@@ -1,5 +1,5 @@
 // 通知收件箱页(顶栏铃铛进入,{prefix}/notifications)。设计 §7.7:
-// 标签「消息 / 公告」(消息带未读数),右上角「全部已读」与「提醒设置」。消息为按天分组的列表行
+// 标签「消息 / 公告」(都带未读数),右上角「全部已读」与「提醒设置」。消息为按天分组的列表行
 // (未读圆点、标题加粗、内容摘要一行、相对时间),分段「全部 / 未读」;点击一条标为已读,有链接的
 // 跳转到对应页面,没有链接的就地展开全文;行内删除在悬停时出现。公告标签为公告列表,点开展开全文
 // 并标为已读。「提醒设置」在右侧抽屉里列出提醒类型开关,强制类显示为不可关闭并说明原因。
@@ -8,7 +8,8 @@
 // 三端共用同一实现:学生、教师、学校管理端都是租户身份(平台管理端无收件箱)。
 // 通知偏好只渲染 GET /notify/preferences 返回的类型,前端不硬编码类型清单(对齐清单 §6.5)。
 // 未读数改变后经资源失效协议广播给顶栏角标 —— 壳层与页面不在同一渲染树。
-// 公告接口不提供未读筛选与未读数,故公告标签不带数字(设计 §10 分段计数缺口)。
+// 公告的未读数取公告列表的 facets.is_read:公告列表在页面层读一次,标签数字与列表共用这次请求;
+// 公告页码写进地址的 notice_page(消息列表用 page),两个标签互不干扰。
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
@@ -42,7 +43,8 @@ import {
 import { api } from '../../../app/api'
 import { invalidateAppResource, subscribeAppResource } from '../../../app/resourceInvalidation'
 import { ResourceError, ResourceState } from '../../../components/ResourceState'
-import { useAsyncResource, usePagedResource, usePageLocation, useUrlState } from '../../../hooks'
+import { useAsyncResource, usePagedResource, usePageLocation, useUrlState, type PagedResourceState } from '../../../hooks'
+import { facetCount, facetSum } from '../../../utils/facets'
 import { formatDateTime, formatRelativeOccurrence } from '../../../utils/formatters'
 import { safeInternalNavigation } from '../../../utils/safeNavigation'
 import { FORCED_PREFERENCE_HINT, announcementScopeLabel, notificationTypeLabel } from '../../../utils/labels/notify'
@@ -66,6 +68,10 @@ export default function NotificationInboxPage() {
   const unread = useAsyncResource(() => api.notify.getUnreadCount(), [], () => false)
   useEffect(() => subscribeAppResource('notification-unread', unread.reload), [unread.reload])
   const unreadCount = unread.data?.unread
+  const announcements = usePagedResource<Announcement>((params) => api.notify.getAnnouncements(params), [], {
+    urlPageKey: 'notice_page',
+  })
+  const unreadAnnouncements = facetCount(announcements.data?.facets, 'is_read', false)
 
   const markAllRead = useCallback(async () => {
     setMarkingAll(true)
@@ -115,7 +121,11 @@ export default function NotificationInboxPage() {
             <TabsTrigger value="messages" icon={Inbox} count={unreadCount && unreadCount > 0 ? unreadCount : undefined}>
               消息
             </TabsTrigger>
-            <TabsTrigger value="announcements" icon={Megaphone}>
+            <TabsTrigger
+              value="announcements"
+              icon={Megaphone}
+              count={unreadAnnouncements && unreadAnnouncements > 0 ? unreadAnnouncements : undefined}
+            >
               公告
             </TabsTrigger>
           </TabsList>
@@ -123,7 +133,7 @@ export default function NotificationInboxPage() {
             <MessageList filter={query.filter} onFilterChange={(value) => setQuery({ filter: value })} />
           </TabsContent>
           <TabsContent value="announcements">
-            <AnnouncementList />
+            <AnnouncementList announcements={announcements} />
           </TabsContent>
         </Tabs>
       </div>
@@ -200,6 +210,11 @@ function MessageList({ filter, onFilterChange }: { filter: string; onFilterChang
     }
   }, [])
 
+  // 「全部 / 未读」的数字取列表接口的 facets(套用类型筛选,不套用已读筛选)
+  const facets = notifications.status === 'success' || notifications.status === 'empty' ? notifications.data?.facets : undefined
+  const allCount = facetSum(facets, 'is_read')
+  const unreadInList = facetCount(facets, 'is_read', false)
+
   const groups = useMemo(() => {
     const now = new Date()
     const result: { label: string; items: Notification[] }[] = []
@@ -218,8 +233,8 @@ function MessageList({ filter, onFilterChange }: { filter: string; onFilterChang
         aria-label="按是否已读筛选"
         size="sm"
         options={[
-          { value: 'all', label: '全部' },
-          { value: 'unread', label: '未读' },
+          { value: 'all', label: '全部', count: allCount },
+          { value: 'unread', label: '未读', count: unreadInList },
         ]}
         value={filter}
         onValueChange={onFilterChange}
@@ -329,11 +344,11 @@ function MessageRow({
 /**
  * AnnouncementList 系统公告:点开展开全文并标为已读。
  * 公告是「收」的一侧:发布在校管/平台端的侧栏「系统公告」页,两者不互相替代。
+ * 列表由页面层读取后传入:标签上的未读数与列表共用同一次请求,标为已读后一起刷新。
  */
-function AnnouncementList() {
+function AnnouncementList({ announcements }: { announcements: PagedResourceState<Announcement> }) {
   const [expandedId, setExpandedId] = useState<string>()
   const [actionError, setActionError] = useState<string>()
-  const announcements = usePagedResource<Announcement>((params) => api.notify.getAnnouncements(params), [])
 
   const toggle = useCallback(
     async (announcement: Announcement) => {

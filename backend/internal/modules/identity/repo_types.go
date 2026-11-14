@@ -81,8 +81,10 @@ type AccountQuery struct {
 	BaseIdentity int16
 	ClassID      int64
 	Keyword      string
-	Page         int32
-	Size         int32
+	// PhoneHash 搜索词是完整手机号时由服务层换成手机号哈希,按哈希精确匹配;否则为空
+	PhoneHash string
+	Page      int32
+	Size      int32
 }
 
 // TenantListQuery 描述平台租户列表过滤和分页字段。

@@ -1,6 +1,7 @@
 // 学业预警页(校管侧栏,/school-admin/alerts)。设计 §7.5:
 // 页头 +「执行扫描」,次要「调整预警规则」;工具条(状态、学生搜索,写进地址);表格(学生、学期、预警类型与说明、
-// 状态、扫出时间)。扫描弹窗选范围后开始,完成后就地刷新并提示新增几条。学生姓名按页取完全部学生账号后解析。
+// 状态、扫出时间)。扫描弹窗选范围后开始,完成后就地刷新并提示新增几条。学生姓名与学号随预警记录由服务端给出,
+// 按学生筛选用账号搜索(AccountPicker),不把全校学生一次取回。
 //
 // 预警由规则扫描产生:不及格课程数超阈值、平均学分绩点低于下限。
 // 校管能看全校预警并主动触发扫描;确认动作属于学生本人(后端 ackWarning 在 student 组),
@@ -14,7 +15,6 @@ import { RefreshCw, Settings2, TriangleAlert } from 'lucide-react'
 import {
   GradeWarningStatus,
   BaseIdentity,
-  type Account,
   type GradeWarning,
   type Semester,
 } from '@chaimir/api-client'
@@ -45,9 +45,10 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource, useResourceTotal, useUrlState } from '../../../../hooks'
+import { useAsyncResource, usePagedResource, useUrlState } from '../../../../hooks'
+import { segmentCounts as segmentCountsOf } from '../../../../utils/facets'
 import { AccountNameText } from '../../../identity/components/AccountNameText'
-import { useAccountNames } from '../../../identity/useAccountNames'
+import { AccountPicker } from '../../../identity/components/AccountPicker'
 import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
 import {
   gradeWarningDetailTerm,
@@ -61,6 +62,8 @@ import { gradeWarningStatusTone } from '../../statusPresentation'
 const ALERTS_QUERY = {
   status: { defaultValue: 'all', allowed: ['all', 'pending', 'acknowledged'] },
   student: { defaultValue: '' },
+  /** 学期编号;空为全部学期 */
+  semester: { defaultValue: '' },
 } as const
 
 const STATUS_SEGMENTS = [
@@ -69,8 +72,8 @@ const STATUS_SEGMENTS = [
   { value: 'acknowledged', label: '学生已确认', status: GradeWarningStatus.ACKNOWLEDGED },
 ] as const
 
-/** 学生筛选里「全部学生」的取值(下拉不接受空串作选项值) */
-const ALL_STUDENTS = 'all'
+/** 学期筛选里「全部学期」的取值 */
+const ALL_SEMESTERS = 'all'
 
 /**
  * SchoolAdminAlertsPage 呈现全校学业预警并承载扫描。
@@ -85,28 +88,18 @@ export default function SchoolAdminAlertsPage() {
       api.grade.listWarnings({
         student_id: query.student || undefined,
         status: segment && 'status' in segment ? segment.status : undefined,
+        semester_id: query.semester || undefined,
         ...params,
       }),
-    [query.status, query.student],
+    [query.semester, query.status, query.student],
     { urlPageKey: 'page' },
   )
 
-  // 分段上的数字取全量口径,不随学生筛选变化
-  const totalCount = useResourceTotal((params) => api.grade.listWarnings(params), [], warnings.refreshVersion)
-  const pendingCount = useResourceTotal(
-    (params) => api.grade.listWarnings({ status: GradeWarningStatus.PENDING, ...params }),
-    [],
-    warnings.refreshVersion
-  )
-  const acknowledgedCount = useResourceTotal(
-    (params) => api.grade.listWarnings({ status: GradeWarningStatus.ACKNOWLEDGED, ...params }),
-    [],
-    warnings.refreshVersion
-  )
-  const segmentCounts: Record<string, number | undefined> = { all: totalCount, pending: pendingCount, acknowledged: acknowledgedCount }
+  // 分段计数取列表接口的 facets:套用学生筛选,不套用状态筛选
+  const facets = warnings.status === 'success' || warnings.status === 'empty' ? warnings.data?.facets : undefined
+  const segmentCounts = segmentCountsOf(facets, 'status', STATUS_SEGMENTS, (item) => ('status' in item ? item.status : undefined))
 
-  // 预警只回 student_id / semester_id,姓名与学期名在此解析;学生超过一页时按页取完(设计 §10)
-  const students = useAccountNames(BaseIdentity.STUDENT)
+  // 学期名在此解析(学期很少,接口不分页);学生姓名随预警记录由服务端给出
 
   const semesters = useAsyncResource(
     () => api.grade.listSemesters(),
@@ -124,7 +117,7 @@ export default function SchoolAdminAlertsPage() {
     {
       key: 'student_id',
       header: '学生',
-      render: (warning) => <AccountNameText name={students.lookup(warning.student_id)} />,
+      render: (warning) => <AccountNameText name={warning.student_name} no={warning.student_no} />,
     },
     {
       key: 'semester_id',
@@ -191,16 +184,26 @@ export default function SchoolAdminAlertsPage() {
           onValueChange={(value) => setQuery({ status: value })}
           className="max-w-full overflow-x-auto"
         />
-        <Select
-          aria-label="按学生筛选"
-          value={query.student || ALL_STUDENTS}
-          onValueChange={(value) => setQuery({ student: value === ALL_STUDENTS ? '' : value })}
-          options={[
-            { value: ALL_STUDENTS, label: '全部学生' },
-            ...students.list.map((account) => ({ value: account.id, label: account.no ? `${account.name} · ${account.no}` : account.name })),
-          ]}
-          className="w-full sm:w-64"
-        />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <AccountPicker
+            value={query.student}
+            onChange={(accountId) => setQuery({ student: accountId })}
+            role={BaseIdentity.STUDENT}
+            allLabel="全部学生"
+            label="按学生筛选"
+            className="w-full sm:w-64"
+          />
+          <Select
+            aria-label="按学期筛选"
+            value={query.semester || ALL_SEMESTERS}
+            onValueChange={(value) => setQuery({ semester: value === ALL_SEMESTERS ? '' : value })}
+            options={[
+              { value: ALL_SEMESTERS, label: '全部学期' },
+              ...(semesters.data ?? []).map((semester: Semester) => ({ value: semester.id, label: semester.name })),
+            ]}
+            className="w-full sm:w-44"
+          />
+        </div>
       </div>
 
       <DataPanel
@@ -233,10 +236,7 @@ export default function SchoolAdminAlertsPage() {
                 elevated={false}
                 // <md 换行卡(§6.4.1 规则 3):学生名一行、预警原因与时间一行
                 mobileCard={(item) => ({
-                  title: (() => {
-                    const name = students.lookup(item.student_id)
-                    return name.state === 'found' ? name.account.name : name.state === 'missing' ? '已移除的账号' : '…'
-                  })(),
+                  title: item.student_name || '已移除的账号',
                   meta: `${gradeWarningTypeLabel(item.type)} · ${formatRelativeOccurrence(item.created_at)}`,
                   badge: (
                     <StatusIndicator
@@ -252,7 +252,6 @@ export default function SchoolAdminAlertsPage() {
 
       {scanOpen ? (
         <ScanWarningsModal
-          students={students.list}
           semesters={semesters.data ?? []}
           onClose={() => setScanOpen(false)}
           onDone={() => {
@@ -300,7 +299,6 @@ function formatDetailValue(value: unknown): string {
 }
 
 interface ScanWarningsModalProps {
-  students: Account[]
   semesters: Semester[]
   onClose: () => void
   onDone: () => void
@@ -310,7 +308,7 @@ interface ScanWarningsModalProps {
  * ScanWarningsModal 触发预警扫描。
  * 学生与学期都可缺省:缺省时按当前规则扫描全校当前学期。
  */
-function ScanWarningsModal({ students, semesters, onClose, onDone }: ScanWarningsModalProps) {
+function ScanWarningsModal({ semesters, onClose, onDone }: ScanWarningsModalProps) {
   const [studentId, setStudentId] = useState('')
   const [semesterId, setSemesterId] = useState('')
   const [formError, setFormError] = useState<string>()
@@ -348,18 +346,13 @@ function ScanWarningsModal({ students, semesters, onClose, onDone }: ScanWarning
         </ModalHeader>
         <ModalBody className="flex flex-col gap-4">
           <FormField label="学生范围" htmlFor="scan-student" helper="不选则扫描全校学生">
-            <Select
+            <AccountPicker
               id="scan-student"
-              options={[
-                { value: '', label: '全校学生' },
-                ...students.map((account) => ({
-                  value: account.id,
-                  label: account.no ? `${account.name} · ${account.no}` : account.name,
-                })),
-              ]}
               value={studentId}
-              placeholder="全校学生"
-              onValueChange={setStudentId}
+              onChange={setStudentId}
+              role={BaseIdentity.STUDENT}
+              allLabel="全校学生"
+              label="学生范围"
             />
           </FormField>
 

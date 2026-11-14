@@ -1,7 +1,7 @@
 // auditDetail.test.ts 验证审计记录 detail 的整理:只展示登记过的项、按固定顺序、需要查表的项由调用方给出文案。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { auditDetailRows, auditObjectHint } from './auditDetail.ts'
+import { auditDetailRows, auditDetailText, auditObjectHint } from './auditDetail.ts'
 
 test('解析失败或不是对象时没有内容', () => {
   assert.deepEqual(auditDetailRows(undefined), [])
@@ -60,4 +60,12 @@ test('对象提示:依次取名称、编码、题目编码、文件名', () => {
   assert.equal(auditObjectHint('{"course_id":"1"}'), undefined)
   assert.equal(auditObjectHint('{"name":"  "}'), undefined)
   assert.equal(auditObjectHint(undefined), undefined)
+})
+
+test('auditDetailText 只取非空的文字值', () => {
+  assert.equal(auditDetailText('{"student_id":"123"}', 'student_id'), '123')
+  assert.equal(auditDetailText('{"student_id":123}', 'student_id'), undefined)
+  assert.equal(auditDetailText('{"student_id":"  "}', 'student_id'), undefined)
+  assert.equal(auditDetailText('not json', 'student_id'), undefined)
+  assert.equal(auditDetailText(undefined, 'student_id'), undefined)
 })

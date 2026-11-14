@@ -12,6 +12,7 @@
 //
 // 已冻结的组合快照只作为事实展示,不回填成编辑输入:修改时要重新声明一遍判题环境。
 
+import { ShieldCheck } from 'lucide-react'
 import { useCallback, useId, useMemo, useState } from 'react'
 import {
   JudgerStatus,
@@ -29,13 +30,13 @@ import {
   DescriptionList,
   FormField,
   Input,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   SegmentedControl,
   Select,
   toast,
@@ -74,12 +75,14 @@ export interface JudgerFormModalProps {
   judger?: Judger
   onClose: () => void
   onSaved: () => void
+  /** 已登记的判题器:抽屉底部的「运行自测」 */
+  selftest?: { running: boolean; onRun: () => void; unavailableReason?: string }
 }
 
 /**
  * JudgerFormModal 承载判题器的登记与修改。
  */
-export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalProps) {
+export function JudgerFormModal({ judger, onClose, onSaved, selftest }: JudgerFormModalProps) {
   const fieldId = useId()
   const editing = judger !== undefined
   const spec = judger?.resource_spec
@@ -120,73 +123,79 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
         .split(/\s+/)
         .map((item) => item.trim())
         .filter((item) => item !== ''),
-    [command],
+    [command]
   )
 
   /** validate 按类型逐项校验,口径与后端 parseJudgerExecutionSpec 一致。 */
-  const { errors, validate } = useFormValidation(useCallback(() => {
-    const timeoutValue = Number(timeoutSec)
-    const retriesValue = Number(maxRetries)
-    const defaultTimeoutValue = Number(defaultTimeout)
+  const { errors, validate } = useFormValidation(
+    useCallback(() => {
+      const timeoutValue = Number(timeoutSec)
+      const retriesValue = Number(maxRetries)
+      const defaultTimeoutValue = Number(defaultTimeout)
 
-    const next: Record<string, string | null> = {
-      code: CODE_PATTERN.test(code.trim())
-        ? null
-        : '以小写字母或数字开头,只含小写字母、数字与连字符,长度 3 到 64 位',
-      name: name.trim() === '' ? '请输入判题器名称' : null,
-      executorRef: executorRef.trim() === '' ? '请填写判题实现名称' : null,
-      defaultTimeout:
-        !Number.isInteger(defaultTimeoutValue) || defaultTimeoutValue <= 0
-          ? '默认超时要是大于 0 的整数秒'
-          : null,
-      timeoutSec:
-        !Number.isInteger(timeoutValue) || timeoutValue < 0 ? '覆盖超时要是 0 或更大的整数秒' : null,
-      maxRetries:
-        !Number.isInteger(retriesValue) || retriesValue < 0 ? '重试次数要是 0 或更大的整数' : null,
-      composition: null,
-      genesisRef: null,
-      command: null,
-      execTarget: null,
-      sidecars: null,
-    }
+      const next: Record<string, string | null> = {
+        code: CODE_PATTERN.test(code.trim())
+          ? null
+          : '以小写字母或数字开头,只含小写字母、数字与连字符,长度 3 到 64 位',
+        name: name.trim() === '' ? '请输入判题器名称' : null,
+        executorRef: executorRef.trim() === '' ? '请填写判题实现名称' : null,
+        defaultTimeout:
+          !Number.isInteger(defaultTimeoutValue) || defaultTimeoutValue <= 0
+            ? '默认超时要是大于 0 的整数秒'
+            : null,
+        timeoutSec:
+          !Number.isInteger(timeoutValue) || timeoutValue < 0
+            ? '覆盖超时要是 0 或更大的整数秒'
+            : null,
+        maxRetries:
+          !Number.isInteger(retriesValue) || retriesValue < 0
+            ? '重试次数要是 0 或更大的整数'
+            : null,
+        composition: null,
+        genesisRef: null,
+        command: null,
+        execTarget: null,
+        sidecars: null,
+      }
 
-    if (needsRuntime) {
-      next.composition = compositionDeclarationError(declaration) ?? null
-      next.genesisRef = genesisRef.trim() === '' ? '请填写初始链状态名称' : null
-    }
+      if (needsRuntime) {
+        next.composition = compositionDeclarationError(declaration) ?? null
+        next.genesisRef = genesisRef.trim() === '' ? '请填写初始链状态名称' : null
+      }
 
-    if (needsCommand) {
-      next.command = commandList.length === 0 ? '请填写判题要执行的命令' : null
-      next.execTarget = EXEC_TARGET_PATTERN.test(execTarget.trim())
-        ? null
-        : '执行目标写成「组/名称」两段,例如 sandbox/testcase-evm'
-      next.sidecars =
-        sidecars.length === 0
-          ? '这类判题器需要判题器镜像提供私有执行容器。请先在平台镜像目录同步该判题器镜像,再回来配置。'
-          : null
-    }
+      if (needsCommand) {
+        next.command = commandList.length === 0 ? '请填写判题要执行的命令' : null
+        next.execTarget = EXEC_TARGET_PATTERN.test(execTarget.trim())
+          ? null
+          : '执行目标写成「组/名称」两段,例如 sandbox/testcase-evm'
+        next.sidecars =
+          sidecars.length === 0
+            ? '这类判题器需要判题器镜像提供私有执行容器。请先在平台镜像目录同步该判题器镜像,再回来配置。'
+            : null
+      }
 
-    if (isManual && commandList.length > 0) {
-      next.command = '人工评分不执行命令,请清空这一栏'
-    }
+      if (isManual && commandList.length > 0) {
+        next.command = '人工评分不执行命令,请清空这一栏'
+      }
 
-    return next
-  }, [
-    code,
-    commandList,
-    declaration,
-    defaultTimeout,
-    execTarget,
-    executorRef,
-    genesisRef,
-    isManual,
-    maxRetries,
-    name,
-    needsCommand,
-    needsRuntime,
-    sidecars.length,
-    timeoutSec,
-  ]))
+      return next
+    }, [
+      code,
+      commandList,
+      declaration,
+      defaultTimeout,
+      execTarget,
+      executorRef,
+      genesisRef,
+      isManual,
+      maxRetries,
+      name,
+      needsCommand,
+      needsRuntime,
+      sidecars.length,
+      timeoutSec,
+    ])
+  )
 
   /** buildExecutionSpec 只带该类型真正用到的执行策略字段,空值一律不写进声明。 */
   const buildExecutionSpec = useCallback((): JudgerExecutionSpec => {
@@ -269,20 +278,20 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
       submitting,
       typeValue,
       validate,
-    ],
+    ]
   )
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>{editing ? `修改判题器配置 · ${judger.name}` : '登记判题器'}</ModalTitle>
-          <ModalDescription>
+    <Drawer open onOpenChange={(open) => !open && !submitting && !selftest?.running && onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader>
+          <DrawerTitle>{editing ? judger.name : '登记判题器'}</DrawerTitle>
+          <DrawerDescription>
             判题器决定一道题怎么判分。不同类型需要的声明不同,选好类型后表单会跟着变。
-          </ModalDescription>
-        </ModalHeader>
-        <form onSubmit={submit} noValidate>
-          <ModalBody className="flex flex-col gap-4">
+          </DrawerDescription>
+        </DrawerHeader>
+        <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
+          <DrawerBody className="flex flex-col gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
                 label="判题器短名"
@@ -301,7 +310,12 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   onChange={(event) => setCode(event.target.value)}
                 />
               </FormField>
-              <FormField label="判题器名称" htmlFor={`${fieldId}-name`} required error={errors.name}>
+              <FormField
+                label="判题器名称"
+                htmlFor={`${fieldId}-name`}
+                required
+                error={errors.name}
+              >
                 <Input
                   id={`${fieldId}-name`}
                   value={name}
@@ -430,9 +444,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   </p>
                 </div>
 
-                {errors.composition ? (
-                  <Callout tone="danger">{errors.composition}</Callout>
-                ) : null}
+                {errors.composition ? <Callout tone="danger">{errors.composition}</Callout> : null}
 
                 <CompositionDeclarationFields
                   idPrefix={`${fieldId}-composition`}
@@ -473,8 +485,20 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                   dense
                   columns={2}
                   items={[
-                    { term: '运行时', description: snapshot.runtimes.map((runtime) => `${runtime.instance_code}: ${runtime.code}`).join(' / '), mono: true },
-                    { term: '镜像版本', description: snapshot.runtimes.map((runtime) => `${runtime.instance_code}: ${runtime.image_version}`).join(' / '), mono: true },
+                    {
+                      term: '运行时',
+                      description: snapshot.runtimes
+                        .map((runtime) => `${runtime.instance_code}: ${runtime.code}`)
+                        .join(' / '),
+                      mono: true,
+                    },
+                    {
+                      term: '镜像版本',
+                      description: snapshot.runtimes
+                        .map((runtime) => `${runtime.instance_code}: ${runtime.image_version}`)
+                        .join(' / '),
+                      mono: true,
+                    },
                     {
                       term: '组件数',
                       description: `${snapshot.components?.length ?? 0} 个`,
@@ -487,9 +511,7 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
                 />
               </div>
             ) : editing && needsRuntime ? (
-              <Callout tone="info">
-                判题环境尚未准备完成，完成后会显示已锁定的环境和镜像。
-              </Callout>
+              <Callout tone="info">判题环境尚未准备完成，完成后会显示已锁定的环境和镜像。</Callout>
             ) : null}
 
             {needsCommand ? (
@@ -591,28 +613,47 @@ export function JudgerFormModal({ judger, onClose, onSaved }: JudgerFormModalPro
             ) : null}
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
-          </ModalBody>
-          <ModalFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+          </DrawerBody>
+          <DrawerFooter>
+            {selftest ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="mr-auto"
+                leftIcon={ShieldCheck}
+                loading={selftest.running}
+                disabled={submitting || Boolean(selftest.unavailableReason)}
+                title={selftest.unavailableReason}
+                onClick={selftest.onRun}
+              >
+                运行自测
+              </Button>
+            ) : null}
+            <Button type="button" variant="outline" disabled={submitting} onClick={onClose}>
               取消
             </Button>
-            <Button type="submit" variant="primary" loading={submitting} disabled={needsRuntime && compositionDeclarationError(declaration) !== undefined}>
+            <Button
+              type="submit"
+              variant="primary"
+              loading={submitting}
+              disabled={needsRuntime && compositionDeclarationError(declaration) !== undefined}
+            >
               {editing ? '保存配置' : '登记判题器'}
             </Button>
-          </ModalFooter>
+          </DrawerFooter>
         </form>
-      </ModalContent>
-    </Modal>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
 /** emptyComposition 给出「不需要沙箱」时必须提交的空组合:后端要求这三项一律留空。 */
 function emptyComposition(): JudgerRequest['composition'] {
-	return {
-		id: '',
-		runtimes: [],
-		workspace_runtime_instance: '',
-		access_profile: SANDBOX_ACCESS_PROFILE.JUDGE_PRIVATE,
+  return {
+    id: '',
+    runtimes: [],
+    workspace_runtime_instance: '',
+    access_profile: SANDBOX_ACCESS_PROFILE.JUDGE_PRIVATE,
   }
 }
 

@@ -48,6 +48,7 @@ import { useSession } from '../../../../components/RoleGuard/session'
 import { ResourceError, ResourceState } from '../../../../components/ResourceState'
 import { SearchBox } from '../../../../components/SearchBox'
 import { useAsyncResource, usePagedResource, useUrlState } from '../../../../hooks'
+import { facetCount, facetSum } from '../../../../utils/facets'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
 import { contentAuthorTypeLabel, contentDifficultyLabel, contentTypeLabel } from '../../../../utils/labels/content'
@@ -126,6 +127,8 @@ function SharedQuestionLibrary({ type, keyword, onTypeChange, onSearch, onClear 
     { urlPageKey: 'page', pageSize: CARD_PAGE_SIZE },
   )
   const filtered = type !== 'all' || keyword !== ''
+  // 题型分段的数字取列表接口的 facets(套用搜索,不套用题型筛选)
+  const facets = shared.status === 'success' || shared.status === 'empty' ? shared.data?.facets : undefined
 
   return (
     <>
@@ -133,8 +136,8 @@ function SharedQuestionLibrary({ type, keyword, onTypeChange, onSearch, onClear 
         <SegmentedControl
           aria-label="按题型筛选"
           options={[
-            { value: 'all', label: '全部' },
-            ...CONTENT_TYPES.map((value) => ({ value: String(value), label: contentTypeLabel(value) })),
+            { value: 'all', label: '全部', count: facetSum(facets, 'type') },
+            ...CONTENT_TYPES.map((value) => ({ value: String(value), label: contentTypeLabel(value), count: facetCount(facets, 'type', value) })),
           ]}
           value={type}
           onValueChange={onTypeChange}

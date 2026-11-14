@@ -132,31 +132,37 @@ function readBattleRule(value: unknown): BattleRule {
   throw new Error('轨迹归档里的对局规则无法识别。')
 }
 
+/** isObject 是普通对象(不含数组与 null) */
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** readString 读必填的非空文本,缺失时按归档损坏报错 */
 function readString(value: unknown): string {
   if (typeof value === 'string' && value.length > 0) return value
   throw new Error('轨迹归档缺少必要文本。')
 }
 
+/** readOptionalString 读可选文本;给了就必须是非空文本 */
 function readOptionalString(value: unknown): string | undefined {
   if (value === undefined) return undefined
   return readString(value)
 }
 
+/** readFiniteNumber 读有限数值,不是数值时按归档损坏报错 */
 function readFiniteNumber(value: unknown): number {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   throw new Error('轨迹归档里的数值格式不正确。')
 }
 
+/** readPositiveInteger 读正整数(步号、版本号这类计数) */
 function readPositiveInteger(value: unknown): number {
   const number = readFiniteNumber(value)
   if (Number.isInteger(number) && number > 0) return number
   throw new Error('轨迹归档里的序号格式不正确。')
 }
 
+/** readOptionalObject 读可选对象;给了就必须是对象 */
 function readOptionalObject(value: unknown): Record<string, unknown> | undefined {
   if (value === undefined) return undefined
   if (isObject(value)) return value

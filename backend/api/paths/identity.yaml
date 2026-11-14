@@ -278,6 +278,7 @@
   get:
     tags: [identity]
     summary: 租户列表
+    description: facets.status：学校状态分段计数，套用关键词、不套用状态筛选。
     operationId: identityListTenants
     x-chaimir-audience: platform-admin
     security:
@@ -671,6 +672,7 @@
   get:
     tags: [identity]
     summary: 账号列表
+    description: keyword 匹配姓名、学工号（包含即可）或完整手机号（手机号加密存储，只按完整号码精确匹配）。facets.status：账号状态分段计数，套用身份、班级与关键词，不套用状态筛选。
     operationId: identityListAccounts
     x-chaimir-audience: school-admin
     security:
@@ -706,6 +708,21 @@
       default:
         $ref: "#/components/responses/Error"
 /api/v1/accounts/{id}:
+  get:
+    tags: [identity]
+    summary: 读取单个账号
+    description: 读取本校单个账号（手机号脱敏，与列表项同形），供按编号恢复的筛选条件、详情抽屉显示是谁；其他学校或已删除的账号按不存在处理。
+    operationId: identityGetAccount
+    x-chaimir-audience: school-admin
+    security:
+      - bearerAuth: []
+    parameters:
+      - $ref: "#/components/parameters/IDPath"
+    responses:
+      "200":
+        $ref: "#/components/responses/Standard"
+      default:
+        $ref: "#/components/responses/Error"
   patch:
     tags: [identity]
     summary: 编辑账号
@@ -962,7 +979,7 @@
   get:
     tags: [identity]
     summary: 当前账号信息
-    description: 返回账号信息及 enabled_modules（teaching/experiment/contest/sim/grade，按规范顺序）；平台账号返回空数组。模块开关以服务端当前配置为准，不写入 JWT。
+    description: 返回账号信息、所属学校名称 tenant_name 及 enabled_modules（teaching/experiment/contest/sim/grade，按规范顺序）；平台账号的 tenant_name 为空串、enabled_modules 为空数组。模块开关以服务端当前配置为准，不写入 JWT。
     operationId: identityGetMe
     x-chaimir-audience: user
     security:
@@ -1038,6 +1055,7 @@
   get:
     tags: [identity]
     summary: 当前会话列表
+    description: 返回当前账号的有效会话；发起本次请求的会话 current 为 true（即这台设备），其余为 false。
     operationId: identitySessions
     x-chaimir-audience: user
     security:

@@ -14,16 +14,32 @@ import (
 	"chaimir/pkg/crypto"
 )
 
-// ListAccountsByAdmin 分页读取租户账号列表并做手机号脱敏。
-func (s *Service) ListAccountsByAdmin(ctx context.Context, query AccountQuery) ([]AccountDTO, int64, int, int, error) {
+// accountSearchPhoneHash 搜索词是完整手机号时返回它的哈希,否则返回空串(半截号码无法匹配加密存储的手机号)。
+func accountSearchPhoneHash(keyword string, hash func(string) (string, error)) (string, error) {
+	phone := strings.TrimSpace(keyword)
+	if ValidatePhone(phone) != nil {
+		return "", nil
+	}
+	return hash(phone)
+}
+
+// ListAccountsByAdmin 分页读取租户账号列表并做手机号脱敏;搜索词可以是姓名、学工号或完整手机号。
+func (s *Service) ListAccountsByAdmin(ctx context.Context, query AccountQuery) ([]AccountDTO, int64, int, int, pagex.Facets, error) {
 	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
 	if err != nil {
-		return nil, 0, int(query.Page), int(query.Size), err
+		return nil, 0, int(query.Page), int(query.Size), nil, err
 	}
 	page, size := pagex.Normalize(int(query.Page), int(query.Size))
 	query.Page, query.Size = pagex.Int32(page, size)
+	// 手机号加密存储,只能按完整号码的哈希精确匹配;姓名与学工号照常模糊匹配
+	query.Keyword = strings.TrimSpace(query.Keyword)
+	query.PhoneHash, err = accountSearchPhoneHash(query.Keyword, s.phoneHash)
+	if err != nil {
+		return nil, 0, page, size, nil, apperr.ErrInternal.WithCause(err)
+	}
 	var rows []Account
 	var total int64
+	var byStatus pagex.FacetGroup
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		items, count, err := tx.ListAccounts(ctx, query)
 		if err != nil {
@@ -31,19 +47,46 @@ func (s *Service) ListAccountsByAdmin(ctx context.Context, query AccountQuery) (
 		}
 		rows = items
 		total = count
-		return nil
+		// 状态分段计数:套用其余筛选,不套用状态筛选
+		byStatus, err = tx.CountAccountsByStatus(ctx, query)
+		return err
 	}); err != nil {
-		return nil, 0, page, size, apperr.ErrInternal.WithCause(err)
+		return nil, 0, page, size, nil, apperr.ErrInternal.WithCause(err)
 	}
 	list := make([]AccountDTO, 0, len(rows))
 	for _, row := range rows {
 		phonePlain, err := s.decryptPhone(row.PhoneEnc)
 		if err != nil {
-			return nil, 0, page, size, apperr.ErrInternal.WithCause(err)
+			return nil, 0, page, size, nil, apperr.ErrInternal.WithCause(err)
 		}
 		list = append(list, ToAccountDTO(row, phonePlain))
 	}
-	return list, total, page, size, nil
+	return list, total, page, size, pagex.Facets{"status": byStatus}, nil
+}
+
+// GetAccountByAdmin 读取本校单个账号(手机号脱敏),供按编号恢复的筛选条件与详情抽屉显示是谁;
+// 其他学校的账号在租户事务里读不到,与已删除的一样按不存在处理。
+func (s *Service) GetAccountByAdmin(ctx context.Context, accountID int64) (AccountDTO, error) {
+	id, err := requireTenantRole(ctx, s, contracts.RoleSchoolAdmin)
+	if err != nil {
+		return AccountDTO{}, err
+	}
+	var account Account
+	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		account, err = tx.GetAccount(ctx, accountID)
+		return err
+	}); err != nil {
+		if isNoRows(err) {
+			return AccountDTO{}, apperr.ErrNotFound.WithCause(err)
+		}
+		return AccountDTO{}, apperr.ErrInternal.WithCause(err)
+	}
+	phonePlain, err := s.decryptPhone(account.PhoneEnc)
+	if err != nil {
+		return AccountDTO{}, apperr.ErrInternal.WithCause(err)
+	}
+	return ToAccountDTO(account, phonePlain), nil
 }
 
 // CreateAccountByAdmin 由学校管理员创建单个师生账号。

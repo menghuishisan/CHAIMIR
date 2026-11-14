@@ -19,19 +19,24 @@ import {
   Button,
   Callout,
   Card,
+  ChainProgress,
   Icon,
   PageHeader,
   PageScaffold,
   Pagination,
   Select,
   Skeleton,
+  StatusIndicator,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { collectAllPages } from '../../../../utils/allPages'
 import { ResourceError } from '../../../../components/ResourceState'
 import { SearchBox } from '../../../../components/SearchBox'
 import { useAsyncResource, usePagedResource, useUrlState } from '../../../../hooks'
 import { facetCount } from '../../../../utils/facets'
-import { experimentCollabModeLabel } from '../../../../utils/labels/experiment'
+import { formatScore } from '../../../../utils/formatters'
+import { experimentCollabModeLabel, experimentInstanceStatusLabel } from '../../../../utils/labels/experiment'
+import { experimentInstanceStatusTone } from '../../statusPresentation'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
 /** 地址参数:course 是课程编号(空为全部课程),q 是搜索词 */
@@ -64,18 +69,18 @@ export default function StudentExperimentsPage() {
   )
   // 学生自己的课程:用于筛选项与卡片上的课程名;一学期几门课,一页取完
   const courses = useAsyncResource(
-    () => api.teaching.getCourses({ role: 'student', size: PAGINATION_MAX_SIZE }),
+    () => collectAllPages((params) => api.teaching.getCourses({ role: 'student', ...params }), PAGINATION_MAX_SIZE),
     [],
     () => false,
   )
   const courseName = useMemo(
-    () => new Map((courses.data?.list ?? []).map((course) => [course.id, course.name])),
+    () => new Map((courses.data ?? []).map((course) => [course.id, course.name])),
     [courses.data],
   )
   const courseOptions = useMemo(
     () => [
       { value: ALL_COURSES, label: '全部课程' },
-      ...(courses.data?.list ?? []).map((course) => ({ value: course.id, label: course.name })),
+      ...(courses.data ?? []).map((course) => ({ value: course.id, label: course.name })),
     ],
     [courses.data],
   )
@@ -207,7 +212,8 @@ interface ExperimentCardProps {
 }
 
 /**
- * ExperimentCard 一个实验:实验名(链向详情,整卡可点)、所属课程、个人或小组、是否交报告、阶段与检查点数;
+ * ExperimentCard 一个实验:实验名(链向详情,整卡可点)、所属课程、个人或小组、是否交报告、阶段与检查点数、
+ * 本人进度(实验状态、已通过的检查点、得分;没开始过写「还没开始」);
  * 「进入实验」浮在整卡链接之上单独可点。小组实验未分组时按钮不可用并写明原因。
  */
 function ExperimentCard({ experiment, courseName, entering, onEnter }: ExperimentCardProps) {
@@ -235,6 +241,7 @@ function ExperimentCard({ experiment, courseName, entering, onEnter }: Experimen
       <p className="text-sm text-ink-sub">
         {stages.length} 个阶段 · {checkpoints.length} 个检查点 · {experiment.require_report ? '需交报告' : '不用交报告'}
       </p>
+      <ExperimentProgressLine progress={experiment.my_progress} checkpointCount={checkpoints.length} />
       <div className="relative z-base mt-auto flex flex-wrap items-center gap-3 pt-2">
         <Button
           variant="secondary"
@@ -249,6 +256,29 @@ function ExperimentCard({ experiment, courseName, entering, onEnter }: Experimen
         {waitingGroup ? <span className="text-sm text-warning">等待老师分组后才能开始</span> : null}
       </div>
     </Card>
+  )
+}
+
+/**
+ * ExperimentProgressLine 本人进度:实验状态 + 已通过的检查点 + 得分;没开始过写「还没开始」。
+ * 检查点是少量可枚举的步骤,用链式区块表示(规范 §5.4)。
+ */
+function ExperimentProgressLine({
+  progress,
+  checkpointCount,
+}: {
+  progress: StudentExperiment['my_progress']
+  checkpointCount: number
+}) {
+  if (!progress) return <p className="text-sm text-ink-sub">还没开始</p>
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+      <StatusIndicator tone={experimentInstanceStatusTone(progress.status)} label={experimentInstanceStatusLabel(progress.status)} />
+      {checkpointCount > 0 ? (
+        <ChainProgress size="sm" label="已通过的检查点" total={checkpointCount} done={Math.min(progress.passed_checkpoints, checkpointCount)} />
+      ) : null}
+      <span className="text-sm tabular-nums text-ink-sub">得分 {formatScore(progress.score)}</span>
+    </div>
   )
 }
 

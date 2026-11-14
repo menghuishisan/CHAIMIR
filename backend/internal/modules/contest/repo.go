@@ -75,6 +75,7 @@ type TxStore interface {
 	UpsertLadder(context.Context, LadderRank) (LadderRank, error)
 	RefreshContestRanks(context.Context, int64, int64) error
 	ListLadder(context.Context, int64, int64, int, int) ([]LadderRank, int64, error)
+	TeamNames(context.Context, int64, int64, []int64) (map[int64]string, error)
 	DeactivateBattleEntries(context.Context, int64, int64, int64, int64, int16) error
 	NextBattleVersion(context.Context, int64, int64, int64, int64, int16) (int32, error)
 	CreateBattleEntry(context.Context, BattleEntry) (BattleEntry, error)
@@ -91,7 +92,8 @@ type TxStore interface {
 	RenewBattleMatchStartLease(context.Context, int64, int64, string, time.Time) (bool, error)
 	GetBattleMatch(context.Context, int64, int64) (BattleMatch, error)
 	LockBattleMatchByJudgeTask(context.Context, int64, string) (BattleMatch, error)
-	ListBattleMatchesForTeam(context.Context, int64, int64, int64, int, int) ([]BattleMatch, int64, error)
+	ListBattleMatchesForTeam(context.Context, int64, int64, int64, int16, int, int) ([]BattleMatch, int64, error)
+	CountBattleMatchesByStatus(context.Context, int64, int64, int64) (pagex.FacetGroup, error)
 	ListBattleReplayMatchesForTeam(context.Context, int64, int64, int64, int, int) ([]BattleReplayRow, error)
 	CountBattleReplayPendingForTeam(context.Context, int64, int64, int64) (int64, error)
 	CountBattleReplayCompletedForTeam(context.Context, int64, int64, int64) (int64, error)
@@ -111,6 +113,7 @@ type TxStore interface {
 	UpsertVulnProblem(context.Context, VulnProblem) (VulnProblem, error)
 	GetVulnProblem(context.Context, int64, int64) (VulnProblem, error)
 	ListVulnProblems(context.Context, int64, int64, int16, int16, int, int) ([]VulnProblem, int64, error)
+	CountVulnProblemsByStatus(context.Context, int64, int64) ([]vulnFacetRow, error)
 	SetVulnProblemPrevalidate(context.Context, int64, int64, int16, map[string]any, string, *contracts.SandboxCompositionSnapshot, string, string) (VulnProblem, error)
 	FinalizeVulnProblem(context.Context, int64, int64, string, string) (VulnProblem, error)
 	ListStudentContestRecords(context.Context, int64, int64) ([]StudentContestRecord, error)
@@ -664,6 +667,22 @@ func (tx *txStore) RefreshContestRanks(ctx context.Context, tenantID, contestID 
 	return nil
 }
 
+// TeamNames 按编号一次读取本赛事队伍的名称;没有的编号不在结果里。
+func (tx *txStore) TeamNames(ctx context.Context, tenantID, contestID int64, teamIDs []int64) (map[int64]string, error) {
+	out := make(map[int64]string, len(teamIDs))
+	if len(teamIDs) == 0 {
+		return out, nil
+	}
+	rows, err := tx.q.ListTeamNamesByIDs(ctx, sqlcgen.ListTeamNamesByIDsParams{TenantID: tenantID, ContestID: contestID, TeamIds: teamIDs})
+	if err != nil {
+		return nil, apperr.ErrContestInvalid.WithCause(err)
+	}
+	for _, row := range rows {
+		out[row.ID] = row.Name
+	}
+	return out, nil
+}
+
 // ListLadder 查询排行榜。
 func (tx *txStore) ListLadder(ctx context.Context, tenantID, contestID int64, page, size int) ([]LadderRank, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
@@ -765,7 +784,8 @@ func (tx *txStore) CreateBattleMatch(ctx context.Context, item BattleMatch) (Bat
 	return battleMatchFromRow(row)
 }
 
-// ClaimPendingBattleMatches 跨租户认领待执行对局。
+// ExhaustUnstartedBattleMatches 把启动租约已过期、重试次数用尽且还没交给判题的对局收为失败并返回;
+// 已交给判题的对局由判题生命周期收敛,不在这里处理。
 func (tx *txStore) ExhaustUnstartedBattleMatches(ctx context.Context, maxAttempts int32, staleBefore time.Time) ([]BattleMatch, error) {
 	rows, err := tx.q.ExhaustUnstartedBattleMatches(ctx, sqlcgen.ExhaustUnstartedBattleMatchesParams{MaxAttempts: maxAttempts, StaleBefore: timex.RequiredTimestamptz(staleBefore)})
 	if err != nil {
@@ -782,6 +802,7 @@ func (tx *txStore) ExhaustUnstartedBattleMatches(ctx context.Context, maxAttempt
 	return out, nil
 }
 
+// ClaimPendingBattleMatches 跨租户认领待执行对局。
 func (tx *txStore) ClaimPendingBattleMatches(ctx context.Context, limit int, maxAttempts int32, staleBefore, leaseUntil time.Time, leaseToken string) ([]BattleMatch, error) {
 	limit32, ok := intx.Int32(limit)
 	if !ok || limit32 <= 0 {
@@ -879,10 +900,10 @@ func (tx *txStore) LockBattleMatchByJudgeTask(ctx context.Context, tenantID int6
 }
 
 // ListBattleMatchesForTeam 查询对局历史和总数。
-// teamID 传 0 表示不按队伍过滤(组织者视角看本赛事全部对局)。
-func (tx *txStore) ListBattleMatchesForTeam(ctx context.Context, tenantID, contestID, teamID int64, page, size int) ([]BattleMatch, int64, error) {
+// teamID 传 0 表示不按队伍过滤(组织者视角看本赛事全部对局);status 传 0 表示不按状态过滤。
+func (tx *txStore) ListBattleMatchesForTeam(ctx context.Context, tenantID, contestID, teamID int64, status int16, page, size int) ([]BattleMatch, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := tx.q.ListBattleMatchesForTeam(ctx, sqlcgen.ListBattleMatchesForTeamParams{TenantID: tenantID, ContestID: contestID, TeamID: teamID, PageLimit: limit, PageOffset: offset})
+	rows, err := tx.q.ListBattleMatchesForTeam(ctx, sqlcgen.ListBattleMatchesForTeamParams{TenantID: tenantID, ContestID: contestID, TeamID: teamID, Status: status, PageLimit: limit, PageOffset: offset})
 	if err != nil {
 		return nil, 0, apperr.ErrContestBattleMatchFailed.WithCause(err)
 	}
@@ -894,11 +915,24 @@ func (tx *txStore) ListBattleMatchesForTeam(ctx context.Context, tenantID, conte
 		}
 		out = append(out, item)
 	}
-	total, err := tx.q.CountBattleMatchesForTeam(ctx, sqlcgen.CountBattleMatchesForTeamParams{TenantID: tenantID, ContestID: contestID, TeamID: teamID})
+	total, err := tx.q.CountBattleMatchesForTeam(ctx, sqlcgen.CountBattleMatchesForTeamParams{TenantID: tenantID, ContestID: contestID, TeamID: teamID, Status: status})
 	if err != nil {
 		return nil, 0, apperr.ErrContestBattleMatchFailed.WithCause(err)
 	}
 	return out, total, nil
+}
+
+// CountBattleMatchesByStatus 按状态聚合对局(视角同列表,不套用状态筛选)。
+func (tx *txStore) CountBattleMatchesByStatus(ctx context.Context, tenantID, contestID, teamID int64) (pagex.FacetGroup, error) {
+	rows, err := tx.q.CountBattleMatchesByStatus(ctx, sqlcgen.CountBattleMatchesByStatusParams{TenantID: tenantID, ContestID: contestID, TeamID: teamID})
+	if err != nil {
+		return nil, apperr.ErrContestBattleMatchFailed.WithCause(err)
+	}
+	group := pagex.FacetGroup{}
+	for _, row := range rows {
+		group.Add(row.Status, row.Count)
+	}
+	return group, nil
 }
 
 // ListBattleReplayMatchesForTeam 查询按完成时间排序的回放时间窗。
@@ -1128,6 +1162,19 @@ func (tx *txStore) GetVulnProblem(ctx context.Context, tenantID, id int64) (Vuln
 	return vulnProblemFromRow(row)
 }
 
+// CountVulnProblemsByStatus 按状态与预验证结果聚合本校漏洞题(套用来源筛选)。
+func (tx *txStore) CountVulnProblemsByStatus(ctx context.Context, tenantID, sourceID int64) ([]vulnFacetRow, error) {
+	rows, err := tx.q.CountVulnProblemsByStatus(ctx, sqlcgen.CountVulnProblemsByStatusParams{TenantID: tenantID, SourceID: sourceID})
+	if err != nil {
+		return nil, apperr.ErrContestVulnProblemInvalid.WithCause(err)
+	}
+	out := make([]vulnFacetRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, vulnFacetRow{Status: row.Status, PrevalidateStatus: row.PrevalidateStatus, Count: row.Count})
+	}
+	return out, nil
+}
+
 // ListVulnProblems 查询漏洞题草稿和总数。
 func (tx *txStore) ListVulnProblems(ctx context.Context, tenantID, sourceID int64, status, prevalidateStatus int16, page, size int) ([]VulnProblem, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
@@ -1198,7 +1245,8 @@ func (tx *txStore) Stats(ctx context.Context, tenantID int64) (ContestStatsSnaps
 	return ContestStatsSnapshot{ContestCount: row.ContestCount, ActiveContestCount: row.ActiveContestCount, ParticipantCount: row.ParticipantCount}, nil
 }
 
-// ClaimAutoArchiveContests 跨租户认领已到结束时间的竞赛并标记为已结束。
+// ClaimManualArchiveContest 为人工归档领取已结束竞赛的归档租约;与自动归档共用同一租约栅栏,
+// 仍有待执行或进行中的对局时不领取,避免并发生成不同的最终快照。
 func (tx *txStore) ClaimManualArchiveContest(ctx context.Context, tenantID, contestID int64, staleBefore, leaseUntil time.Time, leaseToken string) (ContestArchiveClaim, error) {
 	row, err := tx.q.ClaimManualArchiveContest(ctx, sqlcgen.ClaimManualArchiveContestParams{TenantID: tenantID, ContestID: contestID, StaleBefore: timex.RequiredTimestamptz(staleBefore), LeaseUntil: timex.RequiredTimestamptz(leaseUntil), LeaseToken: leaseToken})
 	if err != nil {
@@ -1207,6 +1255,7 @@ func (tx *txStore) ClaimManualArchiveContest(ctx context.Context, tenantID, cont
 	return contestArchiveClaimFromManualRow(row), nil
 }
 
+// ClaimAutoArchiveContests 跨租户认领已到结束时间的竞赛并标记为已结束。
 func (tx *txStore) ClaimAutoArchiveContests(ctx context.Context, limit int, staleBefore, leaseUntil time.Time, leaseToken string) ([]ContestArchiveClaim, error) {
 	limit32, ok := intx.Int32(limit)
 	if !ok || limit32 <= 0 {
@@ -1228,10 +1277,12 @@ func (tx *txStore) CompleteAutoArchiveContest(ctx context.Context, tenantID, con
 	return tx.q.CompleteAutoArchiveContest(ctx, sqlcgen.CompleteAutoArchiveContestParams{TenantID: tenantID, ContestID: contestID, LeaseToken: leaseToken})
 }
 
+// contestArchiveClaimFromAutoRow 把自动归档领取到的结果行转成归档租约。
 func contestArchiveClaimFromAutoRow(row sqlcgen.ClaimAutoArchiveContestsAcrossTenantsRow) ContestArchiveClaim {
 	return ContestArchiveClaim{ID: row.ID, TenantID: row.TenantID, CreatedAt: timex.FromTimestamptz(row.CreatedAt), ArchiveLeaseToken: row.ArchiveLeaseToken, ArchiveLeaseUntil: timex.FromTimestamptz(row.ArchiveLeaseUntil)}
 }
 
+// contestArchiveClaimFromManualRow 把人工归档领取到的结果行转成归档租约。
 func contestArchiveClaimFromManualRow(row sqlcgen.ClaimManualArchiveContestRow) ContestArchiveClaim {
 	return ContestArchiveClaim{ID: row.ID, TenantID: row.TenantID, CreatedAt: timex.FromTimestamptz(row.CreatedAt), ArchiveLeaseToken: row.ArchiveLeaseToken, ArchiveLeaseUntil: timex.FromTimestamptz(row.ArchiveLeaseUntil)}
 }

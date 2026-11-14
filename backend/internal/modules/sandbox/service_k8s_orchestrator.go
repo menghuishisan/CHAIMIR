@@ -2436,6 +2436,7 @@ func workspaceMountPath(plan CreateSandboxPlan) string {
 	return "/workspace"
 }
 
+// volumeDomainsForPlan 按合并后的运行时适配声明为沙箱生成卷;跨 Pod 共享的卷域改用沙箱级临时 PVC。
 func volumeDomainsForPlan(plan CreateSandboxPlan) []corev1.Volume {
 	shared := sharedVolumeDomainsForPlan(plan)
 	volumes := make([]corev1.Volume, 0)

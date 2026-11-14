@@ -9,18 +9,16 @@
 // 后端 GET /appeals 在 teacher 组,学生侧不建申诉列表(§6.6)。
 //
 // 校管复用同一区块(校管也在 teacher 组里,能看全校),由调用方用 scope 显式声明范围,组件不判角色枚举:
-// school 范围取全校课程名、用账号列表解析学生姓名,并拿到「重算绩点」(admin 组能力);
-// teacher 范围取自己授课的课程,用这些课的成员列表解析姓名(设计 §10)。
+// school 范围能看全校申诉并拿到「重算绩点」(admin 组能力);teacher 范围只看自己授课课程的申诉。
+// 学生姓名、学号与课程名随申诉记录由服务端给出,不为解析名字拉取课程、成员或账号目录。
 // 设计 §7.5:状态计数(写进地址)+ 队列 + 详情;队列行显示学生姓名、课程名、申诉时间、理由摘要;
 // 详情显示完整理由与该课当前成绩,底部「驳回」「受理」各附后果说明与处理说明输入(学生可见)。
 
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { ChevronLeft, CircleCheck, CircleX, RefreshCw, Scale } from 'lucide-react'
 import {
-  BaseIdentity,
   GradeAppealStatus,
   PAGINATION_MAX_SIZE,
-  type Course,
   type GradeAppeal,
   type Semester,
 } from '@chaimir/api-client'
@@ -49,12 +47,10 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
-import { useAsyncResource, usePagedResource, useResourceTotal, useReviewQueue, useUrlState } from '../../../hooks'
+import { useAsyncResource, usePagedResource, useReviewQueue, useUrlState } from '../../../hooks'
+import { segmentCounts } from '../../../utils/facets'
 import { collectAllPages } from '../../../utils/allPages'
 import { AccountNameText } from '../../identity/components/AccountNameText'
-import { useAccountNames } from '../../identity/useAccountNames'
-import { StudentName } from '../../teaching/components/StudentName'
-import { useCourseMemberNames } from '../../teaching/useCourseMemberNames'
 import { useFormValidation } from '../../../hooks/useFormValidation'
 import { formatDateTime, formatRelativeOccurrence, formatScore } from '../../../utils/formatters'
 import { gradeAppealStatusLabel } from '../../../utils/labels/grade'
@@ -103,42 +99,14 @@ export function GradeAppeals({ scope }: GradeAppealsProps) {
     [query.status],
     { urlPageKey: 'page' },
   )
-  // 分段上的数字取服务端全量口径(只取一条)
-  const counts: Record<string, number | undefined> = {
-    pending: useResourceTotal((params) => api.grade.listAppeals({ status: GradeAppealStatus.PENDING, ...params }), [], appeals.refreshVersion),
-    accepted: useResourceTotal((params) => api.grade.listAppeals({ status: GradeAppealStatus.ACCEPTED, ...params }), [], appeals.refreshVersion),
-    completed: useResourceTotal((params) => api.grade.listAppeals({ status: GradeAppealStatus.COMPLETED, ...params }), [], appeals.refreshVersion),
-    rejected: useResourceTotal((params) => api.grade.listAppeals({ status: GradeAppealStatus.REJECTED, ...params }), [], appeals.refreshVersion),
-    all: useResourceTotal((params) => api.grade.listAppeals(params), [], appeals.refreshVersion),
-  }
+  // 分段计数取列表接口的 facets(范围同列表:教师按任教课程,校管全校);读取中或失败时不显示数字
+  const facets = appeals.status === 'success' || appeals.status === 'empty' ? appeals.data?.facets : undefined
+  const counts = segmentCounts(facets, 'status', STATUS_SEGMENTS, (item) => ('status' in item ? item.status : undefined))
 
-  // 申诉记录只回 course_id,课程名从课程列表解析,不把内部编号抛到界面上。
-  // 校管能看全校申诉,故按处理人身份取对应范围的课程:教师取自己授课的,校管取全校的。
-  const courses = useAsyncResource<Course[]>(
-    () =>
-      collectAllPages(
-        (params) => api.teaching.getCourses(scope === 'school' ? params : { role: 'teacher', ...params }),
-        PAGINATION_MAX_SIZE,
-      ),
-    [scope],
-    () => false,
+  /** studentLabel 一位学生的姓名与学号(服务端解析;账号已移除时写明,不显示编号) */
+  const studentLabel = (appeal: GradeAppeal) => (
+    <AccountNameText name={appeal.student_name} no={appeal.student_no} compact />
   )
-
-  const courseNameById = useMemo(
-    () => new Map((courses.data ?? []).map((course: Course) => [course.id, course.name])),
-    [courses.data],
-  )
-  // 学生姓名:教师用自己授课课程的成员列表,校管用全校学生账号(设计 §10);另一边不读
-  const teacherCourseIds = useMemo(() => (scope === 'teacher' ? (courses.data ?? []).map((course) => course.id) : []), [courses.data, scope])
-  const members = useCourseMemberNames(teacherCourseIds)
-  const accounts = useAccountNames(BaseIdentity.STUDENT, scope === 'school')
-  /** studentLabel 一位学生的姓名与学号(解析不到时有各自的说法,不显示编号) */
-  const studentLabel = (studentId: string) =>
-    scope === 'school' ? (
-      <AccountNameText name={accounts.lookup(studentId)} compact />
-    ) : (
-      <StudentName member={members.lookup(studentId)} compact />
-    )
 
   /**
    * 审阅队列族(§6.5.3 第 ⑤ 族):左队列右详情。
@@ -240,14 +208,14 @@ export function GradeAppeals({ scope }: GradeAppealsProps) {
                         )}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="flex min-w-0 text-sm">{studentLabel(appeal.student_id)}</span>
+                          <span className="flex min-w-0 text-sm">{studentLabel(appeal)}</span>
                           <StatusIndicator
                             tone={gradeAppealStatusTone(appeal.status)}
                             label={gradeAppealStatusLabel(appeal.status)}
                           />
                         </div>
                         <p className="mt-1 truncate text-xs text-ink-sub" title={formatDateTime(appeal.created_at)}>
-                          {courseNameById.get(appeal.course_id) ?? '其他课程'} · {formatRelativeOccurrence(appeal.created_at)}
+                          {appeal.course_name ?? '已删除的课程'} · {formatRelativeOccurrence(appeal.created_at)}
                         </p>
                         <p className="mt-1 line-clamp-1 text-xs text-ink-sub">{appeal.reason}</p>
                       </div>
@@ -264,8 +232,8 @@ export function GradeAppeals({ scope }: GradeAppealsProps) {
             <AppealDetailPane
               key={selected.id}
               appeal={selected}
-              student={studentLabel(selected.student_id)}
-              courseName={courseNameById.get(selected.course_id) ?? '该课程'}
+              student={studentLabel(selected)}
+              courseName={selected.course_name ?? '该课程'}
               canRecompute={canRecompute}
               onHandled={() => {
                 advanceToNext()
@@ -284,7 +252,7 @@ export function GradeAppeals({ scope }: GradeAppealsProps) {
       {recomputeTarget ? (
         <RecomputeModal
           appeal={recomputeTarget}
-          courseName={courseNameById.get(recomputeTarget.course_id) ?? '该课程'}
+          courseName={recomputeTarget.course_name ?? '该课程'}
           onClose={() => setRecomputeTarget(undefined)}
           onDone={() => {
             setRecomputeTarget(undefined)
@@ -446,7 +414,7 @@ function AppealDetailPane({
           {/* 动作条贴详情片底边;<lg 由 QueueDetailLayout 钉到屏幕底部 */}
           <div className="mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
             <Button
-              variant="danger"
+              variant="outline"
               leftIcon={CircleX}
               loading={working === 'reject'}
               onClick={() => void submit('reject')}
@@ -454,7 +422,7 @@ function AppealDetailPane({
               驳回
             </Button>
             <Button
-              variant="seal"
+              variant="primary"
               leftIcon={CircleCheck}
               loading={working === 'accept'}
               onClick={() => void submit('accept')}

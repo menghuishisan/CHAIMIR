@@ -1,6 +1,6 @@
 // SharedCourseLibrary 共享资源库「课程」标签(设计 §7.4 /teacher/shared):搜索 + 卡片网格,整卡打开预览抽屉
 // (简介、类型、难度、学期与学分),抽屉底部「克隆到本校」;克隆成功后在抽屉里给「去编辑」链接。
-// 共享目录是有限投影(不含邀请码与学生数据),他校课程的大纲读不到,故预览不显示章节数(设计 §10 缺口)。
+// 共享目录是有限投影(不含邀请码与学生数据);预览写章节数,章节内容要克隆后才看得到。
 // 搜索词与页码由页面写进地址。克隆表单复用 CloneCourseModal(与「我的课程」共用)。
 
 import { useState } from 'react'
@@ -162,6 +162,7 @@ function SharedCourseDrawer({ course, onClose }: { course: SharedCourse; onClose
               { term: '难度', description: teachingDifficultyLabel(course.difficulty) },
               { term: '学期', description: course.semester },
               { term: '学分', description: `${course.credits} 学分` },
+              { term: '章节', description: course.chapter_count > 0 ? `共 ${course.chapter_count} 章` : '还没有章节' },
               {
                 term: '更新于',
                 description: <span title={formatDateTime(course.updated_at)}>{formatRelativeOccurrence(course.updated_at)}</span>,

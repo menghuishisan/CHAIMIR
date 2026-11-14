@@ -144,20 +144,25 @@ func (s *Service) UpdateRuntime(ctx context.Context, runtimeID int64, req Runtim
 	return runtime, s.writeAuditFromContext(ctx, 0, "sandbox.runtime.update", "runtime", runtimeID, map[string]any{"code": runtime.Code})
 }
 
-// ListRuntimes 查询平台已登记运行时列表。
-func (s *Service) ListRuntimes(ctx context.Context) ([]Runtime, error) {
+// ListRuntimes 查询平台已登记运行时列表,并在同一事务里带回每个运行时的可用镜像版本数(列表卡片的接入进度用)。
+func (s *Service) ListRuntimes(ctx context.Context) ([]Runtime, map[int64]int64, error) {
 	var out []Runtime
+	var availableImages map[int64]int64
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		var err error
 		out, err = tx.ListRuntimes(ctx)
 		if err != nil {
 			return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
 		}
+		availableImages, err = tx.CountAvailableRuntimeImages(ctx)
+		if err != nil {
+			return apperr.ErrSandboxRuntimeNotFound.WithCause(err)
+		}
 		return nil
 	}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return out, nil
+	return out, availableImages, nil
 }
 
 // GetRuntime 按 ID 查询单个运行时,供平台详情页深链和刷新使用。

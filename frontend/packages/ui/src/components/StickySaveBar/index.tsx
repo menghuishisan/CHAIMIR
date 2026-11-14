@@ -31,6 +31,7 @@ export interface StickySaveBarProps {
   className?: string;
 }
 
+/** StickySaveBar 配置表单族的底部粘性保存条 */
 export function StickySaveBar({
   dirtyCount,
   saving = false,

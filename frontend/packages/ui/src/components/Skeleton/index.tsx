@@ -39,6 +39,7 @@ export interface SkeletonProps {
   className?: string;
 }
 
+/** Skeleton 骨架屏占位 */
 export function Skeleton({ variant, width = "full", lines = 1, className }: SkeletonProps) {
   // 骨架纯装饰,对读屏隐藏;加载语义由容器(aria-busy 等)表达
   if (lines <= 1) {

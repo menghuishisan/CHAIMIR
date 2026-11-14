@@ -7,6 +7,7 @@ import (
 
 	"chaimir/internal/platform/db"
 	"chaimir/internal/platform/intx"
+	"chaimir/internal/platform/pagex"
 	"chaimir/internal/platform/timex"
 	"chaimir/internal/platform/transfer/internal/sqlcgen"
 	"chaimir/pkg/apperr"
@@ -19,7 +20,8 @@ type Store interface {
 	CreateTask(ctx context.Context, task Task) (Task, error)
 	GetTask(ctx context.Context, tenantID, taskID int64) (Task, error)
 	DeletePendingTask(ctx context.Context, tenantID, taskID int64) error
-	ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, int64, error)
+	// ListTasks 返回当前页、总数与「按类型」分段计数(套用状态筛选,不套用类型筛选),三者同一事务读取
+	ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, int64, pagex.FacetGroup, error)
 	ClaimTask(ctx context.Context, task Task) (Task, error)
 	CompleteTask(ctx context.Context, task Task, leaseToken string) (Task, error)
 	FailTask(ctx context.Context, task Task, leaseToken string) (Task, error)
@@ -136,12 +138,13 @@ func (s *store) DeletePendingTask(ctx context.Context, tenantID, taskID int64) e
 
 // ListTasks 查询当前账号名下的导入导出任务,并在同一事务内取回符合条件的总数。
 // 总数与当前页在同一事务读取:分两次请求容易在任务状态推进时给出自相矛盾的分页。
-func (s *store) ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, int64, error) {
+func (s *store) ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, int64, pagex.FacetGroup, error) {
 	if s.db == nil {
-		return nil, 0, fmt.Errorf("transfer store 缺少 database")
+		return nil, 0, nil, fmt.Errorf("transfer store 缺少 database")
 	}
 	var out []Task
 	var total int64
+	byChannel := pagex.FacetGroup{}
 	err := s.withTaskTx(ctx, query.TenantID, func(ctx context.Context, tx pgx.Tx) error {
 		queries := sqlcgen.New(tx)
 		rows, err := queries.ListTransferTasks(ctx, sqlcgen.ListTransferTasksParams{
@@ -165,12 +168,23 @@ func (s *store) ListTasks(ctx context.Context, query ListTasksQuery) ([]Task, in
 			return err
 		}
 		out = tasksFromRows(rows)
+		channels, err := queries.CountTransferTasksByChannel(ctx, sqlcgen.CountTransferTasksByChannelParams{
+			TenantID:  query.TenantID,
+			AccountID: query.AccountID,
+			Status:    string(query.Status),
+		})
+		if err != nil {
+			return err
+		}
+		for _, row := range channels {
+			byChannel.Add(row.Channel, row.Count)
+		}
 		return nil
 	})
 	if err != nil {
-		return nil, 0, mapStoreError(err)
+		return nil, 0, nil, mapStoreError(err)
 	}
-	return out, total, nil
+	return out, total, byChannel, nil
 }
 
 // ClaimTask 使用 task ID 和状态条件原子领取模块 worker 的任务。

@@ -23,6 +23,7 @@ const ROW_H = 26;
 /** 泳道窗口:最多同时画这么多条消息(超出部分由右侧事件流承载) */
 const LANE_WINDOW = 12;
 
+/** LanePatternView 时序泳道视图(lane 模式) */
 export function LanePatternView({
   pattern,
   focus,

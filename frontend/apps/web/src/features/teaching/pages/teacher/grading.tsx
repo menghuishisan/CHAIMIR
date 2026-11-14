@@ -53,12 +53,12 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { collectAllPages } from '../../../../utils/allPages'
 import { useSession } from '../../../../components/RoleGuard/session'
 import { ResourceState } from '../../../../components/ResourceState'
 import {
   useAsyncResource,
   usePagedResource,
-  useResourceTotal,
   useReviewQueue,
   useUrlState,
 } from '../../../../hooks'
@@ -67,6 +67,7 @@ import { GradeAppeals } from '../../../grade/components/GradeAppeals'
 import { isJudgeTaskActive } from '../../../judge/rules'
 import { judgeTaskStatusTone } from '../../../judge/statusPresentation'
 import { useRejudgeTask } from '../../../judge/useRejudgeTask'
+import { facetCount, facetSum } from '../../../../utils/facets'
 import { formatDateTime, formatRelativeOccurrence, formatScore } from '../../../../utils/formatters'
 import { judgeTaskStatusLabel } from '../../../../utils/labels/judge'
 import { submissionStatusLabel } from '../../../../utils/labels/teaching'
@@ -155,14 +156,14 @@ function SubmissionsQueue() {
   const names = useCourseMemberNames([courseId])
 
   const courses = useAsyncResource(
-    () => api.teaching.getCourses({ role: 'teacher', page: 1, size: PAGINATION_MAX_SIZE }),
+    () => collectAllPages((params) => api.teaching.getCourses({ role: 'teacher', ...params }), PAGINATION_MAX_SIZE),
     [],
     () => false
   )
   const assignments = useAsyncResource(
     () =>
       courseId
-        ? api.teaching.listCourseAssignments(courseId, { page: 1, size: PAGINATION_MAX_SIZE })
+        ? collectAllPages((params) => api.teaching.listCourseAssignments(courseId, params), PAGINATION_MAX_SIZE)
         : Promise.resolve(null),
     [courseId],
     () => false
@@ -180,27 +181,13 @@ function SubmissionsQueue() {
     [assignmentId, query.view],
     { urlPageKey: 'page' }
   )
-  // 分段计数取服务端全量口径(只读总数),不用当前页切片去数
-  const countLoader = (view: string) => (params: { page: number; size: number }) =>
-    assignmentId
-      ? api.teaching.getSubmissions(assignmentId, { ...viewFilter(view), ...params })
-      : Promise.resolve({ list: [] as Submission[], total: 0, page: 1, size: 1 })
-  const allCount = useResourceTotal(countLoader('all'), [assignmentId], submissions.refreshVersion)
-  const pendingCount = useResourceTotal(
-    countLoader('pending'),
-    [assignmentId],
-    submissions.refreshVersion
-  )
-  const gradedCount = useResourceTotal(
-    countLoader('graded'),
-    [assignmentId],
-    submissions.refreshVersion
-  )
-  const lateCount = useResourceTotal(
-    countLoader('late'),
-    [assignmentId],
-    submissions.refreshVersion
-  )
+  // 分段计数取列表接口的 facets(接口总览「分段计数」):状态与是否迟交两组,不套用本组筛选。
+  // 列表读取中或失败时数量未知,不显示数字。
+  const facets = submissions.status === 'success' || submissions.status === 'empty' ? submissions.data?.facets : undefined
+  const allCount = facetSum(facets, 'status')
+  const pendingCount = facetCount(facets, 'status', SubmissionStatus.PENDING)
+  const gradedCount = facetCount(facets, 'status', SubmissionStatus.GRADED)
+  const lateCount = facetCount(facets, 'is_late', true)
 
   const list = useMemo(() => submissions.data?.list ?? [], [submissions.data])
   const selected = finished
@@ -231,11 +218,11 @@ function SubmissionsQueue() {
     isPending: (item: Submission) => item.status !== SubmissionStatus.GRADED,
   })
 
-  const courseOptions = (courses.data?.list ?? []).map((course) => ({
+  const courseOptions = (courses.data ?? []).map((course) => ({
     value: course.id,
     label: course.name,
   }))
-  const assignmentOptions = (assignments.data?.list ?? []).map((item) => ({
+  const assignmentOptions = (assignments.data ?? []).map((item) => ({
     value: item.id,
     label: item.title,
   }))

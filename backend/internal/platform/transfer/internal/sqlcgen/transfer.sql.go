@@ -195,6 +195,47 @@ func (q *Queries) CountTransferTasks(ctx context.Context, arg CountTransferTasks
 	return column_1, err
 }
 
+const countTransferTasksByChannel = `-- name: CountTransferTasksByChannel :many
+SELECT channel, count(*)::bigint AS count
+FROM transfer_task
+WHERE tenant_id = $1::bigint
+  AND account_id = $2::bigint
+  AND ($3::varchar = '' OR status = $3::varchar)
+GROUP BY channel
+`
+
+type CountTransferTasksByChannelParams struct {
+	TenantID  int64  `json:"tenant_id"`
+	AccountID int64  `json:"account_id"`
+	Status    string `json:"status"`
+}
+
+type CountTransferTasksByChannelRow struct {
+	Channel string `json:"channel"`
+	Count   int64  `json:"count"`
+}
+
+// 任务与下载「全部 / 导入 / 导出」分段计数:本人任务,套用状态筛选,不套用类型筛选。
+func (q *Queries) CountTransferTasksByChannel(ctx context.Context, arg CountTransferTasksByChannelParams) ([]CountTransferTasksByChannelRow, error) {
+	rows, err := q.db.Query(ctx, countTransferTasksByChannel, arg.TenantID, arg.AccountID, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountTransferTasksByChannelRow{}
+	for rows.Next() {
+		var i CountTransferTasksByChannelRow
+		if err := rows.Scan(&i.Channel, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createTransferTask = `-- name: CreateTransferTask :one
 INSERT INTO transfer_task (
     id, tenant_id, account_id, channel, subject, status, content_type, file_name,

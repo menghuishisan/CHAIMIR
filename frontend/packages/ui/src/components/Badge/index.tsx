@@ -60,6 +60,7 @@ export interface BadgeProps {
   className?: string;
 }
 
+/** Badge 语义色徽标 */
 export function Badge({ tone = "neutral", onDark = false, children, className }: BadgeProps) {
   return <span className={cn(badgeVariants({ tone, onDark }), className)}>{children}</span>;
 }
@@ -83,6 +84,7 @@ export interface DotProps {
   className?: string;
 }
 
+/** Dot 语义色小状态点 */
 export function Dot({ tone = "neutral", label, className }: DotProps) {
   return (
     <span className={cn("inline-flex items-center gap-1.5 text-sm text-ink-sub", className)}>

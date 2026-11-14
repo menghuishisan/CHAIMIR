@@ -3,6 +3,7 @@
   get:
     tags: [experiment]
     summary: 实验列表
+    description: facets.status：实验状态分段计数，套用课程与关键词、不套用状态筛选。
     operationId: experimentListExperiments
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
@@ -23,6 +24,7 @@
   get:
     tags: [experiment]
     summary: 教师活跃实验实例列表
+    description: facets.status：实验环境状态分段计数，范围同列表，不套用状态筛选。
     operationId: experimentListTeacherInstances
     x-chaimir-audience: teacher-or-school-admin
     security: [{ bearerAuth: [] }]
@@ -32,6 +34,7 @@
   get:
     tags: [experiment]
     summary: 学生可进入的已发布实验列表
+    description: 开始过的实验带本人进度 my_progress（status 实例状态、score 得分、passed_checkpoints 已通过的检查点数；小组实验看本人所在小组的实验），与列表同页一次聚合；从没开始过的实验不带该字段。
     operationId: experimentListStudentExperiments
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
@@ -191,6 +194,7 @@
   get:
     tags: [experiment]
     summary: 实验报告列表
+    description: facets.status：报告批改状态分段计数，不套用状态筛选。
     operationId: experimentListReports
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]

@@ -64,7 +64,8 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { locationLabel, useAsyncResource, usePageLocation, usePagedResource, useResourceTotal, useReviewQueue, useUrlState } from '../../../../hooks'
+import { locationLabel, useAsyncResource, usePageLocation, usePagedResource, useReviewQueue, useUrlState } from '../../../../hooks'
+import { facetCount, facetSum } from '../../../../utils/facets'
 import { collectAllPages } from '../../../../utils/allPages'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import type { PagedResourceState } from '../../../../hooks/usePagedResource'
@@ -134,30 +135,11 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
     { urlPageKey: 'page' },
   )
 
-  // 待办摘要取服务端全量口径:待批改是教师最常看的数字,不能用当前页数出来的近似值
-  const totalCount = useResourceTotal(
-    (params) => api.experiment.listReports(experiment.id, params),
-    [experiment.id],
-    reports.refreshVersion,
-  )
-  const pendingCount = useResourceTotal(
-    (params) =>
-      api.experiment.listReports(experiment.id, {
-        status: ExperimentReportStatus.SUBMITTED,
-        ...params,
-      }),
-    [experiment.id],
-    reports.refreshVersion,
-  )
-  const gradedCount = useResourceTotal(
-    (params) =>
-      api.experiment.listReports(experiment.id, {
-        status: ExperimentReportStatus.GRADED,
-        ...params,
-      }),
-    [experiment.id],
-    reports.refreshVersion,
-  )
+  // 待办摘要取列表接口的 facets:待批改是教师最常看的数字,按全量口径给出,不用当前页数出来的近似值
+  const facets = reports.status === 'success' || reports.status === 'empty' ? reports.data?.facets : undefined
+  const totalCount = facetSum(facets, 'status')
+  const pendingCount = facetCount(facets, 'status', ExperimentReportStatus.SUBMITTED)
+  const gradedCount = facetCount(facets, 'status', ExperimentReportStatus.GRADED)
 
   /** downloadReport 经业务授权和统一文件服务下载报告,不暴露对象存储地址。 */
   const downloadReport = useCallback(async (report: ReportDTO) => {
@@ -756,7 +738,7 @@ function RemoveMemberModal({ group, studentId, studentName, onClose, onRemoved }
           <Button type="button" variant="outline" onClick={onClose} disabled={working}>
             取消
           </Button>
-          <Button type="button" variant="seal" onClick={() => void remove()} loading={working}>
+          <Button type="button" variant="danger" onClick={() => void remove()} loading={working}>
             移除成员
           </Button>
         </ModalFooter>
@@ -861,7 +843,7 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
     role: role.trim() === '' ? '请填写这名学生在组内的角色' : null,
   }), [classId, role, studentId]))
 
-  const classes = useAsyncResource(() => api.identity.listClasses(), [], () => false)
+  const classes = useAsyncResource(() => api.identity.listClasses(), [], (value) => value.length === 0)
 
   /**
    * 班内学生一次取齐(PAGINATION_MAX_SIZE)。
@@ -871,15 +853,10 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
   const students = useAsyncResource(
     () =>
       classId === ''
-        ? Promise.resolve({
-            list: [] as ClassStudent[],
-            total: 0,
-            page: 1,
-            size: PAGINATION_MAX_SIZE,
-          })
-        : api.identity.listClassStudents(classId, { page: 1, size: PAGINATION_MAX_SIZE }),
+        ? Promise.resolve([] as ClassStudent[])
+        : collectAllPages((params) => api.identity.listClassStudents(classId, params), PAGINATION_MAX_SIZE),
     [classId],
-    (value) => value.list.length === 0,
+    (value) => value.length === 0,
   )
 
   const classOptions = useMemo(
@@ -889,7 +866,7 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
 
   const studentOptions = useMemo(
     () =>
-      (students.data?.list ?? []).map((student) => ({
+      (students.data ?? []).map((student) => ({
         value: student.id,
         label: student.no ? `${student.name} · ${student.no}` : student.name,
       })),

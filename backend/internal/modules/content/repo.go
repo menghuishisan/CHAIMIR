@@ -27,6 +27,7 @@ type TxStore interface {
 	GetItemWithBodyByID(ctx context.Context, tenantID, id int64) (ItemWithBody, error)
 	GetItemWithBodyByRef(ctx context.Context, tenantID int64, code, version string) (ItemWithBody, error)
 	ListItems(ctx context.Context, tenantID int64, filter ItemListFilter) ([]Item, int64, error)
+	CountSharedItemsByType(ctx context.Context, keyword string) (pagex.FacetGroup, error)
 	ListVersions(ctx context.Context, tenantID int64, code string) ([]Item, error)
 	PublishItem(ctx context.Context, tenantID, id int64) (Item, error)
 	DeprecateItem(ctx context.Context, tenantID, id int64) (Item, error)
@@ -134,6 +135,19 @@ func (s *txStore) GetItemWithBodyByRef(ctx context.Context, tenantID int64, code
 		return ItemWithBody{}, err
 	}
 	return itemWithBodyFromRefRow(row)
+}
+
+// CountSharedItemsByType 按题型聚合共享资源库(已发布且共享,套用关键词,不套用题型)。
+func (s *txStore) CountSharedItemsByType(ctx context.Context, keyword string) (pagex.FacetGroup, error) {
+	rows, err := s.q.CountSharedContentItemsByType(ctx, keyword)
+	if err != nil {
+		return nil, err
+	}
+	group := pagex.FacetGroup{}
+	for _, row := range rows {
+		group.Add(row.Type, row.Count)
+	}
+	return group, nil
 }
 
 // ListItems 查询内容分页。

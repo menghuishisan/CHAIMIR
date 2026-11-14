@@ -36,6 +36,7 @@ import {
   Pagination,
   WorkbenchShell,
   WorkbenchTopbar,
+  type WorkbenchShortcut,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -232,6 +233,42 @@ function Rewinder({ window, ranks, page, pageSize, onPageChange }: RewinderProps
   const [topbarError, setTopbarError] = useState<string>()
   const topbarDownload = useReplayDownload(setTopbarError)
 
+  // 时间轴的方向键(设计 §7.2 C):←/→ 按局回溯,Shift + ←/→ 在已读取的轨迹里逐帧回溯。
+  // 两条游标都只是本地重算,按住不放连续移动;可用条件与底栏按钮、滑条的边界一致。
+  const actionCount = trace.archive?.actions.length
+  const timelineShortcuts: WorkbenchShortcut[] = [
+    {
+      key: 'ArrowLeft',
+      repeat: true,
+      description: '回退一局',
+      disabled: cursor === 0,
+      run: () => setCursor((current) => Math.max(0, current - 1)),
+    },
+    {
+      key: 'ArrowRight',
+      repeat: true,
+      description: '前进一局',
+      disabled: cursor >= timeline.length,
+      run: () => setCursor((current) => Math.min(timeline.length, current + 1)),
+    },
+    {
+      key: 'ArrowLeft',
+      shift: true,
+      repeat: true,
+      description: '逐帧回退一步',
+      disabled: actionCount === undefined || step === 0,
+      run: () => setStep((current) => Math.max(0, current - 1)),
+    },
+    {
+      key: 'ArrowRight',
+      shift: true,
+      repeat: true,
+      description: '逐帧前进一步',
+      disabled: actionCount === undefined || step >= actionCount,
+      run: () => setStep((current) => Math.min(actionCount ?? 0, current + 1)),
+    },
+  ]
+
   return (
     <WorkbenchShell
       workbench="replay"
@@ -239,6 +276,7 @@ function Rewinder({ window, ranks, page, pageSize, onPageChange }: RewinderProps
         <WorkbenchTopbar
           onExit={exit}
           exitLabel="退出回放"
+          shortcuts={timelineShortcuts}
           title={title}
           subtitle={
             '已完成 ' +
@@ -916,8 +954,8 @@ function LadderSection({ ranks, pending }: LadderSectionProps) {
                 key={rank.team_id}
                 className="flex items-center justify-between gap-2 rounded-md border border-dark-line bg-dark-surface px-2 py-1.5"
               >
-                <span className="font-mono text-xs tabular-nums text-on-dark-sub">
-                  第 {rank.rank} 名
+                <span className="min-w-0 truncate font-mono text-xs tabular-nums text-on-dark-sub">
+                  第 {rank.rank} 名 · {rank.team_name}
                 </span>
                 <span className="font-mono text-xs tabular-nums text-on-dark">{rank.score} 分</span>
               </li>

@@ -30,6 +30,7 @@ const COLUMNS_CLASS = {
   3: "grid-cols-1 md:grid-cols-3",
 } as const;
 
+/** DescriptionList 键值详情列表 */
 export function DescriptionList({ items, columns = 1, dense = false, className }: DescriptionListProps) {
   return (
     <dl className={cn("grid", COLUMNS_CLASS[columns], dense ? "gap-x-6 gap-y-3" : "gap-x-6 gap-y-5", className)}>

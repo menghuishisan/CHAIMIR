@@ -1,186 +1,137 @@
-// 学校管理页(平台侧栏首屏,/platform-admin/schools)。
-//
-// 平台端的第一个功能页(FE-5:登录直达,不做仪表盘落地页)。一所学校就是一个租户,
-// 这里只做「有哪些学校、各自什么状态」的总览与状态调整;学校自己的配置、配额与
-// 使用情况在详情深页 —— 列表页塞详情会让常用的状态巡检变慢。
-//
-// 状态三档由后端 UpdateTenantStatusByPlatform 限定(正常/停用/到期),
-// 停用与到期的后果不同,故各自说明再确认。到期时间只在这条接口上可改。
+// 学校管理(平台侧栏首页,/platform-admin/schools)。设计 §7.6:
+// 平台管理员登录后的第一页:看已开通的学校、调整状态和到期时间。几十到几百所。
+// 页头右侧次要入口「入驻申请」(有待审核时带数字);工具条为状态分段(带全量数字)与搜索,都写进地址;
+// 表格列为学校名与短码、部署形态、登录方式、状态、服务到期(30 天内到期警示并写剩余天数),整行链向学校详情;
+// 行内「调整状态」打开与详情页同一个弹窗,弹窗写明「会立即影响该校师生登录」。指标条去掉。
 
-import { useCallback, useState } from 'react'
-import { useNavigate } from 'react-router'
-import { Building, CircleSlash, ExternalLink, Search, ShieldCheck } from 'lucide-react'
-import { TenantStatus, type Tenant } from '@chaimir/api-client'
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router'
+import { Building, Inbox } from 'lucide-react'
+import { ApplicationStatus, TenantStatus, type Tenant } from '@chaimir/api-client'
 import {
-  Badge,
   Button,
-  Callout,
-  DataPanel,
-  DescriptionList,
-  FilterBar,
-  FilterField,
-  FormField,
-  Input,
-  MetricStrip,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
+  buttonVariants,
   PageHeader,
   PageScaffold,
   Pagination,
   SegmentedControl,
-  Select,
   StatusIndicator,
   Table,
-  toast,
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource, useResourceTotal } from '../../../../hooks'
-import { formatDate, formatDateTime } from '../../../../utils/formatters'
+import { SearchBox } from '../../../../components/SearchBox'
 import {
+  useAsyncResource,
+  usePagedResource,
+  useUrlState,
+} from '../../../../hooks'
+import { segmentCounts } from '../../../../utils/facets'
+import {
+  authModeLabel,
   deployModeLabel,
   tenantStatusLabel,
 } from '../../../../utils/labels/identity'
-import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { TENANT_STATUSES } from '../../options'
+import { TenantExpiryText } from '../../components/TenantExpiryText'
+import { TenantStatusModal } from '../../components/TenantStatusModal'
 import { tenantStatusTone } from '../../statusPresentation'
 
-/** 状态调整的后果说明:三档各不相同,确认框据此给出不同文案。 */
-const STATUS_COPY: Record<TenantStatus, { title: string; description: string; danger?: boolean }> = {
-  [TenantStatus.ACTIVE]: {
-    title: '恢复正常使用',
-    description: '恢复后这所学校的师生可以照常登录与使用。已停用期间产生的数据不受影响。',
-  },
-  [TenantStatus.DISABLED]: {
-    title: '停用这所学校',
-    description:
-      '停用后全校师生立即无法登录,进行中的实验与竞赛环境会被回收。数据保留,恢复后可继续使用。',
-    danger: true,
-  },
-  [TenantStatus.EXPIRED]: {
-    title: '标记为已到期',
-    description:
-      '到期与停用的效果相同,区别在于原因记录为服务期结束。续期时把状态改回正常并延长到期时间。',
-    danger: true,
-  },
-}
+/** 地址参数:status 状态分段(all 为全部),q 学校名或短码;页码在 page */
+const SCHOOLS_QUERY = {
+  status: { defaultValue: 'all', allowed: ['all', 'active', 'disabled', 'expired'] },
+  q: { defaultValue: '' },
+} as const
 
-/**
- * PlatformSchoolsPage 列出平台上的学校并承载状态调整。
- */
+const STATUS_SEGMENTS = [
+  { value: 'all', label: '全部' },
+  { value: 'active', label: '正常', status: TenantStatus.ACTIVE },
+  { value: 'disabled', label: '已停用', status: TenantStatus.DISABLED },
+  { value: 'expired', label: '已到期', status: TenantStatus.EXPIRED },
+] as const
+
+/** PlatformSchoolsPage 学校列表:按状态与名称找学校,整行进入详情,行内调整状态 */
 export default function PlatformSchoolsPage() {
   const navigate = useNavigate()
-  const [keyword, setKeyword] = useState('')
-  const [searchTerm, setSearchTerm] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [query, setQuery] = useUrlState(SCHOOLS_QUERY)
   const [target, setTarget] = useState<Tenant>()
+  const segment = STATUS_SEGMENTS.find((item) => item.value === query.status)
+  const statusFilter = segment && 'status' in segment ? segment.status : undefined
+  const keyword = query.q.trim()
 
-  // 状态与关键词都交给服务端:对当前页做二次筛选会让「共 N 所」与看到的行数、
-  // 以及翻页范围三者互相矛盾(筛掉的行仍占着页码)。
   const tenants = usePagedResource<Tenant>(
     (params) =>
-      api.identity.getTenants({
-        status: statusFilter ? (Number(statusFilter) as TenantStatus) : undefined,
-        keyword: searchTerm || undefined,
-        ...params,
-      }),
-    [statusFilter, searchTerm],
+      api.identity.getTenants({ status: statusFilter, keyword: keyword || undefined, ...params }),
+    [statusFilter, keyword],
+    { urlPageKey: 'page' }
   )
 
-  // 指标带取全量口径,不随下方筛选变化:它回答「平台整体有多少学校、多少在正常使用」。
-  const totalCount = useResourceTotal((params) => api.identity.getTenants(params), [], tenants.refreshVersion)
-  const activeCount = useResourceTotal(
-    (params) => api.identity.getTenants({ status: TenantStatus.ACTIVE, ...params }),
+  // 分段计数取列表接口的 facets:套用搜索,不套用状态筛选
+  const facets = tenants.status === 'success' || tenants.status === 'empty' ? tenants.data?.facets : undefined
+  const counts = segmentCounts(facets, 'status', STATUS_SEGMENTS, (item) => ('status' in item ? item.status : undefined))
+  // 页头「共 N 所学校」是不随状态筛选的全部学校数(套用搜索),即状态一组之和
+  const allCount = counts.all
+
+  // 页头「入驻申请」上的待审核数(申请接口不分页,直接取待审核的清单数)
+  const pendingApplications = useAsyncResource(
+    () => api.identity.getApplications({ status: ApplicationStatus.PENDING }),
     [],
-    tenants.refreshVersion,
+    () => false
   )
-  const disabledCount = useResourceTotal(
-    (params) => api.identity.getTenants({ status: TenantStatus.DISABLED, ...params }),
-    [],
-    tenants.refreshVersion,
-  )
-  const expiredCount = useResourceTotal(
-    (params) => api.identity.getTenants({ status: TenantStatus.EXPIRED, ...params }),
-    [],
-    tenants.refreshVersion,
-  )
+  const pendingCount = pendingApplications.data?.length ?? 0
+  const filtered = query.status !== 'all' || keyword !== ''
 
   const columns: TableColumn<Tenant>[] = [
     {
       key: 'name',
       header: '学校',
+      primary: true,
       render: (tenant) => (
-        <div className="min-w-0">
-          <button
-            type="button"
-            onClick={() => navigate(`/platform-admin/schools/${tenant.id}`)}
-            className="truncate text-left font-semibold text-ink underline-offset-4 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-            title="查看学校详情"
-          >
+        <span className="min-w-0">
+          <span className="block truncate font-medium text-ink">
             {tenant.display_name || tenant.name}
-          </button>
-          <div className="truncate font-mono text-xs text-ink-sub">{tenant.code}</div>
-        </div>
+          </span>
+          <span className="block font-mono text-xs text-ink-sub">{tenant.code}</span>
+        </span>
       ),
     },
     {
       key: 'deploy_mode',
       header: '部署形态',
-      render: (tenant) => <Badge tone="neutral">{deployModeLabel(tenant.deploy_mode)}</Badge>,
+      render: (tenant) => (
+        <span className="text-sm text-ink">{deployModeLabel(tenant.deploy_mode)}</span>
+      ),
+    },
+    {
+      key: 'auth_mode',
+      header: '登录方式',
+      render: (tenant) => (
+        <span className="text-sm text-ink">{authModeLabel(tenant.auth_mode)}</span>
+      ),
     },
     {
       key: 'status',
       header: '状态',
       render: (tenant) => (
-        <StatusIndicator tone={tenantStatusTone(tenant.status)} label={tenantStatusLabel(tenant.status)} />
+        <StatusIndicator
+          tone={tenantStatusTone(tenant.status)}
+          label={tenantStatusLabel(tenant.status)}
+        />
       ),
     },
     {
       key: 'expire_at',
       header: '服务到期',
-      render: (tenant) =>
-        tenant.expire_at ? (
-          <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-            {formatDate(tenant.expire_at)}
-          </span>
-        ) : (
-          <span className="text-sm text-ink-sub">未设置</span>
-        ),
-    },
-    {
-      key: 'created_at',
-      header: '开通时间',
-      render: (tenant) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDate(tenant.created_at)}
-        </span>
-      ),
+      render: (tenant) => <TenantExpiryText expireAt={tenant.expire_at} />,
     },
     {
       key: 'actions',
-      header: '操作',
+      header: <span className="sr-only">操作</span>,
       align: 'right',
       render: (tenant) => (
-        <div className="flex items-center justify-end gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            leftIcon={ExternalLink}
-            aria-label={`查看学校 ${tenant.name} 详情`}
-            onClick={() => navigate(`/platform-admin/schools/${tenant.id}`)}
-          >
-            详情
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => setTarget(tenant)}>
-            调整状态
-          </Button>
-        </div>
+        <Button variant="ghost" size="sm" onClick={() => setTarget(tenant)}>
+          调整状态
+        </Button>
       ),
     },
   ]
@@ -189,111 +140,107 @@ export default function PlatformSchoolsPage() {
     <PageScaffold>
       <PageHeader
         title="学校管理"
-        description="平台上已开通的学校。停用与到期会立即影响该校师生登录,调整前请确认。"
-      />
-
-      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是学校列表 */}
-      <MetricStrip
-        label="学校总量摘要"
-        className="mb-5"
-        items={[
-          { label: '学校总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
-          { label: '正常使用', value: activeCount ?? '—', hint: '师生可正常登录' },
-          { label: '已停用', value: disabledCount ?? '—', hint: '该校师生无法登录' },
-          { label: '已到期', value: expiredCount ?? '—', hint: '需要关注续期' },
-        ]}
-      />
-
-      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
-      <DataPanel
-        label="学校列表"
-        filter={
-          <FilterBar label="学校筛选" onSubmit={() => setSearchTerm(keyword.trim())} submitLabel="搜索">
-            <FilterField label="学校状态" group>
-              <SegmentedControl
-                aria-label="按学校状态筛选"
-                size="sm"
-                options={[
-                  { value: '', label: '全部' },
-                  ...TENANT_STATUSES.map((status) => ({
-                    value: String(status),
-                    label: tenantStatusLabel(status),
-                  })),
-                ]}
-                value={statusFilter}
-                onValueChange={setStatusFilter}
-              />
-            </FilterField>
-            <FilterField label="学校名称或短名" htmlFor="schools-keyword">
-              <Input
-                id="schools-keyword"
-                type="search"
-                autoComplete="off"
-                leftIcon={Search}
-                value={keyword}
-                placeholder="输入关键词"
-                onChange={(event) => setKeyword(event.target.value)}
-              />
-            </FilterField>
-          </FilterBar>
-        }
-        footer={
-          <Pagination
-            page={tenants.page}
-            pageSize={tenants.pageSize}
-            total={tenants.total}
-            onPageChange={tenants.setPage}
-          />
-        }
-      >
-          <ResourceState
-            resource={tenants}
-            emptyIcon={Building}
-            emptyTitle={statusFilter || searchTerm ? '没有匹配的学校' : '还没有开通学校'}
-            emptyDescription={
-              statusFilter || searchTerm
-                ? '换个状态或关键词再试,也可以清空条件看全部学校。'
-                : '通过入驻申请审核后,学校会出现在这里。'
-            }
-            emptyAction={
-              statusFilter || searchTerm ? undefined : (
-                <Button variant="primary" onClick={() => navigate('/platform-admin/applications')}>
-                  去入驻申请
-                </Button>
-              )
-            }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+        meta={allCount !== undefined ? [{ value: `共 ${allCount} 所学校` }] : undefined}
+        actions={
+          <Link
+            to="/platform-admin/applications"
+            className={buttonVariants({ variant: 'outline' })}
           >
-            {(page) => (
-              <Table
-                columns={columns}
-                data={page.list}
-                rowKey={(item) => item.id}
-                elevated={false}
-                // <md 换行卡(§6.4.1 规则 3):校名一行、短码与到期一行,状态在右
-                mobileCard={(item) => ({
-                  title: item.name,
-                  meta: `${item.code} · ${item.expire_at ? `到期 ${formatDate(item.expire_at)}` : '长期有效'}`,
-                  badge: <StatusIndicator tone={tenantStatusTone(item.status)} label={tenantStatusLabel(item.status)} />,
-                  action: (
-                    <div className="flex shrink-0 items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => navigate(`/platform-admin/schools/${item.id}`)}
-                      >
-                        详情
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => setTarget(item)}>
-                        调整
-                      </Button>
-                    </div>
-                  ),
-                })}
+            入驻申请
+            {pendingCount > 0 ? (
+              <span className="ml-1 rounded-full bg-warning-bg px-2 text-xs font-semibold tabular-nums text-warning">
+                {pendingCount} 待审核
+              </span>
+            ) : null}
+          </Link>
+        }
+      />
+
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <SegmentedControl
+          aria-label="按学校状态筛选"
+          options={STATUS_SEGMENTS.map((item) => ({
+            value: item.value,
+            label: item.label,
+            count: counts[item.value],
+          }))}
+          value={query.status}
+          onValueChange={(value) => setQuery({ status: value })}
+          className="max-w-full self-start overflow-x-auto"
+        />
+        <SearchBox
+          label="搜索学校"
+          placeholder="搜索学校名或短码"
+          value={query.q}
+          onSearch={(value) => setQuery({ q: value })}
+        />
+      </div>
+
+      <ResourceState
+        resource={tenants}
+        emptyIcon={filtered ? Building : Inbox}
+        emptyTitle={filtered ? '没有符合条件的学校' : '还没有开通学校'}
+        emptyDescription={
+          filtered ? '换个状态或关键词再试。' : '入驻申请审核通过后,学校会出现在这里。'
+        }
+        emptyAction={
+          filtered ? (
+            <Button variant="outline" onClick={() => setQuery({ status: 'all', q: '' })}>
+              清空筛选
+            </Button>
+          ) : (
+            <Link
+              to="/platform-admin/applications"
+              className={buttonVariants({ variant: 'primary' })}
+            >
+              去看入驻申请
+            </Link>
+          )
+        }
+        skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
+      >
+        {(page) => (
+          <>
+            <Table
+              columns={columns}
+              data={page.list}
+              rowKey={(tenant) => tenant.id}
+              getRowHref={(tenant) => `/platform-admin/schools/${tenant.id}`}
+              onNavigate={navigate}
+              // <md 换行卡:校名一行;短码、部署形态与到期一行;状态在右,行尾「调整」
+              mobileCard={(tenant) => ({
+                title: tenant.display_name || tenant.name,
+                meta: (
+                  <>
+                    <span className="font-mono">{tenant.code}</span> ·{' '}
+                    {deployModeLabel(tenant.deploy_mode)} ·{' '}
+                    <TenantExpiryText expireAt={tenant.expire_at} />
+                  </>
+                ),
+                badge: (
+                  <StatusIndicator
+                    tone={tenantStatusTone(tenant.status)}
+                    label={tenantStatusLabel(tenant.status)}
+                  />
+                ),
+                action: (
+                  <Button variant="ghost" size="sm" onClick={() => setTarget(tenant)}>
+                    调整
+                  </Button>
+                ),
+              })}
+            />
+            <div className="mt-4">
+              <Pagination
+                page={tenants.page}
+                pageSize={tenants.pageSize}
+                total={tenants.total}
+                onPageChange={tenants.setPage}
               />
-            )}
-          </ResourceState>
-      </DataPanel>
+            </div>
+          </>
+        )}
+      </ResourceState>
 
       {target ? (
         <TenantStatusModal
@@ -306,112 +253,5 @@ export default function PlatformSchoolsPage() {
         />
       ) : null}
     </PageScaffold>
-  )
-}
-
-interface TenantStatusModalProps {
-  tenant: Tenant
-  onClose: () => void
-  onSaved: () => void
-}
-
-/**
- * TenantStatusModal 调整学校状态与服务到期时间。
- * 到期时间随状态一起提交(后端 UpdateTenantStatusRequest 的两个字段),
- * 因此续期就是「状态改回正常 + 延长到期」一次完成。
- */
-function TenantStatusModal({ tenant, onClose, onSaved }: TenantStatusModalProps) {
-  const [status, setStatus] = useState(String(tenant.status))
-  const [expireAt, setExpireAt] = useState(tenant.expire_at ? tenant.expire_at.slice(0, 10) : '')
-  const [formError, setFormError] = useState<string>()
-  const [working, setWorking] = useState(false)
-
-  const statusValue = Number(status) as TenantStatus
-  const copy = STATUS_COPY[statusValue]
-
-  const submit = useCallback(async () => {
-    setFormError(undefined)
-    setWorking(true)
-    try {
-      await api.identity.updateTenant(tenant.id, {
-        status: statusValue,
-        // 日期控件给的是本地日期,统一转成当天结束时刻的时间戳再提交
-        expire_at: expireAt ? new Date(`${expireAt}T23:59:59`).toISOString() : undefined,
-      })
-      toast.success('学校状态已更新')
-      onSaved()
-    } catch (error) {
-      setFormError(userFacingErrorMessage(error, '更新没有成功,请稍后重试。'))
-    } finally {
-      setWorking(false)
-    }
-  }, [expireAt, onSaved, statusValue, tenant.id])
-
-  return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="lg">
-        <ModalHeader>
-          <ModalTitle>{copy.title}</ModalTitle>
-          <ModalDescription>{copy.description}</ModalDescription>
-        </ModalHeader>
-        <ModalBody className="flex flex-col gap-4">
-          <DescriptionList
-            dense
-            items={[
-              { term: '学校', description: tenant.display_name || tenant.name },
-              { term: '学校短名', description: tenant.code, mono: true },
-              { term: '当前状态', description: tenantStatusLabel(tenant.status) },
-              { term: '最近更新', description: formatDateTime(tenant.updated_at), mono: true },
-            ]}
-          />
-
-          <FormField label="调整为" htmlFor="tenant-status" required>
-            <Select
-              id="tenant-status"
-              options={TENANT_STATUSES.map((item) => ({
-                value: String(item),
-                label: tenantStatusLabel(item),
-              }))}
-              value={status}
-              onValueChange={setStatus}
-            />
-          </FormField>
-
-          <FormField
-            label="服务到期日"
-            htmlFor="tenant-expire"
-            helper="留空表示不设到期。到期后师生无法登录,数据保留"
-          >
-            <Input
-              id="tenant-expire"
-              type="date"
-              value={expireAt}
-              onChange={(event) => setExpireAt(event.target.value)}
-            />
-          </FormField>
-
-          {statusValue !== TenantStatus.ACTIVE ? (
-            <Callout tone="warning" title="会立即生效">
-              保存后该校师生将无法登录,正在进行的实验与仿真会被停止。
-            </Callout>
-          ) : null}
-
-          {formError ? <Callout tone="danger">{formError}</Callout> : null}
-        </ModalBody>
-        <ModalFooter>
-          <Button variant="outline" onClick={onClose}>
-            取消
-          </Button>
-          <Button
-            variant={copy.danger ? 'danger' : 'seal'}
-            leftIcon={copy.danger ? CircleSlash : ShieldCheck}
-            loading={working}
-            onClick={() => void submit()}
-          >
-            确认调整
-          </Button>
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
   )
 }

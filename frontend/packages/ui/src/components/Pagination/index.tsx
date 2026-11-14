@@ -46,6 +46,7 @@ function buildPageItems(page: number, totalPages: number): PageItem[] {
 const BUTTON_BASE =
   "hit-target inline-flex h-8 min-w-8 items-center justify-center rounded-md px-1 text-sm tabular-nums pressable focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:opacity-50 disabled:pointer-events-none";
 
+/** Pagination 分页控件:总数未知时不给翻页操作,页码过多时折叠 */
 export function Pagination({ page, pageSize, total, onPageChange, className }: PaginationProps) {
   // 未知数量独立于成功空结果,也不根据上一次查询的页数提供翻页操作。
   if (total === undefined) {

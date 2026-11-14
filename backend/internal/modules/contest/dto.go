@@ -285,7 +285,9 @@ type BattleReplayCheckpointDTO struct {
 
 // LadderDTO 是排行榜输出。
 type LadderDTO struct {
-	TeamID      ids.ID     `json:"team_id"`
+	TeamID ids.ID `json:"team_id"`
+	// TeamName 队名(个人赛为选手的参赛名称);读取时按 team_id 取,榜单快照里不存
+	TeamName    string     `json:"team_name"`
 	Score       float64    `json:"score"`
 	SolvedCount int32      `json:"solved_count"`
 	LastSolveAt *time.Time `json:"last_solve_at,omitempty"`
@@ -310,7 +312,9 @@ type ResultSnapshotDTO struct {
 
 // LadderSnapshotEntryDTO 是最终榜单快照的公开固定结构。
 type LadderSnapshotEntryDTO struct {
-	TeamID      ids.ID     `json:"team_id"`
+	TeamID ids.ID `json:"team_id"`
+	// TeamName 队名;读取时按 team_id 取,快照本身不存名字
+	TeamName    string     `json:"team_name"`
 	Score       float64    `json:"score"`
 	SolvedCount int32      `json:"solved_count"`
 	LastSolveAt *time.Time `json:"last_solve_at,omitempty"`
@@ -328,9 +332,11 @@ type CheatRecordRequest struct {
 
 // CheatRecordDTO 是违规记录输出。
 type CheatRecordDTO struct {
-	ID         ids.ID         `json:"id"`
-	ContestID  ids.ID         `json:"contest_id"`
-	TeamID     ids.ID         `json:"team_id"`
+	ID        ids.ID `json:"id"`
+	ContestID ids.ID `json:"contest_id"`
+	TeamID    ids.ID `json:"team_id"`
+	// TeamName 被处理的队伍名称,只在列表里给出
+	TeamName   string         `json:"team_name,omitempty"`
 	Type       int16          `json:"type"`
 	Evidence   map[string]any `json:"evidence"`
 	Action     int16          `json:"action"`

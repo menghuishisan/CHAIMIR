@@ -13,27 +13,32 @@ import (
 )
 
 // ListExperiments 查询当前租户实验定义列表。
-func (s *Service) ListExperiments(ctx context.Context, courseID int64, status int16, keyword string, page, size int) ([]ExperimentDTO, int64, int, int, error) {
+func (s *Service) ListExperiments(ctx context.Context, courseID int64, status int16, keyword string, page, size int) ([]ExperimentDTO, int64, int, int, pagex.Facets, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, 0, 0, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
 	keyword = strings.TrimSpace(keyword)
 	items := []Experiment{}
 	var total int64
+	var byStatus []statusCount
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		items, total, err = tx.ListExperiments(ctx, id.TenantID, courseID, status, keyword, page, size)
+		if err != nil {
+			return err
+		}
+		byStatus, err = tx.CountExperimentsByStatus(ctx, id.TenantID, courseID, keyword)
 		return err
 	}); err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, 0, 0, nil, err
 	}
 	out := make([]ExperimentDTO, 0, len(items))
 	for _, item := range items {
 		out = append(out, experimentDTOFromModel(item))
 	}
-	return out, total, page, size, nil
+	return out, total, page, size, statusFacets(byStatus), nil
 }
 
 // GetExperimentForTeacher 读取教师可管理的单个实验定义,避免详情页搬运全量列表。
@@ -69,6 +74,7 @@ func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, 
 	items := []Experiment{}
 	var total int64
 	groupByExperiment := map[int64]int64{}
+	progress := map[int64]StudentExperimentProgressDTO{}
 	var facets map[string]map[string]int64
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		items, total, err = tx.ListExperiments(ctx, id.TenantID, courseID, ExperimentStatusPublished, keyword, page, size)
@@ -80,6 +86,11 @@ func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, 
 			experimentIDs = append(experimentIDs, item.ID)
 		}
 		groupByExperiment, err = tx.ListStudentGroupsForExperiments(ctx, id.TenantID, id.AccountID, experimentIDs)
+		if err != nil {
+			return err
+		}
+		// 本人进度与列表同页一次聚合,不让卡片逐个取实例
+		progress, err = tx.ListStudentLatestInstancesForExperiments(ctx, id.TenantID, id.AccountID, experimentIDs)
 		if err != nil {
 			return err
 		}
@@ -100,7 +111,7 @@ func (s *Service) ListPublishedExperiments(ctx context.Context, courseID int64, 
 		}
 		out = append(out, dto)
 	}
-	return out, total, page, size, facets, nil
+	return applyStudentProgress(out, progress), total, page, size, facets, nil
 }
 
 // GetPublishedExperimentForStudent 读取单个已发布实验的学生投影。

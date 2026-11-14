@@ -162,7 +162,8 @@ func (s *Service) PublishAssignment(ctx context.Context, assignmentID int64) (As
 	return assignmentDTO(assignment)
 }
 
-// ListCourseAssignments 查询课程作业清单。
+// ListCourseAssignments 查询课程作业清单,并按视角补上提交情况:
+// 授课教师看全班提交统计(已交、待批改),课程成员看本人已用次数与最近一次提交的状态。
 // 这是学生取得 assignment_id 的唯一入口:作业详情、草稿和提交都以该编号为参数,
 // 而课程大纲只含章节课时。授课教师看到含草稿的全量,课程成员只看到已发布作业。
 func (s *Service) ListCourseAssignments(ctx context.Context, courseID int64, page, size int) ([]AssignmentDTO, int64, int, int, error) {
@@ -173,6 +174,7 @@ func (s *Service) ListCourseAssignments(ctx context.Context, courseID int64, pag
 	}
 	var assignments []Assignment
 	var assignmentTotal int64
+	var facts assignmentFacts
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		isTeacher, err := s.courseReadAccess(ctx, tx, id.TenantID, courseID, id.AccountID)
 		if err != nil {
@@ -180,9 +182,11 @@ func (s *Service) ListCourseAssignments(ctx context.Context, courseID int64, pag
 		}
 		var total int64
 		assignments, total, err = tx.ListAssignmentsByCourse(ctx, id.TenantID, courseID, !isTeacher, page, size)
-		if err == nil {
-			assignmentTotal = total
+		if err != nil {
+			return err
 		}
+		assignmentTotal = total
+		facts, err = loadAssignmentFacts(ctx, tx, id.TenantID, id.AccountID, assignments, isTeacher)
 		return err
 	}); err != nil {
 		return nil, 0, page, size, mapAssignmentError(err)
@@ -195,7 +199,7 @@ func (s *Service) ListCourseAssignments(ctx context.Context, courseID int64, pag
 		}
 		out = append(out, dto)
 	}
-	return out, assignmentTotal, page, size, nil
+	return applyAssignmentFacts(out, facts), assignmentTotal, page, size, nil
 }
 
 // GetAssignmentForStudent 读取作业详情并从 M5 展开题面。
@@ -467,14 +471,15 @@ func (s *Service) GradeSubmission(ctx context.Context, submissionID int64, req G
 // 授课教师看到该作业全部学生提交(批改视角);课程内学生只看到本人的历次提交
 // (自读视角 —— 学生提交后刷新页面需据此取回 submission_id 再看反馈)。
 // 学生编号取自服务端会话,不接受客户端传参;status 传 0 表示不按批改状态过滤。
-func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, status, isLate int16, page, size int) ([]SubmissionDTO, int64, int, int, error) {
+func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, status, isLate int16, page, size int) ([]SubmissionDTO, int64, int, int, pagex.Facets, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, 0, 0, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
 	var subs []Submission
 	var total int64
+	var facetRows []submissionFacetRow
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		assignment, err := tx.GetAssignment(ctx, id.TenantID, assignmentID)
 		if err != nil {
@@ -497,19 +502,24 @@ func (s *Service) ListSubmissions(ctx context.Context, assignmentID int64, statu
 			Page:         page,
 			Size:         size,
 		})
+		if err != nil {
+			return err
+		}
+		// 分段计数与列表同一视角(教师看全班,学生看本人),不套用状态与迟交筛选
+		facetRows, err = tx.CountSubmissionsByStatusAndLate(ctx, id.TenantID, assignmentID, studentFilter)
 		return err
 	}); err != nil {
-		return nil, 0, 0, 0, mapAssignmentError(err)
+		return nil, 0, 0, 0, nil, mapAssignmentError(err)
 	}
 	out := make([]SubmissionDTO, 0, len(subs))
 	for _, sub := range subs {
 		dto, err := submissionDTO(sub)
 		if err != nil {
-			return nil, 0, 0, 0, mapAssignmentError(err)
+			return nil, 0, 0, 0, nil, mapAssignmentError(err)
 		}
 		out = append(out, dto)
 	}
-	return out, total, page, size, nil
+	return out, total, page, size, submissionFacets(facetRows), nil
 }
 
 // GetSubmissionForUser 读取提交反馈。
@@ -636,6 +646,11 @@ func (s *Service) HandleJudgeCompleted(ctx context.Context, event contracts.Judg
 			return err
 		}
 		if _, err := tx.MarkJudgeOutboxResult(ctx, event.TenantID, event.SourceRef, event.Score, event.FinishedAt); err != nil {
+			// 完成时间早于已记录结果的过期事件不写入,也不重新结算
+			if isNoRows(err) {
+				sub = current
+				return nil
+			}
 			return err
 		}
 		outboxes, err := tx.ListJudgeOutboxBySubmission(ctx, event.TenantID, current.ID)
@@ -675,63 +690,38 @@ func (s *Service) HandleJudgeCompleted(ctx context.Context, event contracts.Judg
 	return s.publishGradeUpdated(ctx, event.TenantID, sub.AssignmentID, sub.StudentID)
 }
 
-// HandleJudgeFailed 处理 M3 判题失败事件。
+// HandleJudgeFailed 处理 M3 判题失败事件:记录失败原因,撤销本次提交的自动分与最终分,保留人工分,等待判题恢复。
+// 执行失败与答错不同,不得按零分结算(教学接口设计 §判题事件);重判得到结果后由 HandleJudgeCompleted 重新结算。
 func (s *Service) HandleJudgeFailed(ctx context.Context, event contracts.JudgeFailedEvent) error {
-	var sub Submission
-	var ready bool
 	if err := s.store.TenantTx(ctx, event.TenantID, func(ctx context.Context, tx TxStore) error {
 		current, err := tx.GetSubmissionBySourceRef(ctx, event.TenantID, event.SourceRef)
 		if err != nil {
 			return err
 		}
 		if _, err := tx.MarkJudgeOutboxFailedResult(ctx, event.TenantID, event.SourceRef, event.Reason, event.FailedAt); err != nil {
-			return err
-		}
-		outboxes, err := tx.ListJudgeOutboxBySubmission(ctx, event.TenantID, current.ID)
-		if err != nil {
-			return err
-		}
-		autoScore, allDone := aggregateCompletedAutoScore(outboxes)
-		if !allDone {
-			sub = current
-			return nil
-		}
-		assignment, err := tx.GetAssignment(ctx, event.TenantID, current.AssignmentID)
-		if err != nil {
-			return err
-		}
-		manualComplete := manualMaximumScore(current.ContentRef) == 0 || current.ManualScore != nil
-		combined := autoScore
-		if current.ManualScore != nil {
-			combined += *current.ManualScore
-		}
-		final := int32(0)
-		if manualComplete {
-			final, err = applyLatePenalty(assignment, combined, current.IsLate)
-			if err != nil {
-				return err
+			// 完成时间早于已记录结果的过期失败事件不覆盖较新的结果
+			if isNoRows(err) {
+				return nil
 			}
+			return err
 		}
-		sub, err = tx.UpdateSubmissionAutoScore(ctx, event.TenantID, current.ID, autoScore, final)
-		ready = manualComplete && err == nil
+		_, err = tx.RevokeSubmissionAutoScore(ctx, event.TenantID, current.ID)
 		return err
 	}); err != nil {
 		return apperr.ErrTeachingSubmissionInvalid.WithCause(err)
 	}
-	if !ready {
-		return nil
-	}
-	return s.publishGradeUpdated(ctx, event.TenantID, sub.AssignmentID, sub.StudentID)
+	return nil
 }
 
-// aggregateCompletedAutoScore 汇总一次提交内所有自动题得分,存在未完成题则不结算提交。
+// aggregateCompletedAutoScore 汇总一次提交内所有自动题得分。
+// 存在未完成的题,或有题判题执行失败(记录了失败原因)时不结算:执行失败不是答错,不能按零分计入。
 func aggregateCompletedAutoScore(outboxes []JudgeOutbox) (int32, bool) {
 	if len(outboxes) == 0 {
 		return 0, false
 	}
 	var total int32
 	for _, outbox := range outboxes {
-		if outbox.CompletedAt.IsZero() {
+		if outbox.CompletedAt.IsZero() || strings.TrimSpace(outbox.LastError) != "" {
 			return 0, false
 		}
 		total += outbox.Score

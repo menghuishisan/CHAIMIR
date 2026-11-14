@@ -43,6 +43,7 @@ const DELTA_TONE_CLASS = {
   neutral: "text-ink-sub",
 } as const;
 
+/** Stat 统计指标卡(看板族的指标带) */
 export function Stat({ label, value, icon, delta, hint, chain, className }: StatProps) {
   // 缺省语义:上升视为积极、下降视为消极;特殊指标(如错误率)由调用方显式传 tone
   const deltaTone = delta ? (delta.tone ?? (delta.direction === "up" ? "positive" : "negative")) : undefined;

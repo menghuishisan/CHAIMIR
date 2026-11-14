@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/admin/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/pagex"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -16,6 +18,11 @@ import (
 type roleReader interface {
 	// HasRole 判断账号是否具备指定角色。
 	HasRole(ctx context.Context, accountID int64, role string) (bool, error)
+}
+
+// accountReader 批量解析本校账号姓名(学校配置变更历史的操作人)。
+type accountReader interface {
+	BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]contracts.AccountInfo, error)
 }
 
 // Store 定义 M9 service 使用的持久化入口。
@@ -42,11 +49,13 @@ type TxStore interface {
 	UpdateAlertRule(context.Context, int64, AlertRuleRequest) (AlertRuleDTO, error)
 	CreateAlertEvent(context.Context, int64, int64, int64, int16, string) (AlertEventDTO, error)
 	ListAlertEvents(context.Context, int16, int16, int64, int, int) ([]AlertEventDTO, int64, error)
+	CountAlertEventsByStatus(context.Context, int16, int64) (pagex.FacetGroup, error)
 	HandleAlertEvent(context.Context, int64, int64, int16, int64) (AlertEventDTO, error)
 	ListPlatformStatistics(context.Context, int16, int64, string, string) ([]StatisticsDTO, error)
 	UpsertPlatformStatistics(context.Context, int64, int16, int64, string, map[string]any) (StatisticsDTO, error)
 	CreateBackupRecord(context.Context, int64, BackupRecordCreate) (BackupRecordDTO, error)
 	ListBackupRecords(context.Context, int16, int, int) ([]BackupRecordDTO, int64, error)
+	CountBackupRecordsByStatus(context.Context) (pagex.FacetGroup, error)
 	CreateAuditExportRequest(context.Context, AuditExportRequest) (AuditExportRequest, error)
 	ListDueAuditExportRequests(context.Context, time.Time, int32) ([]AuditExportRequest, error)
 	SetAuditExportRequestNextCheck(context.Context, int64, int64, time.Time) (AuditExportRequest, error)

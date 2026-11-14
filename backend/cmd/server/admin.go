@@ -79,6 +79,7 @@ func RegisterAdminModule(ctx context.Context, deps AdminModuleDeps) (*admin.Serv
 		Audit:       deps.Audit,
 		Roles:       deps.Roles,
 		Identity:    deps.Identity,
+		Accounts:    deps.Roles,
 		Stats:       deps.Stats,
 		AuditRead:   deps.AuditRead,
 		Teaching:    deps.Teaching,

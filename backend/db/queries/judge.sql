@@ -159,6 +159,20 @@ WHERE judge_task.tenant_id = $1
        OR (sqlc.arg(state)::text = 'active' AND judge_task.status IN (1, 2))
        OR (sqlc.arg(state)::text = 'abnormal' AND judge_task.status = 4));
 
+-- name: CountJudgeTasksByState :many
+-- 判题任务的运维分组计数(active=排队/执行中,abnormal=失败;其余状态不在任何分组里):
+-- 套用来源、人工评分与本人范围,不套用 state 筛选;口径与 ListJudgeTasks 一致。
+SELECT CASE WHEN judge_task.status IN (1, 2) THEN 'active' WHEN judge_task.status = 4 THEN 'abnormal' ELSE 'other' END::text AS state,
+       COUNT(*)::bigint AS count
+FROM judge_task
+JOIN judger ON judger.id = judge_task.judger_id
+WHERE judge_task.tenant_id = sqlc.arg(tenant_id)::bigint
+  AND split_part(judge_task.source_ref, ':', 1) = ANY(sqlc.arg(enabled_modules)::text[])
+  AND (sqlc.arg(source_ref)::text = '' OR judge_task.source_ref = sqlc.arg(source_ref)::text)
+  AND (sqlc.arg(pending_manual)::boolean = false OR (judge_task.status = 2 AND judger.type = 6))
+  AND (sqlc.arg(source_owner_id)::bigint = 0 OR judge_task.source_owner_id = sqlc.arg(source_owner_id)::bigint OR judge_task.submitter_id = sqlc.arg(source_owner_id)::bigint)
+GROUP BY 1;
+
 -- name: CancelQueuedJudgeTask :one
 UPDATE judge_task
 SET status = 5, updated_at = now()

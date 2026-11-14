@@ -5,8 +5,8 @@
 //
 // 数据全部是真实状态(M3 判题任务、M7 实例列表、M8 对局记录),不做装饰性雷达或假飞线。
 // 刷新是显式动作:高频路径不自动轮询(规范 §4.1),由教师按需刷新,处理完一项后自动刷新。
-// 对局列表不能按状态向服务端筛选,在最近几十场里挑失败对局会误报「一切正常」,
-// 所以失败对局不并入「需要处理」,只在「竞赛对局」标签里按竞赛查看。
+// 对局按竞赛查看:「竞赛对局」标签里先选竞赛,再按「全部 / 进行中 / 失败」分段(服务端筛选,数字取 facets);
+// 失败对局不并入「需要处理」:那要为每场进行中的对抗赛各发一次请求,改在标签里的「失败」分段查看。
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router'
@@ -65,7 +65,8 @@ import { ResourceState } from '../../../../components/ResourceState'
 import { isJudgeTaskAbnormal, isJudgeTaskActive } from '../../../judge/rules'
 import { judgeTaskStatusTone } from '../../../judge/statusPresentation'
 import { useRejudgeTask } from '../../../judge/useRejudgeTask'
-import { useAsyncResource, useResourceTotal, useUrlState, type AsyncResourceState } from '../../../../hooks'
+import { useAsyncResource, useUrlState, type AsyncResourceState } from '../../../../hooks'
+import { facetCount, segmentCounts } from '../../../../utils/facets'
 import { collectAllPages } from '../../../../utils/allPages'
 import { formatDateTime, formatRelativeOccurrence, formatShortDateTime } from '../../../../utils/formatters'
 import { battleMatchStatusLabel, battleResultLabel, contestStatusLabel } from '../../../../utils/labels/contest'
@@ -79,11 +80,12 @@ import { useCourseMemberNames, type MemberName } from '../../useCourseMemberName
 /** 每张表一次取回的条数:监控看的是「当下有没有问题」,不是全量历史。 */
 const MONITOR_SIZE = 30
 
-/** 地址参数:tab 下方标签;judge、env 两张表的状态分段;contest 对局标签里选中的竞赛(空为第一场) */
+/** 地址参数:tab 下方标签;judge、env、battle 三张表的状态分段;contest 对局标签里选中的竞赛(空为第一场) */
 const MONITOR_QUERY = {
   tab: { defaultValue: 'judge', allowed: ['judge', 'experiment', 'battle'] },
   judge: { defaultValue: 'active', allowed: ['active', 'failed', 'all'] },
   env: { defaultValue: 'running', allowed: ['running', 'paused', 'failed'] },
+  battle: { defaultValue: 'all', allowed: ['all', 'running', 'failed'] },
   contest: { defaultValue: '' },
 } as const
 
@@ -91,6 +93,13 @@ const JUDGE_SEGMENTS = [
   { value: 'active', label: '进行中' },
   { value: 'failed', label: '判题失败' },
   { value: 'all', label: '全部' },
+] as const
+
+/** 对局分段:全部、进行中、失败;取值对应服务端 status 参数 */
+const BATTLE_SEGMENTS = [
+  { value: 'all', label: '全部' },
+  { value: 'running', label: '进行中', status: BattleMatchStatus.RUNNING },
+  { value: 'failed', label: '失败', status: BattleMatchStatus.FAILED },
 ] as const
 
 const ENV_SEGMENTS = [
@@ -184,27 +193,13 @@ function MonitoringBoard({ experimentsEnabled, contestsEnabled }: MonitoringBoar
     [experimentsEnabled, refreshVersion],
     () => false,
   )
-  const activeTaskCount = useResourceTotal(
-    (params) => api.judge.getTasks({ state: JUDGE_TASK_STATE.ACTIVE, ...params }),
-    [],
-    refreshVersion,
-  )
-  const runningCount = useResourceTotal(
-    (params) =>
-      experimentsEnabled
-        ? api.experiment.listInstances({ status: ExperimentInstanceStatus.RUNNING, ...params })
-        : Promise.resolve(emptyPage<ExperimentInstance>()),
-    [experimentsEnabled],
-    refreshVersion,
-  )
-  const pausedCount = useResourceTotal(
-    (params) =>
-      experimentsEnabled
-        ? api.experiment.listInstances({ status: ExperimentInstanceStatus.PAUSED, ...params })
-        : Promise.resolve(emptyPage<ExperimentInstance>()),
-    [experimentsEnabled],
-    refreshVersion,
-  )
+  // 标签与分段上的数字取上面两个「需要处理」列表一并返回的 facets(判题按运维分组 state,环境按 status),
+  // 它们是全量口径且不套用本组筛选,所以不必为每个数字另发一次只取总数的请求
+  const taskFacets = failedTasks.status === 'success' ? failedTasks.data?.facets : undefined
+  const instanceFacets = failedInstances.status === 'success' ? failedInstances.data?.facets : undefined
+  const activeTaskCount = facetCount(taskFacets, 'state', JUDGE_TASK_STATE.ACTIVE)
+  const runningCount = experimentsEnabled ? facetCount(instanceFacets, 'status', ExperimentInstanceStatus.RUNNING) : undefined
+  const pausedCount = experimentsEnabled ? facetCount(instanceFacets, 'status', ExperimentInstanceStatus.PAUSED) : undefined
   // 进行中(含封榜)的对抗赛:标签上的数字与对局标签里的竞赛选择。数量本来就小,按页取完;
   // 解题赛没有对局,不列进来
   const battleContests = useAsyncResource<Contest[]>(
@@ -225,8 +220,8 @@ function MonitoringBoard({ experimentsEnabled, contestsEnabled }: MonitoringBoar
     (query.tab === 'experiment' && !experimentsEnabled) || (query.tab === 'battle' && !contestsEnabled)
       ? 'judge'
       : query.tab
-  const failedTaskCount = failedTasks.status === 'success' ? failedTasks.data?.total : undefined
-  const failedInstanceCount = failedInstances.status === 'success' ? failedInstances.data?.total : undefined
+  const failedTaskCount = facetCount(taskFacets, 'state', JUDGE_TASK_STATE.ABNORMAL)
+  const failedInstanceCount = experimentsEnabled ? facetCount(instanceFacets, 'status', ExperimentInstanceStatus.ERROR) : undefined
 
   return (
     <PageScaffold>
@@ -297,6 +292,8 @@ function MonitoringBoard({ experimentsEnabled, contestsEnabled }: MonitoringBoar
               contests={battleContests}
               contestId={query.contest}
               onContestChange={(value) => setQuery({ contest: value })}
+              segment={query.battle}
+              onSegmentChange={(value) => setQuery({ battle: value })}
               refreshVersion={refreshVersion}
             />
           </TabsContent>
@@ -846,11 +843,14 @@ interface BattleTabProps {
   /** 地址里选中的竞赛;空或已不在进行中时取第一场 */
   contestId: string
   onContestChange: (value: string) => void
+  /** 对局状态分段(写进地址) */
+  segment: string
+  onSegmentChange: (value: string) => void
   refreshVersion: number
 }
 
 /** BattleTab 进行中对抗赛的对局;没有进行中的对抗赛时说明何时会有 */
-function BattleTab({ contests, contestId, onContestChange, refreshVersion }: BattleTabProps) {
+function BattleTab({ contests, contestId, onContestChange, segment, onSegmentChange, refreshVersion }: BattleTabProps) {
   return (
     <ResourceState
       resource={contests}
@@ -872,6 +872,8 @@ function BattleTab({ contests, contestId, onContestChange, refreshVersion }: Bat
           <BattleMatches
             contests={list}
             contestId={contestId}
+            segment={segment}
+            onSegmentChange={onSegmentChange}
             onContestChange={onContestChange}
             refreshVersion={refreshVersion}
           />
@@ -889,13 +891,22 @@ function BattleMatches({
   contests,
   contestId,
   onContestChange,
+  segment,
+  onSegmentChange,
   refreshVersion,
 }: Omit<BattleTabProps, 'contests'> & { contests: Contest[] }) {
   const active = contests.find((contest) => contest.id === contestId) ?? contests[0]
+  const battleSegment = BATTLE_SEGMENTS.find((item) => item.value === segment)
+  const battleStatus = battleSegment && 'status' in battleSegment ? battleSegment.status : undefined
   const matches = useAsyncResource(
-    () => api.contest.listBattleMatches(active.id, { page: 1, size: MONITOR_SIZE }),
-    [active.id, refreshVersion],
+    () => api.contest.listBattleMatches(active.id, { status: battleStatus, page: 1, size: MONITOR_SIZE }),
+    [active.id, battleStatus, refreshVersion],
     () => false,
+  )
+  // 分段上的数字取列表返回的 facets(套用所选竞赛,不套用状态);读取中或失败时不显示
+  const battleFacets = matches.status === 'success' || matches.status === 'empty' ? matches.data?.facets : undefined
+  const battleCounts = segmentCounts(battleFacets, 'status', BATTLE_SEGMENTS, (item) =>
+    'status' in item ? item.status : undefined,
   )
 
   const columns: TableColumn<BattleMatch>[] = [
@@ -957,6 +968,19 @@ function BattleMatches({
               className="w-full sm:w-72"
             />
           </FilterField>
+          <FilterField label="状态" group>
+            <SegmentedControl
+              aria-label="按对局状态筛选"
+              size="sm"
+              options={BATTLE_SEGMENTS.map((item) => ({
+                value: item.value,
+                label: item.label,
+                count: battleCounts[item.value],
+              }))}
+              value={segment}
+              onValueChange={onSegmentChange}
+            />
+          </FilterField>
           <Link to={`/teacher/contests/${active.id}`} className={buttonVariants({ variant: 'ghost', size: 'sm' })}>
             管理这场竞赛
           </Link>
@@ -974,7 +998,9 @@ function BattleMatches({
         {(page) =>
           page.list.length === 0 ? (
             <p className="px-4 py-8 text-center text-sm text-ink-sub">
-              这场竞赛还没有对局。学生提交参战作品后,系统会自动安排。
+              {battleSegment && 'status' in battleSegment
+                ? `这场竞赛目前没有${battleSegment.label}的对局。`
+                : '这场竞赛还没有对局。学生提交参战作品后,系统会自动安排。'}
             </p>
           ) : (
             <Table

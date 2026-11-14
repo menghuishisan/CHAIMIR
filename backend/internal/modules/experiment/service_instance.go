@@ -276,14 +276,14 @@ func instanceCanReconcileSandboxFailure(status int16) bool {
 }
 
 // ListTeacherInstances 查询教师可见的活跃实验实例。
-func (s *Service) ListTeacherInstances(ctx context.Context, status int16, page, size int) ([]InstanceDTO, int64, int, int, error) {
+func (s *Service) ListTeacherInstances(ctx context.Context, status int16, page, size int) ([]InstanceDTO, int64, int, int, pagex.Facets, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	isSchoolAdmin, err := s.isSchoolAdmin(ctx, id.AccountID)
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	teacherID := id.AccountID
 	if isSchoolAdmin {
@@ -292,22 +292,27 @@ func (s *Service) ListTeacherInstances(ctx context.Context, status int16, page, 
 	page, size = pagex.Normalize(page, size)
 	var items []ExperimentInstance
 	var total int64
+	var byStatus []statusCount
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		items, total, err = tx.ListTeacherInstances(ctx, id.TenantID, teacherID, status, page, size)
+		if err != nil {
+			return err
+		}
+		byStatus, err = tx.CountTeacherInstancesByStatus(ctx, id.TenantID, teacherID)
 		return err
 	})
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	out := make([]InstanceDTO, 0, len(items))
 	for _, item := range items {
 		item, err = s.reconcileSandboxFailure(ctx, item)
 		if err != nil {
-			return nil, 0, page, size, err
+			return nil, 0, page, size, nil, err
 		}
 		out = append(out, instanceDTOFromModel(item, nil))
 	}
-	return out, total, page, size, nil
+	return out, total, page, size, statusFacets(byStatus), nil
 }
 
 // GetProgress 返回统一 M10 进度 topic 元信息。

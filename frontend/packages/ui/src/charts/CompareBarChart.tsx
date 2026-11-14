@@ -39,6 +39,7 @@ export interface CompareBarChartProps {
   context?: ChartContext;
 }
 
+/** CompareBarChart 离散类别对比柱状图 */
 export function CompareBarChart({
   data,
   xKey,

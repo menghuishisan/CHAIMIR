@@ -9,6 +9,7 @@ import (
 	"chaimir/internal/contracts"
 	"chaimir/internal/modules/teaching/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/pagex"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -27,11 +28,16 @@ type Store interface {
 type TxStore interface {
 	CreateCourse(context.Context, Course) (Course, error)
 	GetCourse(context.Context, int64, int64) (Course, error)
+	BatchGetCourses(context.Context, int64, []int64) ([]Course, error)
 	GetCloneableCourse(context.Context, int64, int64) (Course, error)
 	GetCourseByInviteCode(context.Context, string) (Course, error)
 	ListTeacherCourses(context.Context, int64, int64, CourseListFilter) ([]Course, int64, error)
 	ListTeacherCourseIDs(context.Context, int64, int64) ([]int64, error)
 	ListStudentCourses(context.Context, int64, int64, CourseListFilter) ([]Course, int64, error)
+	CountCoursesByStatus(context.Context, int64, int64, bool, int16) (pagex.FacetGroup, error)
+	CountMembersByCourses(context.Context, int64, []int64) (map[int64]int64, error)
+	CountChaptersOfSharedCourses(context.Context, int64, []int64) (map[int64]int64, error)
+	CountStudentLessonProgressByCourses(context.Context, int64, int64, []int64) (map[int64]CourseProgressDTO, error)
 	ListSharedCourses(context.Context, int64, CourseListFilter) ([]Course, int64, error)
 	UpdateCourse(context.Context, Course) (Course, error)
 	SetCourseStatus(context.Context, int64, int64, int16) (Course, error)
@@ -64,14 +70,18 @@ type TxStore interface {
 	PublishAssignment(context.Context, int64, int64) (Assignment, error)
 	CountAssignmentSubmissions(context.Context, int64, int64) (int64, error)
 	CountStudentAttempts(context.Context, int64, int64, int64) (int64, error)
+	CountSubmittersByAssignments(context.Context, int64, []int64) (map[int64]AssignmentSubmissionStatsDTO, error)
+	SummarizeStudentSubmissionsByAssignments(context.Context, int64, int64, []int64) (map[int64]MyAssignmentSubmissionDTO, error)
 	CreateSubmission(context.Context, Submission) (Submission, error)
 	GetSubmission(context.Context, int64, int64) (Submission, error)
 	GetSubmissionBySourceRef(context.Context, int64, string) (Submission, error)
 	ListJudgeOutboxBySubmission(context.Context, int64, int64) ([]JudgeOutbox, error)
 	ListSubmissionsByAssignment(context.Context, SubmissionListQuery) ([]Submission, int64, error)
+	CountSubmissionsByStatusAndLate(context.Context, int64, int64, int64) ([]submissionFacetRow, error)
 	UpdateSubmissionManualGrade(context.Context, int64, int64, int32, int32, string) (Submission, error)
 	UpdateSubmissionJudgeRef(context.Context, int64, int64, string) (Submission, error)
 	UpdateSubmissionAutoScore(context.Context, int64, int64, int32, int32) (Submission, error)
+	RevokeSubmissionAutoScore(context.Context, int64, int64) (Submission, error)
 	CreateJudgeOutbox(context.Context, JudgeOutbox) (JudgeOutbox, error)
 	ClaimJudgeOutbox(context.Context, int64, int32, int32, time.Time, string, time.Time) ([]JudgeOutbox, error)
 	ClaimJudgeOutboxAcrossTenants(context.Context, int32, int32, time.Time, string, time.Time) ([]JudgeOutbox, error)

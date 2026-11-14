@@ -70,6 +70,8 @@ type IdentityTenantReadService interface {
 	ListTenants(ctx context.Context) ([]TenantSummary, error)
 	// GetTenant 读取单个租户摘要,供聚合层按租户投影使用。
 	GetTenant(ctx context.Context, tenantID int64) (TenantSummary, error)
+	// PlatformAdminNames 按编号批量解析平台管理员姓名,供平台页面显示操作人;读不到的编号不在结果里。
+	PlatformAdminNames(ctx context.Context, adminIDs []int64) (map[int64]string, error)
 }
 
 // IdentityStats 是 M1 提供给 M9 看板的只读统计摘要。

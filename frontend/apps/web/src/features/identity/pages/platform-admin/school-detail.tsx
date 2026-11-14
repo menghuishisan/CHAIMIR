@@ -1,16 +1,13 @@
-// 学校详情页(平台深页,/platform-admin/schools/:tenantId)。
-//
-// 一所学校的全部平台侧信息:基本信息、服务状态、以及沙箱配额(内页区块,对齐清单 §3.4)。
-// 配额按租户存储,平台身份必须显式带 tenant_id(后端 quotaScopeTenantID),
-// 故配额只在这里出现 —— 运行时详情没有租户上下文,在那里再放一遍等于让管理员先选一次学校。
-//
-// 学校自己的展示配置(校名、校徽、模块开关、登录方式)由该校管理员在校管端维护,
-// 平台端只读:PATCH /tenant/config 走的是「当前租户」语义,平台账号没有当前租户。
+// 学校详情(平台深页,/platform-admin/schools/:tenantId)。设计 §7.6:
+// 页头为校名 + 状态 + 一行属性(短码 · 部署形态 · 服务到期 · 开通时间),右侧「调整状态」(与列表页同一弹窗);
+// 左栏「开通信息」只读列表;右栏「实验环境资源配额」:当前运行数 / 上限的使用比例条,下方配额表单,
+// 有改动时才出现「保存配额」,并说明「只影响之后创建的环境」。
+// 学校自己的展示配置(显示名、校徽、模块、登录方式)由该校管理员维护,平台端只读。
 
-import { useCallback, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
-import { Building, Gauge, Save } from 'lucide-react'
-import { API_ERROR_CODES, ApiError, TenantStatus, type SandboxQuota, type Tenant } from '@chaimir/api-client'
+import { useMemo, useState } from 'react'
+import { useParams } from 'react-router'
+import { Building, Save } from 'lucide-react'
+import { API_ERROR_CODES, ApiError, type SandboxQuota, type Tenant } from '@chaimir/api-client'
 import {
   Badge,
   Button,
@@ -18,45 +15,46 @@ import {
   Card,
   CardBody,
   CardHeader,
+  cn,
   DescriptionList,
   FormField,
   Input,
-  MetricStrip,
   PageHeader,
   PageScaffold,
-  PageSection,
   Skeleton,
   StatusIndicator,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { useFormValidation } from '../../../../hooks/useFormValidation'
-import { TENANT_MODULE_LABELS } from '../../../../utils/labels/identity'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePageLocation, locationLabel } from '../../../../hooks'
+import { locationLabel, useAsyncResource, usePageLocation } from '../../../../hooks'
 import { formatDate, formatDateTime } from '../../../../utils/formatters'
 import {
   authModeLabel,
   deployModeLabel,
+  schoolTypeLabel,
+  TENANT_MODULE_LABELS,
   tenantStatusLabel,
 } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { readTenantModules } from '../../tenantModules'
+import { TenantExpiryText } from '../../components/TenantExpiryText'
+import { TenantStatusModal } from '../../components/TenantStatusModal'
 import { tenantStatusTone } from '../../statusPresentation'
+import { readTenantModules } from '../../tenantModules'
 
-/**
- * PlatformSchoolDetailPage 呈现单所学校的平台侧信息与沙箱配额。
- */
+/** PlatformSchoolDetailPage 一所学校:开通信息与实验环境资源配额 */
 export default function PlatformSchoolDetailPage() {
   const { tenantId = '' } = useParams<{ tenantId: string }>()
-  const navigate = useNavigate()
+  const [statusOpen, setStatusOpen] = useState(false)
 
   const tenant = useAsyncResource(
     async () => {
       try {
         return await api.identity.getTenant(tenantId)
       } catch (error) {
-        if (error instanceof ApiError && error.code === API_ERROR_CODES.RESOURCE_NOT_FOUND) return null
+        // 学校不存在时给「没有找到」,不当作读取失败
+        if (error instanceof ApiError && error.code === API_ERROR_CODES.RESOURCE_NOT_FOUND)
+          return null
         throw error
       }
     },
@@ -64,7 +62,15 @@ export default function PlatformSchoolDetailPage() {
     (value) => value === null
   )
 
-  usePageLocation([{ label: locationLabel(tenant, (data) => (data ? data.display_name || data.name : ''), '学校详情') }])
+  usePageLocation([
+    {
+      label: locationLabel(
+        tenant,
+        (data) => (data ? data.display_name || data.name : ''),
+        '学校详情'
+      ),
+    },
+  ])
 
   return (
     <PageScaffold>
@@ -72,200 +78,189 @@ export default function PlatformSchoolDetailPage() {
         resource={tenant}
         emptyIcon={Building}
         emptyTitle="没有找到这所学校"
-        emptyDescription="学校可能已被移除,回列表重新选择。"
+        emptyDescription="学校可能已被移除,回学校管理重新选择。"
         skeleton={
           <div className="flex flex-col gap-4">
+            <Skeleton variant="title" width="half" />
             <Skeleton variant="block" />
-            <Skeleton variant="line" lines={4} />
           </div>
         }
       >
-        {(data) => data ? (
-          <>
-            <SchoolOverview tenant={data} onBack={() => navigate('/platform-admin/schools')} />
-            <QuotaSection key={data.id} tenantId={data.id} />
-          </>
-        ) : null}
+        {(data) =>
+          data ? (
+            <>
+              <PageHeader
+                title={data.display_name || data.name}
+                status={
+                  <StatusIndicator
+                    tone={tenantStatusTone(data.status)}
+                    label={tenantStatusLabel(data.status)}
+                  />
+                }
+                meta={[
+                  { value: <span className="font-mono">{data.code}</span> },
+                  { value: deployModeLabel(data.deploy_mode) },
+                  { label: '服务到期', value: <TenantExpiryText expireAt={data.expire_at} /> },
+                  { label: '开通于', value: formatDate(data.created_at) },
+                ]}
+                actions={
+                  <Button variant="outline" onClick={() => setStatusOpen(true)}>
+                    调整状态
+                  </Button>
+                }
+              />
+              <div className="grid gap-6 lg:grid-cols-2">
+                <ProvisionCard tenant={data} />
+                <QuotaCard key={data.id} tenantId={data.id} />
+              </div>
+              {statusOpen ? (
+                <TenantStatusModal
+                  tenant={data}
+                  onClose={() => setStatusOpen(false)}
+                  onSaved={() => {
+                    setStatusOpen(false)
+                    tenant.reload()
+                  }}
+                />
+              ) : null}
+            </>
+          ) : null
+        }
       </ResourceState>
     </PageScaffold>
   )
 }
 
-/**
- * SchoolOverview 渲染学校的对象身份区与开通信息属性表。
- */
-function SchoolOverview({ tenant, onBack }: { tenant: Tenant; onBack: () => void }) {
+/** ProvisionCard 开通信息:只读;展示配置由该校管理员在校管端维护 */
+function ProvisionCard({ tenant }: { tenant: Tenant }) {
+  const modules = readTenantModules(tenant.feature_flags)
   return (
-    <>
-      {/*
-        对象身份区:学校名 + 服务状态 + 关键属性横排。
-        状态、到期与部署形态都是租户静态属性,横排在这里;其余属性下沉到开通信息表(§6.5.3 第 ④)。
-      */}
-      <PageHeader
-        title={tenant.display_name || tenant.name}
-        status={
-          <StatusIndicator
-            tone={tenantStatusTone(tenant.status)}
-            label={tenantStatusLabel(tenant.status)}
-          />
-        }
-        description={
-          tenant.display_name
-            ? `学校全名 ${tenant.name} · 短名 ${tenant.code}`
-            : `短名 ${tenant.code}(未设置对外显示名)`
-        }
-        actions={
-          <Button variant="outline" onClick={onBack}>
-            返回学校列表
-          </Button>
-        }
-        meta={[
-          { label: '部署形态', value: deployModeLabel(tenant.deploy_mode) },
-          { label: '登录方式', value: authModeLabel(tenant.auth_mode) },
-          {
-            label: '服务到期',
-            value: tenant.expire_at ? formatDate(tenant.expire_at) : '不限期',
-          },
-          { label: '激活码开通', value: tenant.enable_activation_code ? '已启用' : '已关闭' },
-          { label: '开通时间', value: formatDate(tenant.created_at) },
-        ]}
-      />
-
-      <PageSection
+    <Card>
+      <CardHeader
         title="开通信息"
-        description="学校短名在开通时确定,不能修改;状态与到期时间在学校列表页调整。展示配置由该校管理员自行维护,平台端只读。"
-        className="mt-6"
-      >
-        <div className="flex flex-col gap-4 rounded-tl-lg bg-surface p-5 shadow-xs">
-          <DescriptionList
-            columns={2}
-            items={[
-              {
-                term: '服务状态',
-                description:
-                  tenant.status === TenantStatus.ACTIVE
-                    ? `${tenantStatusLabel(tenant.status)} · 师生可正常登录`
-                    : `${tenantStatusLabel(tenant.status)} · 师生登录已被拒绝`,
-              },
-              {
-                term: '服务到期',
-                description: tenant.expire_at
-                  ? `${formatDate(tenant.expire_at)} 到期后自动停止服务`
-                  : '不限期',
-              },
-              { term: '开通时间', description: formatDateTime(tenant.created_at), mono: true },
-              { term: '最近更新', description: formatDateTime(tenant.updated_at), mono: true },
-            ]}
-          />
-
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm text-ink-sub">已开启的模块:</span>
-            <TenantModuleBadges featureFlags={tenant.feature_flags} />
-          </div>
-        </div>
-      </PageSection>
-    </>
+        description="学校的显示名、校徽、模块与登录方式由该校管理员维护,这里只读。"
+      />
+      <CardBody>
+        <DescriptionList
+          items={[
+            { term: '学校全称', description: tenant.name },
+            { term: '对外显示名', description: tenant.display_name || '未设置,显示学校全称' },
+            { term: '学校短码', description: tenant.code, mono: true },
+            { term: '机构类型', description: schoolTypeLabel(tenant.type) },
+            { term: '部署形态', description: deployModeLabel(tenant.deploy_mode) },
+            { term: '登录方式', description: authModeLabel(tenant.auth_mode) },
+            {
+              term: '激活码开通账号',
+              description: tenant.enable_activation_code ? '已开启' : '已关闭',
+            },
+            {
+              term: '已开启的模块',
+              description:
+                modules.length === 0 ? (
+                  '没有开启业务模块'
+                ) : (
+                  <span className="flex flex-wrap gap-1">
+                    {modules.map((code) => (
+                      <Badge key={code} tone="jade">
+                        {TENANT_MODULE_LABELS[code]}
+                      </Badge>
+                    ))}
+                  </span>
+                ),
+            },
+            { term: '开通时间', description: formatDateTime(tenant.created_at), mono: true },
+            { term: '最近更新', description: formatDateTime(tenant.updated_at), mono: true },
+          ]}
+        />
+      </CardBody>
+    </Card>
   )
 }
 
-/**
- * TenantModuleBadges 展示该校已开启的功能模块。
- * feature_flags 是开放 JSONB,只呈现已登记的模块键;学校没配过就显示默认口径。
- */
-function TenantModuleBadges({ featureFlags }: { featureFlags: Record<string, unknown> }) {
-  const modules = readTenantModules(featureFlags)
-
-  if (modules.length === 0) {
-    return <span className="text-sm text-ink-sub">未启用业务模块</span>
-  }
-  return (
-    <span className="flex flex-wrap gap-1">
-      {modules.map((code) => (
-        <Badge key={code} tone="jade">
-          {TENANT_MODULE_LABELS[code]}
-        </Badge>
-      ))}
-    </span>
-  )
-}
-
-/**
- * QuotaSection 读取并调整这所学校的沙箱配额。
- * 后端 validateQuota 要求并发/CPU/内存/空闲超时/最长存活都为正数,
- * 保活与快照保留可以为 0(表示不允许),故前端按同一口径校验,不让保存到后端才报错。
- */
-function QuotaSection({ tenantId }: { tenantId: string }) {
-  const quota = useAsyncResource(
-    () => api.sandbox.getQuota({ tenant_id: tenantId }),
-    [tenantId],
-    () => false
-  )
-
-  return (
-    <PageSection
-      title="实验环境资源配额"
-      description="这所学校能同时开的实验环境数量与单校资源上限。调低不会影响已在运行的环境,下一次创建时生效。"
-    >
-      <ResourceState
-        resource={quota}
-        emptyIcon={Gauge}
-        emptyTitle="还没有配额记录"
-        emptyDescription="学校首次创建沙箱时会按平台默认配额建档,也可以在这里先设定。"
-        skeleton={<Skeleton variant="line" lines={4} />}
-      >
-        {(data) => <QuotaForm quota={data} tenantId={tenantId} onSaved={quota.reload} />}
-      </ResourceState>
-    </PageSection>
-  )
-}
-
-/** 配额字段登记:名称、说明与是否允许为 0,与后端 validateQuota 一致。 */
+/** 配额字段:名称、说明与是否允许为 0,与后端 validateQuota 一致 */
 const QUOTA_FIELDS = [
   {
-    key: 'max_concurrent_sandbox' as const,
-    label: '同时运行的沙箱数',
-    helper: '全校同一时刻最多能开这么多个实验或答题环境',
+    key: 'max_concurrent_sandbox',
+    label: '同时运行的环境数',
+    helper: '全校同一时刻最多能开的实验或答题环境',
     allowZero: false,
   },
+  { key: 'max_cpu', label: 'CPU 核数上限', helper: '全校环境合计可占用的核数', allowZero: false },
   {
-    key: 'max_cpu' as const,
-    label: 'CPU 核数上限',
-    helper: '全校沙箱合计可占用的核数',
-    allowZero: false,
-  },
-  {
-    key: 'max_memory_mb' as const,
+    key: 'max_memory_mb',
     label: '内存上限(MB)',
-    helper: '全校沙箱合计可占用的内存',
+    helper: '全校环境合计可占用的内存',
     allowZero: false,
   },
   {
-    key: 'idle_timeout_min' as const,
-    label: '无操作回收时长(分钟)',
-    helper: '学生离开这么久后自动回收环境,释放资源',
+    key: 'idle_timeout_min',
+    label: '无操作回收(分钟)',
+    helper: '学生离开这么久后自动回收环境',
     allowZero: false,
   },
   {
-    key: 'max_lifetime_min' as const,
+    key: 'max_lifetime_min',
     label: '单次最长存活(分钟)',
     helper: '一个环境从创建起最多存活这么久',
     allowZero: false,
   },
   {
-    key: 'max_keepalive_min' as const,
-    label: '可申请的保活时长(分钟)',
-    helper: '填 0 表示不允许学生申请延长',
+    key: 'max_keepalive_min',
+    label: '可申请保活(分钟)',
+    helper: '填 0 表示不允许延长',
     allowZero: true,
   },
   {
-    key: 'max_snapshot_retention_min' as const,
-    label: '快照保留时长(分钟)',
-    helper: '填 0 表示不保留快照,环境回收即清空',
+    key: 'max_snapshot_retention_min',
+    label: '快照保留(分钟)',
+    helper: '填 0 表示回收即清空,不保留快照',
     allowZero: true,
   },
-]
+] as const
 
-type QuotaFieldKey = (typeof QUOTA_FIELDS)[number]['key']
+type QuotaKey = (typeof QUOTA_FIELDS)[number]['key']
+
+/** quotaDraft 把配额换成表单的文本值 */
+function quotaDraft(quota: SandboxQuota): Record<QuotaKey, string> {
+  return Object.fromEntries(
+    QUOTA_FIELDS.map((field) => [field.key, String(quota[field.key])])
+  ) as Record<QuotaKey, string>
+}
+
+/** QuotaCard 读取这所学校的配额;平台身份读配额必须带学校编号 */
+function QuotaCard({ tenantId }: { tenantId: string }) {
+  const quota = useAsyncResource(
+    () => api.sandbox.getQuota({ tenant_id: tenantId }),
+    [tenantId],
+    () => false
+  )
+  return (
+    <Card>
+      <CardHeader
+        title="实验环境资源配额"
+        description="改动只影响之后创建的环境,正在运行的不受影响。"
+      />
+      <CardBody>
+        <ResourceState
+          resource={quota}
+          emptyIcon={Building}
+          emptyTitle="还没有配额记录"
+          emptyDescription="学校第一次创建环境时会按平台默认配额建档。"
+          skeleton={<Skeleton variant="line" lines={5} />}
+        >
+          {(data) => (
+            <QuotaForm
+              key={JSON.stringify(data)}
+              quota={data}
+              tenantId={tenantId}
+              onSaved={quota.reload}
+            />
+          )}
+        </ResourceState>
+      </CardBody>
+    </Card>
+  )
+}
 
 interface QuotaFormProps {
   quota: SandboxQuota
@@ -273,116 +268,129 @@ interface QuotaFormProps {
   onSaved: () => void
 }
 
-/**
- * QuotaForm 编辑七项配额并提交。
- */
+/** QuotaForm 使用比例条 + 七项配额;有改动时才出现保存 */
 function QuotaForm({ quota, tenantId, onSaved }: QuotaFormProps) {
-  const [values, setValues] = useState<Record<QuotaFieldKey, string>>(() => ({
-    max_concurrent_sandbox: String(quota.max_concurrent_sandbox),
-    max_cpu: String(quota.max_cpu),
-    max_memory_mb: String(quota.max_memory_mb),
-    idle_timeout_min: String(quota.idle_timeout_min),
-    max_lifetime_min: String(quota.max_lifetime_min),
-    max_keepalive_min: String(quota.max_keepalive_min),
-    max_snapshot_retention_min: String(quota.max_snapshot_retention_min),
-  }))
+  const initial = useMemo(() => quotaDraft(quota), [quota])
+  const [values, setValues] = useState(initial)
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
 
-  const { errors, validate } = useFormValidation(useCallback(() => {
-    const next: Partial<Record<QuotaFieldKey, string>> = {}
+  const errors = useMemo(() => {
+    const next: Partial<Record<QuotaKey, string>> = {}
     for (const field of QUOTA_FIELDS) {
-      const parsed = Number(values[field.key])
-      if (!Number.isInteger(parsed) || parsed < 0 || (!field.allowZero && parsed === 0)) {
+      const raw = values[field.key].trim()
+      const parsed = Number(raw)
+      if (
+        raw === '' ||
+        !Number.isInteger(parsed) ||
+        parsed < 0 ||
+        (!field.allowZero && parsed === 0)
+      ) {
         next[field.key] = field.allowZero ? '请填 0 或更大的整数' : '请填大于 0 的整数'
       }
     }
     return next
-  }, [values]))
+  }, [values])
+  const dirty = QUOTA_FIELDS.some((field) => values[field.key].trim() !== initial[field.key])
+  const valid = Object.keys(errors).length === 0
 
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!validate()) return
-      const numbers = Object.fromEntries(
-        QUOTA_FIELDS.map((field) => [field.key, Number(values[field.key])]),
-      ) as Record<QuotaFieldKey, number>
+  const active = quota.active_sandbox_count ?? 0
+  const limit = quota.max_concurrent_sandbox
+  const share = limit > 0 ? Math.min(100, Math.round((active / limit) * 100)) : 0
 
-      setFormError(undefined)
-      setWorking(true)
-      try {
-        await api.sandbox.updateQuota({ tenant_id: tenantId, ...numbers })
-        toast.success('配额已保存')
-        onSaved()
-      } catch (error) {
-        setFormError(userFacingErrorMessage(error, '保存没有成功,请稍后重试。'))
-      } finally {
-        setWorking(false)
-      }
-    },
-    [onSaved, tenantId, validate, values]
-  )
+  /** save 提交七项配额 */
+  const save = async () => {
+    if (!valid) return
+    setFormError(undefined)
+    setWorking(true)
+    try {
+      await api.sandbox.updateQuota({
+        tenant_id: tenantId,
+        ...(Object.fromEntries(
+          QUOTA_FIELDS.map((field) => [field.key, Number(values[field.key])])
+        ) as Record<QuotaKey, number>),
+      })
+      toast.success('配额已保存,之后创建的环境按新配额执行')
+      onSaved()
+    } catch (error) {
+      setFormError(userFacingErrorMessage(error, '配额没有保存成功,请稍后重试。'))
+    } finally {
+      setWorking(false)
+    }
+  }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* 配额现状降为内联摘要:本区块的主体是下面那张可改的表单,不是三个只读数字(§6.5.3 第 ③ 族) */}
-      <MetricStrip
-        label="配额现状摘要"
-        items={[
-          {
-            label: '当前活跃实验环境',
-            value: quota.active_sandbox_count,
-            hint: `并发上限 ${quota.max_concurrent_sandbox}`,
-          },
-          { label: 'CPU 上限', value: `${quota.max_cpu} 核`, hint: '全校沙箱合计' },
-          { label: '内存上限', value: `${quota.max_memory_mb} MB`, hint: '全校沙箱合计' },
-        ]}
-      />
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-1.5">
+        <p className="flex items-baseline justify-between text-sm text-ink-sub">
+          <span>正在运行的环境</span>
+          <span className="tabular-nums">
+            <span className="text-lg font-semibold text-ink">{active}</span> / {limit}
+          </span>
+        </p>
+        <div
+          role="progressbar"
+          aria-label="实验环境并发使用比例"
+          aria-valuenow={share}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          className="h-2 overflow-hidden rounded-full bg-surface-sunken"
+        >
+          {/* 动态宽度:使用比例来自接口数据,属于运行时计算值 */}
+          <span
+            className={cn('block h-full', share >= 85 ? 'bg-warning' : 'bg-primary')}
+            style={{ width: `${share}%` }}
+          />
+        </div>
+        <p className="text-xs text-ink-sub">
+          已用 {share}%{share >= 85 ? ',接近上限,学生新开环境可能会被拒绝' : ''}
+        </p>
+      </div>
 
-      <Card>
-        <CardHeader
-          title="调整配额"
-          description="改动只影响之后创建的环境,不会中断正在运行的实验。"
-        />
-        <CardBody>
-          <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {QUOTA_FIELDS.map((field) => (
-                <FormField
-                  key={field.key}
-                  label={field.label}
-                  htmlFor={`quota-${field.key}`}
-                  required
-                  helper={field.helper}
-                  error={errors[field.key]}
-                >
-                  <Input
-                    id={`quota-${field.key}`}
-                    type="number"
-                    min={field.allowZero ? 0 : 1}
-                    value={values[field.key]}
-                    invalid={Boolean(errors[field.key])}
-                    onChange={(event) =>
-                      setValues((current) => ({ ...current, [field.key]: event.target.value }))
-                    }
-                  />
-                </FormField>
-              ))}
-            </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        {QUOTA_FIELDS.map((field) => (
+          <FormField
+            key={field.key}
+            label={field.label}
+            htmlFor={`quota-${field.key}`}
+            required
+            helper={field.helper}
+            error={dirty ? errors[field.key] : undefined}
+          >
+            <Input
+              id={`quota-${field.key}`}
+              type="number"
+              inputMode="numeric"
+              min={field.allowZero ? 0 : 1}
+              value={values[field.key]}
+              invalid={dirty && Boolean(errors[field.key])}
+              onChange={(event) =>
+                setValues((current) => ({ ...current, [field.key]: event.target.value }))
+              }
+            />
+          </FormField>
+        ))}
+      </div>
 
-            {formError ? <Callout tone="danger">{formError}</Callout> : null}
+      {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
-            <div className="flex items-center gap-2">
-              <Button type="submit" variant="primary" leftIcon={Save} loading={working}>
-                保存配额
-              </Button>
-              <span className="text-sm text-ink-sub">
-                超出配额时学生创建环境会被拒绝,并提示稍后再试。
-              </span>
-            </div>
-          </form>
-        </CardBody>
-      </Card>
+      {dirty ? (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="primary"
+            leftIcon={Save}
+            loading={working}
+            disabled={!valid}
+            onClick={() => void save()}
+          >
+            保存配额
+          </Button>
+          <Button variant="ghost" disabled={working} onClick={() => setValues(initial)}>
+            放弃修改
+          </Button>
+          <span className="text-sm text-ink-sub">只影响之后创建的环境。</span>
+        </div>
+      ) : null}
     </div>
   )
 }

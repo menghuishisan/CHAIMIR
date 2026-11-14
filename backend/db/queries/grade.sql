@@ -113,14 +113,24 @@ SELECT id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status,
 FROM grade_review
 WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
   AND (sqlc.arg(is_locked)::smallint = 0 OR is_locked = (sqlc.arg(is_locked)::smallint = 1))
+  AND (sqlc.arg(semester_id)::bigint = 0 OR semester_id = sqlc.arg(semester_id)::bigint)
 ORDER BY submitted_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountGradeReviewsByStatus :many
+-- 成绩审核队列的状态分段计数:套用锁定筛选,不套用状态筛选。
+SELECT status, count(*)::bigint AS count
+FROM grade_review
+WHERE (sqlc.arg(is_locked)::smallint = 0 OR is_locked = (sqlc.arg(is_locked)::smallint = 1))
+  AND (sqlc.arg(semester_id)::bigint = 0 OR semester_id = sqlc.arg(semester_id)::bigint)
+GROUP BY status;
 
 -- name: CountGradeReviews :one
 SELECT count(*)::bigint
 FROM grade_review
 WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
-  AND (sqlc.arg(is_locked)::smallint = 0 OR is_locked = (sqlc.arg(is_locked)::smallint = 1));
+  AND (sqlc.arg(is_locked)::smallint = 0 OR is_locked = (sqlc.arg(is_locked)::smallint = 1))
+  AND (sqlc.arg(semester_id)::bigint = 0 OR semester_id = sqlc.arg(semester_id)::bigint);
 
 -- name: ListOwnGradeReviews :many
 SELECT id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status, is_locked, comment, submitted_at, reviewed_at
@@ -253,11 +263,34 @@ WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
 ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
+-- name: CountGradeAppealsByStatus :many
+-- 申诉列表的状态分段计数:范围与列表一致(学生只数本人,教师按任教课程,校管全校),不套用状态筛选。
+SELECT status, count(*)::bigint AS count
+FROM grade_appeal
+WHERE (sqlc.arg(student_id)::bigint = 0 OR student_id = sqlc.arg(student_id)::bigint)
+  AND (sqlc.arg(student_id)::bigint <> 0 OR sqlc.arg(all_courses)::boolean OR course_id = ANY(sqlc.arg(course_ids)::bigint[]))
+GROUP BY status;
+
 -- name: CountGradeAppeals :one
 SELECT count(*)::bigint
 FROM grade_appeal
 WHERE (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
   AND (sqlc.arg(all_courses)::boolean OR course_id = ANY(sqlc.arg(course_ids)::bigint[]));
+
+-- name: ListStudentGradeAppeals :many
+-- 学生本人的申诉:成绩中心按课程显示处理状态与处理意见;student_id 由服务端填会话账号。
+SELECT id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at, unlock_revision
+FROM grade_appeal
+WHERE student_id = sqlc.arg(student_id)::bigint
+  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountStudentGradeAppeals :one
+SELECT count(*)::bigint
+FROM grade_appeal
+WHERE student_id = sqlc.arg(student_id)::bigint
+  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint);
 
 -- name: UpdateGradeAppealStatus :one
 UPDATE grade_appeal
@@ -278,14 +311,24 @@ SELECT id, tenant_id, student_id, semester_id, type, detail, status, created_at,
 FROM academic_warning
 WHERE (sqlc.arg(student_id)::bigint = 0 OR student_id = sqlc.arg(student_id)::bigint)
   AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(semester_id)::bigint = 0 OR semester_id = sqlc.arg(semester_id)::bigint)
 ORDER BY created_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountAcademicWarningsByStatus :many
+-- 学业预警的状态分段计数:套用学生筛选,不套用状态筛选。
+SELECT status, count(*)::bigint AS count
+FROM academic_warning
+WHERE (sqlc.arg(student_id)::bigint = 0 OR student_id = sqlc.arg(student_id)::bigint)
+  AND (sqlc.arg(semester_id)::bigint = 0 OR semester_id = sqlc.arg(semester_id)::bigint)
+GROUP BY status;
 
 -- name: CountAcademicWarnings :one
 SELECT count(*)::bigint
 FROM academic_warning
 WHERE (sqlc.arg(student_id)::bigint = 0 OR student_id = sqlc.arg(student_id)::bigint)
-  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint);
+  AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
+  AND (sqlc.arg(semester_id)::bigint = 0 OR semester_id = sqlc.arg(semester_id)::bigint);
 
 -- name: AckAcademicWarning :one
 UPDATE academic_warning

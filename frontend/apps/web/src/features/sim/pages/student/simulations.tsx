@@ -77,12 +77,8 @@ export default function StudentSimulationsPage() {
     [query.category, query.q],
     { urlPageKey: 'page' },
   )
-  const categoryCounts = useAsyncResource(
-    () => api.sim.getPackages({ status: SIM_PACKAGE_STATUS.PUBLISHED, keyword: query.q || undefined, page: 1, size: 1 }),
-    [query.q],
-    () => false,
-  )
-  const categoryFacets = categoryCounts.data?.facets
+  // 分类分段的数字取列表接口的 facets:套用搜索,不套用分类筛选,选中一个分类后其他分类的数字仍然可见
+  const categoryFacets = packages.status === 'success' || packages.status === 'empty' ? packages.data?.facets : undefined
   const categoryOptions = useMemo(() => {
     const group = facetGroup(categoryFacets, 'category') ?? {}
     const known = Object.keys(group).sort((a, b) => simCategoryLabel(a).localeCompare(simCategoryLabel(b), 'zh-CN'))

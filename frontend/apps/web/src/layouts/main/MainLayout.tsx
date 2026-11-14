@@ -184,7 +184,8 @@ export function MainLayout({ config }: MainLayoutProps) {
             className="paper-surface animate-pane-in"
           >
             <div className="paper-scrollport">
-              <RouteErrorBoundary>
+              {/* 只换掉内容区:失败提示铺在纸面上,侧栏与顶栏留着,用户可以直接去别的页面 */}
+              <RouteErrorBoundary surface="paper">
                 <Outlet />
               </RouteErrorBoundary>
             </div>

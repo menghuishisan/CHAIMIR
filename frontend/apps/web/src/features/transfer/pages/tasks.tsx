@@ -4,8 +4,8 @@
 // 全部结束或页面不可见时停止(任务进度没有推送通道,只能轮询;间隔遵守规范 §4.1)。分段写进地址。
 //
 // 四端共用同一实现:任务归属由后端按会话账号与租户判定。取件经统一文件服务(useTaskArtifactDownload),
-// 页面不拼接对象存储地址、不自造文件名。任务快照不带进度百分比与失败原因文字,
-// 故进行中用不定量指示、失败写明「尝试 N 次后仍未完成」(设计 §10 数据缺口)。
+// 页面不拼接对象存储地址、不自造文件名。任务表不记录进度百分比;失败的技术原因只进日志、不给用户看
+// (错误暴露分层),故进行中用不定量指示、失败写明「尝试 N 次后仍未完成」。
 
 import { useCallback } from 'react'
 import { Download, FileDown, FileUp, ListChecks, LoaderCircle } from 'lucide-react'
@@ -14,6 +14,7 @@ import { Button, Callout, Icon, PageHeader, PageScaffold, Pagination, SegmentedC
 import { api } from '../../../app/api'
 import { ResourceError } from '../../../components/ResourceState'
 import { usePagedResource, usePageLocation, useUrlState, useVisiblePolling } from '../../../hooks'
+import { facetCount, facetSum } from '../../../utils/facets'
 import { formatDateTime, formatFileSize, formatRelativeOccurrence } from '../../../utils/formatters'
 import { transferChannelLabel, transferTaskStatusLabel, transferTaskSubjectLabel } from '../../../utils/labels/transfer'
 import { TRANSFER_ACTIVE_STATUSES, transferTaskStatusTone } from '../../../utils/transfer'
@@ -44,6 +45,8 @@ export default function TransferTasksPage() {
     [query.channel],
     { urlPageKey: 'page' },
   )
+  // 「全部 / 导入 / 导出」的数字取列表接口的 facets(本人任务,不套用类型筛选)
+  const facets = tasks.status === 'success' || tasks.status === 'empty' ? tasks.data?.facets : undefined
   const list = tasks.data?.list ?? []
   const hasActive = list.some((task) => TRANSFER_ACTIVE_STATUSES.has(task.status))
   // 有进行中的任务且页面可见时每 5 秒重读当前页;全部结束即停
@@ -59,9 +62,9 @@ export default function TransferTasksPage() {
         <SegmentedControl
           aria-label="按任务类型筛选"
           options={[
-            { value: 'all', label: '全部' },
-            { value: 'import', label: '导入' },
-            { value: 'export', label: '导出' },
+            { value: 'all', label: '全部', count: facetSum(facets, 'channel') },
+            { value: 'import', label: '导入', count: facetCount(facets, 'channel', 'import') },
+            { value: 'export', label: '导出', count: facetCount(facets, 'channel', 'export') },
           ]}
           value={query.channel}
           onValueChange={(value) => setQuery({ channel: value })}

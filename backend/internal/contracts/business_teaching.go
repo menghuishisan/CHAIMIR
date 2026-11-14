@@ -20,6 +20,7 @@ type TeachingCourseGrade struct {
 type TeachingCourseInfo struct {
 	TenantID  int64   `json:"tenant_id"`
 	CourseID  int64   `json:"course_id"`
+	Name      string  `json:"name"`
 	TeacherID int64   `json:"teacher_id"`
 	Semester  string  `json:"semester"`
 	Credits   float64 `json:"credits"`
@@ -38,6 +39,8 @@ type TeachingStats struct {
 type TeachingReadService interface {
 	// GetCourse 读取课程归属摘要,供 M11 审核和申诉流程校验课程边界。
 	GetCourse(ctx context.Context, tenantID, courseID int64) (TeachingCourseInfo, error)
+	// BatchGetCourses 按编号一次读取本租户未删除课程的摘要(含课程名),供 M11 列表随记录下发课程名;已删除的课程不在结果里。
+	BatchGetCourses(ctx context.Context, tenantID int64, courseIDs []int64) ([]TeachingCourseInfo, error)
 	// ListTeacherCourseIDs 读取教师全部未删除课程编号,供 M11 在申诉分页前限制授课范围。
 	ListTeacherCourseIDs(ctx context.Context, tenantID, teacherID int64) ([]int64, error)
 	// GetCourseGrade 读取单个学生在单课程的成绩,供 M11 申诉校验成绩存在性。

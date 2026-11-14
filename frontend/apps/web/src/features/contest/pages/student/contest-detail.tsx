@@ -56,6 +56,7 @@ import { ContestTimeline } from '../../components/ContestTimeline'
 import { isContestAnswerable, isContestLeaderboardFrozen } from '../../rules'
 import { contestStatusTone } from '../../statusPresentation'
 import { ContestTeamCard } from './contest-team'
+import { useSession } from '../../../../components/RoleGuard/session'
 
 /** 地址参数:tab 是左栏标签 */
 const DETAIL_QUERY = {
@@ -376,7 +377,7 @@ function JoinTeamForm({ contestId, onJoined }: { contestId: string; onJoined: ()
   )
 }
 
-/** SignupModal 报名弹窗:组队赛填队名(同时创建队伍),个人赛直接确认 */
+/** SignupModal 报名弹窗:组队赛填队名(同时创建队伍);个人赛填参赛名称(默认本人姓名,排行榜上显示) */
 function SignupModal({
   open,
   onOpenChange,
@@ -389,10 +390,14 @@ function SignupModal({
   onJoined: () => void
 }) {
   const solo = contest.team_mode === TeamMode.SOLO
-  const [teamName, setTeamName] = useState('')
+  const { me } = useSession()
+  // 个人赛的参赛名称默认填本人姓名,可改成昵称;组队赛由队长起名
+  const [teamName, setTeamName] = useState(solo ? me.account.name : '')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string>()
-  const validation = useFormValidation(() => ({ teamName: !solo && !teamName.trim() ? '请输入队伍名称' : null }))
+  const validation = useFormValidation(() => ({
+    teamName: teamName.trim() ? null : solo ? '请输入参赛名称' : '请输入队伍名称',
+  }))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -401,7 +406,7 @@ function SignupModal({
       setSubmitting(true)
       setError(undefined)
       try {
-        // 个人赛的队名由后端统一生成,不要求填写
+        // 个人赛提交的是参赛名称,组队赛提交的是队名;两者都显示在排行榜上
         await api.contest.signup(contest.id, { team_name: teamName.trim() })
         toast.success('报名成功')
         onJoined()
@@ -420,23 +425,27 @@ function SignupModal({
         <ModalHeader>
           <ModalTitle>报名「{contest.name}」</ModalTitle>
           <ModalDescription>
-            {solo ? '这场赛事个人参赛,确认后即完成报名。' : '报名会同时创建你的队伍,之后把邀请码发给队友。'}
+            {solo ? '这场赛事个人参赛,排行榜上显示你填写的参赛名称。' : '报名会同时创建你的队伍,之后把邀请码发给队友。'}
           </ModalDescription>
         </ModalHeader>
         <ModalBody>
           <form id="contest-signup-form" onSubmit={submit} noValidate className="flex flex-col gap-4">
-            {solo ? null : (
-              <FormField label="队伍名称" htmlFor="contest-team-name" required error={validation.errors.teamName}>
-                <Input
-                  id="contest-team-name"
-                  value={teamName}
-                  placeholder="给队伍起个名字"
-                  invalid={Boolean(validation.errors.teamName)}
-                  onChange={(event) => setTeamName(event.target.value)}
-                  onBlur={() => validation.validate(['teamName'])}
-                />
-              </FormField>
-            )}
+            <FormField
+              label={solo ? '参赛名称' : '队伍名称'}
+              htmlFor="contest-team-name"
+              required
+              helper={solo ? '排行榜上显示这个名称,可以用本人姓名或昵称' : undefined}
+              error={validation.errors.teamName}
+            >
+              <Input
+                id="contest-team-name"
+                value={teamName}
+                placeholder={solo ? '填写参赛名称' : '给队伍起个名字'}
+                invalid={Boolean(validation.errors.teamName)}
+                onChange={(event) => setTeamName(event.target.value)}
+                onBlur={() => validation.validate(['teamName'])}
+              />
+            </FormField>
             {error ? <Callout tone="danger">{error}</Callout> : null}
             <div className="flex justify-end gap-2">
               <Button variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>
@@ -534,8 +543,8 @@ function ListRowLink(props: { href: string; title: string; meta: string; leading
 }
 
 /**
- * ContestLadder 天梯榜:名次、得分(解题赛还有通过题数与最近通过时间);我的队伍高亮并标「我的队伍」。
- * 队伍名不在天梯响应里(只回 team_id),不把内部编号当队名显示。
+ * ContestLadder 天梯榜:名次、队名、得分(解题赛还有通过题数与最近通过时间);我的队伍高亮并标「我的队伍」。
+ * 队名由接口按 team_id 读取后随榜单给出,个人赛是选手报名时填写的参赛名称。
  */
 function ContestLadder({ contestId, mode, myTeamId }: { contestId: string; mode: ContestMode; myTeamId: string | undefined }) {
   const ladder = usePagedResource<LadderRank>((params) => api.contest.getLadder(contestId, params), [contestId])
@@ -583,7 +592,10 @@ function ContestLadder({ contestId, mode, myTeamId }: { contestId: string; mode:
                 return (
                   <tr key={rank.team_id} className={mine ? 'bg-primary-soft' : 'border-b border-line last:border-b-0'}>
                     <td className="px-4 py-3 font-semibold tabular-nums text-ink">{rank.rank}</td>
-                    <td className="px-4 py-3 text-ink">{mine ? <span className="font-semibold text-primary">我的队伍</span> : `第 ${rank.rank} 名`}</td>
+                    <td className="px-4 py-3 text-ink">
+                      <span className={mine ? 'font-semibold text-primary' : undefined}>{rank.team_name}</span>
+                      {mine ? <span className="ml-2 text-xs text-primary">我的队伍</span> : null}
+                    </td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums text-ink">{formatScore(rank.score)}</td>
                     {solve ? <td className="px-4 py-3 text-right tabular-nums text-ink">{rank.solved_count}</td> : null}
                     {solve ? (

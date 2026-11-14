@@ -70,6 +70,8 @@ func (s *Service) compositionFromProblem(_ context.Context, _ int64, problem Con
 	return snapshot, nil
 }
 
+// normalizeContestComposition 校验赛题的组合声明是否完整(工作区实例、各运行时实例的编码与镜像版本),
+// 声明的访问配置必须与竞赛场景一致,并统一写成该场景的访问配置。
 func normalizeContestComposition(spec contracts.SandboxCompositionSpec, profile contracts.SandboxAccessProfile) (contracts.SandboxCompositionSpec, error) {
 	spec.ID = strings.TrimSpace(spec.ID)
 	if spec.ID == "" || len(spec.Runtimes) == 0 || strings.TrimSpace(spec.WorkspaceRuntimeInstance) == "" {

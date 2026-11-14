@@ -202,6 +202,8 @@ function ContestDetailContent({ contest, onRefresh }: ContestDetailContentProps)
 
 /** SnapshotRow 是快照榜单的一行。 */
 interface SnapshotRow {
+  teamId: string
+  teamName: string
   rank: number
   score: number
   solvedCount: number
@@ -217,12 +219,13 @@ function ContestSnapshot({ contest }: { contest: Contest }) {
   )
 
   const columns: TableColumn<SnapshotRow>[] = [
-    { key: 'rank', header: '名次', align: 'right', mono: true },
+    // 名次是窄的数字列:定宽靠左,不让表格把它摊成一大片空白
+    { key: 'rank', header: '名次', align: 'right', mono: true, width: '88px' },
     {
       key: 'team',
       header: '队伍',
-      // 快照只存 team_id,按名次呈现,不把内部编号当队名显示
-      render: (row) => <span className="text-ink">第 {row.rank} 名队伍</span>,
+      // 队名由接口按 team_id 读取后随快照条目给出
+      render: (row) => <span className="text-ink">{row.teamName}</span>,
     },
     {
       key: 'score',
@@ -267,11 +270,11 @@ function ContestSnapshot({ contest }: { contest: Contest }) {
               <Table
                 columns={columns}
                 data={snapshotRows(data)}
-                rowKey={(row) => String(row.rank)}
+                rowKey={(row) => row.teamId}
                 elevated={false}
                 // <md 换行卡(§6.4.1 规则 3):名次一行、得分与通过题数一行
                 mobileCard={(row) => ({
-                  title: `第 ${row.rank} 名`,
+                  title: `第 ${row.rank} 名 · ${row.teamName}`,
                   meta:
                     contest.mode === ContestMode.SOLVE
                       ? `得分 ${formatScore(row.score)} · 通过 ${row.solvedCount} 题`
@@ -290,6 +293,8 @@ function ContestSnapshot({ contest }: { contest: Contest }) {
 function snapshotRows(snapshot: ResultSnapshot): SnapshotRow[] {
   return snapshot.final_ranking
     .map((entry) => ({
+      teamId: entry.team_id,
+      teamName: entry.team_name,
       rank: entry.rank,
       score: entry.score,
       solvedCount: entry.solved_count,

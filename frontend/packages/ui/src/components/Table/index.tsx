@@ -128,6 +128,7 @@ function openInNewTab(href: string): void {
   window.open(href, "_blank", "noopener,noreferrer");
 }
 
+/** Table 列定义驱动的泛型数据表格;窄屏可换成行卡 */
 export function Table<T>({
   columns,
   data,

@@ -28,6 +28,7 @@ export interface WorkbenchAccordionProps {
   className?: string;
 }
 
+/** WorkbenchAccordion 沉浸态左辅助区的手风琴阅读区 */
 export function WorkbenchAccordion({ sections, defaultOpenId, className }: WorkbenchAccordionProps) {
   const [openId, setOpenId] = useState<string | undefined>(defaultOpenId ?? sections[0]?.id);
   // 段可能随帧变化而增减:展开的那段没了就退回第一段。

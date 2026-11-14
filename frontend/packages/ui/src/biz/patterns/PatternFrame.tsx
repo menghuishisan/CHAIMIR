@@ -18,6 +18,7 @@ export interface PatternFrameProps {
   children?: ReactNode;
 }
 
+/** PatternFrame 七种模式渲染器的统一外框,主舞台永不滚动 */
 export function PatternFrame({ density, canvas, children }: PatternFrameProps) {
   if (density === "panel") {
     return (

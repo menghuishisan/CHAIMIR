@@ -69,18 +69,30 @@ func (s *Service) ListCheatRecords(ctx context.Context, contestID int64, page, s
 	page, size = pagex.Normalize(page, size)
 	var items []CheatRecord
 	var total int64
+	var names map[int64]string
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		if _, err := s.loadContestForManage(ctx, tx, id.TenantID, id.AccountID, contestID); err != nil {
 			return err
 		}
 		items, total, err = tx.ListCheatRecords(ctx, id.TenantID, contestID, page, size)
+		if err != nil {
+			return err
+		}
+		// 记录只存 team_id:按当前页一次取队名,列表直接写出处理的是哪支队伍
+		teamIDs := make([]int64, 0, len(items))
+		for _, item := range items {
+			teamIDs = append(teamIDs, item.TeamID)
+		}
+		names, err = tx.TeamNames(ctx, id.TenantID, contestID, teamIDs)
 		return err
 	}); err != nil {
 		return nil, 0, page, size, err
 	}
 	out := make([]CheatRecordDTO, 0, len(items))
 	for _, item := range items {
-		out = append(out, cheatDTOFromModel(item))
+		record := cheatDTOFromModel(item)
+		record.TeamName = names[item.TeamID]
+		out = append(out, record)
 	}
 	return out, total, page, size, nil
 }

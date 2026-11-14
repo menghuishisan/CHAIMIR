@@ -78,8 +78,8 @@ func (a experimentAPI) listTeacherInstances(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListTeacherInstances(c.Request.Context(), status, page, size)
-	httpx.WritePage(c, out, total, p, s, err)
+	out, total, p, s, facets, err := a.svc.ListTeacherInstances(c.Request.Context(), status, page, size)
+	httpx.WritePageWithFacets(c, out, total, p, s, facets.Map(), err)
 }
 
 // getExperiment 读取教师可管理的实验定义,只允许作者或学校管理员访问。
@@ -162,8 +162,8 @@ func (a experimentAPI) listExperiments(c *gin.Context) {
 		return
 	}
 	keyword := strings.TrimSpace(c.Query("keyword"))
-	out, total, p, s, err := a.svc.ListExperiments(c.Request.Context(), courseID, status, keyword, page, size)
-	httpx.WritePage(c, out, total, p, s, err)
+	out, total, p, s, facets, err := a.svc.ListExperiments(c.Request.Context(), courseID, status, keyword, page, size)
+	httpx.WritePageWithFacets(c, out, total, p, s, facets.Map(), err)
 }
 
 // createExperiment 绑定创建实验草稿请求。
@@ -361,8 +361,8 @@ func (a experimentAPI) listReports(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListReports(c.Request.Context(), id, status, page, size)
-	httpx.WritePage(c, out, total, p, s, err)
+	out, total, p, s, facets, err := a.svc.ListReports(c.Request.Context(), id, status, page, size)
+	httpx.WritePageWithFacets(c, out, total, p, s, facets.Map(), err)
 }
 
 // issueReportAccess 校验报告编号后签发教师一次性下载授权。

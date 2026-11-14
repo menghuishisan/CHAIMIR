@@ -117,6 +117,32 @@ func (s *txStore) CountStudentAttempts(ctx context.Context, tenantID, assignment
 	return s.q.CountStudentAttempts(ctx, sqlcgen.CountStudentAttemptsParams{TenantID: tenantID, AssignmentID: assignmentID, StudentID: studentID})
 }
 
+// CountSubmittersByAssignments 按作业编号一次聚合已交人数与待批改人数(按学生去重,看最近一次提交)。
+func (s *txStore) CountSubmittersByAssignments(ctx context.Context, tenantID int64, assignmentIDs []int64) (map[int64]AssignmentSubmissionStatsDTO, error) {
+	rows, err := s.q.CountSubmittersByAssignments(ctx, sqlcgen.CountSubmittersByAssignmentsParams{TenantID: tenantID, AssignmentIds: assignmentIDs})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]AssignmentSubmissionStatsDTO, len(rows))
+	for _, row := range rows {
+		out[row.AssignmentID] = AssignmentSubmissionStatsDTO{SubmittedCount: row.SubmittedCount, PendingCount: row.PendingCount}
+	}
+	return out, nil
+}
+
+// SummarizeStudentSubmissionsByAssignments 按作业编号一次聚合本人已用次数与最近一次提交的状态;没交过的作业不出现在结果里。
+func (s *txStore) SummarizeStudentSubmissionsByAssignments(ctx context.Context, tenantID, studentID int64, assignmentIDs []int64) (map[int64]MyAssignmentSubmissionDTO, error) {
+	rows, err := s.q.SummarizeStudentSubmissionsByAssignments(ctx, sqlcgen.SummarizeStudentSubmissionsByAssignmentsParams{TenantID: tenantID, StudentID: studentID, AssignmentIds: assignmentIDs})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]MyAssignmentSubmissionDTO, len(rows))
+	for _, row := range rows {
+		out[row.AssignmentID] = MyAssignmentSubmissionDTO{Attempts: row.Attempts, LatestStatus: row.LatestStatus}
+	}
+	return out, nil
+}
+
 // CreateSubmission 创建正式提交。
 func (s *txStore) CreateSubmission(ctx context.Context, sub Submission) (Submission, error) {
 	content, err := encodeMap(sub.ContentRef)
@@ -186,6 +212,19 @@ func (s *txStore) ListSubmissionsByAssignment(ctx context.Context, query Submiss
 		out = append(out, item)
 	}
 	return out, total, nil
+}
+
+// CountSubmissionsByStatusAndLate 按状态与是否迟交聚合一份作业的提交;studentID 非 0 时只数本人。
+func (s *txStore) CountSubmissionsByStatusAndLate(ctx context.Context, tenantID, assignmentID, studentID int64) ([]submissionFacetRow, error) {
+	rows, err := s.q.CountSubmissionsByStatusAndLate(ctx, sqlcgen.CountSubmissionsByStatusAndLateParams{TenantID: tenantID, AssignmentID: assignmentID, StudentID: studentID})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]submissionFacetRow, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, submissionFacetRow{Status: row.Status, IsLate: row.IsLate, Count: row.Count})
+	}
+	return out, nil
 }
 
 // UpdateSubmissionManualGrade 更新教师批改分。
@@ -288,6 +327,15 @@ func (s *txStore) RetryJudgeOutbox(ctx context.Context, tenantID, id int64, maxA
 		return JudgeOutbox{}, err
 	}
 	return outboxFromRow(row)
+}
+
+// RevokeSubmissionAutoScore 判题执行失败时撤销本次提交的自动分与最终分,保留人工分,回到已提交(等待判题恢复)。
+func (s *txStore) RevokeSubmissionAutoScore(ctx context.Context, tenantID, submissionID int64) (Submission, error) {
+	row, err := s.q.RevokeSubmissionAutoScore(ctx, sqlcgen.RevokeSubmissionAutoScoreParams{TenantID: tenantID, ID: submissionID})
+	if err != nil {
+		return Submission{}, err
+	}
+	return submissionFromRow(row)
 }
 
 // MarkJudgeOutboxResult 回写单题判题结果。

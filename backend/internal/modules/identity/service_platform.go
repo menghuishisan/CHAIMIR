@@ -207,17 +207,18 @@ func (s *Service) GetApplicationByPlatform(ctx context.Context, appID int64) (Te
 // ListTenantsByPlatform 分页读取平台租户列表,用于 SaaS 平台学校管理页。
 // status 传 0、keyword 传空串表示该维度不过滤;过滤与计数都在服务端完成,
 // 前端不得再对当前页做二次筛选(否则分页与总数会自相矛盾)。
-func (s *Service) ListTenantsByPlatform(ctx context.Context, status int16, keyword string, page, size int) ([]TenantDTO, int64, int, int, error) {
+func (s *Service) ListTenantsByPlatform(ctx context.Context, status int16, keyword string, page, size int) ([]TenantDTO, int64, int, int, pagex.Facets, error) {
 	if err := s.ensurePlatformLayerEnabled(); err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	id, ok := tenant.FromContext(ctx)
 	if !ok || !id.IsPlatform {
-		return nil, 0, page, size, apperr.ErrForbidden
+		return nil, 0, page, size, nil, apperr.ErrForbidden
 	}
 	page, size = pagex.Normalize(page, size)
 	var rows []Tenant
 	var total int64
+	var byStatus pagex.FacetGroup
 	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 		items, count, err := tx.ListTenants(ctx, TenantListQuery{
 			Status:  status,
@@ -230,19 +231,21 @@ func (s *Service) ListTenantsByPlatform(ctx context.Context, status int16, keywo
 		}
 		rows = items
 		total = count
-		return nil
+		// 状态分段计数:套用关键词,不套用状态筛选
+		byStatus, err = tx.CountTenantsByStatus(ctx, strings.TrimSpace(keyword))
+		return err
 	}); err != nil {
-		return nil, 0, page, size, apperr.ErrInternal.WithCause(err)
+		return nil, 0, page, size, nil, apperr.ErrInternal.WithCause(err)
 	}
 	out := make([]TenantDTO, 0, len(rows))
 	for _, row := range rows {
 		dto, err := ToTenantDTO(row)
 		if err != nil {
-			return nil, 0, page, size, err
+			return nil, 0, page, size, nil, err
 		}
 		out = append(out, dto)
 	}
-	return out, total, page, size, nil
+	return out, total, page, size, pagex.Facets{"status": byStatus}, nil
 }
 
 // GetTenantByPlatform 读取单个租户详情,用于平台管理员管理学校状态。

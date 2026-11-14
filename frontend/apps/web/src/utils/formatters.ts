@@ -21,6 +21,17 @@ const DATE_TIME_FORMAT = new Intl.DateTimeFormat('zh-CN', {
   minute: '2-digit',
 })
 
+/** 审计、日志类页面的完整时间精确到秒;固定 24 小时制,午夜写 00 而不是 24。 */
+const DATE_TIME_SECONDS_FORMAT = new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+})
+
 /** 时间流族的事件轴按天分组,左列只需时刻(规范 §6.5.3 第 ⑥ 族)。 */
 const TIME_FORMAT = new Intl.DateTimeFormat('zh-CN', {
   hour: '2-digit',
@@ -69,6 +80,12 @@ export function formatTime(value: string): string {
 export function formatDateTime(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? UNKNOWN_TIME : DATE_TIME_FORMAT.format(date)
+}
+
+/** formatDateTimeSeconds 展示精确到秒的完整时间(审计、日志类页面;相对时间只作补充)。 */
+export function formatDateTimeSeconds(value: string): string {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? UNKNOWN_TIME : DATE_TIME_SECONDS_FORMAT.format(date)
 }
 
 /**

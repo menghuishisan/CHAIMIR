@@ -1,131 +1,94 @@
-// 漏洞题源页(平台侧栏,/platform-admin/vulnerabilities)。
+// 漏洞题源(平台侧栏,/platform-admin/vulnerabilities)。设计 §7.6:
+// 页头 +「添加全局来源」;列表行显示来源名、类型、启用状态、上次同步时间;整行打开来源编辑抽屉;
+// 密钥类配置不回显(由后端加密保存)。指标条、平铺属性的卡片和常驻说明卡去掉。
 //
-// 这里只维护「全平台共享的漏洞来源」:tenant_id=0 的全局源,所有学校都能从它同步案例。
-// 边界在后端就是分开的两组路由 —— 平台组只有 GET/POST /contest/platform/vuln-sources,
-// 同步案例(POST /vuln-sources/{id}/sync)、漏洞题草稿、预验证与固化都在 teacher 组,
-// 是租户内的出题工作流。故本页不出现这些动作(对齐清单 §3.4)。
-//
-// 表单与教师侧共用同一实现,只是落到不同归属,由 global 显式声明。
+// 这里只维护全平台共享的来源(所有学校的教师都能从它同步案例)。同步案例、做成赛题、预验证与确认
+// 都是学校内的出题工作,在教师端的漏洞题工坊完成,平台这里不出现这些动作。
 
-import { useMemo, useState } from 'react'
-import { Database, Plus, Settings2 } from 'lucide-react'
-import { type VulnSource } from '@chaimir/api-client'
-import {
-  Badge,
-  Button,
-  Callout,
-  Card,
-  CardBody,
-  CardHeader,
-  DescriptionList,
-  MetricStrip,
-  PageHeader,
-  PageScaffold,
-  PageSection,
-  Skeleton,
-} from '@chaimir/ui'
+import { useState } from 'react'
+import { Database, Plus } from 'lucide-react'
+import type { VulnSource } from '@chaimir/api-client'
+import { Button, ListRow, PageHeader, PageScaffold, Skeleton, StatusIndicator } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
-import { formatDateTime } from '../../../../utils/formatters'
-import { vulnLevelLabel, vulnSourceTypeLabel } from '../../../../utils/labels/contest'
+import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
+import { vulnSourceTypeLabel } from '../../../../utils/labels/contest'
 import { VulnSourceFormModal } from '../../components/VulnSourceFormModal'
-import { VULN_SOURCE_CONFIG_FIELDS } from '../../vulnerabilityContract'
-import { readString } from '../../jsonReaders'
 
-/**
- * PlatformVulnerabilitiesPage 维护全平台共享的漏洞来源。
- */
+/** PlatformVulnerabilitiesPage 全局漏洞来源清单,整行打开编辑抽屉 */
 export default function PlatformVulnerabilitiesPage() {
-  const [formTarget, setFormTarget] = useState<{ source?: VulnSource } | undefined>()
-
+  const [target, setTarget] = useState<{ source?: VulnSource }>()
   const sources = useAsyncResource(
     () => api.contest.listPlatformVulnSources(),
     [],
-    (value) => value.length === 0,
+    (list) => list.length === 0
   )
-
-  const stats = useMemo(() => {
-    if ((sources.status !== 'success' && sources.status !== 'empty') || !sources.data) return undefined
-    const list = sources.data
-    return {
-      total: list.length,
-      enabled: list.filter((item) => item.enabled).length,
-      synced: list.filter((item) => item.last_sync_at !== undefined).length,
-    }
-  }, [sources.data, sources.status])
+  const total = sources.status === 'success' ? sources.data?.length : undefined
 
   return (
     <PageScaffold>
       <PageHeader
         title="漏洞题源"
-        description="全平台共享的漏洞案例来源。学校的教师从这些来源同步案例,再转化成本校的赛题。"
+        meta={total !== undefined ? [{ value: `${total} 个全局来源` }] : undefined}
         actions={
-          <Button variant="primary" leftIcon={Plus} onClick={() => setFormTarget({})}>
+          <Button variant="primary" leftIcon={Plus} onClick={() => setTarget({})}>
             添加全局来源
           </Button>
         }
       />
 
-      {/*
-        归族:资源列表族的卡片网格形态(§6.5.3 第 ① 族 + §6.5.2 第二条出路)。
-        数据区本身就是一排 Card(已是抬起片),故不再套 DataPanel —— 那会成为片里套片。
-        指标降为内联摘要;三项由全部来源算出而不是页面切片:接口不分页、一次回齐(§6.5.4)。
-      */}
-      <MetricStrip
-        label="全局来源摘要"
-        className="mb-5"
-        items={[
-          { label: '全局来源', value: stats?.total, hint: '全平台共享' },
-          { label: '已启用', value: stats?.enabled, hint: '学校可以从它同步' },
-          { label: '曾同步过', value: stats?.synced, hint: '有同步记录的来源' },
-        ]}
-      />
-
-      <PageSection
-        title="全局来源"
-        description="来源是一个返回漏洞案例列表的公开接口。密钥类配置由后端加密保存,不回显。"
+      <ResourceState
+        resource={sources}
+        emptyIcon={Database}
+        emptyTitle="还没有配置全局漏洞来源"
+        emptyDescription="配置后,所有学校的教师都能从这里同步漏洞案例做成赛题。"
+        emptyAction={
+          <Button variant="primary" leftIcon={Plus} onClick={() => setTarget({})}>
+            添加全局来源
+          </Button>
+        }
+        skeleton={<Skeleton variant="line" lines={4} />}
       >
-        <div className="flex flex-col gap-4">
-          <ResourceState
-            resource={sources}
-            emptyIcon={Database}
-            emptyTitle="还没有配置全局漏洞来源"
-            emptyDescription="配置后所有学校的教师都能从这里同步漏洞案例做成赛题。"
-            emptyAction={
-              <Button variant="primary" leftIcon={Plus} onClick={() => setFormTarget({})}>
-                添加全局来源
-              </Button>
-            }
-            skeleton={<Skeleton variant="line" lines={4} />}
-          >
-            {(items) => (
-              <div className={items.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
-                {items.map((source) => (
-                  <VulnSourceCard
-                    key={source.id}
-                    source={source}
-                    onEdit={() => setFormTarget({ source })}
-                  />
-                ))}
-              </div>
-            )}
-          </ResourceState>
+        {(items) => (
+          <ul className="divide-y divide-line rounded-lg bg-surface px-2 py-1 shadow-xs">
+            {items.map((source) => (
+              <li key={source.id}>
+                <ListRow
+                  title={source.name}
+                  meta={
+                    <span>
+                      {vulnSourceTypeLabel(source.type)} ·{' '}
+                      {source.last_sync_at ? (
+                        <span title={formatDateTime(source.last_sync_at)}>
+                          {formatRelativeOccurrence(source.last_sync_at)}同步过
+                        </span>
+                      ) : (
+                        '还没有学校同步过'
+                      )}
+                    </span>
+                  }
+                  trailing={
+                    <StatusIndicator
+                      tone={source.enabled ? 'success' : 'neutral'}
+                      label={source.enabled ? '已启用' : '已停用'}
+                    />
+                  }
+                  onSelect={() => setTarget({ source })}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+      </ResourceState>
 
-          <Callout tone="info">
-            同步案例、预验证与固化进题库都是学校内的出题工作,由教师在漏洞题工坊完成 ——
-            平台这里只负责来源本身可用。
-          </Callout>
-        </div>
-      </PageSection>
-
-      {formTarget ? (
+      {target ? (
         <VulnSourceFormModal
-          source={formTarget.source}
+          source={target.source}
           global
-          onClose={() => setFormTarget(undefined)}
+          onClose={() => setTarget(undefined)}
           onSaved={() => {
-            setFormTarget(undefined)
+            setTarget(undefined)
             sources.reload()
           }}
         />
@@ -133,57 +96,3 @@ export default function PlatformVulnerabilitiesPage() {
     </PageScaffold>
   )
 }
-
-interface VulnSourceCardProps {
-  source: VulnSource
-  onEdit: () => void
-}
-
-/**
- * VulnSourceCard 展示单个全局来源的配置概要。
- * 同步按钮不在这里:同步是租户动作,落到本校的漏洞题草稿上,平台没有归属可落。
- */
-function VulnSourceCard({ source, onEdit }: VulnSourceCardProps) {
-  const endpoint = readString(source.config, VULN_SOURCE_CONFIG_FIELDS.endpoint)
-  const method = readString(source.config, VULN_SOURCE_CONFIG_FIELDS.method)
-
-  return (
-    <Card>
-      <CardHeader
-        title={source.name}
-        description={vulnSourceTypeLabel(source.type)}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="jade">全平台共享</Badge>
-            {source.enabled ? <Badge tone="success">已启用</Badge> : <Badge tone="neutral">已停用</Badge>}
-          </div>
-        }
-      />
-      <CardBody className="flex flex-col gap-3">
-        <DescriptionList
-          dense
-          items={[
-            { term: '默认分级', description: vulnLevelLabel(source.default_level) },
-            { term: '来源地址', description: endpoint || '未配置', mono: true },
-            { term: '获取方式', description: method || 'GET' },
-            {
-              term: '上次同步',
-              description: source.last_sync_at ? formatDateTime(source.last_sync_at) : '尚未同步',
-              mono: true,
-            },
-          ]}
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="ghost" size="sm" leftIcon={Settings2} onClick={onEdit}>
-            修改配置
-          </Button>
-          {source.enabled ? null : (
-            <span className="text-sm text-ink-sub">停用后学校不能再从这个来源同步。</span>
-          )}
-        </div>
-      </CardBody>
-    </Card>
-  )
-}
-
-/** readString 从来源配置里读字符串字段;被后端脱敏的字段回空串,不把掩码对象抛到界面上。 */

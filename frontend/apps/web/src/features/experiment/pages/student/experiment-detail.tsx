@@ -31,6 +31,7 @@ import {
   Skeleton,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { collectAllPages } from '../../../../utils/allPages'
 import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePageLocation, locationLabel } from '../../../../hooks'
 import { experimentCollabModeLabel } from '../../../../utils/labels/experiment'
@@ -83,12 +84,12 @@ function ExperimentDetailContent({ experiment }: { experiment: StudentExperiment
 
   // 所属课程名:用学生自己的课程列表解析(一学期几门课,一页取完);读不到时不显示这一项
   const courses = useAsyncResource(
-    () => api.teaching.getCourses({ role: 'student', size: PAGINATION_MAX_SIZE }),
+    () => collectAllPages((params) => api.teaching.getCourses({ role: 'student', ...params }), PAGINATION_MAX_SIZE),
     [],
     () => false,
   )
   const courseName = useMemo(
-    () => courses.data?.list.find((course) => course.id === experiment.course_id)?.name,
+    () => courses.data?.find((course) => course.id === experiment.course_id)?.name,
     [courses.data, experiment.course_id],
   )
 

@@ -1,8 +1,7 @@
 // 我的课程(学生登录后的第一页,/student/courses)。设计 §7.2:
 // 学生来这里是为了找到正在上的课进入学习,偶尔用邀请码加入新课;一学期 3–8 门。
 // 所以主体是卡片网格(整卡链向课程详情),状态分段写进地址;网格末尾一张「加入新课程」小卡。
-// 学习进度需要课时总数,只有单课程 outline 同时给出;逐门课请求会让一页发二十次请求,
-// 因此进度只在课程详情显示(数据缺口见设计 §10,第 16 批补齐)。
+// 每张卡片带本人学习进度与授课教师:列表接口按当前页一次聚合给出,不逐门课取大纲。
 
 import { useCallback, useEffect, useId, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
@@ -25,6 +24,7 @@ import {
   PageHeader,
   PageScaffold,
   Pagination,
+  Progress,
   SegmentedControl,
   Skeleton,
   StatusIndicator,
@@ -35,6 +35,7 @@ import { api } from '../../../../app/api'
 import { ResourceError } from '../../../../components/ResourceState'
 import { usePagedResource, useResourceTotal, useUrlState } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
+import { segmentCounts } from '../../../../utils/facets'
 import { formatDateRange } from '../../../../utils/formatters'
 import { courseStatusLabel, courseTypeLabel } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -105,6 +106,11 @@ export default function StudentCoursesPage() {
     return () => window.clearTimeout(timer)
   }, [courses.data, courses.status, pendingHighlight])
 
+  // 分段计数取列表接口的 facets(不套用状态筛选);读取中或失败时不显示数字
+  const facets = courses.status === 'success' || courses.status === 'empty' ? courses.data?.facets : undefined
+  const statusCounts = segmentCounts(facets, 'status', STATUS_SEGMENTS, (item) =>
+    item.value === 'all' ? undefined : Number(item.value),
+  )
   const list = courses.data?.list ?? []
   const showGrid = courses.status === 'success' || (courses.status === 'loading' && list.length > 0)
   const filtered = status !== 'all'
@@ -123,7 +129,7 @@ export default function StudentCoursesPage() {
       <div className="mb-5">
         <SegmentedControl
           aria-label="按课程状态筛选"
-          options={STATUS_SEGMENTS.map((item) => ({ value: item.value, label: item.label }))}
+          options={STATUS_SEGMENTS.map((item) => ({ value: item.value, label: item.label, count: statusCounts[item.value] }))}
           value={status ?? ''}
           onValueChange={(value) => setQuery({ status: value })}
         />
@@ -192,8 +198,29 @@ interface CourseCardProps {
 
 /**
  * CourseCard 一门课:纸材质封面条与课程类型题识(列表不逐行换取真实封面,规范 §1.3)、课程名、
- * 学期 · 学分 · 类型、状态、开课区间;整卡是一个链向课程详情的真实链接。
+ * 授课教师、学期 · 学分 · 类型、状态、本人学习进度、开课区间;整卡是一个链向课程详情的真实链接。
+ * 进度来自列表接口按当前页一次聚合的 my_progress,不逐门课取大纲。
  */
+/**
+ * CourseProgressLine 本人学习进度:「已学完 n/m 课时」与进度条;还没有课时的课不画进度条,只写一句说明。
+ * 课时数可能有几十个,用进度条而不是链式区块(区块只用于检查点、步骤这类少量可枚举的进度)。
+ */
+function CourseProgressLine({ progress }: { progress: Course['my_progress'] }) {
+  if (!progress) return null
+  if (progress.lesson_count === 0) return <p className="text-xs text-ink-sub">老师还没有排课时</p>
+  const percent = (progress.completed_count / progress.lesson_count) * 100
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-xs tabular-nums text-ink-sub">
+        已学完 {progress.completed_count}/{progress.lesson_count} 课时
+      </p>
+      {/* 文字已写明 n/m,进度条不再重复标签;读屏名由组件给出 */}
+      <Progress value={percent} tone={progress.completed_count === progress.lesson_count ? 'success' : 'primary'} />
+    </div>
+  )
+}
+
+/** CourseCard 一门课的卡片:封面、课程名、授课教师与本人进度,整卡链到课程详情 */
 function CourseCard({ course, highlighted, onOpen }: CourseCardProps) {
   const cover = courseTypeCover(course.type)
   const href = `/student/courses/${course.id}`
@@ -224,9 +251,11 @@ function CourseCard({ course, highlighted, onOpen }: CourseCardProps) {
           </Link>
           <StatusIndicator tone={courseStatusTone(course.status)} label={courseStatusLabel(course.status)} />
         </div>
+        {course.teacher_name ? <p className="text-sm text-ink">{course.teacher_name} 老师</p> : null}
         <p className="text-sm text-ink-sub">
           {course.semester} · {course.credits} 学分 · {courseTypeLabel(course.type)}
         </p>
+        <CourseProgressLine progress={course.my_progress} />
         <p className="mt-auto pt-2 font-mono text-xs tabular-nums text-ink-sub">{formatDateRange(course.start_at, course.end_at)}</p>
       </div>
     </Card>

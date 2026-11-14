@@ -27,6 +27,7 @@ function formatTime(date: Date): string {
   return `${hours}:${minutes}`;
 }
 
+/** Autosave 自动保存状态指示(配合服务端草稿) */
 export function Autosave({ state, savedAt, onRetry, className }: AutosaveProps) {
   return (
     // aria-live 常驻容器:内容变化时读屏播报;min-h 保证 idle 态占位不塌陷

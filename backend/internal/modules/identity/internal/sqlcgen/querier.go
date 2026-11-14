@@ -14,12 +14,18 @@ type Querier interface {
 	ArchiveClassesByEnrollmentYear(ctx context.Context, arg ArchiveClassesByEnrollmentYearParams) error
 	ArchiveStudentAccountsByEnrollmentYear(ctx context.Context, arg ArchiveStudentAccountsByEnrollmentYearParams) error
 	BatchGetAccounts(ctx context.Context, dollar_1 []int64) ([]BatchGetAccountsRow, error)
+	// 平台操作记录(配置变更、场景审核)只存管理员编号;平台页面按一页编号一次解析姓名。
+	BatchGetPlatformAdminNames(ctx context.Context, ids []int64) ([]BatchGetPlatformAdminNamesRow, error)
 	ClaimTenantProvisionOutbox(ctx context.Context, arg ClaimTenantProvisionOutboxParams) ([]TenantProvisionOutbox, error)
 	ClassExists(ctx context.Context, arg ClassExistsParams) (bool, error)
 	ClearPasswordFailure(ctx context.Context, arg ClearPasswordFailureParams) error
+	// 账号管理列表的状态分段计数:套用身份、班级与关键词筛选,不套用状态筛选;口径同 ListAccounts(未删除)。
+	CountAccountsByStatus(ctx context.Context, arg CountAccountsByStatusParams) ([]CountAccountsByStatusRow, error)
 	CountActiveRoleAccounts(ctx context.Context, arg CountActiveRoleAccountsParams) (int64, error)
 	CountClassStudents(ctx context.Context, arg CountClassStudentsParams) (int64, error)
 	CountPendingImportPreviews(ctx context.Context, arg CountPendingImportPreviewsParams) (int64, error)
+	// 学校管理列表的状态分段计数:套用关键词筛选,不套用状态筛选。
+	CountTenantsByStatus(ctx context.Context, keyword string) ([]CountTenantsByStatusRow, error)
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (Account, error)
 	CreateAccountProfile(ctx context.Context, arg CreateAccountProfileParams) error
 	CreateAccountRole(ctx context.Context, arg CreateAccountRoleParams) error
@@ -87,6 +93,7 @@ type Querier interface {
 	PlatformStats(ctx context.Context) (PlatformStatsRow, error)
 	PromoteClassStudentProfiles(ctx context.Context, arg PromoteClassStudentProfilesParams) error
 	PromoteClasses(ctx context.Context, arg PromoteClassesParams) (int64, error)
+	// 动作下拉的分组计数:套用学校、操作人、对象类型与时间范围,不套用动作筛选(接口总览「分段计数」)。
 	QueryAuditActionFacets(ctx context.Context, arg QueryAuditActionFacetsParams) ([]QueryAuditActionFacetsRow, error)
 	QueryAuditLogs(ctx context.Context, arg QueryAuditLogsParams) ([]QueryAuditLogsRow, error)
 	RecordPasswordFailure(ctx context.Context, arg RecordPasswordFailureParams) (Account, error)

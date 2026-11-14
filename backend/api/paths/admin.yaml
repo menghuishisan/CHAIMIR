@@ -28,6 +28,7 @@
   get:
     tags: [admin]
     summary: 备份记录分页列表
+    description: facets.status：备份状态分段计数。
     operationId: adminListBackups
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]
@@ -54,23 +55,35 @@
   get:
     tags: [admin]
     summary: 跨模块审计聚合查询
+    description: tenant_id 只对平台身份生效，按学校筛选（省略为全平台，含平台自身记录）；学校身份固定为本校，忽略该参数。facets.action：按动作分组计数，套用学校、操作人、对象类型与时间范围，不套用动作筛选。每条带 actor_name（学校账号另带 actor_no）：学校身份解析本校账号，平台身份只解析平台管理员。
     operationId: adminQueryAudit
     x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
     parameters:
+      - { name: tenant_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
       - { name: actor_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
       - { name: action, in: query, schema: { type: string } }
       - { name: target_type, in: query, schema: { type: string } }
       - { $ref: "#/components/parameters/FromQuery" }
       - { $ref: "#/components/parameters/ToQuery" }
+      - { $ref: "#/components/parameters/PageQuery" }
+      - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/audit/export:
   get:
     tags: [admin]
     summary: 创建审计 CSV 导出任务
+    description: 筛选参数与审计查询相同（不分页），导出范围与查询共用同一身份边界并在创建时冻结。
     operationId: adminExportAudit
     x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
+    parameters:
+      - { name: tenant_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
+      - { name: actor_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
+      - { name: action, in: query, schema: { type: string } }
+      - { name: target_type, in: query, schema: { type: string } }
+      - { $ref: "#/components/parameters/FromQuery" }
+      - { $ref: "#/components/parameters/ToQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/configs:
   get:
@@ -79,7 +92,7 @@
     operationId: adminListConfigs
     x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
-    parameters: [{ name: scope, in: query, schema: { type: string } }]
+    parameters: [{ name: scope, in: query, description: 平台身份只读全平台配置（省略或 1），学校身份固定为本校并忽略该参数, schema: { type: integer, minimum: 0, maximum: 2 } }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/admin/configs/{key}:
   get:
@@ -103,6 +116,7 @@
   get:
     tags: [admin]
     summary: 配置变更历史
+    description: 每条带操作人姓名 operator_name（平台配置解析平台管理员，学校配置解析本校账号；账号已移除时省略）。
     operationId: adminConfigHistory
     x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]
@@ -148,6 +162,7 @@
   get:
     tags: [admin]
     summary: 告警事件分页列表
+    description: facets.status：告警状态分段计数，套用级别与学校范围、不套用状态筛选。
     operationId: adminListAlertEvents
     x-chaimir-audience: platform-admin-or-school-admin
     security: [{ bearerAuth: [] }]

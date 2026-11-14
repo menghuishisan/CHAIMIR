@@ -302,11 +302,13 @@ function ChapterCard({
   onDeleteLesson,
 }: ChapterCardProps) {
   const columns: TableColumn<Lesson>[] = [
+    // 序号是窄的数字列:定宽,各章的课时表上下对齐,也不把它摊成一大片空白
     {
       key: 'sort',
       header: '序号',
       align: 'right',
       mono: true,
+      width: '88px',
       render: (lesson) => lessons.indexOf(lesson) + 1,
     },
     {

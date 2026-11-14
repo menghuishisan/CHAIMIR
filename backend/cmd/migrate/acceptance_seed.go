@@ -1019,6 +1019,8 @@ func acceptanceBattleReplayActions() []contracts.JudgeReplayAction {
 
 // acceptanceBattleReplayArchive 构造与 M8 正式归档协议一致的历史对局回放。
 
+// acceptanceBattleReplayArchive 生成验收对抗赛那一局的回放归档(版本、对局与判题任务编号、双方参战物版本与产物摘要、
+// 链上动作序列);种子把它写进对象存储,回放页按它重建时间轴。
 func acceptanceBattleReplayArchive(artifactAHash, artifactBHash string) map[string]any {
 	return map[string]any{
 		"version":    1,
