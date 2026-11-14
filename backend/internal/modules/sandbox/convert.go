@@ -3,6 +3,7 @@ package sandbox
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"chaimir/internal/contracts"
@@ -12,19 +13,11 @@ import (
 	"chaimir/pkg/apperr"
 )
 
-// sandboxInfoFromModel 把内部沙箱快照转换为跨模块摘要。
-func sandboxInfoFromModel(sb Sandbox, runtime Runtime, image RuntimeImage, tools []SandboxTool) contracts.SandboxInfo {
-	instances := []string{}
-	var snapshot contracts.SandboxCompositionSnapshot
-	if len(sb.CompositionSnapshot) > 0 && json.Unmarshal(sb.CompositionSnapshot, &snapshot) == nil {
-		for _, item := range snapshot.Runtimes {
-			if value := strings.TrimSpace(item.InstanceCode); value != "" {
-				instances = append(instances, value)
-			}
-		}
-	}
-	if len(instances) == 0 {
-		instances = []string{runtime.Code}
+// sandboxInfoFromModel 把内部沙箱快照转换为跨模块摘要;运行时实例列表取自已校验的组合快照。
+func sandboxInfoFromModel(sb Sandbox, snapshot contracts.SandboxCompositionSnapshot, runtime Runtime, image RuntimeImage, tools []SandboxTool) contracts.SandboxInfo {
+	instances := make([]string, 0, len(snapshot.Runtimes))
+	for _, item := range snapshot.Runtimes {
+		instances = append(instances, strings.TrimSpace(item.InstanceCode))
 	}
 	return contracts.SandboxInfo{
 		SandboxID:           sb.ID,
@@ -110,24 +103,25 @@ func sandboxCapabilitiesFromModel(runtime Runtime, tools []SandboxTool, register
 	return out
 }
 
-// sandboxCapabilitiesFromSnapshot 合并组合内所有运行时实例的工作区与链能力,避免工作台只看到首个实例。
-func sandboxCapabilitiesFromSnapshot(sb Sandbox, fallback Runtime, tools []SandboxTool, registered map[string]ChainCapability) contracts.SandboxCapabilities {
-	var snapshot contracts.SandboxCompositionSnapshot
-	if len(sb.CompositionSnapshot) == 0 || json.Unmarshal(sb.CompositionSnapshot, &snapshot) != nil || len(snapshot.Runtimes) == 0 {
-		return sandboxCapabilitiesFromModel(fallback, tools, registered)
+// sandboxCapabilitiesFromSnapshot 按冻结的组合快照合并所有运行时实例的工作区与链能力,避免工作台只看到首个实例。
+// 快照是唯一事实来源:没有运行时或声明读不出即报错,不用工作区运行时冒充整套组合。
+func sandboxCapabilitiesFromSnapshot(snapshot contracts.SandboxCompositionSnapshot, tools []SandboxTool, registered map[string]ChainCapability) (contracts.SandboxCapabilities, error) {
+	if len(snapshot.Runtimes) == 0 {
+		return contracts.SandboxCapabilities{}, fmt.Errorf("沙箱组合快照缺少运行时")
 	}
 	out := contracts.SandboxCapabilities{ChainOperations: []string{}}
 	seenOps := map[string]struct{}{}
 	for _, frozen := range snapshot.Runtimes {
-		runtime := fallback
-		runtime.Code = frozen.Code
-		runtime.AdapterLevel = frozen.AdapterLevel
-		runtime.CapabilityImpl = frozen.CapabilityImpl
-		runtime.PluginRef = frozen.PluginRef
-		if len(frozen.AdapterSpec) > 0 {
-			if err := json.Unmarshal(frozen.AdapterSpec, &runtime.AdapterSpec); err != nil {
-				return sandboxCapabilitiesFromModel(fallback, tools, registered)
-			}
+		runtime := Runtime{
+			ID:             frozen.RuntimeID,
+			Code:           frozen.Code,
+			Eco:            frozen.Eco,
+			AdapterLevel:   frozen.AdapterLevel,
+			CapabilityImpl: frozen.CapabilityImpl,
+			PluginRef:      frozen.PluginRef,
+		}
+		if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &runtime.AdapterSpec); err != nil {
+			return contracts.SandboxCapabilities{}, fmt.Errorf("读取运行时 %s 的冻结声明失败: %w", frozen.InstanceCode, err)
 		}
 		item := sandboxCapabilitiesFromModel(runtime, tools, registered)
 		out.FileWorkspace = out.FileWorkspace || item.FileWorkspace
@@ -141,7 +135,7 @@ func sandboxCapabilitiesFromSnapshot(sb Sandbox, fallback Runtime, tools []Sandb
 			out.ChainOperations = append(out.ChainOperations, operation)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // runtimeResponseFromModel 将运行时内部模型转换为 HTTP 稳定字段名。
@@ -165,14 +159,16 @@ func runtimeResponseFromModel(item Runtime) (RuntimeResponse, error) {
 	}, nil
 }
 
-// runtimeResponsesFromModels 批量转换运行时列表。
-func runtimeResponsesFromModels(items []Runtime) ([]RuntimeResponse, error) {
+// runtimeResponsesFromModels 批量转换运行时列表,每条带上可用镜像版本数(没有可用镜像的记 0)。
+func runtimeResponsesFromModels(items []Runtime, availableImages map[int64]int64) ([]RuntimeResponse, error) {
 	out := make([]RuntimeResponse, 0, len(items))
 	for _, item := range items {
 		response, err := runtimeResponseFromModel(item)
 		if err != nil {
 			return nil, err
 		}
+		count := availableImages[item.ID]
+		response.AvailableImageCount = &count
 		out = append(out, response)
 	}
 	return out, nil

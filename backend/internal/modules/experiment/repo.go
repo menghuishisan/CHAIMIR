@@ -43,6 +43,7 @@ type TxStore interface {
 	ListGroupMembers(context.Context, int64, int64) ([]GroupMember, error)
 	GetGroupMember(context.Context, int64, int64, int64) (GroupMember, error)
 	ListStudentGroupsForExperiments(context.Context, int64, int64, []int64) (map[int64]int64, error)
+	ListStudentLatestInstancesForExperiments(context.Context, int64, int64, []int64) (map[int64]StudentExperimentProgressDTO, error)
 	UpsertGroupMember(context.Context, GroupMember) (GroupMember, error)
 	DeleteGroupMember(context.Context, int64, int64, int64) error
 	LockInstanceCreation(context.Context, int64) error
@@ -68,6 +69,10 @@ type TxStore interface {
 	GetReport(context.Context, int64, int64) (ExperimentReport, error)
 	GetReportByInstanceStudent(context.Context, int64, int64, int64) (ExperimentReport, error)
 	ListReports(context.Context, int64, int64, int16, int, int) ([]ExperimentReport, int64, error)
+	// CountExperimentsByStatus、CountReportsByStatus、CountTeacherInstancesByStatus 是对应列表的状态分段计数
+	CountExperimentsByStatus(context.Context, int64, int64, string) ([]statusCount, error)
+	CountReportsByStatus(context.Context, int64, int64) ([]statusCount, error)
+	CountTeacherInstancesByStatus(context.Context, int64, int64) ([]statusCount, error)
 	SumScores(context.Context, int64, int64) (float64, error)
 	HasPendingInstanceReports(context.Context, int64, int64) (bool, error)
 	Stats(context.Context, int64, int64) (ExperimentStatsSnapshot, error)
@@ -267,6 +272,23 @@ func (tx *txStore) GetGroupMember(ctx context.Context, tenantID, groupID, studen
 		return GroupMember{}, apperr.ErrExperimentGroupMemberDenied.WithCause(err)
 	}
 	return groupMemberFromRow(row), nil
+}
+
+// ListStudentLatestInstancesForExperiments 批量返回学生在给定实验集合中最近一次实验的进度,键为实验 ID;
+// 小组实验看学生所在小组的实验,从没开始过的实验不在结果里。
+func (tx *txStore) ListStudentLatestInstancesForExperiments(ctx context.Context, tenantID, studentID int64, experimentIDs []int64) (map[int64]StudentExperimentProgressDTO, error) {
+	out := map[int64]StudentExperimentProgressDTO{}
+	if len(experimentIDs) == 0 {
+		return out, nil
+	}
+	rows, err := tx.q.ListStudentLatestInstancesForExperiments(ctx, sqlcgen.ListStudentLatestInstancesForExperimentsParams{TenantID: tenantID, StudentID: studentID, ExperimentIds: experimentIDs})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.ExperimentID] = StudentExperimentProgressDTO{Status: row.Status, Score: row.Score, PassedCheckpoints: row.PassedCheckpoints}
+	}
+	return out, nil
 }
 
 // ListStudentGroupsForExperiments 批量返回学生在给定实验集合中所属的小组,键为实验 ID、值为小组 ID。
@@ -556,6 +578,45 @@ func (tx *txStore) GetReportByInstanceStudent(ctx context.Context, tenantID, ins
 		return ExperimentReport{}, apperr.ErrExperimentReportNotFound.WithCause(err)
 	}
 	return ExperimentReport{ID: row.ID, TenantID: row.TenantID, InstanceID: row.InstanceID, StudentID: row.StudentID, ContentRef: row.ContentRef, ManualScore: row.ManualScore, Comment: pgtypex.TextValue(row.Comment), Status: row.Status, SubmittedAt: timex.FromTimestamptz(row.SubmittedAt)}, nil
+}
+
+// CountExperimentsByStatus 按状态聚合教师实验列表(套用课程与关键词,不套用状态)。
+func (tx *txStore) CountExperimentsByStatus(ctx context.Context, tenantID, courseID int64, keyword string) ([]statusCount, error) {
+	rows, err := tx.q.CountExperimentsByStatus(ctx, sqlcgen.CountExperimentsByStatusParams{TenantID: tenantID, CourseID: courseID, Keyword: keyword})
+	if err != nil {
+		return nil, apperr.ErrExperimentInvalid.WithCause(err)
+	}
+	out := make([]statusCount, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, statusCount{Status: row.Status, Count: row.Count})
+	}
+	return out, nil
+}
+
+// CountReportsByStatus 按批改状态聚合一个实验的报告。
+func (tx *txStore) CountReportsByStatus(ctx context.Context, tenantID, experimentID int64) ([]statusCount, error) {
+	rows, err := tx.q.CountExperimentReportsByStatus(ctx, sqlcgen.CountExperimentReportsByStatusParams{TenantID: tenantID, ExperimentID: experimentID})
+	if err != nil {
+		return nil, apperr.ErrExperimentReportInvalid.WithCause(err)
+	}
+	out := make([]statusCount, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, statusCount{Status: row.Status, Count: row.Count})
+	}
+	return out, nil
+}
+
+// CountTeacherInstancesByStatus 按状态聚合教学监控的实验环境(范围同 ListTeacherInstances)。
+func (tx *txStore) CountTeacherInstancesByStatus(ctx context.Context, tenantID, teacherID int64) ([]statusCount, error) {
+	rows, err := tx.q.CountTeacherInstancesByStatus(ctx, sqlcgen.CountTeacherInstancesByStatusParams{TenantID: tenantID, TeacherID: teacherID})
+	if err != nil {
+		return nil, apperr.ErrExperimentInvalid.WithCause(err)
+	}
+	out := make([]statusCount, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, statusCount{Status: row.Status, Count: row.Count})
+	}
+	return out, nil
 }
 
 // ListReports 查询实验报告分页。

@@ -10,7 +10,11 @@ import (
 
 type Querier interface {
 	CountAlertEvents(ctx context.Context, arg CountAlertEventsParams) (int64, error)
+	// 告警列表的状态分段计数:套用级别与学校范围,不套用状态筛选。
+	CountAlertEventsByStatus(ctx context.Context, arg CountAlertEventsByStatusParams) ([]CountAlertEventsByStatusRow, error)
 	CountBackupRecords(ctx context.Context, status int16) (int64, error)
+	// 备份巡检的状态分段计数(进行中 / 已成功 / 已失败)。
+	CountBackupRecordsByStatus(ctx context.Context) ([]CountBackupRecordsByStatusRow, error)
 	CountConfigChangeLogs(ctx context.Context, configID int64) (int64, error)
 	CreateAlertEvent(ctx context.Context, arg CreateAlertEventParams) (AlertEvent, error)
 	CreateAlertRule(ctx context.Context, arg CreateAlertRuleParams) (AlertRule, error)

@@ -23,6 +23,47 @@ import { api } from '../../../../app/api'
 import { experimentStageStatusLabel } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
+/** CheckpointJudge 是工作台持有的判分状态:正在判的检查点、最近一次失败原因、发起判分 */
+export interface CheckpointJudge {
+  judgingId: string | undefined
+  error: string | undefined
+  judge: (checkpointId: string) => Promise<void>
+}
+
+/**
+ * useCheckpointJudge 触发检查点判分。
+ * 服务端在存在现场沙箱时于本次判分动作内固化快照;页面引用仅作为无现场沙箱时的输入。
+ * 同一时刻只判一个;判完请调用方重读实例。
+ */
+export function useCheckpointJudge(
+  instanceId: string,
+  codeRef: WorkspaceCodeRef | undefined,
+  onJudged: () => void,
+): CheckpointJudge {
+  const [judgingId, setJudgingId] = useState<string>()
+  const [error, setError] = useState<string>()
+  const judge = useCallback(
+    async (checkpointId: string) => {
+      setJudgingId(checkpointId)
+      setError(undefined)
+      try {
+        const result = await api.experiment.judgeCheckpoint(instanceId, checkpointId, {
+          code_storage_key: codeRef?.codeStorageKey,
+          code_hash: codeRef?.codeHash,
+        })
+        toast.success(result.passed ? '判分通过,区块已铸成' : '判分完成,这次没有通过')
+        onJudged()
+      } catch (cause) {
+        setError(userFacingErrorMessage(cause, '判分没有跑完,请稍后重试。'))
+      } finally {
+        setJudgingId(undefined)
+      }
+    },
+    [codeRef, instanceId, onJudged],
+  )
+  return { judgingId, error, judge }
+}
+
 /** BlockPhase 是一个检查点区块的四种形态。 */
 type BlockPhase = 'pending' | 'incubating' | 'minted' | 'failed'
 
@@ -40,7 +81,6 @@ export interface WorkspaceCodeRef {
 }
 
 export interface BlockIncubatorProps {
-  instanceId: string
   /** 实验配置里的检查点(学生投影:只有编号与分值,没有判题器与题目配置) */
   checkpoints: StudentCheckpointConfig[]
   /** 实例上的判分结果 */
@@ -51,8 +91,8 @@ export interface BlockIncubatorProps {
   codeRef?: WorkspaceCodeRef
   /** 只有实例处于 running/paused 时才允许触发检查点判分。 */
   canJudge: boolean
-  /** 判分完成后请调用方重新读取实例 */
-  onJudged: () => void
+  /** 判分状态与动作:由工作台持有,顶栏的「判分」与这里的按钮共用同一份 */
+  judging: CheckpointJudge
   /** 激活一个已解锁阶段 */
   onActivateStage: (stage: number) => void
 }
@@ -61,17 +101,15 @@ export interface BlockIncubatorProps {
  * BlockIncubator 渲染阶段链与检查点区块,并承载判分。
  */
 export function BlockIncubator({
-  instanceId,
   checkpoints,
   results,
   stages,
   codeRef,
   canJudge,
-  onJudged,
+  judging,
   onActivateStage,
 }: BlockIncubatorProps) {
-  const [judgingId, setJudgingId] = useState<string>()
-  const [panelError, setPanelError] = useState<string>()
+  const { judgingId, error: panelError, judge } = judging
 
   const resultById = useMemo(
     () => new Map(results.map((result) => [result.id, result])),
@@ -103,30 +141,6 @@ export function BlockIncubator({
 
   const earned = results.reduce((sum, result) => sum + result.score, 0)
   const total = checkpoints.reduce((sum, checkpoint) => sum + checkpoint.score, 0)
-
-  /**
-   * judge 触发一个检查点判分。
-   * 服务端在存在现场沙箱时于本次判分动作内固化快照;页面引用仅作为无现场沙箱时的输入。
-   */
-  const judge = useCallback(
-    async (checkpointId: string) => {
-      setJudgingId(checkpointId)
-      setPanelError(undefined)
-      try {
-        const result = await api.experiment.judgeCheckpoint(instanceId, checkpointId, {
-          code_storage_key: codeRef?.codeStorageKey,
-          code_hash: codeRef?.codeHash,
-        })
-        toast.success(result.passed ? '判分通过,区块已铸成' : '判分完成,这次没有通过')
-        onJudged()
-      } catch (error) {
-        setPanelError(userFacingErrorMessage(error, '判分没有跑完,请稍后重试。'))
-      } finally {
-        setJudgingId(undefined)
-      }
-    },
-    [codeRef, instanceId, onJudged],
-  )
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">

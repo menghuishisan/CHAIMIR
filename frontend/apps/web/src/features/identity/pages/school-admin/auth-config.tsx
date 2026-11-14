@@ -1,25 +1,24 @@
-// 认证配置页(校管侧栏,/school-admin/auth-config)。
+// 认证配置页(校管侧栏,/school-admin/auth-config)。设计 §7.5:
+// 两个分组「学校统一认证(CAS)」「目录服务(LDAP)」上下排列,每组右上角是启用开关和状态(未配置 / 已启用 / 已停用),
+// 下方是参数表单,各自保存(启用开关也随保存生效)。
 //
 // CAS 与 LDAP 各一套配置,后端按 type 分别 upsert。两者的必填项不同
 // (CAS 只要 https 服务器地址;LDAP 要 ldaps 地址 + 绑定账号 + 搜索基准 + 过滤式 + 匹配属性),
 // 故按类型渲染各自的显式字段,不给裸 JSON 文本域。
 //
-// 绑定密码由后端加密保存且不回显(响应里是「已配置」占位)。编辑时留空即报错 ——
-// 后端 secureSSOConfig 明确拒绝把占位值当密码,故这里要求每次保存都重填密码,并说明原因。
+// 绑定密码由后端加密保存且不回显(响应里是「已配置」占位)。修改已有配置时绑定密码留空表示不修改,
+// 服务端沿用已保存的密文;首次配置必须填写(docs/01-身份与租户/03-接口设计.md)。
 
 import { useCallback, useMemo, useState } from 'react'
+import { Link } from 'react-router'
 import { CircleCheck, Shield, ShieldCheck } from 'lucide-react'
 import { SsoMatchField, SsoType, type SSOConfig } from '@chaimir/api-client'
 import {
-  Badge,
-  Breadcrumb,
   Button,
   Callout,
   Card,
   CardBody,
   CardHeader,
-  Checkbox,
-  DescriptionList,
   FormField,
   Input,
   PageHeader,
@@ -27,10 +26,7 @@ import {
   SegmentedControl,
   Skeleton,
   StickySaveBar,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
+  Switch,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -63,7 +59,6 @@ const MATCH_FIELD_LABELS: Record<SsoMatchField, string> = {
  */
 export default function SchoolAdminAuthConfigPage() {
   const configs = useAsyncResource(() => api.identity.listSSOConfigs(), [], () => false)
-  const [activeTab, setActiveTab] = useState('cas')
 
   const byType = useMemo(() => {
     const map = new Map<SsoType, SSOConfig>()
@@ -73,12 +68,14 @@ export default function SchoolAdminAuthConfigPage() {
 
   return (
     <PageScaffold>
-      <PageHeader
-        kicker={<Breadcrumb items={[{ label: '系统配置' }]} />}
-        title="认证配置"
-        description="接入学校统一认证或目录服务。配置好并启用后,师生可以用校内账号登录。"
-        icon={Shield}
-      />
+      <PageHeader title="认证配置" />
+      <p className="-mt-3 mb-6 text-sm text-ink-sub">
+        配置只是接入参数;要让师生真正用这种方式登录,还要在{' '}
+        <Link to="/school-admin/settings#settings-auth" className="font-medium text-primary underline-offset-2 hover:underline">
+          学校配置
+        </Link>
+        里把登录方式切换过来。
+      </p>
 
       <ResourceState
         resource={configs}
@@ -89,60 +86,10 @@ export default function SchoolAdminAuthConfigPage() {
       >
         {/* 表单只在权威快照就绪后挂载；重新读取时卸载，避免空初值或旧编辑态覆盖已保存配置。 */}
         {() => (
-          <>
-            <div className="mb-6 grid gap-4 sm:grid-cols-2">
-              {([SsoType.CAS, SsoType.LDAP] as const).map((type) => {
-                const config = byType.get(type)
-                const label = type === SsoType.CAS ? '学校统一认证(CAS)' : '目录服务(LDAP)'
-                return (
-                  <div key={type} className="rounded-lg border border-border bg-surface p-4 shadow-xs">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="font-medium text-ink">{label}</p>
-                      <Badge tone={config?.enabled ? 'success' : 'neutral'}>
-                        {config?.enabled ? '已启用' : config ? '已配置未启用' : '未配置'}
-                      </Badge>
-                    </div>
-                    <p className="mt-2 text-sm leading-relaxed text-ink-sub">
-                      {config
-                        ? '参数已保存；是否实际生效由租户配置页的登录方式决定。'
-                        : '先在下方填写参数并保存，再到租户配置页切换登录方式。'}
-                    </p>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/*
-              归族:配置表单族(§6.5.3 第 ③)。两种认证方式是两套互不相干的参数、两次独立提交,
-              故用 Tabs 让一次只出现一套表单 —— 这样底部粘性保存条也只服务当前那一套。
-              并排两张卡各带一个保存按钮时,「我改的是哪一套、存的是哪一套」要靠位置去猜。
-              学校在租户配置页选定的登录方式只有一种,故一次只配一套是常态。
-            */}
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList aria-label="认证方式">
-                <TabsTrigger value="cas">学校统一认证(CAS)</TabsTrigger>
-                <TabsTrigger value="ldap">目录服务(LDAP)</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="cas">
-                <p className="mb-4 text-sm text-ink-sub">
-                  师生跳转到学校的统一认证页登录,回跳后按名单匹配到平台账号。
-                </p>
-                <CasConfigCard config={byType.get(SsoType.CAS)} onSaved={configs.reload} />
-              </TabsContent>
-
-              <TabsContent value="ldap">
-                <p className="mb-4 text-sm text-ink-sub">
-                  在平台登录页输入校内账号密码,由平台向目录服务校验。
-                </p>
-                <LdapConfigCard config={byType.get(SsoType.LDAP)} onSaved={configs.reload} />
-              </TabsContent>
-            </Tabs>
-
-            <Callout tone="info" className="mt-4">
-              配置只是接入参数。要让师生真正用这种方式登录,还要在租户配置页把登录方式切换过来。
-            </Callout>
-          </>
+          <div className="flex flex-col gap-6">
+            <CasConfigCard config={byType.get(SsoType.CAS)} onSaved={configs.reload} />
+            <LdapConfigCard config={byType.get(SsoType.LDAP)} onSaved={configs.reload} />
+          </div>
         )}
       </ResourceState>
     </PageScaffold>
@@ -152,6 +99,20 @@ export default function SchoolAdminAuthConfigPage() {
 interface ConfigCardProps {
   config?: SSOConfig
   onSaved: () => void
+}
+
+/**
+ * GroupStatus 分组右上角:已保存的状态(未配置 / 已启用 / 已停用)+ 启用开关。
+ * 开关是表单的一部分,随「保存」一起提交;状态文字反映服务端已保存的值。
+ */
+function GroupStatus({ config, enabled, onEnabledChange, label }: { config?: SSOConfig; enabled: boolean; onEnabledChange: (value: boolean) => void; label: string }) {
+  const status = !config ? '未配置' : config.enabled ? '已启用' : '已停用'
+  return (
+    <span className="flex items-center gap-3">
+      <span className={config?.enabled ? 'text-sm font-medium text-success' : 'text-sm text-ink-sub'}>{status}</span>
+      <Switch checked={enabled} aria-label={`启用${label}`} onCheckedChange={onEnabledChange} />
+    </span>
+  )
 }
 
 /**
@@ -205,11 +166,9 @@ function CasConfigCard({ config, onSaved }: ConfigCardProps) {
   return (
     <Card>
       <CardHeader
-        title="CAS 参数"
-        description="填写学校统一认证服务的根地址,例如 https://sso.example.edu/cas。"
-        actions={
-          config?.enabled ? <Badge tone="success">已启用</Badge> : <Badge tone="neutral">未启用</Badge>
-        }
+        title="学校统一认证(CAS)"
+        description="师生跳转到学校的统一认证页登录,回跳后按名单匹配到平台账号。"
+        actions={<GroupStatus config={config} enabled={enabled} onEnabledChange={setEnabled} label="学校统一认证" />}
       />
       <CardBody>
         <form onSubmit={submit} noValidate className="flex flex-col gap-4">
@@ -246,12 +205,6 @@ function CasConfigCard({ config, onSaved }: ConfigCardProps) {
             />
           </FormField>
 
-          <Checkbox
-            checked={enabled}
-            label="启用这套配置"
-            onCheckedChange={(checked) => setEnabled(checked === true)}
-          />
-
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
           <StickySaveBar
@@ -272,8 +225,7 @@ function CasConfigCard({ config, onSaved }: ConfigCardProps) {
 
 /**
  * LdapConfigCard 维护 LDAP 配置。
- * 绑定密码不回显:后端保存后返回占位值,直接提交占位值会被拒绝,
- * 故每次保存都要求重填 —— 界面说明原因,不让管理员以为是 bug。
+ * 绑定密码不回显:修改已有配置时留空表示沿用已保存的密码,填写即替换;首次配置必须填写。
  */
 function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
   const configured = config !== undefined
@@ -295,7 +247,7 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
       ? null
       : '目录服务地址要以 ldaps:// 开头 —— 明文 LDAP 不被接受',
     bindDn: bindDn.trim() === '' ? '请填写绑定账号' : null,
-    bindPassword: bindPassword === '' ? '请填写绑定密码' : null,
+    bindPassword: bindPassword === '' && !configured ? '请填写绑定密码' : null,
     baseDn: baseDn.trim() === '' ? '请填写搜索基准' : null,
     userFilter: userFilter.trim() === ''
       ? '请填写用户过滤式'
@@ -303,7 +255,7 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
         ? '请在用户过滤式中用 {username} 代表登录名'
         : null,
     matchAttribute: matchAttribute.trim() === '' ? '请填写匹配属性' : null,
-  }), [baseDn, bindDn, bindPassword, matchAttribute, url, userFilter]))
+  }), [baseDn, bindDn, bindPassword, configured, matchAttribute, url, userFilter]))
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -356,11 +308,9 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
   return (
     <Card>
       <CardHeader
-        title="LDAP 参数"
-        description="平台用绑定账号连接目录服务,按过滤式查到用户后再校验其密码。"
-        actions={
-          config?.enabled ? <Badge tone="success">已启用</Badge> : <Badge tone="neutral">未启用</Badge>
-        }
+        title="目录服务(LDAP)"
+        description="在平台登录页输入校内账号密码,由平台用绑定账号连接目录服务查到用户后校验密码。"
+        actions={<GroupStatus config={config} enabled={enabled} onEnabledChange={setEnabled} label="目录服务" />}
       />
       <CardBody>
         <form onSubmit={submit} noValidate className="flex flex-col gap-4">
@@ -401,11 +351,11 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
             <FormField
               label="绑定密码"
               htmlFor="ldap-bind-password"
-              required
+              required={!configured}
               error={errors.bindPassword}
               helper={
                 configured
-                  ? '已保存的密码不会回显,每次保存都需要重新填写'
+                  ? '已配置,不会回显;留空表示不修改,填写即替换'
                   : '保存后加密存储,不会回显'
               }
             >
@@ -486,27 +436,6 @@ function LdapConfigCard({ config, onSaved }: ConfigCardProps) {
             </FormField>
           </div>
 
-          <Checkbox
-            checked={enabled}
-            label="启用这套配置"
-            onCheckedChange={(checked) => setEnabled(checked === true)}
-          />
-
-          {configured ? (
-            <DescriptionList
-              dense
-              items={[
-                {
-                  term: '当前状态',
-                  description: config.enabled ? '已启用,师生可用校内账号登录' : '已配置但未启用',
-                },
-                {
-                  term: '匹配方式',
-                  description: MATCH_FIELD_LABELS[config.match_field],
-                },
-              ]}
-            />
-          ) : null}
 
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
 

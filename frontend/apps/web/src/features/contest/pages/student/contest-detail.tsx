@@ -1,66 +1,67 @@
-// 竞赛详情页(深页,/student/contests/:contestId)。
-// 这是竞赛答题与对局回放两条沉浸路由的退出回落页,故必须支持深链与刷新:
-// 赛事本体走学生专用单读 GET /contest/student/contests/{id}。
+// 竞赛详情页(深页,/student/contests/:contestId)。设计 §7.2:
+// 页头为赛事名 + 状态 + 一行属性(赛制 · 参赛形式 · 当前阶段的关键时间),右侧主按钮;下方赛程条。
+// 主体左栏「赛题 / 天梯榜」标签(当前标签写进地址;开赛前赛题显示「开赛后公布」,开赛后列题目与分值,
+// 点击进入答题);右栏「我的队伍」(未报名时是报名 / 用邀请码加入)与「我的成绩」(报名后显示)。
+// 主操作按状态:报名中且未报名 →「报名参赛」;进行中或封榜且已报名 →「进入答题」;已结束 →
+// 「查看我的战绩」;对抗赛增加「看对局回放」。不能操作时写原因(如「报名已截止」)。
 //
-// 报名与组队是本页动作区的操作,不单独建页 —— 报名没有跨步骤中间态,
-// 独立成页只会多一次跳转(对齐清单 §3.1「竞赛报名」)。
+// 这是竞赛答题与对局回放两条沉浸路由的退出回落页,故必须支持深链与刷新:
+// 赛事本体走学生专用单读 GET /contest/student/contests/{id}。报名与组队在本页完成,不单独建页。
 // 结果快照不对学生开放(teacher 组),最终名次经天梯榜与竞赛战绩呈现。
 
-import { useCallback, useMemo, useState } from 'react'
-import { useFormValidation } from '../../../../hooks/useFormValidation'
-import { useNavigate, useParams } from 'react-router'
-import { ListOrdered, Play, Swords, Trophy, UserPlus, Users } from 'lucide-react'
+import { useCallback, useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router'
+import { History, ListOrdered, Play, Swords, Trophy, UserPlus, Users } from 'lucide-react'
 import {
-	ContestMode,
-	ContestStatus,
+  ContestMode,
+  ContestStatus,
   TeamMode,
   type Contest,
-  type ContestProblem,
   type ContestRecord,
   type LadderRank,
 } from '@chaimir/api-client'
 import {
-  Badge,
-  Breadcrumb,
   Button,
+  buttonVariants,
   Callout,
-  Card,
-  CardBody,
-  CardHeader,
-  DataPanel,
-  DescriptionList,
-  Empty,
   FormField,
+  Icon,
   Input,
-  ObjectIdentity,
-  PageBody,
+  ListRow,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalDescription,
+  ModalHeader,
+  ModalTitle,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
+  Skeleton,
   StatusIndicator,
-  Table,
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
   toast,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../../hooks'
+import { ResourceError, ResourceState } from '../../../../components/ResourceState'
+import { useAsyncResource, usePagedResource, usePageLocation, locationLabel, useUrlState } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDateTime, formatScore } from '../../../../utils/formatters'
-import {
-  contestModeLabel,
-  contestStatusLabel,
-  matchModeLabel,
-  teamModeLabel,
-} from '../../../../utils/labels/contest'
+import { contestModeLabel, contestStatusLabel, matchModeLabel, teamModeLabel } from '../../../../utils/labels/contest'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { ContestTimeline } from '../../components/ContestTimeline'
 import { isContestAnswerable, isContestLeaderboardFrozen } from '../../rules'
 import { contestStatusTone } from '../../statusPresentation'
 import { ContestTeamCard } from './contest-team'
+import { useSession } from '../../../../components/RoleGuard/session'
+
+/** 地址参数:tab 是左栏标签 */
+const DETAIL_QUERY = {
+  tab: { defaultValue: 'problems', allowed: ['problems', 'ladder'] },
+} as const
 
 /**
  * StudentContestDetailPage 读取赛事与本人参赛记录。
@@ -71,16 +72,17 @@ export default function StudentContestDetailPage() {
   // 赛事本体与本人战绩一起读:战绩里的 team_id 是学生侧唯一的队伍来源
   const view = useAsyncResource(
     () =>
-      Promise.all([
-        api.contest.getStudentContest(contestId),
-        api.contest.getMyContestRecords(),
-      ]).then(([contest, records]) => ({
-        contest,
-        record: records.find((item: ContestRecord) => item.contest_id === contestId),
-      })),
+      Promise.all([api.contest.getStudentContest(contestId), api.contest.getMyContestRecords()]).then(
+        ([contest, records]) => ({
+          contest,
+          record: records.find((item: ContestRecord) => item.contest_id === contestId),
+        }),
+      ),
     [contestId],
     () => false,
   )
+
+  usePageLocation([{ label: locationLabel(view, (data) => data.contest.name, '赛事详情') }])
 
   return (
     <PageScaffold>
@@ -89,17 +91,31 @@ export default function StudentContestDetailPage() {
         emptyIcon={Swords}
         emptyTitle="赛事暂不可用"
         emptyDescription="这场赛事可能尚未发布,请回到竞赛参赛查看其他赛事。"
+        skeleton={
+          <div aria-busy="true" className="flex flex-col gap-4">
+            <Skeleton variant="title" width="half" />
+            <Skeleton variant="line" width="third" />
+            <Skeleton variant="block" />
+          </div>
+        }
       >
-        {(data) => (
-          <ContestDetailContent
-            contest={data.contest}
-            record={data.record}
-            onRefresh={view.reload}
-          />
-        )}
+        {(data) => <ContestDetailContent contest={data.contest} record={data.record} onRefresh={view.reload} />}
       </ResourceState>
     </PageScaffold>
   )
+}
+
+/** keyTimeMeta 页头属性里「当前阶段的关键时间」 */
+function keyTimeMeta(contest: Contest): { label: string; value: string } {
+  switch (contest.status) {
+    case ContestStatus.SIGNUP:
+      return { label: '报名截止', value: formatDateTime(contest.signup_end) }
+    case ContestStatus.RUNNING:
+    case ContestStatus.FROZEN:
+      return { label: '结束', value: formatDateTime(contest.end_at) }
+    default:
+      return { label: '已于', value: `${formatDateTime(contest.end_at)} 结束` }
+  }
 }
 
 interface ContestDetailContentProps {
@@ -109,512 +125,494 @@ interface ContestDetailContentProps {
 }
 
 /**
- * ContestDetailContent 渲染赛事档案、赛题、榜单与参赛动作。
+ * ContestDetailContent 渲染页头主操作、赛程条、赛题与天梯榜、队伍与成绩。
  */
 function ContestDetailContent({ contest, record, onRefresh }: ContestDetailContentProps) {
-  const navigate = useNavigate()
+  const [query, setQuery] = useUrlState(DETAIL_QUERY)
+  const [signupOpen, setSignupOpen] = useState(false)
   const joined = record !== undefined
   const canAnswer = joined && isContestAnswerable(contest.status)
+  const frozen = isContestLeaderboardFrozen(contest.status)
+  const battle = contest.mode === ContestMode.BATTLE
+  const ended = contest.status === ContestStatus.ENDED || contest.status === ContestStatus.ARCHIVED
+  const keyTime = keyTimeMeta(contest)
 
   return (
     <>
-      {/*
-        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的赛事名承担,
-        故页面头只出面包屑,末节到「竞赛参赛」为止(§6.5.0 通则 1)。
-      */}
-      <PageHeader kicker={<Breadcrumb items={[{ label: '竞赛参赛', href: '/student/contests' }]} />} />
-
-      {/*
-        对象身份区:赛事名 + 状态 + 关键属性横排。赛制、参赛形式与比赛时间是赛事属性,
-        横排在这里就够;报名与进入答题是右栏动作区的事,不塞进身份区 ——
-        报名要填队名或邀请码,那是一张表单而不是一个按钮。
-      */}
-      <ObjectIdentity
-        name={contest.name}
-        status={
-          <div className="flex flex-wrap items-center gap-2">
-            {joined ? <Badge tone="jade">已报名</Badge> : null}
-            <StatusIndicator
-              tone={contestStatusTone(contest.status)}
-              label={contestStatusLabel(contest.status)}
-            />
-          </div>
-        }
-        subtitle={`${formatDateTime(contest.start_at)} — ${formatDateTime(contest.end_at)}`}
-        properties={[
-          { label: '赛制', value: contestModeLabel(contest.mode) },
-          { label: '参赛形式', value: teamModeLabel(contest.team_mode) },
-          { label: '我的得分', value: record ? formatScore(record.score) : '尚未计分' },
-          {
-            label: '我的名次',
-            value: record && record.rank > 0 ? `第 ${record.rank} 名` : '未上榜',
-          },
-          { label: '报名截止', value: formatDateTime(contest.signup_end) },
+      <PageHeader
+        title={contest.name}
+        status={<StatusIndicator tone={contestStatusTone(contest.status)} label={contestStatusLabel(contest.status)} />}
+        meta={[
+          { value: contestModeLabel(contest.mode) + (contest.match_mode ? `(${matchModeLabel(contest.match_mode)})` : '') },
+          { value: teamModeLabel(contest.team_mode) },
+          { label: keyTime.label, value: keyTime.value },
         ]}
+        actions={
+          <PrimaryContestAction
+            contest={contest}
+            joined={joined}
+            canAnswer={canAnswer}
+            ended={ended}
+            battle={battle}
+            onSignup={() => setSignupOpen(true)}
+          />
+        }
       />
 
-      {isContestLeaderboardFrozen(contest.status) ? (
-        <Callout tone="warning" className="mt-4">
-          当前处于封榜期,得分与名次暂停更新。封榜结束后一次性揭晓。
+      <ContestTimeline contest={contest} className="mb-6" />
+
+      {frozen ? (
+        <Callout tone="warning" className="mb-6">
+          现在处于封榜期,得分与名次暂停更新,结束后一次性揭晓。
         </Callout>
       ) : null}
 
-      <PageBody
-        className="mt-6"
-        rail={
-          <div className="flex flex-col gap-4">
-            <ContestActionCard
-              contest={contest}
-              joined={joined}
-              canAnswer={canAnswer}
-              onJoined={onRefresh}
-              onEnterWorkspace={() => navigate(`/student/contests/${contest.id}/workspace`)}
-              onViewRecords={() => navigate('/student/records')}
-            />
-            {record ? <ContestTeamCard teamId={record.team_id} onChanged={onRefresh} /> : null}
-            <ContestScheduleCard contest={contest} />
-          </div>
-        }
-      >
-        <Tabs defaultValue="problems">
-          <TabsList>
-            <TabsTrigger value="problems" icon={Swords}>
-              赛题
-            </TabsTrigger>
-            <TabsTrigger value="ladder" icon={ListOrdered}>
-              天梯榜
-            </TabsTrigger>
-          </TabsList>
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="min-w-0 lg:col-span-2">
+          <Tabs value={query.tab} onValueChange={(value) => setQuery({ tab: value })}>
+            <TabsList aria-label="赛题与榜单">
+              <TabsTrigger value="problems" icon={Swords}>
+                赛题
+              </TabsTrigger>
+              <TabsTrigger value="ladder" icon={ListOrdered}>
+                天梯榜
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="problems">
+              <ContestProblems contest={contest} canAnswer={canAnswer} joined={joined} />
+            </TabsContent>
+            <TabsContent value="ladder">
+              <ContestLadder contestId={contest.id} mode={contest.mode} myTeamId={record?.team_id} />
+            </TabsContent>
+          </Tabs>
+        </div>
 
-          <TabsContent value="problems">
-            <ContestProblems contestId={contest.id} canAnswer={canAnswer} />
-          </TabsContent>
+        <aside aria-label="我的参赛" className="flex min-w-0 flex-col gap-4">
+          {record ? (
+            <>
+              <MyScoreCard record={record} frozen={frozen} />
+              <ContestTeamCard teamId={record.team_id} onChanged={onRefresh} />
+            </>
+          ) : (
+            <NotJoinedCard contest={contest} onSignup={() => setSignupOpen(true)} onJoined={onRefresh} />
+          )}
+        </aside>
+      </div>
 
-          <TabsContent value="ladder">
-            <ContestLadder
-              contestId={contest.id}
-              mode={contest.mode}
-              frozen={isContestLeaderboardFrozen(contest.status)}
-            />
-          </TabsContent>
-        </Tabs>
-      </PageBody>
+      <SignupModal
+        open={signupOpen}
+        onOpenChange={setSignupOpen}
+        contest={contest}
+        onJoined={() => {
+          setSignupOpen(false)
+          onRefresh()
+        }}
+      />
     </>
   )
 }
 
-interface ContestActionCardProps {
-  contest: Contest
-  joined: boolean
-  canAnswer: boolean
-  onJoined: () => void
-  onEnterWorkspace: () => void
-  onViewRecords: () => void
-}
-
-/**
- * ContestActionCard 承载报名、加入队伍与进入答题。
- * 报名窗口关闭后不给可点的报名按钮,而是说明原因 —— 给一个必然失败的按钮更差。
- */
-function ContestActionCard({
+/** PrimaryContestAction 页头主操作,按赛事状态与本人是否报名决定;不能操作时写原因 */
+function PrimaryContestAction({
   contest,
   joined,
   canAnswer,
-  onJoined,
-  onEnterWorkspace,
-  onViewRecords,
-}: ContestActionCardProps) {
-  const [teamName, setTeamName] = useState('')
-  const [inviteCode, setInviteCode] = useState('')
-  const [signupError, setSignupError] = useState<string>()
-  const [joinError, setJoinError] = useState<string>()
-  const [signingUp, setSigningUp] = useState(false)
-  const [joining, setJoining] = useState(false)
+  ended,
+  battle,
+  onSignup,
+}: {
+  contest: Contest
+  joined: boolean
+  canAnswer: boolean
+  ended: boolean
+  battle: boolean
+  onSignup: () => void
+}) {
+  const replay = battle && (canAnswer || ended) ? (
+    <Link to={`/student/contests/${contest.id}/replay`} className={buttonVariants({ variant: 'outline' })}>
+      <Icon icon={History} size="sm" />
+      看对局回放
+    </Link>
+  ) : null
 
-  const signupOpen = contest.status === ContestStatus.SIGNUP
-  const isSolo = contest.team_mode === TeamMode.SOLO
-  const signupValidation = useFormValidation(() => ({
-    teamName: !isSolo && !teamName.trim() ? '请输入队伍名称' : null,
-  }))
-  const joinValidation = useFormValidation(() => ({
-    inviteCode: !inviteCode.trim() ? '请输入队伍邀请码' : null,
-  }))
+  if (canAnswer) {
+    return (
+      <div className="flex flex-wrap gap-2">
+        {replay}
+        <Link to={`/student/contests/${contest.id}/workspace`} className={buttonVariants({ variant: 'primary' })}>
+          <Icon icon={Play} size="sm" />
+          进入答题
+        </Link>
+      </div>
+    )
+  }
+  if (ended) {
+    return (
+      <div className="flex flex-wrap gap-2">
+        {replay}
+        {joined ? (
+          <Link to="/student/records" className={buttonVariants({ variant: 'primary' })}>
+            <Icon icon={Trophy} size="sm" />
+            查看我的战绩
+          </Link>
+        ) : null}
+      </div>
+    )
+  }
+  if (contest.status === ContestStatus.SIGNUP && !joined) {
+    const closed = new Date(contest.signup_end).getTime() < Date.now()
+    return closed ? (
+      <span className="text-sm text-ink-sub">报名已截止</span>
+    ) : (
+      <Button variant="primary" leftIcon={UserPlus} onClick={onSignup}>
+        报名参赛
+      </Button>
+    )
+  }
+  if (contest.status === ContestStatus.SIGNUP && joined) {
+    return <span className="text-sm text-ink-sub">已报名,开赛后可以进入答题</span>
+  }
+  // 进行中但没报名
+  return <span className="text-sm text-ink-sub">已开赛,报名已关闭</span>
+}
 
-  /** signup 报名并创建队伍(个人赛由后端统一命名,不要求填队名)。 */
-  const signup = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!signupValidation.validate()) return
-      setSignupError(undefined)
-      setSigningUp(true)
-      try {
-        await api.contest.signup(contest.id, { team_name: teamName.trim() })
-        toast.success('报名成功')
-        onJoined()
-      } catch (error) {
-        setSignupError(userFacingErrorMessage(error, '报名没有成功,请稍后重试。'))
-      } finally {
-        setSigningUp(false)
-      }
-    },
-    [contest.id, onJoined, signupValidation, teamName],
+/** MyScoreCard 我的成绩:得分与名次(封榜期注明暂停更新) */
+function MyScoreCard({ record, frozen }: { record: ContestRecord; frozen: boolean }) {
+  return (
+    <section aria-labelledby="contest-score-title" className="rounded-lg bg-surface p-5 shadow-xs">
+      <h2 id="contest-score-title" className="text-sm font-medium text-ink-sub">
+        我的成绩
+      </h2>
+      <dl className="mt-3 grid grid-cols-3 gap-3">
+        <div>
+          <dt className="text-xs text-ink-sub">得分</dt>
+          <dd className="text-xl font-bold tabular-nums text-ink">{formatScore(record.score)}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-ink-sub">名次</dt>
+          <dd className="text-xl font-bold tabular-nums text-ink">{record.rank > 0 ? record.rank : '—'}</dd>
+        </div>
+        <div>
+          <dt className="text-xs text-ink-sub">通过</dt>
+          <dd className="text-xl font-bold tabular-nums text-ink">{record.solved_count}</dd>
+        </div>
+      </dl>
+      {frozen ? <p className="mt-2 text-xs text-ink-sub">封榜期间名次暂停更新</p> : null}
+    </section>
   )
+}
 
-  /**
-   * joinTeam 用邀请码加入已有队伍。
-   * 邀请码由队长分享,后端按邀请码定位队伍并校验人数上限。
-   */
-  const joinTeam = useCallback(
+/** NotJoinedCard 未报名时的右栏:报名中给报名与邀请码加入,否则说明报名已关闭 */
+function NotJoinedCard({ contest, onSignup, onJoined }: { contest: Contest; onSignup: () => void; onJoined: () => void }) {
+  const signupOpen = contest.status === ContestStatus.SIGNUP && new Date(contest.signup_end).getTime() >= Date.now()
+  const group = contest.team_mode === TeamMode.GROUP
+  return (
+    <section aria-labelledby="contest-join-title" className="rounded-lg bg-surface p-5 shadow-xs">
+      <h2 id="contest-join-title" className="text-sm font-medium text-ink-sub">
+        我的队伍
+      </h2>
+      {signupOpen ? (
+        <div className="mt-3 flex flex-col gap-4">
+          <p className="text-sm text-ink">
+            {group ? '还没有队伍。创建队伍后把邀请码发给队友,或用队长给的邀请码加入。' : '这场赛事个人参赛,报名即可。'}
+          </p>
+          <Button variant="secondary" leftIcon={UserPlus} onClick={onSignup}>
+            {group ? '创建队伍并报名' : '报名参赛'}
+          </Button>
+          {group ? <JoinTeamForm contestId={contest.id} onJoined={onJoined} /> : null}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-ink-sub">
+          {contest.status === ContestStatus.SIGNUP ? '报名已截止,' : '报名已关闭,'}可以看看赛题与榜单。
+        </p>
+      )}
+    </section>
+  )
+}
+
+/** JoinTeamForm 用队长分享的邀请码加入队伍(后端按邀请码定位队伍并校验人数上限) */
+function JoinTeamForm({ contestId, onJoined }: { contestId: string; onJoined: () => void }) {
+  const [inviteCode, setInviteCode] = useState('')
+  const [joining, setJoining] = useState(false)
+  const [error, setError] = useState<string>()
+  const validation = useFormValidation(() => ({ inviteCode: !inviteCode.trim() ? '请输入队伍邀请码' : null }))
+
+  const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
       event.preventDefault()
-      const code = inviteCode.trim()
-      if (!joinValidation.validate()) return
-      setJoinError(undefined)
+      if (!validation.validate()) return
       setJoining(true)
+      setError(undefined)
       try {
-        await api.contest.joinTeam(contest.id, { invite_code: code })
+        await api.contest.joinTeam(contestId, { invite_code: inviteCode.trim() })
         toast.success('已加入队伍')
         onJoined()
-      } catch (error) {
-        setJoinError(userFacingErrorMessage(error, '加入队伍没有成功,请确认邀请码后重试。'))
+      } catch (cause) {
+        setError(userFacingErrorMessage(cause, '没能加入队伍,请确认邀请码后重试。'))
       } finally {
         setJoining(false)
       }
     },
-    [contest.id, inviteCode, joinValidation, onJoined],
+    [contestId, inviteCode, onJoined, validation],
   )
 
-  if (joined) {
-    return (
-      <Card>
-        <CardHeader title="参赛" description="你已报名这场赛事。" />
-        <CardBody className="flex flex-col gap-3">
-          {canAnswer ? (
-            <Button variant="primary" leftIcon={Play} onClick={onEnterWorkspace}>
-              进入答题
-            </Button>
-          ) : (
-            <Callout tone="info">
-              {contest.status === ContestStatus.SIGNUP
-                ? '比赛还没开始,开赛后可以进入答题。'
-                : '比赛已结束,可以在竞赛战绩里回顾成绩。'}
-            </Callout>
-          )}
-          <Button variant="ghost" leftIcon={Trophy} onClick={onViewRecords}>
-            查看我的战绩
-          </Button>
-        </CardBody>
-      </Card>
-    )
-  }
+  return (
+    <form onSubmit={submit} noValidate className="flex flex-col gap-3 border-t border-line pt-4">
+      <FormField label="用邀请码加入" htmlFor="contest-team-invite" error={validation.errors.inviteCode}>
+        <Input
+          id="contest-team-invite"
+          value={inviteCode}
+          autoComplete="off"
+          placeholder="队长给你的邀请码"
+          invalid={Boolean(validation.errors.inviteCode)}
+          onChange={(event) => setInviteCode(event.target.value)}
+          onBlur={() => validation.validate(['inviteCode'])}
+        />
+      </FormField>
+      {error ? <Callout tone="danger">{error}</Callout> : null}
+      <Button type="submit" variant="outline" leftIcon={Users} loading={joining}>
+        加入队伍
+      </Button>
+    </form>
+  )
+}
 
-  if (!signupOpen) {
+/** SignupModal 报名弹窗:组队赛填队名(同时创建队伍);个人赛填参赛名称(默认本人姓名,排行榜上显示) */
+function SignupModal({
+  open,
+  onOpenChange,
+  contest,
+  onJoined,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  contest: Contest
+  onJoined: () => void
+}) {
+  const solo = contest.team_mode === TeamMode.SOLO
+  const { me } = useSession()
+  // 个人赛的参赛名称默认填本人姓名,可改成昵称;组队赛由队长起名
+  const [teamName, setTeamName] = useState(solo ? me.account.name : '')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string>()
+  const validation = useFormValidation(() => ({
+    teamName: teamName.trim() ? null : solo ? '请输入参赛名称' : '请输入队伍名称',
+  }))
+
+  const submit = useCallback(
+    async (event: React.FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      if (!validation.validate()) return
+      setSubmitting(true)
+      setError(undefined)
+      try {
+        // 个人赛提交的是参赛名称,组队赛提交的是队名;两者都显示在排行榜上
+        await api.contest.signup(contest.id, { team_name: teamName.trim() })
+        toast.success('报名成功')
+        onJoined()
+      } catch (cause) {
+        setError(userFacingErrorMessage(cause, '报名没有成功,请稍后重试。'))
+      } finally {
+        setSubmitting(false)
+      }
+    },
+    [contest.id, onJoined, teamName, validation],
+  )
+
+  return (
+    <Modal open={open} onOpenChange={(next) => (submitting ? undefined : onOpenChange(next))}>
+      <ModalContent size="sm">
+        <ModalHeader>
+          <ModalTitle>报名「{contest.name}」</ModalTitle>
+          <ModalDescription>
+            {solo ? '这场赛事个人参赛,排行榜上显示你填写的参赛名称。' : '报名会同时创建你的队伍,之后把邀请码发给队友。'}
+          </ModalDescription>
+        </ModalHeader>
+        <ModalBody>
+          <form id="contest-signup-form" onSubmit={submit} noValidate className="flex flex-col gap-4">
+            <FormField
+              label={solo ? '参赛名称' : '队伍名称'}
+              htmlFor="contest-team-name"
+              required
+              helper={solo ? '排行榜上显示这个名称,可以用本人姓名或昵称' : undefined}
+              error={validation.errors.teamName}
+            >
+              <Input
+                id="contest-team-name"
+                value={teamName}
+                placeholder={solo ? '填写参赛名称' : '给队伍起个名字'}
+                invalid={Boolean(validation.errors.teamName)}
+                onChange={(event) => setTeamName(event.target.value)}
+                onBlur={() => validation.validate(['teamName'])}
+              />
+            </FormField>
+            {error ? <Callout tone="danger">{error}</Callout> : null}
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>
+                取消
+              </Button>
+              <Button type="submit" variant="primary" loading={submitting}>
+                确认报名
+              </Button>
+            </div>
+          </form>
+        </ModalBody>
+      </ModalContent>
+    </Modal>
+  )
+}
+
+/**
+ * ContestProblems 赛题列表:开赛前「开赛后公布」;开赛后每题一行(题号、题名、题型、分值),
+ * 已报名且可作答时整行链到答题工作台里的这一题。题面正文只在工作台里按需取用(答案黑盒)。
+ */
+function ContestProblems({ contest, canAnswer, joined }: { contest: Contest; canAnswer: boolean; joined: boolean }) {
+  const started = contest.status !== ContestStatus.SIGNUP && contest.status !== ContestStatus.DRAFT
+  const problems = useAsyncResource(() => (started ? api.contest.getProblems(contest.id) : Promise.resolve([])), [contest.id, started])
+
+  if (!started) {
     return (
-      <Card>
-        <CardHeader title="报名" />
-        <CardBody>
-          <Callout tone="info">
-            {contest.status === ContestStatus.RUNNING || contest.status === ContestStatus.FROZEN
-              ? '这场赛事已开赛,报名已关闭。'
-              : '报名窗口尚未开放或已结束。'}
-          </Callout>
-        </CardBody>
-      </Card>
+      <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-12 text-center shadow-xs">
+        <Icon icon={Swords} size="lg" className="text-ink-faint" />
+        <p className="mt-3 text-md font-semibold text-ink">赛题开赛后公布</p>
+        <p className="mt-1 text-sm text-ink-sub">{formatDateTime(contest.start_at)} 开赛</p>
+      </div>
     )
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader
-          title="报名参赛"
-          description={isSolo ? '这场赛事个人参赛,报名即完成。' : '创建队伍后把邀请码发给队友。'}
-        />
-        <CardBody>
-          <form onSubmit={signup} noValidate>
-            {isSolo ? null : (
-              <FormField label="队伍名称" htmlFor="contest-team-name" required error={signupValidation.errors.teamName}>
-                <Input
-                  id="contest-team-name"
-                  value={teamName}
-                  placeholder="给队伍起个名字"
-                  invalid={Boolean(signupValidation.errors.teamName)}
-                  onChange={(event) => setTeamName(event.target.value)}
-                  onBlur={() => signupValidation.validate(['teamName'])}
-                />
-              </FormField>
-            )}
-            {signupError ? <Callout tone="danger">{signupError}</Callout> : null}
-            <Button
-              type="submit"
-              variant="primary"
-              leftIcon={UserPlus}
-              loading={signingUp}
-              className={isSolo ? 'w-full' : 'mt-4 w-full'}
-            >
-              报名参赛
-            </Button>
-          </form>
-        </CardBody>
-      </Card>
-
-      {isSolo ? null : (
-        <Card>
-          <CardHeader title="加入已有队伍" description="向队长索取邀请码后填入即可加入。" />
-          <CardBody>
-            <form onSubmit={joinTeam} noValidate>
-              <FormField label="队伍邀请码" htmlFor="contest-team-invite" required error={joinValidation.errors.inviteCode}>
-                <Input
-                  id="contest-team-invite"
-                  value={inviteCode}
-                  autoComplete="off"
-                  placeholder="请输入邀请码"
-                  invalid={Boolean(joinValidation.errors.inviteCode)}
-                  onChange={(event) => setInviteCode(event.target.value)}
-                  onBlur={() => joinValidation.validate(['inviteCode'])}
-                />
-              </FormField>
-              {joinError ? <Callout tone="danger" className="mt-4">{joinError}</Callout> : null}
-              <Button type="submit" variant="outline" leftIcon={Users} loading={joining} className="mt-4 w-full">
-                加入队伍
-              </Button>
-            </form>
-          </CardBody>
-        </Card>
-      )}
+    <div className="overflow-hidden rounded-lg bg-surface shadow-xs">
+      <ResourceState
+        resource={problems}
+        emptyIcon={Swords}
+        emptyTitle="这场赛事还没有赛题"
+        emptyDescription="老师添加赛题后会显示在这里。"
+        skeleton={
+          <div aria-busy="true" className="flex flex-col gap-3 p-4">
+            <Skeleton variant="line" lines={3} />
+          </div>
+        }
+      >
+        {(list) => (
+          <>
+            <ul className="divide-y divide-line">
+              {[...list]
+                .sort((a, b) => a.seq - b.seq)
+                .map((problem) => {
+                  const title = problem.title || `第 ${problem.seq} 题`
+                  const leading = (
+                    <span className="grid size-8 place-items-center rounded-md bg-surface-hover text-sm font-semibold tabular-nums text-ink-sub">
+                      {problem.seq}
+                    </span>
+                  )
+                  const trailing = <span className="text-base font-semibold tabular-nums text-ink">{problem.score} 分</span>
+                  const meta = problem.battle_rule ? '对抗题' : '解题'
+                  return (
+                    <li key={problem.id}>
+                      {canAnswer ? (
+                        <ListRowLink
+                          href={`/student/contests/${contest.id}/workspace?problem=${problem.id}`}
+                          title={title}
+                          meta={meta}
+                          leading={leading}
+                          trailing={trailing}
+                        />
+                      ) : (
+                        <ListRow title={title} meta={meta} leading={leading} trailing={trailing} />
+                      )}
+                    </li>
+                  )
+                })}
+            </ul>
+            {!canAnswer ? (
+              <p className="border-t border-line px-4 py-3 text-sm text-ink-sub">
+                {joined ? '比赛结束后不能再作答。' : '报名参赛的同学可以进入答题。'}
+              </p>
+            ) : null}
+          </>
+        )}
+      </ResourceState>
     </div>
   )
 }
 
-/**
- * ContestScheduleCard 展示赛程时间与规则要点。
- * 赛制、参赛形式与封榜时长都是赛事的静态属性,统一在这里列出,不占指标位(规范 §6.5)。
- */
-function ContestScheduleCard({ contest }: { contest: Contest }) {
-  const items = useMemo(
-    () => [
-      { term: '报名开始', description: formatDateTime(contest.signup_start), mono: true },
-      { term: '报名截止', description: formatDateTime(contest.signup_end), mono: true },
-      { term: '比赛开始', description: formatDateTime(contest.start_at), mono: true },
-      { term: '比赛结束', description: formatDateTime(contest.end_at), mono: true },
-      { term: '赛制', description: contestModeLabel(contest.mode) },
-      ...(contest.match_mode
-        ? [{ term: '对抗形式', description: matchModeLabel(contest.match_mode) }]
-        : []),
-      { term: '参赛形式', description: teamModeLabel(contest.team_mode) },
-      {
-        term: '封榜时长',
-        description: contest.freeze_minutes > 0 ? `${contest.freeze_minutes} 分钟` : '不封榜',
-      },
-    ],
-    [contest],
-  )
-
-  return (
-    <Card>
-      <CardHeader title="赛程" />
-      <CardBody>
-        <DescriptionList dense items={items} />
-      </CardBody>
-    </Card>
-  )
-}
-
-interface ContestProblemsProps {
-  contestId: string
-  canAnswer: boolean
-}
-
-/**
- * ContestProblems 列出赛题。
- * 题面正文不在列表里展开:答案黑盒要求题面只在答题工作台按需取用,
- * 列表只给分值与序号(后端 face 字段已剥离答案与判题配置)。
- */
-function ContestProblems({ contestId, canAnswer }: ContestProblemsProps) {
+/** ListRowLink 在路由内跳转的整行链接(保留中键与 Ctrl/⌘ 新标签页打开) */
+function ListRowLink(props: { href: string; title: string; meta: string; leading: React.ReactNode; trailing: React.ReactNode }) {
   const navigate = useNavigate()
-  const problems = useAsyncResource(() => api.contest.getProblems(contestId), [contestId])
-
-  const columns: TableColumn<ContestProblem>[] = [
-    { key: 'seq', header: '序号', align: 'right', mono: true },
-    {
-      key: 'title',
-      header: '赛题',
-      render: (problem) => (
-        <span className="font-medium text-ink">
-          {problem.title || `第 ${problem.seq} 题`}
-        </span>
-      ),
-    },
-    { key: 'score', header: '分值', align: 'right', mono: true },
-    {
-      key: 'battle_rule',
-      header: '题目类型',
-      render: (problem) => (
-        <Badge tone="neutral">{problem.battle_rule ? '对抗题' : '解题'}</Badge>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: () => (
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={!canAnswer}
-          onClick={() => navigate(`/student/contests/${contestId}/workspace`)}
-        >
-          去作答
-        </Button>
-      ),
-    },
-  ]
-
-  return (
-    // 列表型页内子视图走 DataPanel 片段(§6.5.5 B):赛题清单一次回齐,不分页也不筛选
-    <PageSection title="赛题" description="进入答题后才能看到完整题面。">
-      <DataPanel label="赛题">
-        <ResourceState
-          resource={problems}
-          emptyIcon={Swords}
-          emptyTitle="赛题尚未公布"
-          emptyDescription="开赛后赛题会显示在这里。"
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-        >
-          {(list) => (
-            <Table
-              columns={columns}
-              data={list}
-              rowKey={(item) => item.id}
-              elevated={false}
-              // <md 换行卡(§6.4.1 规则 3):题号与分值一行、题型一行
-              mobileCard={(item) => ({
-                title: `第 ${item.seq} 题`,
-                meta: `${item.score} 分`,
-                action: (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={!canAnswer}
-                    onClick={() => navigate(`/student/contests/${contestId}/workspace`)}
-                  >
-                    去作答
-                  </Button>
-                ),
-              })}
-            />
-          )}
-        </ResourceState>
-      </DataPanel>
-    </PageSection>
-  )
-}
-
-interface ContestLadderProps {
-  contestId: string
-  mode: ContestMode
-  frozen: boolean
+  return <ListRow {...props} onNavigate={(href: string) => navigate(href)} />
 }
 
 /**
- * ContestLadder 展示天梯榜。
- * 封榜期明确说明榜单暂停更新,避免用户把冻结的名次当成最终结果。
+ * ContestLadder 天梯榜:名次、队名、得分(解题赛还有通过题数与最近通过时间);我的队伍高亮并标「我的队伍」。
+ * 队名由接口按 team_id 读取后随榜单给出,个人赛是选手报名时填写的参赛名称。
  */
-function ContestLadder({ contestId, mode, frozen }: ContestLadderProps) {
-  const ladder = usePagedResource<LadderRank>(
-    (params) => api.contest.getLadder(contestId, params),
-    [contestId],
-  )
+function ContestLadder({ contestId, mode, myTeamId }: { contestId: string; mode: ContestMode; myTeamId: string | undefined }) {
+  const ladder = usePagedResource<LadderRank>((params) => api.contest.getLadder(contestId, params), [contestId])
+  const solve = mode === ContestMode.SOLVE
 
-  const columns: TableColumn<LadderRank>[] = [
-    { key: 'rank', header: '名次', align: 'right', mono: true },
-    {
-      key: 'team_id',
-      header: '队伍',
-      // 队伍名不在天梯响应里(只回 team_id),按名次呈现,不把内部编号当队名显示
-      render: (rank) => <span className="text-ink">第 {rank.rank} 名队伍</span>,
-    },
-    {
-      key: 'score',
-      header: '得分',
-      align: 'right',
-      mono: true,
-      render: (rank) => formatScore(rank.score),
-    },
-    ...(mode === ContestMode.SOLVE
-      ? [
-          { key: 'solved_count', header: '通过题数', align: 'right' as const, mono: true },
-          {
-            key: 'last_solve_at',
-            header: '最近通过',
-            render: (rank: LadderRank) => (
-              <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-                {rank.last_solve_at ? formatDateTime(rank.last_solve_at) : '—'}
-              </span>
-            ),
-          },
-        ]
-      : []),
-  ]
+  if (ladder.status === 'error') {
+    return (
+      <div className="rounded-lg bg-surface shadow-xs">
+        <ResourceError
+          message={ladder.error?.message ?? '榜单暂时读取不到'}
+          traceId={ladder.error?.traceId}
+          onRetry={ladder.reload}
+        />
+      </div>
+    )
+  }
 
   return (
-    // 同一父页下的子视图必须同构(§6.5.5 B):与赛题一样走 DataPanel 片段
-    <PageSection
-      title="天梯榜"
-      description={
-        mode === ContestMode.SOLVE
-          ? '按得分、通过题数与通过时间排名,封榜期暂停更新。'
-          : '按对抗赛积分排名,封榜期暂停更新。'
-      }
-    >
-      <div className="flex flex-col gap-4">
-        {frozen ? (
-          <Callout tone="warning" title="封榜中">
-            比赛进入封榜期,榜单暂停更新,当前名次不代表最终结果。
-          </Callout>
-        ) : null}
-        <DataPanel
-          label="天梯榜"
-          footer={
-            <Pagination
-              page={ladder.page}
-              pageSize={ladder.pageSize}
-              total={ladder.total}
-              onPageChange={ladder.setPage}
-            />
-          }
-        >
-          <ResourceState
-            resource={ladder}
-            emptyIcon={ListOrdered}
-            emptyTitle="榜单还是空的"
-            emptyDescription={
-              mode === ContestMode.SOLVE
-                ? '有队伍通过赛题后榜单就会出现。'
-                : '有队伍完成对局后榜单就会出现。'
-            }
-            skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-          >
-            {(page) => (
-              <Table
-                columns={columns}
-                data={page.list}
-                rowKey={(item) => item.team_id}
-                elevated={false}
-                // <md 换行卡(§6.4.1 规则 3):名次一行,赛制适用的成绩指标一行
-                mobileCard={(item) => ({
-                  title: `第 ${item.rank} 名`,
-                  meta:
-                    mode === ContestMode.SOLVE
-                      ? `得分 ${formatScore(item.score)} · 通过 ${item.solved_count} 题`
-                      : `对抗积分 ${formatScore(item.score)}`,
-                })}
-                empty={<Empty icon={ListOrdered} title="榜单还是空的" />}
-              />
-            )}
-          </ResourceState>
-        </DataPanel>
+    <div className="overflow-hidden rounded-lg bg-surface shadow-xs">
+      {ladder.status === 'loading' && !ladder.data ? (
+        <div aria-busy="true" className="flex flex-col gap-3 p-4">
+          <Skeleton variant="line" lines={5} />
+        </div>
+      ) : (ladder.data?.list.length ?? 0) === 0 ? (
+        <div className="flex flex-col items-center px-6 py-12 text-center">
+          <Icon icon={ListOrdered} size="lg" className="text-ink-faint" />
+          <p className="mt-3 text-md font-semibold text-ink">榜单还是空的</p>
+          <p className="mt-1 text-sm text-ink-sub">{solve ? '有队伍通过赛题后榜单就会出现。' : '有队伍完成对局后榜单就会出现。'}</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-line text-left text-sm text-ink-sub">
+                <th scope="col" className="px-4 py-3 font-normal">名次</th>
+                <th scope="col" className="px-4 py-3 font-normal">队伍</th>
+                <th scope="col" className="px-4 py-3 text-right font-normal">{solve ? '得分' : '对抗积分'}</th>
+                {solve ? <th scope="col" className="px-4 py-3 text-right font-normal">通过题数</th> : null}
+                {solve ? <th scope="col" className="hidden px-4 py-3 font-normal sm:table-cell">最近通过</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {ladder.data?.list.map((rank) => {
+                const mine = rank.team_id === myTeamId
+                return (
+                  <tr key={rank.team_id} className={mine ? 'bg-primary-soft' : 'border-b border-line last:border-b-0'}>
+                    <td className="px-4 py-3 font-semibold tabular-nums text-ink">{rank.rank}</td>
+                    <td className="px-4 py-3 text-ink">
+                      <span className={mine ? 'font-semibold text-primary' : undefined}>{rank.team_name}</span>
+                      {mine ? <span className="ml-2 text-xs text-primary">我的队伍</span> : null}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums text-ink">{formatScore(rank.score)}</td>
+                    {solve ? <td className="px-4 py-3 text-right tabular-nums text-ink">{rank.solved_count}</td> : null}
+                    {solve ? (
+                      <td className="hidden px-4 py-3 font-mono text-xs tabular-nums text-ink-sub sm:table-cell">
+                        {rank.last_solve_at ? formatDateTime(rank.last_solve_at) : '—'}
+                      </td>
+                    ) : null}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="border-t border-line px-4 py-3 empty:hidden">
+        <Pagination page={ladder.page} pageSize={ladder.pageSize} total={ladder.total} onPageChange={ladder.setPage} />
       </div>
-    </PageSection>
+    </div>
   )
 }

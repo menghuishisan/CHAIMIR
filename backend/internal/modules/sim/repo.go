@@ -38,7 +38,8 @@ type TxStore interface {
 	GetPackageByCodeVersion(ctx context.Context, code, version string) (Package, error)
 	GetPackageByID(ctx context.Context, id int64) (Package, error)
 	ListPackages(ctx context.Context, status int16, category, keyword string, authorID int64, limit, offset int32) ([]Package, int64, error)
-	CountPackagesByCategory(ctx context.Context, status int16, category, keyword string, authorID int64) (map[string]int64, error)
+	CountPackagesByCategory(ctx context.Context, status int16, keyword string, authorID int64) (map[string]int64, error)
+	CountPackagesByStatus(ctx context.Context, category, keyword string, authorID int64) (map[int16]int64, error)
 	ListPackageVersions(ctx context.Context, code string) ([]Package, error)
 	CreatePackage(ctx context.Context, pkg Package) (Package, error)
 	UpsertBuiltinPackage(ctx context.Context, pkg Package) (Package, error)
@@ -49,6 +50,8 @@ type TxStore interface {
 	GetReview(ctx context.Context, id int64) (Review, error)
 	GetLatestReviewForPackage(ctx context.Context, packageID int64) (Review, error)
 	ListReviews(ctx context.Context, result int16, limit, offset int32) ([]ReviewInfo, int64, error)
+	LatestRejections(ctx context.Context, packageIDs []int64) (map[int64]string, error)
+	CountReviewsByResult(ctx context.Context) (map[int16]int64, error)
 	MergeValidationReport(ctx context.Context, reviewID, packageID int64, leaseToken string, report ValidationReport) (Review, error)
 	ReleasePreviewLease(ctx context.Context, reviewID, packageID int64, leaseToken string) (int64, error)
 	ExhaustPreviewAttempts(ctx context.Context, maxAttempts int32, staleBefore time.Time, report ValidationReport) ([]Review, error)
@@ -146,9 +149,9 @@ func (s *txStore) ListPackages(ctx context.Context, status int16, category, keyw
 	return items, total, err
 }
 
-// CountPackagesByCategory 按当前列表边界统计仿真包分类。
-func (s *txStore) CountPackagesByCategory(ctx context.Context, status int16, category, keyword string, authorID int64) (map[string]int64, error) {
-	rows, err := s.q.CountSimPackagesByCategory(ctx, sqlcgen.CountSimPackagesByCategoryParams{Column1: status, Column2: category, Column3: keyword, Column4: authorID})
+// CountPackagesByCategory 按分类统计仿真包:套用状态、关键词与作者范围,不套用分类筛选。
+func (s *txStore) CountPackagesByCategory(ctx context.Context, status int16, keyword string, authorID int64) (map[string]int64, error) {
+	rows, err := s.q.CountSimPackagesByCategory(ctx, sqlcgen.CountSimPackagesByCategoryParams{Status: status, Keyword: keyword, AuthorID: authorID})
 	if err != nil {
 		return nil, err
 	}
@@ -293,6 +296,48 @@ func (s *txStore) GetLatestReviewForPackage(ctx context.Context, packageID int64
 		return Review{}, err
 	}
 	return reviewFromFields(row.ID, row.PackageID, row.SubmitterID, row.PreviewReport, row.ReviewerID, row.Result, row.Comment, row.CreatedAt, row.UpdatedAt)
+}
+
+// LatestRejections 返回每个包最近一次退回的审核意见;没有退回记录的包不在结果里。
+func (s *txStore) LatestRejections(ctx context.Context, packageIDs []int64) (map[int64]string, error) {
+	out := map[int64]string{}
+	if len(packageIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.q.ListLatestRejectionsByPackages(ctx, packageIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.PackageID] = pgtypex.TextValue(row.Comment)
+	}
+	return out, nil
+}
+
+// CountReviewsByResult 按审核结论聚合全部审核记录。
+func (s *txStore) CountReviewsByResult(ctx context.Context) (map[int16]int64, error) {
+	rows, err := s.q.CountSimReviewsByResult(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int16]int64, len(rows))
+	for _, row := range rows {
+		out[row.Result] = row.Count
+	}
+	return out, nil
+}
+
+// CountPackagesByStatus 按状态聚合仿真场景(套用分类、关键词与作者范围,按场景去重)。
+func (s *txStore) CountPackagesByStatus(ctx context.Context, category, keyword string, authorID int64) (map[int16]int64, error) {
+	rows, err := s.q.CountSimPackagesByStatus(ctx, sqlcgen.CountSimPackagesByStatusParams{Category: category, Keyword: keyword, AuthorID: authorID})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int16]int64, len(rows))
+	for _, row := range rows {
+		out[row.Status] = row.Count
+	}
+	return out, nil
 }
 
 // ListReviews 查询审核分页。

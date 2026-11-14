@@ -344,6 +344,8 @@ export interface BattleReplayResultDetail {
 
 export interface LadderRank {
   team_id: SnowflakeID
+  /** 队名(个人赛为选手报名时填写的参赛名称);读取时按 team_id 取,榜单快照里不存 */
+  team_name: string
   score: number
   solved_count: number
   last_solve_at?: string
@@ -361,6 +363,8 @@ export interface ResultSnapshot {
 
 export interface LadderSnapshotEntry {
   team_id: SnowflakeID
+  /** 队名;读取时按 team_id 取,快照本身不存名字 */
+  team_name: string
   score: number
   solved_count: number
   last_solve_at?: string
@@ -379,6 +383,8 @@ export interface CheatRecord {
   id: SnowflakeID
   contest_id: SnowflakeID
   team_id: SnowflakeID
+  /** 被处理的队伍名称;只在违规记录列表里给出 */
+  team_name?: string
   type: CheatType
   evidence: Record<string, unknown>
   action: CheatAction

@@ -46,6 +46,7 @@
   get:
     tags: [judge]
     summary: 判题任务列表
+    description: facets.state：运维分组计数（active 排队与执行中、abnormal 失败），套用其余筛选、不套用 state。
     operationId: judgeListTasks
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]

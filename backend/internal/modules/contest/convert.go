@@ -79,15 +79,34 @@ func ladderDTOFromModel(item LadderRank) LadderDTO {
 	return LadderDTO{TeamID: ids.ID(item.TeamID), Score: item.Score, SolvedCount: item.SolvedCount, LastSolveAt: optionalTime(item.LastSolveAt), Rank: item.Rank, UpdatedAt: item.UpdatedAt}
 }
 
-// resultSnapshotDTOFromModel 把归档状态的排行榜快照转换为最终结果输出。
-func resultSnapshotDTOFromModel(item LadderSnapshot, mode int16) ResultSnapshotDTO {
+// withLadderTeamNames 把队名合并进榜单行(返回新切片,不改动传入的列表);读不到的留空。
+func withLadderTeamNames(items []LadderDTO, names map[int64]string) []LadderDTO {
+	out := make([]LadderDTO, len(items))
+	for i, item := range items {
+		item.TeamName = names[item.TeamID.Int64()]
+		out[i] = item
+	}
+	return out
+}
+
+// snapshotTeamIDs 列出榜单快照里出现的队伍编号,供一次读取队名。
+func snapshotTeamIDs(snapshot LadderSnapshot) []int64 {
+	out := make([]int64, 0, len(snapshot.Ranking))
+	for _, entry := range snapshot.Ranking {
+		out = append(out, entry.TeamID)
+	}
+	return out
+}
+
+// resultSnapshotDTOFromModel 把归档状态的排行榜快照转换为最终结果输出;names 是按 team_id 读到的队名。
+func resultSnapshotDTOFromModel(item LadderSnapshot, mode int16, names map[int64]string) ResultSnapshotDTO {
 	ranking := make([]LadderSnapshotEntryDTO, 0, len(item.Ranking))
 	for _, entry := range item.Ranking {
 		solvedCount, lastSolveAt := entry.SolvedCount, entry.LastSolveAt
 		if mode == ContestModeBattle {
 			solvedCount, lastSolveAt = 0, nil
 		}
-		ranking = append(ranking, LadderSnapshotEntryDTO{TeamID: ids.ID(entry.TeamID), Score: entry.Score, SolvedCount: solvedCount, LastSolveAt: lastSolveAt, Rank: entry.Rank, UpdatedAt: entry.UpdatedAt})
+		ranking = append(ranking, LadderSnapshotEntryDTO{TeamID: ids.ID(entry.TeamID), TeamName: names[entry.TeamID], Score: entry.Score, SolvedCount: solvedCount, LastSolveAt: lastSolveAt, Rank: entry.Rank, UpdatedAt: entry.UpdatedAt})
 	}
 	return ResultSnapshotDTO{ID: ids.ID(item.ID), TenantID: ids.ID(item.TenantID), ContestID: ids.ID(item.ContestID), FinalRanking: ranking, GeneratedAt: item.GeneratedAt}
 }

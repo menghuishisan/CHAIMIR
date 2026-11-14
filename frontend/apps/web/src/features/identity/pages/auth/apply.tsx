@@ -4,8 +4,8 @@
 // 机构类型枚举与 tenantApplicationSchoolTypeLabel 同源,避免前后端两套文案。
 
 import React, { useCallback, useId, useState } from 'react'
-import { ArrowLeft } from 'lucide-react'
-import { Select } from '@chaimir/ui'
+import { ArrowLeft, Save } from 'lucide-react'
+import { Icon, Select } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import {
   tenantApplicationSchoolTypeLabel,
@@ -160,7 +160,7 @@ export default function ApplyPage() {
         {/* 尾链是弱化通路:申请人此刻还没有账号,登录不是他的下一步(下一步是等平台联系) */}
         <AuthSuccess
           title="申请已提交"
-          description="平台运营人员会通过您留下的电话或邮箱与您联系,请留意来电与邮件。"
+          description="平台运营人员会通过您留下的电话或邮箱与您联系,确认后为学校开通账号。请留意来电与邮件。"
         >
           <AuthFormError message={draftState.warning} />
           <AuthQuietLink to="/auth/login" icon={ArrowLeft}>
@@ -174,10 +174,21 @@ export default function ApplyPage() {
   return (
     <AuthPanel>
       <form className="w-full max-w-md" onSubmit={handleSubmit} noValidate>
-        <AuthHeading
-          title="申请学校入驻"
-          description="留下学校与联系人信息,平台运营人员会与您联系确认后开通。"
-        />
+        <div className="flex items-start justify-between gap-4">
+          <AuthHeading
+            title="申请学校入驻"
+            description="留下学校与联系人信息,平台运营人员会与您联系确认后开通。"
+          />
+          {/* 已填字段只保存在本机(全站唯一允许只存本机的表单,CLAUDE.md §9),提交成功后立即清除 */}
+          {draftState.warning ? null : (
+            <span className="mt-1 flex shrink-0 items-center gap-1.5 text-xs text-on-dark-sub">
+              <Icon icon={Save} size="xs" />
+              已在本机保存
+            </span>
+          )}
+        </div>
+
+        <h2 className="mt-8 text-sm font-semibold text-on-dark">学校信息</h2>
 
         <AuthTextField
           label="学校名称"
@@ -203,6 +214,8 @@ export default function ApplyPage() {
             onValueChange={(value) => updateDraft({ schoolType: Number(value) as TenantApplicationSchoolType })}
           />
         </AuthField>
+
+        <h2 className="mt-10 text-sm font-semibold text-on-dark">联系人</h2>
 
         <AuthTextField
           label="联系人姓名"

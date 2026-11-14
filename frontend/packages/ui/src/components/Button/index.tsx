@@ -1,8 +1,9 @@
 /**
  * Button:平台统一按钮组件。
- * CVA 变体:primary(玉实底)/ seal(朱砂落印)/ outline / ghost / danger /
- * on-dark(深色语境描边)/ on-dark-warning(深色语境需注意描边);
- * 尺寸 sm/md/lg;按压反馈走 pressable 工具类。
+ * CVA 变体:primary(玉实底)/ secondary(玉浅底 + 玉字,卡内次要操作)/ seal(朱砂落印,仅限提交作答、
+ * 成绩报送、发布、归档结算)/ outline / ghost / danger(删除、移除类确认)/ on-dark(深色语境描边)/
+ * on-dark-warning(深色语境需注意描边);尺寸 sm 30 / md 36 / lg 42,触屏上最小高 44(§3.2);
+ * 按压反馈走 pressable 工具类。
  * loading 时以 LoaderCircle 旋转图标替换左图标,但不设原生 disabled:
  * 原生 disabled 会让浏览器把焦点甩回 body,读屏用户丢失上下文;
  * 改用 aria-disabled + aria-busy + onClick 守卫拦截,元素保持可聚焦。
@@ -19,11 +20,13 @@ import { Icon, type IconSize } from "../../lib/icon";
  * 对外导出:少数必须是链接的按钮(如认证页成功态的「前往登录」)需要同一套视觉,
  * 由调用方把它套到 <Link> 上,避免把类名再抄一遍写出第二套落印按钮。 */
 export const buttonVariants = cva(
-  "pressable inline-flex min-h-11 select-none items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  "pressable inline-flex pointer-coarse:min-h-11 select-none items-center justify-center gap-2 whitespace-nowrap rounded-md font-medium focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {
         primary: "bg-primary text-on-solid hover:bg-primary-hover",
+        // 卡内或列表里的次要操作:玉色但不抢主按钮(每页最多一个实底主按钮,§6.5.0 通则 3)
+        secondary: "bg-primary-soft text-primary hover:bg-primary-soft-hover hover:text-primary-hover",
         seal: "bg-seal-action text-on-solid hover:bg-seal-action-hover",
         outline: "border border-line-strong bg-transparent text-ink hover:bg-surface-hover",
         ghost: "text-ink-sub hover:bg-surface-hover hover:text-ink",
@@ -35,9 +38,9 @@ export const buttonVariants = cva(
           "border border-on-dark-amber bg-transparent text-on-dark-amber hover:bg-dark-elevated",
       },
       size: {
-        sm: "h-8 px-3 text-sm",
+        sm: "h-7.5 px-3 text-sm",
         md: "h-9 px-4 text-base",
-        lg: "h-11 px-5 text-md",
+        lg: "h-10.5 px-5 text-md",
       },
     },
     defaultVariants: { variant: "primary", size: "md" },

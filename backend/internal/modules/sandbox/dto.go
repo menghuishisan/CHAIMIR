@@ -51,6 +51,8 @@ type RuntimeResponse struct {
 	PluginRef      string          `json:"plugin_ref"`
 	SelftestStatus int16           `json:"selftest_status"`
 	Status         int16           `json:"status"`
+	// AvailableImageCount 可用镜像版本数;只在列表里给出(详情页另有完整镜像列表)
+	AvailableImageCount *int64 `json:"available_image_count,omitempty"`
 }
 
 // RuntimeImageResponse 是运行时镜像接口的稳定输出 DTO。

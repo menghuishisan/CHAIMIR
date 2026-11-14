@@ -71,6 +71,7 @@ export interface StatusIndicatorProps {
   className?: string;
 }
 
+/** StatusIndicator 运行或流程状态指示:色点 + 文字,进行中可带转圈 */
 export function StatusIndicator({
   tone,
   appearance = "soft",

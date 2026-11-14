@@ -18,9 +18,16 @@ type Querier interface {
 	ClearCurrentSemesters(ctx context.Context) error
 	ClearDefaultLevelConfigs(ctx context.Context) error
 	CountAcademicWarnings(ctx context.Context, arg CountAcademicWarningsParams) (int64, error)
+	// 学业预警的状态分段计数:套用学生筛选,不套用状态筛选。
+	CountAcademicWarningsByStatus(ctx context.Context, arg CountAcademicWarningsByStatusParams) ([]CountAcademicWarningsByStatusRow, error)
 	CountGradeAppeals(ctx context.Context, arg CountGradeAppealsParams) (int64, error)
+	// 申诉列表的状态分段计数:范围与列表一致(学生只数本人,教师按任教课程,校管全校),不套用状态筛选。
+	CountGradeAppealsByStatus(ctx context.Context, arg CountGradeAppealsByStatusParams) ([]CountGradeAppealsByStatusRow, error)
 	CountGradeReviews(ctx context.Context, arg CountGradeReviewsParams) (int64, error)
+	// 成绩审核队列的状态分段计数:套用锁定筛选,不套用状态筛选。
+	CountGradeReviewsByStatus(ctx context.Context, arg CountGradeReviewsByStatusParams) ([]CountGradeReviewsByStatusRow, error)
 	CountOwnGradeReviews(ctx context.Context, arg CountOwnGradeReviewsParams) (int64, error)
+	CountStudentGradeAppeals(ctx context.Context, arg CountStudentGradeAppealsParams) (int64, error)
 	CreateAcademicWarning(ctx context.Context, arg CreateAcademicWarningParams) (AcademicWarning, error)
 	CreateGradeAppeal(ctx context.Context, arg CreateGradeAppealParams) (GradeAppeal, error)
 	CreateGradeLockOutbox(ctx context.Context, arg CreateGradeLockOutboxParams) (GradeLockOutbox, error)
@@ -46,6 +53,8 @@ type Querier interface {
 	ListLevelConfigs(ctx context.Context) ([]GradeLevelConfig, error)
 	ListOwnGradeReviews(ctx context.Context, arg ListOwnGradeReviewsParams) ([]GradeReview, error)
 	ListSemesters(ctx context.Context) ([]Semester, error)
+	// 学生本人的申诉:成绩中心按课程显示处理状态与处理意见;student_id 由服务端填会话账号。
+	ListStudentGradeAppeals(ctx context.Context, arg ListStudentGradeAppealsParams) ([]GradeAppeal, error)
 	ListStudentSemesterGrades(ctx context.Context, studentID int64) ([]StudentSemesterGrade, error)
 	ListTranscriptRecords(ctx context.Context, arg ListTranscriptRecordsParams) ([]TranscriptRecord, error)
 	LockGradeCourseScope(ctx context.Context, arg LockGradeCourseScopeParams) error

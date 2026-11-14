@@ -60,6 +60,7 @@ const STYLES: Record<
   },
 };
 
+/** DensityMatrix 双维度密度矩阵(热力图) */
 export function DensityMatrix({
   rows,
   columns,

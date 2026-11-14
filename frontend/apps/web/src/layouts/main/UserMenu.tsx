@@ -77,10 +77,14 @@ export function UserMenu({ profilePath, loginPath }: UserMenuProps) {
         <ChevronDown aria-hidden="true" className="size-4 shrink-0 text-on-dark-sub" />
       </MenuTrigger>
 
-      <MenuContent align="end" className="min-w-52">
-        <MenuLabel>
-          {account.name}
-          {roleName ? ` · ${roleName}` : ''}
+      <MenuContent align="end" className="min-w-52 max-w-72">
+        {/* 菜单顶部:姓名、角色、学校(设计 §7.8);一个手机号可以属于多所学校,写明这次登录的是哪所 */}
+        <MenuLabel className="flex flex-col gap-0.5">
+          <span className="truncate text-sm font-medium text-ink">
+            {account.name}
+            {roleName ? ` · ${roleName}` : ''}
+          </span>
+          {me.tenant_name ? <span className="truncate">{me.tenant_name}</span> : null}
         </MenuLabel>
         <MenuSeparator />
         <MenuItem icon={UserCog} onSelect={() => navigate(profilePath)}>

@@ -74,23 +74,29 @@ func NewService(deps ServiceDeps) (*Service, error) {
 }
 
 // Inbox 查询当前用户站内信。
-func (s *Service) Inbox(ctx context.Context, isRead *bool, typ string, page, size int) ([]NotificationDTO, int64, error) {
+func (s *Service) Inbox(ctx context.Context, isRead *bool, typ string, page, size int) ([]NotificationDTO, int64, pagex.Facets, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
 	var out []NotificationDTO
 	var total int64
+	var byRead pagex.FacetGroup
 	err = s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		out, total, err = tx.ListNotifications(ctx, id.AccountID, isRead, typ, page, size)
+		if err != nil {
+			return err
+		}
+		// 「全部 / 未读」分段计数:不套用已读筛选
+		byRead, err = tx.CountNotificationsByRead(ctx, id.AccountID, typ)
 		return err
 	})
 	if err != nil {
-		return nil, 0, apperr.ErrNotifyInboxQueryInvalid.WithCause(err)
+		return nil, 0, nil, apperr.ErrNotifyInboxQueryInvalid.WithCause(err)
 	}
-	return out, total, nil
+	return out, total, pagex.Facets{"is_read": byRead}, nil
 }
 
 // Unread 查询当前用户未读数。
@@ -239,7 +245,7 @@ func (s *Service) CreateAnnouncement(ctx context.Context, req AnnouncementReques
 	return out, nil
 }
 
-// ListAnnouncements 查询可见公告分页。
+// ListAnnouncements 查询可见公告分页,并带回范围与本人已读两组计数(当前身份可见的全部公告)。
 func (s *Service) ListAnnouncements(ctx context.Context, page, size int) ([]AnnouncementDTO, int64, int, int, map[string]map[string]int64, error) {
 	id, err := currentIdentityAllowPlatform(ctx)
 	if err != nil {
@@ -248,20 +254,20 @@ func (s *Service) ListAnnouncements(ctx context.Context, page, size int) ([]Anno
 	page, size = pagex.Normalize(page, size)
 	var out []AnnouncementDTO
 	var total int64
-	var byScope map[string]int64
+	var facets pagex.Facets
 	if id.IsPlatform {
 		err = s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
 			var err error
 			out, total, err = tx.ListAnnouncements(ctx, 0, id.AccountID, []int16{contracts.RoleNumPlatformAdmin}, page, size)
 			if err == nil {
-				byScope, err = tx.CountVisibleAnnouncementsByScope(ctx, 0, id.AccountID, []int16{contracts.RoleNumPlatformAdmin})
+				facets, err = tx.CountVisibleAnnouncementFacets(ctx, 0, id.AccountID, []int16{contracts.RoleNumPlatformAdmin})
 			}
 			return err
 		})
 		if err != nil {
 			return nil, 0, page, size, nil, err
 		}
-		return out, total, page, size, map[string]map[string]int64{"scope": byScope}, nil
+		return out, total, page, size, facets.Map(), nil
 	}
 	roleNumbers, err := s.currentRoleNumbers(ctx, id.AccountID)
 	if err != nil {
@@ -271,7 +277,7 @@ func (s *Service) ListAnnouncements(ctx context.Context, page, size int) ([]Anno
 		var err error
 		out, total, err = tx.ListAnnouncements(ctx, id.TenantID, id.AccountID, roleNumbers, page, size)
 		if err == nil {
-			byScope, err = tx.CountVisibleAnnouncementsByScope(ctx, id.TenantID, id.AccountID, roleNumbers)
+			facets, err = tx.CountVisibleAnnouncementFacets(ctx, id.TenantID, id.AccountID, roleNumbers)
 		}
 		return err
 	})
@@ -282,7 +288,7 @@ func (s *Service) ListAnnouncements(ctx context.Context, page, size int) ([]Anno
 	if err != nil {
 		return nil, 0, page, size, nil, err
 	}
-	return filtered, total, page, size, map[string]map[string]int64{"scope": byScope}, nil
+	return filtered, total, page, size, facets.Map(), nil
 }
 
 // MarkAnnouncementRead 标记公告已读。

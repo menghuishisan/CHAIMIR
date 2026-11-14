@@ -14,11 +14,15 @@ import (
 	"chaimir/pkg/chainassert"
 	pkgcrypto "chaimir/pkg/crypto"
 	"chaimir/pkg/privacy"
+	"chaimir/pkg/question"
 )
 
 // executeJudgerStrategy 执行不需要容器命令的后端内置判题策略。
 func (s *Service) executeJudgerStrategy(ctx context.Context, task JudgeTask, sandboxID int64) (JudgeExecutionResult, bool, error) {
 	switch task.InputSnapshot.JudgerType {
+	case JudgerTypeTheoryQuestion:
+		result, err := judgeTheoryQuestion(task)
+		return result, true, err
 	case JudgerTypeOnchainAssert:
 		result, err := s.judgeOnchainAssertions(ctx, task, sandboxID)
 		return result, true, err
@@ -210,6 +214,14 @@ func (s *Service) snapshotExpectationForJudger(typ int16, expectation map[string
 		out[k] = v
 	}
 	switch typ {
+	case JudgerTypeTheoryQuestion:
+		definition, err := question.Decode(out, true)
+		if err != nil || !definition.Automatic() {
+			return nil, apperr.ErrJudgerConfigInvalid.WithCause(err)
+		}
+		snapshot := definition.Face()
+		snapshot["answer"] = out["answer"]
+		return snapshot, nil
 	case JudgerTypeFlag:
 		hash := strings.TrimSpace(jsonx.StringFromAny(out["flag_hash"]))
 		if !pkgcrypto.ValidSHA256Hex(hash) {

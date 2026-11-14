@@ -12,6 +12,8 @@ type Querier interface {
 	ClaimTransferTask(ctx context.Context, arg ClaimTransferTaskParams) (TransferTask, error)
 	CompleteTransferTask(ctx context.Context, arg CompleteTransferTaskParams) (TransferTask, error)
 	CountTransferTasks(ctx context.Context, arg CountTransferTasksParams) (int64, error)
+	// 任务与下载「全部 / 导入 / 导出」分段计数:本人任务,套用状态筛选,不套用类型筛选。
+	CountTransferTasksByChannel(ctx context.Context, arg CountTransferTasksByChannelParams) ([]CountTransferTasksByChannelRow, error)
 	CreateTransferTask(ctx context.Context, arg CreateTransferTaskParams) (TransferTask, error)
 	DeletePendingTransferTask(ctx context.Context, arg DeletePendingTransferTaskParams) error
 	FailTransferTask(ctx context.Context, arg FailTransferTaskParams) (TransferTask, error)

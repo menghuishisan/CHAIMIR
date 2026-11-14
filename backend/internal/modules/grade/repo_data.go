@@ -144,10 +144,23 @@ func (t *txStore) CreateGradeReview(ctx context.Context, id, tenantID, submitter
 	return reviewDTO(row), nil
 }
 
-// ListGradeReviews 查询成绩审核分页列表和总数。
-func (t *txStore) ListGradeReviews(ctx context.Context, status, isLocked int16, page, size int) ([]ReviewDTO, int64, error) {
+// CountGradeReviewsByStatus 按状态聚合成绩审核(套用锁定与学期筛选,不套用状态)。
+func (t *txStore) CountGradeReviewsByStatus(ctx context.Context, isLocked int16, semesterID int64) (pagex.FacetGroup, error) {
+	rows, err := t.q.CountGradeReviewsByStatus(ctx, sqlcgen.CountGradeReviewsByStatusParams{IsLocked: isLocked, SemesterID: semesterID})
+	if err != nil {
+		return nil, err
+	}
+	group := pagex.FacetGroup{}
+	for _, row := range rows {
+		group.Add(row.Status, row.Count)
+	}
+	return group, nil
+}
+
+// ListGradeReviews 查询成绩审核分页列表和总数;semesterID 传 0 表示不按学期筛选。
+func (t *txStore) ListGradeReviews(ctx context.Context, status, isLocked int16, semesterID int64, page, size int) ([]ReviewDTO, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := t.q.ListGradeReviews(ctx, sqlcgen.ListGradeReviewsParams{Status: status, IsLocked: isLocked, PageOffset: offset, PageLimit: limit})
+	rows, err := t.q.ListGradeReviews(ctx, sqlcgen.ListGradeReviewsParams{Status: status, IsLocked: isLocked, SemesterID: semesterID, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -155,7 +168,7 @@ func (t *txStore) ListGradeReviews(ctx context.Context, status, isLocked int16, 
 	for _, row := range rows {
 		out = append(out, reviewDTO(row))
 	}
-	total, err := t.q.CountGradeReviews(ctx, sqlcgen.CountGradeReviewsParams{Status: status, IsLocked: isLocked})
+	total, err := t.q.CountGradeReviews(ctx, sqlcgen.CountGradeReviewsParams{Status: status, IsLocked: isLocked, SemesterID: semesterID})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -372,9 +385,25 @@ func (t *txStore) GetGradeAppeal(ctx context.Context, id int64) (AppealDTO, erro
 	return appealDTO(row), nil
 }
 
+// CountGradeAppealsByStatus 按状态聚合申诉,范围同列表(学生本人 / 教师任教课程 / 校管全校)。
+func (t *txStore) CountGradeAppealsByStatus(ctx context.Context, query AppealListQuery) (pagex.FacetGroup, error) {
+	rows, err := t.q.CountGradeAppealsByStatus(ctx, sqlcgen.CountGradeAppealsByStatusParams{StudentID: query.StudentID, AllCourses: query.AllCourses, CourseIds: query.CourseIDs})
+	if err != nil {
+		return nil, err
+	}
+	group := pagex.FacetGroup{}
+	for _, row := range rows {
+		group.Add(row.Status, row.Count)
+	}
+	return group, nil
+}
+
 // ListGradeAppeals 按同一角色课程范围查询申诉分页及总数,不在分页后过滤。
 func (t *txStore) ListGradeAppeals(ctx context.Context, query AppealListQuery) ([]AppealDTO, int64, error) {
 	limit, offset := pagex.LimitOffset(query.Page, query.Size)
+	if query.StudentID > 0 {
+		return t.listStudentGradeAppeals(ctx, query, limit, offset)
+	}
 	rows, err := t.q.ListGradeAppeals(ctx, sqlcgen.ListGradeAppealsParams{Status: query.Status, AllCourses: query.AllCourses, CourseIds: query.CourseIDs, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
@@ -384,6 +413,23 @@ func (t *txStore) ListGradeAppeals(ctx context.Context, query AppealListQuery) (
 		out = append(out, appealDTO(row))
 	}
 	total, err := t.q.CountGradeAppeals(ctx, sqlcgen.CountGradeAppealsParams{Status: query.Status, AllCourses: query.AllCourses, CourseIds: query.CourseIDs})
+	if err != nil {
+		return nil, 0, err
+	}
+	return out, total, nil
+}
+
+// listStudentGradeAppeals 只读一名学生本人的申诉,分页与计数同口径。
+func (t *txStore) listStudentGradeAppeals(ctx context.Context, query AppealListQuery, limit, offset int32) ([]AppealDTO, int64, error) {
+	rows, err := t.q.ListStudentGradeAppeals(ctx, sqlcgen.ListStudentGradeAppealsParams{StudentID: query.StudentID, Status: query.Status, PageOffset: offset, PageLimit: limit})
+	if err != nil {
+		return nil, 0, err
+	}
+	out := make([]AppealDTO, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, appealDTO(row))
+	}
+	total, err := t.q.CountStudentGradeAppeals(ctx, sqlcgen.CountStudentGradeAppealsParams{StudentID: query.StudentID, Status: query.Status})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -425,11 +471,24 @@ func (t *txStore) CreateAcademicWarning(ctx context.Context, id, tenantID, stude
 	return warningDTO(row)
 }
 
+// CountAcademicWarningsByStatus 按状态聚合学业预警(套用学生与学期筛选,不套用状态)。
+func (t *txStore) CountAcademicWarningsByStatus(ctx context.Context, studentID, semesterID int64) (pagex.FacetGroup, error) {
+	rows, err := t.q.CountAcademicWarningsByStatus(ctx, sqlcgen.CountAcademicWarningsByStatusParams{StudentID: studentID, SemesterID: semesterID})
+	if err != nil {
+		return nil, err
+	}
+	group := pagex.FacetGroup{}
+	for _, row := range rows {
+		group.Add(row.Status, row.Count)
+	}
+	return group, nil
+}
+
 // ListAcademicWarnings 查询学业预警分页列表和总数。
-// status 传 0 表示不按确认状态过滤,与 SQL 中的可选条件一致。
-func (t *txStore) ListAcademicWarnings(ctx context.Context, studentID int64, status int16, page, size int) ([]WarningDTO, int64, error) {
+// status、semesterID 传 0 表示不按该维度过滤,与 SQL 中的可选条件一致。
+func (t *txStore) ListAcademicWarnings(ctx context.Context, studentID int64, status int16, semesterID int64, page, size int) ([]WarningDTO, int64, error) {
 	limit, offset := pagex.LimitOffset(page, size)
-	rows, err := t.q.ListAcademicWarnings(ctx, sqlcgen.ListAcademicWarningsParams{StudentID: studentID, Status: status, PageOffset: offset, PageLimit: limit})
+	rows, err := t.q.ListAcademicWarnings(ctx, sqlcgen.ListAcademicWarningsParams{StudentID: studentID, Status: status, SemesterID: semesterID, PageOffset: offset, PageLimit: limit})
 	if err != nil {
 		return nil, 0, err
 	}
@@ -441,7 +500,7 @@ func (t *txStore) ListAcademicWarnings(ctx context.Context, studentID int64, sta
 		}
 		out = append(out, item)
 	}
-	total, err := t.q.CountAcademicWarnings(ctx, sqlcgen.CountAcademicWarningsParams{StudentID: studentID, Status: status})
+	total, err := t.q.CountAcademicWarnings(ctx, sqlcgen.CountAcademicWarningsParams{StudentID: studentID, Status: status, SemesterID: semesterID})
 	if err != nil {
 		return nil, 0, err
 	}

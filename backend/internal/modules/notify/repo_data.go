@@ -3,7 +3,6 @@ package notify
 
 import (
 	"context"
-	"strconv"
 	"strings"
 	"time"
 
@@ -85,6 +84,19 @@ func (t *txStore) CreateNotifications(ctx context.Context, records []notificatio
 		}
 	}
 	return nil
+}
+
+// CountNotificationsByRead 按已读与否聚合本人收件箱(套用类型筛选,不套用已读筛选)。
+func (t *txStore) CountNotificationsByRead(ctx context.Context, accountID int64, typ string) (pagex.FacetGroup, error) {
+	rows, err := t.q.CountNotificationsByRead(ctx, sqlcgen.CountNotificationsByReadParams{ReceiverID: accountID, Type: strings.TrimSpace(typ)})
+	if err != nil {
+		return nil, err
+	}
+	group := pagex.FacetGroup{}
+	for _, row := range rows {
+		group.Add(row.IsRead, row.Count)
+	}
+	return group, nil
 }
 
 // ListNotifications 查询站内信分页。
@@ -197,17 +209,19 @@ func (t *txStore) ListAnnouncements(ctx context.Context, tenantID, accountID int
 	return out, total, nil
 }
 
-// CountVisibleAnnouncementsByScope 按当前用户可见边界统计公告范围。
-func (t *txStore) CountVisibleAnnouncementsByScope(ctx context.Context, tenantID, accountID int64, roleNumbers []int16) (map[string]int64, error) {
-	rows, err := t.q.CountVisibleAnnouncementsByScope(ctx, sqlcgen.CountVisibleAnnouncementsByScopeParams{TenantID: pgtypex.Int8(tenantID), AccountID: accountID, RoleNumbers: roleNumbers})
+// CountVisibleAnnouncementFacets 按当前身份的可见边界统计公告列表的两组计数:
+// scope 按发布范围,is_read 按本人是否已读(收件箱「公告」标签的未读数)。
+func (t *txStore) CountVisibleAnnouncementFacets(ctx context.Context, tenantID, accountID int64, roleNumbers []int16) (pagex.Facets, error) {
+	rows, err := t.q.CountVisibleAnnouncementFacets(ctx, sqlcgen.CountVisibleAnnouncementFacetsParams{TenantID: tenantID, AccountID: accountID, RoleNumbers: roleNumbers})
 	if err != nil {
 		return nil, err
 	}
-	out := make(map[string]int64, len(rows))
+	byScope, byRead := pagex.FacetGroup{}, pagex.FacetGroup{}
 	for _, row := range rows {
-		out[strconv.Itoa(int(row.Scope))] = row.Count
+		byScope.Add(row.Scope, row.Count)
+		byRead.Add(row.IsRead, row.Count)
 	}
-	return out, nil
+	return pagex.Facets{"scope": byScope, "is_read": byRead}, nil
 }
 
 // GetVisibleAnnouncement 查询当前用户可见公告。

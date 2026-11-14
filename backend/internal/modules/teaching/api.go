@@ -144,8 +144,8 @@ func (a teachingAPI) listCourses(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListCourses(c.Request.Context(), CourseListFilter{Role: c.Query("role"), Status: status, IsShared: isShared, Page: page, Size: size})
-	httpx.WritePage(c, out, total, p, s, err)
+	out, total, p, s, facets, err := a.svc.ListCourses(c.Request.Context(), CourseListFilter{Role: c.Query("role"), Status: status, IsShared: isShared, Page: page, Size: size})
+	httpx.WritePageWithFacets(c, out, total, p, s, facets.Map(), err)
 }
 
 // listSharedCourses只接受目录关键词与分页，不接受调用方指定租户范围。
@@ -504,7 +504,7 @@ func (a teachingAPI) createAssignment(c *gin.Context) {
 		return
 	}
 	var req AssignmentRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingAssignmentInvalid) {
+	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingAssignmentInvalid) {
 		return
 	}
 	out, err := a.svc.CreateAssignment(c.Request.Context(), courseID, req)
@@ -518,7 +518,7 @@ func (a teachingAPI) updateAssignment(c *gin.Context) {
 		return
 	}
 	var req AssignmentRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingAssignmentInvalid) {
+	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingAssignmentInvalid) {
 		return
 	}
 	out, err := a.svc.UpdateAssignment(c.Request.Context(), id, req)
@@ -566,7 +566,7 @@ func (a teachingAPI) saveDraft(c *gin.Context) {
 		return
 	}
 	var req DraftRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingDraftInvalid) {
+	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingDraftInvalid) {
 		return
 	}
 	out, err := a.svc.SaveDraft(c.Request.Context(), id, req)
@@ -590,7 +590,7 @@ func (a teachingAPI) submitAssignment(c *gin.Context) {
 		return
 	}
 	var req SubmitAssignmentRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingSubmissionInvalid) {
+	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingSubmissionInvalid) {
 		return
 	}
 	out, err := a.svc.SubmitAssignment(c.Request.Context(), id, req)
@@ -616,8 +616,8 @@ func (a teachingAPI) listSubmissions(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListSubmissions(c.Request.Context(), id, status, isLate, page, size)
-	httpx.WritePage(c, out, total, p, s, err)
+	out, total, p, s, facets, err := a.svc.ListSubmissions(c.Request.Context(), id, status, isLate, page, size)
+	httpx.WritePageWithFacets(c, out, total, p, s, facets.Map(), err)
 }
 
 // gradeSubmission 绑定教师批改请求。
@@ -627,7 +627,7 @@ func (a teachingAPI) gradeSubmission(c *gin.Context) {
 		return
 	}
 	var req GradeSubmissionRequest
-	if !httpx.BindJSONWithError(c, &req, apperr.ErrTeachingSubmissionInvalid) {
+	if !httpx.BindJSONKnownFieldsWithError(c, &req, apperr.ErrTeachingSubmissionInvalid) {
 		return
 	}
 	out, err := a.svc.GradeSubmission(c.Request.Context(), id, req)

@@ -12,9 +12,15 @@ type Querier interface {
 	ClaimPendingExperimentEventOutbox(ctx context.Context, arg ClaimPendingExperimentEventOutboxParams) ([]ExperimentEventOutbox, error)
 	ClaimRecyclableInstancesAcrossTenants(ctx context.Context, arg ClaimRecyclableInstancesAcrossTenantsParams) ([]ClaimRecyclableInstancesAcrossTenantsRow, error)
 	CountExperimentReports(ctx context.Context, arg CountExperimentReportsParams) (int64, error)
+	// 实验报告批改台的状态分段计数(待批改 / 已批改),不套用状态筛选。
+	CountExperimentReportsByStatus(ctx context.Context, arg CountExperimentReportsByStatusParams) ([]CountExperimentReportsByStatusRow, error)
 	CountExperiments(ctx context.Context, arg CountExperimentsParams) (int64, error)
+	// 教师实验列表的状态分段计数:套用课程与关键词筛选,不套用状态筛选。
+	CountExperimentsByStatus(ctx context.Context, arg CountExperimentsByStatusParams) ([]CountExperimentsByStatusRow, error)
 	CountPublishedExperimentsByShape(ctx context.Context, arg CountPublishedExperimentsByShapeParams) ([]CountPublishedExperimentsByShapeRow, error)
 	CountTeacherInstances(ctx context.Context, arg CountTeacherInstancesParams) (int64, error)
+	// 教学监控的实验环境分段计数:范围同 ListTeacherInstances(教师看本人实验,校管 teacher_id=0 看全校),不套用状态筛选。
+	CountTeacherInstancesByStatus(ctx context.Context, arg CountTeacherInstancesByStatusParams) ([]CountTeacherInstancesByStatusRow, error)
 	// experiment.sql 定义 M7 实验模块的 sqlc 查询,仅访问实验模块自有表。
 	CreateExperiment(ctx context.Context, arg CreateExperimentParams) (Experiment, error)
 	// 实例行锁内生成得分修订，绑定使用定义的单调修订；载荷与修订同次提交。
@@ -53,6 +59,9 @@ type Querier interface {
 	ListLiveInstancesByCourse(ctx context.Context, arg ListLiveInstancesByCourseParams) ([]ListLiveInstancesByCourseRow, error)
 	// 按学生视角批量解析其在给定实验集合中所属的小组,供学生实验列表/详情一次性填充 my_group_id。
 	ListStudentGroupsForExperiments(ctx context.Context, arg ListStudentGroupsForExperimentsParams) ([]ListStudentGroupsForExperimentsRow, error)
+	// 学生实验卡片的本人进度:当前页每个实验里本人最近一次实验(个人实验看本人,小组实验看本人所在小组),
+	// 带状态、得分与已通过的检查点数,一次聚合;从没开始过的实验不出现在结果里。
+	ListStudentLatestInstancesForExperiments(ctx context.Context, arg ListStudentLatestInstancesForExperimentsParams) ([]ListStudentLatestInstancesForExperimentsRow, error)
 	// 教师只看本人实验实例,学校管理员由服务层传 teacher_id=0 查看本租户全部活跃实例。
 	ListTeacherInstances(ctx context.Context, arg ListTeacherInstancesParams) ([]ListTeacherInstancesRow, error)
 	LockInstanceCreation(ctx context.Context, lockKey int64) error

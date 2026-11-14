@@ -1,29 +1,23 @@
-// MainLayout 日常页壳层(FE-6 底层曝光系统的「光面态」):
-// 侧栏与顶栏直接生长在墨色底层上,内容区是浮起的宣纸光面。
-// 光面的缝只留在**导航侧**(顶与左,由 pane-frame 取 --pane-inset),右下出血到视口边缘;
-// 圆角只在左上角(radius-lg)、投影只从顶左透出 —— 四周等宽的缝会把内容读作「被装进一个容器」(规范 §1.2)。
-// 断点行为(§6.4):≥lg 侧栏常驻可折叠 220↔64;<lg 侧栏抽屉化(汉堡触发,遮罩层级高于侧栏,
-// Esc 与焦点陷阱由 Radix Dialog 保证);<md 缝与圆角归零走全宽。
-// 路由切换只动光面内容的 opacity/translateY,底层与导航保持静止(§4.4)。
+// MainLayout 日常页外框(规范 FE-6 / §1.2):墨色侧栏与顶栏 + 浅色内容纸面。
+// 纸面直接贴住侧栏和顶栏,不留缝、不加投影;侧栏常驻(≥lg)时左上角收成圆角(paper-surface)。
+// 顶栏左侧是「当前位置」(页面经 usePageLocation 声明,规范 §6.2),右侧是任务与下载、通知铃铛、头像菜单;
+// 浏览器标题随当前位置变化。内容区不再放面包屑。
+// 断点(§6.4):≥lg 侧栏常驻可折叠 224↔64;<lg 侧栏收进抽屉(品牌在抽屉顶部),
+// 顶栏依次是菜单按钮、返回上级、当前页名。路由切换只动纸面内容的淡入(§4.4)。
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useLocation } from 'react-router'
 import { Menu as MenuIcon } from 'lucide-react'
-import {
-  BrandMark,
-  Drawer,
-  DrawerContent,
-  DrawerTitle,
-  IconButton,
-  cn,
-  useMediaQuery,
-} from '@chaimir/ui'
+import { Drawer, DrawerContent, DrawerTitle, IconButton, cn, useMediaQuery } from '@chaimir/ui'
 import { RouteErrorBoundary } from '../../components/RouteErrorBoundary'
+import { PageLocationContext, type PageLocationItem } from '../../hooks/pageLocation'
 import type { RoleNavigationConfig } from './navigation'
 import { AppSidebar } from './AppSidebar'
 import { NotificationBell } from './NotificationBell'
 import { TaskCenterButton } from './TaskCenterButton'
+import { TopBarTrail } from './TopBarTrail'
 import { UserMenu } from './UserMenu'
+import { pageTitle, resolvePageTrail } from './pageTrail'
 import { errorDiagnostics } from '../../utils/userFacingError'
 
 /** 侧栏折叠选择:仅界面偏好(非业务状态),全站一个键 —— 同一个人换端不需要重设一次 */
@@ -63,7 +57,7 @@ export interface MainLayoutProps {
 }
 
 /**
- * MainLayout 组装底层上的导航壳与光面内容区。
+ * MainLayout 组装导航、顶栏与内容纸面。
  * 导航配置由所属角色区注入,壳层本身不认识其他角色 —— 这样打包时
  * 各角色的路径清单只进各自的懒加载块,不会汇聚到入口包。
  */
@@ -73,6 +67,7 @@ export function MainLayout({ config }: MainLayoutProps) {
 
   const [collapsed, setCollapsed] = useState(readSidebarCollapsed)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [declared, setDeclared] = useState<PageLocationItem[] | null>(null)
 
   /** 回到桌面宽度时关闭抽屉:否则抽屉遮罩会盖在已常驻的侧栏上 */
   useEffect(() => {
@@ -83,6 +78,35 @@ export function MainLayout({ config }: MainLayoutProps) {
   useEffect(() => {
     setDrawerOpen(false)
   }, [location.pathname])
+
+  // 记住每个路径最近一次的查询串(筛选、搜索、页码):从详情页经顶栏点回列表时,视图还在(规范 §6.2)。
+  // 只在内存里、只在本角色区内有效,刷新后由地址本身承担。
+  const recentSearch = useRef(new Map<string, string>())
+  useEffect(() => {
+    if (location.search) recentSearch.current.set(location.pathname, location.search)
+    else recentSearch.current.delete(location.pathname)
+  }, [location.pathname, location.search])
+  const hrefOf = useCallback((to: string) => {
+    if (to.includes('?')) return to
+    return `${to}${recentSearch.current.get(to) ?? ''}`
+  }, [])
+
+  const navItems = useMemo(() => config.groups.flatMap((group) => group.items), [config.groups])
+  const trail = useMemo(
+    () => resolvePageTrail(navItems, location.pathname, declared),
+    [declared, location.pathname, navItems],
+  )
+
+  /** 浏览器标题随当前位置变化;离开日常页外框时还原 */
+  useEffect(() => {
+    document.title = pageTitle(trail)
+  }, [trail])
+  useEffect(() => {
+    const original = document.title
+    return () => {
+      document.title = original
+    }
+  }, [])
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((previous) => {
@@ -97,89 +121,77 @@ export function MainLayout({ config }: MainLayoutProps) {
   const profilePath = `${config.pathPrefix}/profile`
 
   return (
-    <div className="flex min-h-dvh bg-substrate">
-      <a href="#main-content" className="skip-link">
-        跳到主要内容
-      </a>
+    <PageLocationContext.Provider value={setDeclared}>
+      {/* 外框恰好一屏高、自身不滚动:只有纸面内层(paper-scrollport)滚动,
+          页面里的吸顶、吸底元素(保存条、答题卡、阅读目录)以它为准 */}
+      <div className="flex h-dvh overflow-hidden bg-substrate">
+        <a href="#main-content" className="skip-link">
+          跳到主要内容
+        </a>
 
-      {/* 常驻侧栏(≥lg):固定宽度走令牌,折叠只改宽度不改结构 */}
-      {isDesktop ? (
-        <div
-          className="sticky top-0 h-dvh shrink-0 transition-sidebar duration-base ease-out"
-          style={{ width: collapsed ? 'var(--sidebar-w-collapsed)' : 'var(--sidebar-w)' }}
-        >
-          <AppSidebar config={config} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
-        </div>
-      ) : (
-        // 抽屉侧栏(<lg):Radix Dialog 提供遮罩(z-drawer)、Esc 与焦点陷阱
-        <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
-          <DrawerContent side="left" tone="dark" className="max-w-64 p-0">
-            <DrawerTitle className="sr-only">主导航</DrawerTitle>
-            <AppSidebar config={config} />
-          </DrawerContent>
-        </Drawer>
-      )}
-
-      {/* 右侧:顶栏 + 光面内容区;min-w-0 防子元素撑破布局产生非预期横向滚动 */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header
-          className="sticky top-0 z-sticky flex shrink-0 items-center gap-2 bg-substrate px-3 sm:px-4"
-          style={{ height: 'var(--topnav-h)' }}
-        >
-          {!isDesktop ? (
-            <IconButton
-              variant="on-dark"
-              icon={MenuIcon}
-              aria-label="打开主导航"
-              onClick={() => setDrawerOpen(true)}
-            />
-          ) : null}
-
-          {/* 窄屏顶栏承载品牌(侧栏收进抽屉后锁定组合需有落点),同样不加端名(§1.3) */}
-          {!isDesktop ? (
-            <span className="flex min-w-0 flex-1 items-center gap-2">
-              <BrandMark size="sm" className="text-accent" />
-              <span className="truncate text-sm font-semibold text-on-dark">Chaimir</span>
-            </span>
-          ) : (
-            /*
-              宽屏顶栏左侧刻意留空,这是决定而不是遗漏:
-              页面标题与面包屑归光面里的 PageHeader,顶栏再放一遍就是把同一件事说两遍
-              (§6.5.0 通则 1);全站检索没有对应的后端能力,放一个搜不到东西的框更糟。
-              这段裸露的墨色底层正是 FE-6 的「三种状态共用同一世界」——
-              它是层次信号,不是待填的空位,不得为填满而加装饰或重复导航(§1.2)。
-            */
-            <span className="flex-1" />
-          )}
-
-          <div className="flex shrink-0 items-center gap-1">
-            <TaskCenterButton tasksPath={tasksPath} />
-            {/* 铃铛只在有站内信收件箱的端出现:归属由该区导航配置声明(见 navigation.ts) */}
-            {config.hasNotificationInbox ? <NotificationBell allPath={notificationsPath} /> : null}
-            <UserMenu profilePath={profilePath} loginPath={config.loginPath} />
+        {/* 常驻侧栏(≥lg):固定宽度走令牌,折叠只改宽度不改结构 */}
+        {isDesktop ? (
+          <div
+            className="h-full shrink-0 transition-sidebar duration-base ease-out"
+            style={{ width: collapsed ? 'var(--sidebar-w-collapsed)' : 'var(--sidebar-w)' }}
+          >
+            <AppSidebar config={config} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
           </div>
-        </header>
+        ) : (
+          // 抽屉侧栏(<lg):Radix Dialog 提供遮罩(z-drawer)、Esc 与焦点陷阱;品牌在抽屉顶部
+          <Drawer open={drawerOpen} onOpenChange={setDrawerOpen}>
+            <DrawerContent side="left" tone="dark" className="max-w-64 p-0">
+              <DrawerTitle className="sr-only">主导航</DrawerTitle>
+              <AppSidebar config={config} />
+            </DrawerContent>
+          </Drawer>
+        )}
 
-        {/* 光面外框:缝只在导航侧(顶与左),右下出血到视口边;<md 归零全宽 */}
-        <div className="pane-frame flex min-h-0 flex-1 flex-col">
+        {/* 右侧:顶栏 + 内容纸面;min-w-0 防子元素撑破布局产生非预期横向滚动 */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <header
+            className={cn(
+              'z-sticky flex shrink-0 items-center gap-2 bg-substrate',
+              isDesktop ? 'pl-9 pr-4' : 'px-3',
+            )}
+            style={{ height: 'var(--topnav-h)' }}
+          >
+            {!isDesktop ? (
+              <IconButton
+                variant="on-dark"
+                icon={MenuIcon}
+                aria-label="打开主导航"
+                onClick={() => setDrawerOpen(true)}
+                className="border-transparent"
+              />
+            ) : null}
+
+            <TopBarTrail trail={trail} compact={!isDesktop} hrefOf={hrefOf} />
+
+            <div className="flex shrink-0 items-center gap-1">
+              <TaskCenterButton tasksPath={tasksPath} />
+              {/* 铃铛只在有站内信收件箱的端出现:归属由该区导航配置声明(见 navigation.ts) */}
+              {config.hasNotificationInbox ? <NotificationBell allPath={notificationsPath} /> : null}
+              <UserMenu profilePath={profilePath} loginPath={config.loginPath} />
+            </div>
+          </header>
+
+          {/* 内容纸面:贴住侧栏与顶栏,外层固定形状,内层独立滚动 */}
           <main
             id="main-content"
             /* key 绑定路径:切页时重放入场动画,只动 opacity/translateY(§4.4) */
             key={location.pathname}
-            className={cn(
-              'paper-surface',
-              'animate-pane-in',
-            )}
+            className="paper-surface animate-pane-in"
           >
-            {/* 外层固定光面形状,内层独立滚动;滚动内容不会重新定义圆角或投影边界。 */}
             <div className="paper-scrollport">
-              <RouteErrorBoundary>
+              {/* 只换掉内容区:失败提示铺在纸面上,侧栏与顶栏留着,用户可以直接去别的页面 */}
+              <RouteErrorBoundary surface="paper">
                 <Outlet />
               </RouteErrorBoundary>
             </div>
           </main>
         </div>
       </div>
-    </div>
+    </PageLocationContext.Provider>
   )
 }

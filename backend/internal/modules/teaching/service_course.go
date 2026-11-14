@@ -18,11 +18,12 @@ import (
 
 const inviteCodeLength = 10
 
-// ListCourses 查询教师或学生课程列表。
-func (s *Service) ListCourses(ctx context.Context, filter CourseListFilter) ([]CourseDTO, int64, int, int, error) {
+// ListCourses 查询教师或学生课程列表,并补上卡片要显示的事实:
+// 授课教师姓名、选课人数(教师视角)、本人学习进度(学生视角),都按当前页一次聚合。
+func (s *Service) ListCourses(ctx context.Context, filter CourseListFilter) ([]CourseDTO, int64, int, int, pagex.Facets, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, 0, 0, nil, err
 	}
 	filter.Page, filter.Size = pagex.Normalize(filter.Page, filter.Size)
 	role := strings.TrimSpace(filter.Role)
@@ -30,29 +31,45 @@ func (s *Service) ListCourses(ctx context.Context, filter CourseListFilter) ([]C
 		role = contracts.RoleStudent
 	}
 	var (
-		courses []Course
-		total   int64
+		courses  []Course
+		total    int64
+		facts    courseFacts
+		byStatus pagex.FacetGroup
 	)
+	studentView := role != contracts.RoleTeacher
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
-		if role == contracts.RoleTeacher {
+		if studentView {
+			courses, total, err = tx.ListStudentCourses(ctx, id.TenantID, id.AccountID, filter)
+		} else {
 			courses, total, err = tx.ListTeacherCourses(ctx, id.TenantID, id.AccountID, filter)
+		}
+		if err != nil {
 			return err
 		}
-		courses, total, err = tx.ListStudentCourses(ctx, id.TenantID, id.AccountID, filter)
+		facts, err = loadCourseFacts(ctx, tx, id.TenantID, id.AccountID, courses, studentView)
+		if err != nil {
+			return err
+		}
+		byStatus, err = tx.CountCoursesByStatus(ctx, id.TenantID, id.AccountID, !studentView, filter.IsShared)
 		return err
 	}); err != nil {
-		return nil, 0, 0, 0, mapCourseError(err)
+		return nil, 0, 0, 0, nil, mapCourseError(err)
+	}
+	// 教师档案在 identity 模块,事务外经契约一次批量读取
+	facts.teachers, err = s.courseTeachers(ctx, courses)
+	if err != nil {
+		return nil, 0, 0, 0, nil, err
 	}
 	out := make([]CourseDTO, 0, len(courses))
 	for _, course := range courses {
 		dto, err := courseDTO(course)
 		if err != nil {
-			return nil, 0, 0, 0, mapCourseError(err)
+			return nil, 0, 0, 0, nil, mapCourseError(err)
 		}
 		out = append(out, dto)
 	}
-	return out, total, filter.Page, filter.Size, nil
+	return applyCourseFacts(out, facts, studentView), total, filter.Page, filter.Size, pagex.Facets{"status": byStatus}, nil
 }
 
 // ListSharedCourses用当前租户的共享SELECT权限发现课程，不开放来源课程业务详情。
@@ -72,11 +89,31 @@ func (s *Service) ListSharedCourses(ctx context.Context, filter CourseListFilter
 	}); err != nil {
 		return nil, 0, 0, 0, mapCourseError(err)
 	}
+	// 章节数要跨校读 chapter,走与克隆同一个受控特权事务;查询自身限定课程仍共享(M6 安全设计 §5)
+	courseIDs := make([]int64, 0, len(courses))
+	for _, course := range courses {
+		courseIDs = append(courseIDs, course.ID)
+	}
+	chapters := map[int64]int64{}
+	if len(courseIDs) > 0 {
+		if err := s.store.PrivilegedTx(ctx, func(ctx context.Context, tx TxStore) error {
+			var err error
+			chapters, err = tx.CountChaptersOfSharedCourses(ctx, id.TenantID, courseIDs)
+			return err
+		}); err != nil {
+			return nil, 0, 0, 0, mapCourseError(err)
+		}
+	}
+	return sharedCourseDTOs(courses, chapters), total, filter.Page, filter.Size, nil
+}
+
+// sharedCourseDTOs 把共享课程转换为目录投影并带上章节数;没有章节的课为 0。
+func sharedCourseDTOs(courses []Course, chapters map[int64]int64) []SharedCourseDTO {
 	out := make([]SharedCourseDTO, 0, len(courses))
 	for _, course := range courses {
-		out = append(out, SharedCourseDTO{ID: ids.ID(course.ID), Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, Semester: course.Semester, Credits: course.Credits, UpdatedAt: timex.RFC3339OrEmpty(course.UpdatedAt)})
+		out = append(out, SharedCourseDTO{ID: ids.ID(course.ID), Name: course.Name, Description: course.Description, Type: course.Type, Difficulty: course.Difficulty, Semester: course.Semester, Credits: course.Credits, UpdatedAt: timex.RFC3339OrEmpty(course.UpdatedAt), ChapterCount: chapters[course.ID]})
 	}
-	return out, total, filter.Page, filter.Size, nil
+	return out
 }
 
 // CreateCourse 创建课程草稿。
@@ -495,7 +532,7 @@ func (s *Service) cloneAssignments(ctx context.Context, tx TxStore, source Cours
 			}
 			clonedItems := make([]AssignmentItem, 0, len(items))
 			for _, item := range items {
-				clonedItems = append(clonedItems, AssignmentItem{ID: s.ids.Generate(), TenantID: targetTenantID, AssignmentID: clonedAssignment.ID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq, GradingMode: item.GradingMode, JudgerCode: item.JudgerCode})
+				clonedItems = append(clonedItems, AssignmentItem{ID: s.ids.Generate(), TenantID: targetTenantID, AssignmentID: clonedAssignment.ID, ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, Score: item.Score, Seq: item.Seq})
 			}
 			persistedItems, err := tx.ReplaceAssignmentItems(ctx, targetTenantID, clonedAssignment.ID, clonedItems)
 			if err != nil {

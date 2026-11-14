@@ -1,4 +1,4 @@
-// 仿真场景提交表单(仿真场景页内弹层)。
+// 仿真场景提交表单(仿真场景页内弹层)。设计 §7.4:字段多且带上传,用右侧大抽屉(宽 880px、整高、底部固定操作条)。
 //
 // 后端 validateBundleManifestMatchesRequest 要求表单元数据与包内 sim-package.json 的 meta 逐字一致
 // (code/version/name/category 与 scale_limit),故本表单把这些字段全部显式渲染,
@@ -17,13 +17,13 @@ import {
   Callout,
   FormField,
   Input,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -53,18 +53,18 @@ export interface SimPackageFormModalProps {
  */
 export function SimPackageFormModal({ item, onClose, onSaved }: SimPackageFormModalProps) {
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="lg">
-        <ModalHeader>
-          <ModalTitle>{item ? '更新仿真场景' : '提交仿真场景'}</ModalTitle>
-          <ModalDescription>
+    <Drawer open onOpenChange={(open) => !open && onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader>
+          <DrawerTitle>{item ? '更新仿真场景' : '提交仿真场景'}</DrawerTitle>
+          <DrawerDescription>
             表单里的编号、版本、名称、分类与规模上限必须与场景包内的声明完全一致,否则平台会拒收。
             场景提交后由平台在隔离环境里试跑并审核,通过后才能被课程使用。
-          </ModalDescription>
-        </ModalHeader>
+          </DrawerDescription>
+        </DrawerHeader>
         <PackageForm item={item} onClose={onClose} onSaved={onSaved} />
-      </ModalContent>
-    </Modal>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
@@ -158,8 +158,8 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
   )
 
   return (
-    <form onSubmit={submit} noValidate>
-      <ModalBody className="flex flex-col gap-4">
+    <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
+      <DrawerBody className="flex flex-col gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField
             label="场景短名"
@@ -212,7 +212,7 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
           </FormField>
         </div>
 
-        <div className="flex flex-col gap-3 well p-4">
+        <div className="flex flex-col gap-3 rounded-md bg-surface-hover p-4">
           <div className="text-sm font-medium text-ink">规模上限</div>
           <p className="text-xs text-ink-sub">
             运行时按这三个上限约束状态规模与执行步数。填写的值必须与场景包内声明的一致。
@@ -270,15 +270,15 @@ function PackageForm({ item, onClose, onSaved }: PackageFormProps) {
         ) : null}
 
         {formError ? <Callout tone="danger">{formError}</Callout> : null}
-      </ModalBody>
-      <ModalFooter>
+      </DrawerBody>
+      <DrawerFooter>
         <Button type="button" variant="outline" onClick={onClose}>
           取消
         </Button>
         <Button type="submit" variant="primary" leftIcon={Upload} loading={submitting}>
           {editing ? '重新提交审核' : '提交审核'}
         </Button>
-      </ModalFooter>
+      </DrawerFooter>
     </form>
   )
 }

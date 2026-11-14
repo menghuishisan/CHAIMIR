@@ -1,5 +1,5 @@
-// AuthUI 是 identity 领域内认证页共用的深色呈现原语:无盒字段(等宽大写标签 + 底线输入)、就近错误、
-// 表单级错误条、验证码字段、主落点按钮、页尾弱化通路与成功态。
+// AuthUI 是 identity 领域内认证页共用的深色呈现原语:字段(标签 + 有底色的深色输入框)、就近错误、
+// 表单级错误条、验证码字段、密码规则清单、步骤条、方式切换、主落点按钮、页尾弱化通路与成功态。
 // 八个认证页共处同一块墨色底层(FE-6 底层全裸露),同一种元素在各页必须是同一个写法 ——
 // 各页各抄一遍类名的后果是间距、强调级别与焦点态慢慢长成八套。
 // 校验规则与就近错误状态在 authForm.ts,本文件只管呈现。
@@ -7,17 +7,24 @@
 
 import React from 'react'
 import { Link } from 'react-router'
-import { CircleAlert } from 'lucide-react'
+import { Check, CircleAlert } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Button, BrandSeal, Icon, Input, buttonVariants, cn } from '@chaimir/ui'
 import type { InputProps } from '@chaimir/ui'
+import { AuthBrandMark, SchoolBrandLine } from '../../../components/AuthBrand'
+import { PASSWORD_RULE_TEXT, passwordRuleStates } from '../passwordRules'
+import { useTenantBrand } from '../useTenantBrand'
 
 /** 页尾弱化通路的统一样式:返回登录、切换登录方式、退出登录共用一套(层级靠留白密度,不画分隔线) */
 const QUIET_ACTION_CLASS =
   'mt-5 flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md text-sm text-on-dark-sub transition-colors duration-fast hover:text-on-dark focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2'
 
-/** 主落点(落印级)的统一样式:通栏、字距放宽,与表单末字段保持一个呼吸 */
+/** 主落点的统一样式:通栏,与表单末字段保持一个呼吸 */
 const PRIMARY_ACTION_CLASS = 'mt-7 w-full'
+
+/** 次要文字链接(忘记密码、激活账号等)的统一样式:可点区触屏达标 */
+export const AUTH_TEXT_LINK_CLASS =
+  'hit-target relative rounded-sm text-sm text-on-dark-sub transition-colors duration-fast hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2'
 
 export interface AuthPanelProps {
   children: React.ReactNode
@@ -49,7 +56,7 @@ export function AuthField({ label, htmlFor, error, children }: AuthFieldProps) {
     <div className="mt-6">
       <label
         htmlFor={htmlFor}
-        className="font-mono text-xs uppercase text-on-dark-sub"
+        className="text-sm font-medium text-on-dark-sub"
       >
         {label}
       </label>
@@ -73,7 +80,7 @@ export interface AuthTextFieldProps
 }
 
 /**
- * AuthTextField 是认证页的文本字段:底线输入 + 就近错误联动错误态边框。
+ * AuthTextField 是认证页的文本字段:深色输入框(高 44) + 就近错误联动错误态边框。
  * 错误态不另传一个布尔值 —— 有错误文案就是错误态,两者不可能不一致。
  */
 export function AuthTextField({ label, id, error, onValueChange, ...rest }: AuthTextFieldProps) {
@@ -81,7 +88,8 @@ export function AuthTextField({ label, id, error, onValueChange, ...rest }: Auth
     <AuthField label={label} htmlFor={id} error={error}>
       <Input
         id={id}
-        variant="underline"
+        variant="dark"
+        className="h-11"
         invalid={Boolean(error)}
         onChange={(event) => onValueChange(event.target.value)}
         {...rest}
@@ -118,10 +126,11 @@ export function AuthSmsField({
 }: AuthSmsFieldProps) {
   return (
     <AuthField label="验证码" htmlFor={id} error={error}>
-      <div className="flex items-end gap-3">
+      <div className="flex items-stretch gap-3">
         <Input
           id={id}
-          variant="underline"
+          variant="dark"
+        className="h-11"
           inputMode="numeric"
           autoComplete="one-time-code"
           value={value}
@@ -132,11 +141,10 @@ export function AuthSmsField({
         <Button
           type="button"
           variant="on-dark"
-          size="sm"
           loading={sending}
           disabled={cooldownSeconds > 0}
           onClick={onSend}
-          className="shrink-0"
+          className="h-11 shrink-0"
         >
           {cooldownSeconds > 0 ? `${cooldownSeconds} 秒后可重发` : '发送验证码'}
         </Button>
@@ -279,5 +287,151 @@ export function AuthSuccess({ title, description, children }: AuthSuccessProps) 
       <AuthHeading title={title} description={description} />
       {children}
     </div>
+  )
+}
+
+/**
+ * AuthFormBrand 表单栏顶部的品牌行:窄屏左侧介绍区收起时由它补上品牌(宽屏隐藏,品牌在左侧介绍区);
+ * 学校私有部署在品牌下方多一行校徽与校名。always 用于特权通道:无论宽窄都显示,标明通道用途。
+ */
+export function AuthFormBrand({ subtitle, always = false }: { subtitle?: string; always?: boolean }) {
+  const brand = useTenantBrand()
+  return (
+    <div className={cn('mb-10 flex flex-col gap-3', !always && 'lg:hidden')}>
+      <AuthBrandMark subtitle={subtitle} />
+      {brand ? <SchoolBrandLine name={brand.display_name} logoSrc={brand.logo_image} /> : null}
+    </div>
+  )
+}
+
+/**
+ * PasswordRuleChecklist 设置密码时的实时规则清单:满足一条勾一条,代替提交后才报错(设计 §7.1)。
+ * 规则与后端同一口径(passwordRules.ts)。清单是辅助说明:勾选状态经读屏文字表达,不只靠颜色。
+ */
+export function PasswordRuleChecklist({ value, id }: { value: string; id?: string }) {
+  const states = passwordRuleStates(value)
+  return (
+    <ul id={id} className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1.5 text-sm" aria-label="密码要求">
+      {PASSWORD_RULE_TEXT.map((rule) => {
+        const met = states[rule.key]
+        return (
+          <li
+            key={rule.key}
+            className={cn('flex items-center gap-1.5 transition-colors duration-fast', met ? 'text-accent' : 'text-on-dark-sub')}
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                'flex size-4 items-center justify-center rounded-full border',
+                met ? 'border-accent bg-accent text-substrate' : 'border-dark-control',
+              )}
+            >
+              {met ? <Icon icon={Check} size="xs" /> : null}
+            </span>
+            {rule.text}
+            <span className="sr-only">{met ? '(已满足)' : '(未满足)'}</span>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
+/**
+ * AuthSteps 两步以上表单的步骤条(找回密码):当前步玉色,已完成的带勾,当前步 aria-current="step"。
+ */
+export function AuthSteps({ steps, current }: { steps: string[]; current: number }) {
+  return (
+    <ol className="mt-6 flex items-center gap-3" aria-label="步骤">
+      {steps.map((label, index) => {
+        const done = index < current
+        const active = index === current
+        return (
+          <li key={label} className="flex min-w-0 items-center gap-3" aria-current={active ? 'step' : undefined}>
+            {index > 0 ? <span aria-hidden="true" className="h-px w-6 shrink-0 bg-dark-control" /> : null}
+            <span className="flex min-w-0 items-center gap-2">
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
+                  done && 'bg-accent text-substrate',
+                  active && 'border border-accent text-accent',
+                  !done && !active && 'border border-dark-control text-on-dark-sub',
+                )}
+              >
+                {done ? <Icon icon={Check} size="xs" /> : index + 1}
+              </span>
+              <span className={cn('truncate text-sm', active ? 'font-medium text-on-dark' : 'text-on-dark-sub')}>
+                {label}
+                {done ? <span className="sr-only">(已完成)</span> : null}
+              </span>
+            </span>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+export interface AuthSegmentedOption<T extends string> {
+  value: T
+  label: string
+}
+
+/**
+ * AuthSegmented 深色底层上的分段切换(密码 / 验证码):一组互斥的按钮,aria-pressed 表达选中。
+ * 不用设计系统 SegmentedControl:它是纸面配色,放到墨色底层上对比关系会反过来。
+ */
+export function AuthSegmented<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string
+  options: AuthSegmentedOption<T>[]
+  value: T
+  onChange: (next: T) => void
+}) {
+  return (
+    <div className="mt-6 flex gap-1 rounded-md bg-dark-elevated p-1" role="group" aria-label={label}>
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={value === option.value}
+          onClick={() => onChange(option.value)}
+          className={cn(
+            'flex min-h-9 flex-1 items-center justify-center rounded-sm text-sm transition-colors duration-fast pointer-coarse:min-h-11',
+            'focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2',
+            value === option.value ? 'bg-dark-surface font-semibold text-accent' : 'text-on-dark-sub hover:text-on-dark',
+          )}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/**
+ * AuthLinkRow 表单底部一行次要入口(如「首次使用?激活账号 · 忘记密码 · 学校申请入驻」),按使用频率排列。
+ */
+export function AuthLinkRow({ lead, children }: { lead?: string; children: React.ReactNode }) {
+  const items = React.Children.toArray(children).filter(Boolean)
+  return (
+    <p className="mt-8 flex flex-wrap items-center justify-center gap-x-2 gap-y-1.5 text-sm text-on-dark-sub">
+      {lead ? <span>{lead}</span> : null}
+      {items.map((item, index) => (
+        <React.Fragment key={index}>
+          {index > 0 ? (
+            <span aria-hidden="true" className="text-on-dark-faint">
+              ·
+            </span>
+          ) : null}
+          {item}
+        </React.Fragment>
+      ))}
+    </p>
   )
 }

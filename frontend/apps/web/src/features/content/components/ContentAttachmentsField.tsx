@@ -82,7 +82,7 @@ export function ContentAttachmentsField({
           {attachments.map((attachment) => (
             <li
               key={attachment.object_ref}
-              className="flex items-center gap-2 well px-2 py-1.5"
+              className="flex items-center gap-2 rounded-md bg-surface-hover px-2 py-1.5"
             >
               <Paperclip aria-hidden="true" className="size-4 shrink-0 text-ink-faint" />
               <span className="min-w-0 flex-1 truncate text-sm text-ink">{attachment.file_name}</span>

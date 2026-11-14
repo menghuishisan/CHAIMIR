@@ -79,9 +79,19 @@ type StudentExperimentDTO struct {
 	GroupConfig   GroupConfig            `json:"group_config"`
 	MyGroupID     ids.ID                 `json:"my_group_id,omitempty"`
 	RequireReport bool                   `json:"require_report"`
-	Status        int16                  `json:"status"`
-	CreatedAt     time.Time              `json:"created_at"`
-	UpdatedAt     time.Time              `json:"updated_at"`
+	// MyProgress 本人最近一次实验的进度;从没开始过的实验不带(只在学生实验列表里给出)
+	MyProgress *StudentExperimentProgressDTO `json:"my_progress,omitempty"`
+	Status     int16                         `json:"status"`
+	CreatedAt  time.Time                     `json:"created_at"`
+	UpdatedAt  time.Time                     `json:"updated_at"`
+}
+
+// StudentExperimentProgressDTO 本人在一个实验里最近一次实验的进度:实例状态、得分、已通过的检查点数。
+// 小组实验看本人所在小组的实验。
+type StudentExperimentProgressDTO struct {
+	Status            int16   `json:"status"`
+	Score             float64 `json:"score"`
+	PassedCheckpoints int64   `json:"passed_checkpoints"`
 }
 
 // StudentComponentConfig 只暴露学生理解实验流程所需的组件摘要。

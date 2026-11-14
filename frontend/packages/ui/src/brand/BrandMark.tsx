@@ -21,6 +21,7 @@ export interface BrandMarkProps {
   className?: string;
 }
 
+/** BrandMark 平台主标志(缺口环 + 环内注册点) */
 export function BrandMark({ size = "md", label, className }: BrandMarkProps) {
   const px = MARK_SIZE[size];
   return (

@@ -107,6 +107,41 @@ func (q *Queries) CountPapersByGenMode(ctx context.Context, tenantID int64) ([]C
 	return items, nil
 }
 
+const countSharedContentItemsByType = `-- name: CountSharedContentItemsByType :many
+SELECT type, COUNT(*)::bigint AS count
+FROM content_item
+WHERE deleted_at IS NULL
+  AND visibility = 3 AND status = 2
+  AND ($1::text = '' OR title ILIKE '%' || $1::text || '%' OR code ILIKE '%' || $1::text || '%')
+GROUP BY type
+`
+
+type CountSharedContentItemsByTypeRow struct {
+	Type  int16 `json:"type"`
+	Count int64 `json:"count"`
+}
+
+// 共享资源库「按题型」分段计数:只数其他学校已发布且共享的题目,套用关键词,不套用题型筛选。
+func (q *Queries) CountSharedContentItemsByType(ctx context.Context, keyword string) ([]CountSharedContentItemsByTypeRow, error) {
+	rows, err := q.db.Query(ctx, countSharedContentItemsByType, keyword)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountSharedContentItemsByTypeRow{}
+	for rows.Next() {
+		var i CountSharedContentItemsByTypeRow
+		if err := rows.Scan(&i.Type, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createContentBody = `-- name: CreateContentBody :one
 INSERT INTO content_body (item_id, tenant_id, body, sensitive_fields, created_at, updated_at)
 VALUES ($1, $2, $3, $4, now(), now())

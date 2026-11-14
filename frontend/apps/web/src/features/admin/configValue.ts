@@ -44,7 +44,7 @@ export function credentialKeysOf(value: Record<string, unknown>): string[] {
 /** withoutKeys 去掉指定键,得到可以安全放进编辑器的部分。 */
 export function withoutKeys(
   value: Record<string, unknown>,
-  keys: string[],
+  keys: string[]
 ): Record<string, unknown> {
   const drop = new Set(keys)
   return Object.fromEntries(Object.entries(value).filter(([key]) => !drop.has(key)))
@@ -74,12 +74,38 @@ export function summarizeValue(value: Record<string, unknown>): Array<{
 /** changedKeys 比较改动前后的键值,列出真正变化的键。 */
 export function changedKeys(
   oldValue: Record<string, unknown>,
-  newValue: Record<string, unknown>,
+  newValue: Record<string, unknown>
 ): string[] {
   const keys = new Set([...Object.keys(oldValue), ...Object.keys(newValue)])
   return [...keys]
     .filter((key) => JSON.stringify(oldValue[key]) !== JSON.stringify(newValue[key]))
     .sort()
+}
+
+/** 一个键的改前与改后(变更历史时间线用) */
+export interface ConfigChangeRow {
+  key: string
+  before: string
+  after: string
+}
+
+/**
+ * changeRows 列出一次改动里变化的键与改前、改后的可读值。
+ * 凭据字段只说明「已配置(不显示)」,不把加密值或掩码当内容展示;键不存在写「未设置」。
+ */
+export function changeRows(
+  oldValue: Record<string, unknown>,
+  newValue: Record<string, unknown>
+): ConfigChangeRow[] {
+  const show = (key: string, value: Record<string, unknown>) => {
+    if (!(key in value)) return '未设置'
+    return isCredentialKey(key) ? '已配置(不显示)' : describeValue(value[key])
+  }
+  return changedKeys(oldValue, newValue).map((key) => ({
+    key,
+    before: show(key, oldValue),
+    after: show(key, newValue),
+  }))
 }
 
 /** ParsedValue 是配置内容文本的解析结果。 */

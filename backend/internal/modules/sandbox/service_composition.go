@@ -371,6 +371,7 @@ func initAssetSidecarFrom(privateSidecar workload.ComponentSpec) workload.Compon
 	return privateSidecar
 }
 
+// cloneStringMap 复制字符串映射;nil 返回空映射,写进组合快照时不出现 null。
 func cloneStringMap(values map[string]string) map[string]string {
 	if values == nil {
 		return map[string]string{}
@@ -697,6 +698,7 @@ func compositionParamString(value any) (string, error) {
 	}
 }
 
+// validateCapabilityCardinality 声明为唯一的能力,在运行时与已选组件里合计只能有一个提供者。
 func validateCapabilityCardinality(runtime CapabilityConstraints, refs []contracts.CompositionComponentRef, tools map[string]Tool) error {
 	counts := map[string]int{}
 	for _, item := range runtime.Provides {
@@ -721,6 +723,8 @@ func validateCapabilityCardinality(runtime CapabilityConstraints, refs []contrac
 	return nil
 }
 
+// findCapabilityProvider 在可用的沙箱内组件里找提供某能力的唯一候选(按编码排序,结果稳定);
+// 没有候选返回空,多个候选时要求组合显式选择,不替用户挑。
 func findCapabilityProvider(tools map[string]Tool, required, category string) (string, error) {
 	required = strings.TrimSpace(required)
 	codes := make([]string, 0, len(tools))
@@ -750,6 +754,7 @@ func findCapabilityProvider(tools map[string]Tool, required, category string) (s
 	return candidates[0], nil
 }
 
+// capabilityProvided 判断某能力是否已由运行时或其他已选组件提供;excludedCode 是正在检查的组件本身,不算在内。
 func capabilityProvided(runtime CapabilityConstraints, refs []contracts.CompositionComponentRef, tools map[string]Tool, required, excludedCode string) bool {
 	required = strings.TrimSpace(required)
 	for _, provided := range runtime.Provides {
@@ -770,6 +775,8 @@ func capabilityProvided(runtime CapabilityConstraints, refs []contracts.Composit
 	return false
 }
 
+// validateCompositionLinks 校验组件之间的连接:两端都要是组合里的运行时实例或已选组件,
+// 协议、端点、访问范围与配置绑定都要写全,源组件必须已在目录里登记。
 func validateCompositionLinks(spec contracts.SandboxCompositionSpec, refs []contracts.CompositionComponentRef, tools map[string]Tool) error {
 	known := map[string]struct{}{}
 	for _, runtime := range spec.Runtimes {
@@ -834,7 +841,7 @@ func compileCompositionLinks(spec contracts.SandboxCompositionSpec, runtimes map
 		}
 		applyRuntimeParameterComponents(&compiledRuntime, runtimeComponents)
 		compiledRuntimes[runtimePlan.InstanceCode] = compiledRuntime
-		compiledRuntimes[runtimePlan.InstanceCode] = materializeRuntimeTopology(runtimePlan.InstanceCode, compiledRuntime)
+		compiledRuntimes[runtimePlan.InstanceCode] = MaterializeRuntimeTopology(runtimePlan.InstanceCode, compiledRuntime)
 	}
 	for _, ref := range refs {
 		tool := compiledTools[ref.Code]
@@ -1305,6 +1312,7 @@ func componentHasName(components []workload.ComponentSpec, name string) bool {
 	return ok
 }
 
+// findComponentByName 按名称(去掉首尾空白)在工作负载组件里查找。
 func findComponentByName(components []workload.ComponentSpec, name string) (workload.ComponentSpec, bool) {
 	name = strings.TrimSpace(name)
 	for _, component := range components {
@@ -1481,11 +1489,6 @@ func MaterializeRuntimeTopology(instance string, adapter AdapterSpec) AdapterSpe
 	return adapter
 }
 
-// materializeRuntimeTopology 保留包内调用的短名称,所有实际规则仍由统一实现维护。
-func materializeRuntimeTopology(instance string, adapter AdapterSpec) AdapterSpec {
-	return MaterializeRuntimeTopology(instance, adapter)
-}
-
 // rewriteRuntimeExecTarget prefixes the Pod portion of a declared pod/container target.
 // Container names remain unchanged; an unknown Pod is left intact so later topology validation reports it.
 func rewriteRuntimeExecTarget(target string, podNames map[string]string) string {
@@ -1531,6 +1534,7 @@ func cloneAdapterSpec(input AdapterSpec) (AdapterSpec, error) {
 	return out, nil
 }
 
+// cloneTool 经 JSON 往返深拷贝组件的工作负载声明,组合编译时改副本不影响目录里的原件。
 func cloneTool(input Tool) (Tool, error) {
 	b, err := json.Marshal(input.ResourceSpec)
 	if err != nil {
@@ -1544,6 +1548,7 @@ func cloneTool(input Tool) (Tool, error) {
 	return input, nil
 }
 
+// validateCompositionAccess 私有组件只能挂在判题私有或对抗赛场景;基础设施组件不受此限。
 func validateCompositionAccess(profile contracts.SandboxAccessProfile, category, access string) error {
 	if category == "infra" {
 		return nil
@@ -1557,6 +1562,8 @@ func validateCompositionAccess(profile contracts.SandboxAccessProfile, category,
 	return nil
 }
 
+// validateCompositionConflicts 汇总运行时与已选组件提供的能力:双方声明互斥的能力不能同时出现,
+// 每个组件需要的能力也必须有人提供。
 func validateCompositionConflicts(runtime CapabilityConstraints, refs []contracts.CompositionComponentRef, tools map[string]Tool) error {
 	capabilities := make(map[string]struct{}, len(runtime.Provides))
 	for _, item := range runtime.Provides {

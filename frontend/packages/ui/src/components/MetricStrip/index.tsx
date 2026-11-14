@@ -29,6 +29,7 @@ export interface MetricStripProps {
   className?: string;
 }
 
+/** MetricStrip 内联指标摘要(资源列表族) */
 export function MetricStrip({ label, items, className }: MetricStripProps) {
   return (
     <dl

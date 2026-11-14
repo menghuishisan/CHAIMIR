@@ -52,8 +52,8 @@ func (a notifyAPI) inbox(c *gin.Context) {
 		v := raw == "true"
 		isRead = &v
 	}
-	items, total, err := a.svc.Inbox(c.Request.Context(), isRead, c.Query("type"), page, size)
-	httpx.WritePage(c, items, total, page, size, err)
+	items, total, facets, err := a.svc.Inbox(c.Request.Context(), isRead, c.Query("type"), page, size)
+	httpx.WritePageWithFacets(c, items, total, page, size, facets.Map(), err)
 }
 
 // unread 查询当前用户未读通知数。

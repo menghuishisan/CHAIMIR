@@ -56,8 +56,8 @@ func ToAccountDTO(a Account, phonePlain string) AccountDTO {
 	return dto
 }
 
-// ToSessionDTO 把服务端会话快照转换为个人中心响应,不暴露 Refresh 哈希。
-func ToSessionDTO(session AuthSession) SessionDTO {
+// ToSessionDTO 把服务端会话快照转换为个人中心响应,不暴露 Refresh 哈希;currentSessionID 是发起本次请求的会话。
+func ToSessionDTO(session AuthSession, currentSessionID int64) SessionDTO {
 	return SessionDTO{
 		ID:         ids.ID(session.ID),
 		DeviceInfo: session.DeviceInfo,
@@ -65,11 +65,12 @@ func ToSessionDTO(session AuthSession) SessionDTO {
 		Status:     session.Status,
 		ExpireAt:   timex.RFC3339OrEmpty(session.ExpireAt),
 		CreatedAt:  timex.RFC3339OrEmpty(session.CreatedAt),
+		Current:    session.ID == currentSessionID,
 	}
 }
 
-// ToPlatformSessionDTO 把平台管理员会话转换为个人中心响应,不暴露 Refresh 哈希。
-func ToPlatformSessionDTO(session PlatformAuthSession) SessionDTO {
+// ToPlatformSessionDTO 把平台管理员会话转换为个人中心响应,不暴露 Refresh 哈希;currentSessionID 是发起本次请求的会话。
+func ToPlatformSessionDTO(session PlatformAuthSession, currentSessionID int64) SessionDTO {
 	return SessionDTO{
 		ID:         ids.ID(session.ID),
 		DeviceInfo: session.DeviceInfo,
@@ -77,6 +78,7 @@ func ToPlatformSessionDTO(session PlatformAuthSession) SessionDTO {
 		Status:     session.Status,
 		ExpireAt:   timex.RFC3339OrEmpty(session.ExpireAt),
 		CreatedAt:  timex.RFC3339OrEmpty(session.CreatedAt),
+		Current:    session.ID == currentSessionID,
 	}
 }
 

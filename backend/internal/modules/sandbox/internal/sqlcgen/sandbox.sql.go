@@ -120,6 +120,39 @@ func (q *Queries) CountActiveSandboxes(ctx context.Context, tenantID int64) (int
 	return column_1, err
 }
 
+const countAvailableRuntimeImagesByRuntime = `-- name: CountAvailableRuntimeImagesByRuntime :many
+SELECT runtime_id, COUNT(*)::bigint AS count
+FROM runtime_image
+WHERE status = 1
+GROUP BY runtime_id
+`
+
+type CountAvailableRuntimeImagesByRuntimeRow struct {
+	RuntimeID int64 `json:"runtime_id"`
+	Count     int64 `json:"count"`
+}
+
+// 运行时列表的接入进度要知道每个运行时有几个可用镜像版本:一次分组计数,不逐个运行时取镜像列表。
+func (q *Queries) CountAvailableRuntimeImagesByRuntime(ctx context.Context) ([]CountAvailableRuntimeImagesByRuntimeRow, error) {
+	rows, err := q.db.Query(ctx, countAvailableRuntimeImagesByRuntime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountAvailableRuntimeImagesByRuntimeRow{}
+	for rows.Next() {
+		var i CountAvailableRuntimeImagesByRuntimeRow
+		if err := rows.Scan(&i.RuntimeID, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createRuntimeImage = `-- name: CreateRuntimeImage :one
 INSERT INTO runtime_image (id, runtime_id, image_url, version, status, genesis_baked, created_at)
 VALUES ($1, $2, $3, $4, 1, $5, now())

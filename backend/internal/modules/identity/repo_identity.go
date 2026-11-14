@@ -71,6 +71,19 @@ func (t *txStore) MarkTenantProvisionOutboxFailed(ctx context.Context, id int64,
 	return tenantProvisionOutboxFromRow(row), nil
 }
 
+// BatchGetPlatformAdminNames 按编号批量读取平台管理员的编号与姓名,不带口令与账号名。
+func (t *txStore) BatchGetPlatformAdminNames(ctx context.Context, ids []int64) ([]PlatformAdmin, error) {
+	rows, err := t.q.BatchGetPlatformAdminNames(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PlatformAdmin, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, PlatformAdmin{ID: row.ID, Name: row.Name})
+	}
+	return out, nil
+}
+
 // GetPlatformAdminByID 按 ID 读取平台管理员账号。
 func (t *txStore) GetPlatformAdminByID(ctx context.Context, id int64) (PlatformAdmin, error) {
 	row, err := t.q.GetPlatformAdminByID(ctx, id)
@@ -125,6 +138,32 @@ func (t *txStore) ListAllTenants(ctx context.Context) ([]Tenant, error) {
 		out = append(out, tenantFromRow(row))
 	}
 	return out, nil
+}
+
+// CountTenantsByStatus 按状态聚合学校(套用关键词,不套用状态)。
+func (t *txStore) CountTenantsByStatus(ctx context.Context, keyword string) (pagex.FacetGroup, error) {
+	rows, err := t.q.CountTenantsByStatus(ctx, keyword)
+	if err != nil {
+		return nil, err
+	}
+	group := pagex.FacetGroup{}
+	for _, row := range rows {
+		group.Add(row.Status, row.Count)
+	}
+	return group, nil
+}
+
+// CountAccountsByStatus 按状态聚合本校账号(套用身份、班级与关键词,不套用状态)。
+func (t *txStore) CountAccountsByStatus(ctx context.Context, query AccountQuery) (pagex.FacetGroup, error) {
+	rows, err := t.q.CountAccountsByStatus(ctx, sqlcgen.CountAccountsByStatusParams{BaseIdentity: query.BaseIdentity, ClassID: query.ClassID, Keyword: query.Keyword, PhoneHash: query.PhoneHash})
+	if err != nil {
+		return nil, err
+	}
+	group := pagex.FacetGroup{}
+	for _, row := range rows {
+		group.Add(row.Status, row.Count)
+	}
+	return group, nil
 }
 
 // ListTenants 分页读取平台租户摘要。
@@ -469,6 +508,7 @@ func (t *txStore) ListAccounts(ctx context.Context, query AccountQuery) ([]Accou
 		Column4: query.Keyword,
 		Limit:   query.Size,
 		Offset:  (query.Page - 1) * query.Size,
+		Column7: query.PhoneHash,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -1038,7 +1078,8 @@ func (t *txStore) QueryAuditLogs(ctx context.Context, query AuditQueryInput) ([]
 
 // QueryAuditActionFacets 按与审计列表完全相同的权限和过滤条件统计动作。
 func (t *txStore) QueryAuditActionFacets(ctx context.Context, query AuditQueryInput) ([]AuditFacetRow, error) {
-	rows, err := t.q.QueryAuditActionFacets(ctx, sqlcgen.QueryAuditActionFacetsParams{Column1: query.TenantID, Column2: query.ActorID, Column3: query.Action, Column4: query.TargetType, Column5: timex.Timestamptz(query.From), Column6: timex.Timestamptz(query.To)})
+	// 动作分组不套用动作筛选:选中一个动作后,下拉里其他动作的数字仍然可见
+	rows, err := t.q.QueryAuditActionFacets(ctx, sqlcgen.QueryAuditActionFacetsParams{TenantID: query.TenantID, ActorID: query.ActorID, TargetType: query.TargetType, FromAt: timex.Timestamptz(query.From), ToAt: timex.Timestamptz(query.To)})
 	if err != nil {
 		return nil, err
 	}

@@ -8,7 +8,6 @@ import type {
   CourseType,
   CourseVisibility,
   GradeSource,
-  GradingMode,
   JoinMode,
   LatePolicy,
   LessonContentType,
@@ -37,13 +36,28 @@ export interface Course {
   visibility: CourseVisibility
   created_at: string
   updated_at: string
+  /** 授课教师姓名;课程列表与课程大纲给出,账号已注销读不到时为空串 */
+  teacher_name?: string
+  /** 选课人数;只在教师课程列表里给出 */
+  member_count?: number
+  /** 本人学习进度;只在学生课程列表里给出 */
+  my_progress?: CourseProgressSummary
+}
+
+/** 一门课的本人学习进度:有效课时数与已学完的课时数,与课程大纲同口径 */
+export interface CourseProgressSummary {
+  lesson_count: number
+  completed_count: number
 }
 
 /** 跨租户课程目录的有限投影，不包含邀请码及学生业务数据。 */
 export type SharedCourse = Pick<
   Course,
   'id' | 'name' | 'description' | 'type' | 'difficulty' | 'semester' | 'credits' | 'updated_at'
->
+> & {
+  /** 章节数;只给数量,不给章节内容 */
+  chapter_count: number
+}
 
 export interface CourseRequest {
   name: string
@@ -180,6 +194,22 @@ export interface Assignment {
   status: AssignmentStatus
   created_at: string
   updated_at: string
+  /** 全班提交统计;只在授课教师读取作业清单时给出 */
+  submission_stats?: AssignmentSubmissionStats
+  /** 本人提交情况;只在课程成员读取作业清单时给出 */
+  my_submission?: MyAssignmentSubmission
+}
+
+/** 一份作业的全班提交统计,按学生去重:交过的人数与最近一次提交在等老师评分的人数(与批改中心「待批改」同口径) */
+export interface AssignmentSubmissionStats {
+  submitted_count: number
+  pending_count: number
+}
+
+/** 本人在一份作业上的提交情况:已用次数与最近一次提交的状态(还没交为 0) */
+export interface MyAssignmentSubmission {
+  attempts: number
+  latest_status: SubmissionStatus | 0
 }
 
 export interface AssignmentRequest {
@@ -197,8 +227,6 @@ export interface AssignmentItemInput {
   item_version: string
   score: number
   seq: number
-  grading_mode: GradingMode
-  judger_code: string
 }
 
 export interface AssignmentItem {
@@ -207,8 +235,6 @@ export interface AssignmentItem {
   item_version: string
   score: number
   seq: number
-  grading_mode: GradingMode
-  judger_code?: string
   /**
    * 以下四个字段是 M6 从 M5 题面视角展开的题目信息(见 service_assignment.go
    * GetAssignmentForStudent),因此 type / difficulty 是 M5 的内容枚举而非教学枚举。
@@ -233,6 +259,9 @@ export interface Draft {
   exists: boolean
 }
 
+/** TheoryAnswer 保留理论题的文本、布尔值和有序答案数组。 */
+export type TheoryAnswer = string | boolean | string[]
+
 /** DraftSave 是服务端草稿保存成功后的固定响应。 */
 export interface DraftSave {
   updated_at: string
@@ -244,6 +273,7 @@ export interface Submission {
   student_id: SnowflakeID
   attempt_no: number
   content: Record<string, unknown>
+  manual_max_score: number
   judge_task_ref?: string
   auto_score?: number
   manual_score?: number
@@ -255,7 +285,7 @@ export interface Submission {
 }
 
 export interface SubmitRequest {
-  content_ref: Record<string, unknown>
+  answers: Record<string, TheoryAnswer>
 }
 
 export interface CourseMember {

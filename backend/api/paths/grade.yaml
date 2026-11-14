@@ -45,12 +45,14 @@
   get:
     tags: [grade]
     summary: 成绩审核列表
+    description: facets.status：审核状态分段计数，套用锁定与学期筛选、不套用状态筛选。semester_id 按学期筛选，省略为全部学期。每条带 submitter_name 与 course_name（当前页经身份与教学契约批量解析）。
     operationId: gradeListReviews
     x-chaimir-audience: school-admin
     security: [{ bearerAuth: [] }]
     parameters:
       - { $ref: "#/components/parameters/StatusQuery" }
       - { name: is_locked, in: query, schema: { type: integer, minimum: 0, maximum: 2 } }
+      - { name: semester_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
       - { $ref: "#/components/parameters/PageQuery" }
       - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
@@ -67,6 +69,7 @@
   get:
     tags: [grade]
     summary: 我提交的成绩审核列表
+    description: 每条带 course_name（当前页经教学契约批量解析）。
     operationId: gradeListOwnReviews
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
@@ -137,9 +140,9 @@
   get:
     tags: [grade]
     summary: 成绩申诉列表
-    description: 教师仅查看本人任教且未删除课程的申诉，学校管理员查看本租户申诉；服务端先限制课程范围，再按状态分页和统计总数。
+    description: 按身份分视角：学生只查看本人申诉，教师仅查看本人任教且未删除课程的申诉，学校管理员查看本租户申诉；服务端先限制范围，再按状态分页和统计总数。facets.status：申诉状态分段计数，范围同列表视角，不套用状态筛选。每条带 student_name、student_no 与 course_name（当前页批量解析）。
     operationId: gradeListAppeals
-    x-chaimir-audience: teacher
+    x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
     parameters:
       - { $ref: "#/components/parameters/StatusQuery" }
@@ -193,11 +196,14 @@
   get:
     tags: [grade]
     summary: 学业预警列表
+    description: facets.status：预警状态分段计数，套用学生与学期筛选、不套用状态筛选。semester_id 按学期筛选，省略为全部学期。每条带 student_name 与 student_no（当前页经身份契约批量解析）。
     operationId: gradeListWarnings
     x-chaimir-audience: school-admin-or-student
     security: [{ bearerAuth: [] }]
     parameters:
       - { name: student_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
+      - { $ref: "#/components/parameters/StatusQuery" }
+      - { name: semester_id, in: query, schema: { $ref: "#/components/schemas/SnowflakeID" } }
       - { $ref: "#/components/parameters/PageQuery" }
       - { $ref: "#/components/parameters/SizeQuery" }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }

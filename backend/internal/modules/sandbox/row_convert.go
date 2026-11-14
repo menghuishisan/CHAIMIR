@@ -46,6 +46,7 @@ func runtimeImageFromRow(row sqlcgen.RuntimeImage) RuntimeImage {
 	}
 }
 
+// compositionPrepullFromRow 把组合预拉取证明行转换为内部模型。
 func compositionPrepullFromRow(row sqlcgen.SandboxCompositionPrepull) CompositionPrepull {
 	return CompositionPrepull{
 		ID:                row.ID,

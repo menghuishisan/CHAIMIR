@@ -75,6 +75,13 @@ FROM runtime_image
 WHERE runtime_id = $1
 ORDER BY created_at DESC, id DESC;
 
+-- name: CountAvailableRuntimeImagesByRuntime :many
+-- 运行时列表的接入进度要知道每个运行时有几个可用镜像版本:一次分组计数,不逐个运行时取镜像列表。
+SELECT runtime_id, COUNT(*)::bigint AS count
+FROM runtime_image
+WHERE status = 1
+GROUP BY runtime_id;
+
 -- name: CreateRuntimeImage :one
 INSERT INTO runtime_image (id, runtime_id, image_url, version, status, genesis_baked, created_at)
 VALUES ($1, $2, $3, $4, 1, $5, now())

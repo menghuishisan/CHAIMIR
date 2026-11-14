@@ -136,6 +136,11 @@ func (s *Service) UpdateDraftItem(ctx context.Context, itemID int64, req UpdateI
 		if current.Status != StatusDraft {
 			return apperr.ErrContentVersionImmutable
 		}
+		if current.Type == TypeTheoryQuestion {
+			if err := validateTheoryQuestionBody(req.Body); err != nil {
+				return err
+			}
+		}
 		current.Title = req.Title
 		current.CategoryID = req.CategoryID.Int64()
 		current.Difficulty = req.Difficulty
@@ -172,6 +177,11 @@ func (s *Service) PublishItem(ctx context.Context, itemID int64) (ItemDTO, error
 		}
 		if err := validateContestSubmitKey(item); err != nil {
 			return Item{}, err
+		}
+		if item.Type == TypeTheoryQuestion {
+			if err := validateTheoryQuestionBody(item.Body); err != nil {
+				return Item{}, err
+			}
 		}
 		return tx.PublishItem(ctx, tenantID, id)
 	})
@@ -560,10 +570,10 @@ func (s *Service) setItemVisibility(ctx context.Context, itemID int64, visibilit
 }
 
 // ListShared 查询跨租户共享库,只返回已发布共享内容摘要。
-func (s *Service) ListShared(ctx context.Context, filter ItemListFilter) ([]ItemDTO, int64, int, int, error) {
+func (s *Service) ListShared(ctx context.Context, filter ItemListFilter) ([]ItemDTO, int64, int, int, pagex.Facets, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, 0, 0, nil, err
 	}
 	filter.Visibility = VisibilityShared
 	filter.Status = StatusPublished
@@ -572,18 +582,24 @@ func (s *Service) ListShared(ctx context.Context, filter ItemListFilter) ([]Item
 	filter.Page, filter.Size = pagex.Normalize(filter.Page, filter.Size)
 	var items []Item
 	var total int64
+	var byType pagex.FacetGroup
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		items, total, err = tx.ListItems(ctx, id.TenantID, filter)
+		if err != nil {
+			return err
+		}
+		// 「按题型」分段计数:套用关键词,不套用题型筛选
+		byType, err = tx.CountSharedItemsByType(ctx, filter.Keyword)
 		return err
 	}); err != nil {
-		return nil, 0, 0, 0, apperr.ErrContentQueryInvalid.WithCause(err)
+		return nil, 0, 0, 0, nil, apperr.ErrContentQueryInvalid.WithCause(err)
 	}
 	out := make([]ItemDTO, 0, len(items))
 	for _, item := range items {
 		out = append(out, itemDTO(item))
 	}
-	return out, total, filter.Page, filter.Size, nil
+	return out, total, filter.Page, filter.Size, pagex.Facets{"type": byType}, nil
 }
 
 // getItemWithBody 统一读取完整内容并映射错误。

@@ -25,7 +25,10 @@ func platformStableID(namespace, code string) int64 {
 	return 900000000000000000 + int64(h.Sum64()%99999999999999999)
 }
 
-func platformCatalogRuntimeID(code string) int64      { return platformStableID("runtime", code) }
+// platformCatalogRuntimeID 按运行时编码派生稳定编号,重复执行种子时同一运行时落到同一行。
+func platformCatalogRuntimeID(code string) int64 { return platformStableID("runtime", code) }
+
+// platformCatalogRuntimeImageID 按运行时编码派生其镜像版本的稳定编号。
 func platformCatalogRuntimeImageID(code string) int64 { return platformStableID("runtime-image", code) }
 
 // imageVersionFromURL 把不可变 digest 的短前缀作为展示版本,不再维护一份硬编码版本号。

@@ -32,6 +32,45 @@ func (q *Queries) CountAlertEvents(ctx context.Context, arg CountAlertEventsPara
 	return column_1, err
 }
 
+const countAlertEventsByStatus = `-- name: CountAlertEventsByStatus :many
+SELECT status, count(*)::bigint AS count
+FROM alert_event
+WHERE ($1::smallint = 0 OR level = $1::smallint)
+  AND (($2::bigint IS NULL) OR tenant_id = $2::bigint)
+GROUP BY status
+`
+
+type CountAlertEventsByStatusParams struct {
+	Level    int16       `json:"level"`
+	TenantID pgtype.Int8 `json:"tenant_id"`
+}
+
+type CountAlertEventsByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 告警列表的状态分段计数:套用级别与学校范围,不套用状态筛选。
+func (q *Queries) CountAlertEventsByStatus(ctx context.Context, arg CountAlertEventsByStatusParams) ([]CountAlertEventsByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countAlertEventsByStatus, arg.Level, arg.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountAlertEventsByStatusRow{}
+	for rows.Next() {
+		var i CountAlertEventsByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countBackupRecords = `-- name: CountBackupRecords :one
 SELECT count(*)::bigint
 FROM backup_record
@@ -43,6 +82,38 @@ func (q *Queries) CountBackupRecords(ctx context.Context, status int16) (int64, 
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countBackupRecordsByStatus = `-- name: CountBackupRecordsByStatus :many
+SELECT status, count(*)::bigint AS count
+FROM backup_record
+GROUP BY status
+`
+
+type CountBackupRecordsByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 备份巡检的状态分段计数(进行中 / 已成功 / 已失败)。
+func (q *Queries) CountBackupRecordsByStatus(ctx context.Context) ([]CountBackupRecordsByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countBackupRecordsByStatus)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountBackupRecordsByStatusRow{}
+	for rows.Next() {
+		var i CountBackupRecordsByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const countConfigChangeLogs = `-- name: CountConfigChangeLogs :one

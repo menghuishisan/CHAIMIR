@@ -1,35 +1,27 @@
-// 课程管理页(教师侧栏,/teacher/courses)。
-// 课程写操作全部在此页与课程编辑页:创建、发布、结束、归档、克隆、共享、刷新邀请码。
-// 状态流转是有向的(草稿→发布→进行中→结课→归档),故动作按当前状态给出,
-// 不把全部动作平铺成永远可点的按钮组。
+// 课程管理页(教师侧栏,/teacher/courses)。设计 §7.4:
+// 页头 +「新建课程」;分段「进行中 / 草稿 / 已结课 / 全部」+「共享状态」下拉(都写进地址,默认「进行中」);
+// 卡片网格,卡片显示课程名、状态、学期 · 学分、开课区间、邀请码(带复制,只在已发布和进行中时显示)、共享标记;
+// 整卡链向课程详情;卡片右上角更多菜单:发布 / 结课 / 归档 / 共享或取消共享 / 刷新邀请码 / 克隆,按状态只显示可用项。
+// 创建成功后进入新课程的详情页继续编排章节。状态流转是有向的(草稿→发布→进行中→结课→归档),
+// 结课、归档等需确认的操作弹窗写明后果。
 
 import { useCallback, useRef, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { Link, useNavigate } from 'react-router'
 import { Book, BookPlus, ClipboardCopy, Copy, KeyRound, MoreVertical, Share2 } from 'lucide-react'
-import {
-  BOOL_FILTER,
-  CourseStatus,
-  CourseVisibility,
-  type BoolFilter,
-  type Course,
-} from '@chaimir/api-client'
+import { BOOL_FILTER, CourseStatus, CourseVisibility, type BoolFilter, type Course } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
-  DataPanel,
-  FilterBar,
-  FilterField,
+  Card,
+  Icon,
   IconButton,
   Menu,
   MenuContent,
   MenuItem,
   MenuSeparator,
   MenuTrigger,
-  MetricStrip,
   Modal,
-  ModalBody,
   ModalContent,
   ModalDescription,
   ModalFooter,
@@ -39,44 +31,50 @@ import {
   PageScaffold,
   Pagination,
   SegmentedControl,
+  Select,
+  Skeleton,
   StatusIndicator,
-  Table,
   toast,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource, useResourceTotal } from '../../../../hooks'
+import { ResourceError } from '../../../../components/ResourceState'
+import { usePagedResource, useUrlState } from '../../../../hooks'
 import { copyText } from '../../../../utils/clipboard'
-import { formatDate } from '../../../../utils/formatters'
-import {
-  courseStatusLabel,
-  courseTypeLabel,
-  teachingDifficultyLabel,
-} from '../../../../utils/labels/teaching'
+import { segmentCounts } from '../../../../utils/facets'
+import { formatDateRange } from '../../../../utils/formatters'
+import { courseStatusLabel, courseTypeLabel } from '../../../../utils/labels/teaching'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { CourseIdentityCell } from '../../components/CourseIdentityCell'
 import { courseStatusTone } from '../../statusPresentation'
 import { CourseFormModal } from '../../components/CourseFormModal'
 import { CloneCourseModal } from '../../components/CloneCourseModal'
 
-/** 状态筛选项:值为空串表示不过滤。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(CourseStatus.DRAFT), label: '草稿' },
-  { value: String(CourseStatus.RUNNING), label: '进行中' },
-  { value: String(CourseStatus.ENDED), label: '已结课' },
+/** 地址参数:status 课程状态分段(默认进行中),shared 共享状态 */
+const COURSES_QUERY = {
+  status: { defaultValue: 'running', allowed: ['running', 'draft', 'ended', 'all'] },
+  shared: { defaultValue: 'any', allowed: ['any', 'yes', 'no'] },
+} as const
+
+const STATUS_SEGMENTS = [
+  { value: 'running', label: '进行中' },
+  { value: 'draft', label: '草稿' },
+  { value: 'ended', label: '已结课' },
+  { value: 'all', label: '全部' },
 ] as const
 
-/**
- * SHARED_FILTERS 是「是否已共享」筛选项。
- * 布尔列没法用「缺省即不过滤」表达三种意图,全平台统一用 BoolFilter(0 不限 / 1 是 / 2 否)。
- */
-const SHARED_FILTERS = [
-  { value: BOOL_FILTER.ANY, label: '不限' },
-  { value: BOOL_FILTER.YES, label: '已共享' },
-  { value: BOOL_FILTER.NO, label: '未共享' },
-] as const
+/** statusOf 分段对应的课程状态(全部为 undefined) */
+function statusOf(segment: string): CourseStatus | undefined {
+  if (segment === 'running') return CourseStatus.RUNNING
+  if (segment === 'draft') return CourseStatus.DRAFT
+  if (segment === 'ended') return CourseStatus.ENDED
+  return undefined
+}
+
+/** sharedOf 共享下拉对应的筛选值 */
+function sharedOf(value: string): BoolFilter {
+  if (value === 'yes') return BOOL_FILTER.YES
+  if (value === 'no') return BOOL_FILTER.NO
+  return BOOL_FILTER.ANY
+}
 
 /** 需要二次确认的状态流转:这三个动作不可逆或影响学生可见性。 */
 type ConfirmAction = 'publish' | 'end' | 'archive'
@@ -84,19 +82,19 @@ type ConfirmAction = 'publish' | 'end' | 'archive'
 const CONFIRM_COPY: Record<ConfirmAction, { title: string; description: string; confirm: string }> =
   {
     publish: {
-      title: '确认发布课程',
+      title: '发布课程',
       description: '发布后学生可以用邀请码加入,课程基础信息将不能再随意修改。',
-      confirm: '确认发布',
+      confirm: '发布课程',
     },
     end: {
-      title: '确认结束课程',
+      title: '结束课程',
       description: '结束后学生不能再提交作业,可以开始评价课程。你仍可查看全部数据。',
-      confirm: '确认结束',
+      confirm: '结束课程',
     },
     archive: {
-      title: '确认归档课程',
+      title: '归档课程',
       description: '归档后课程转为只读,学生不再看到它。归档不可撤销。',
-      confirm: '确认归档',
+      confirm: '归档课程',
     },
   }
 
@@ -105,8 +103,7 @@ const CONFIRM_COPY: Record<ConfirmAction, { title: string; description: string; 
  */
 export default function TeacherCoursesPage() {
   const navigate = useNavigate()
-  const [statusFilter, setStatusFilter] = useState<string>('')
-  const [sharedFilter, setSharedFilter] = useState<BoolFilter>(BOOL_FILTER.ANY)
+  const [query, setQuery] = useUrlState(COURSES_QUERY)
   const [createOpen, setCreateOpen] = useState(false)
   const [confirm, setConfirm] = useState<{ action: ConfirmAction; course: Course }>()
   const [cloneTarget, setCloneTarget] = useState<Course>()
@@ -119,12 +116,16 @@ export default function TeacherCoursesPage() {
     (params) =>
       api.teaching.getCourses({
         role: 'teacher',
-        status: statusFilter ? (Number(statusFilter) as CourseStatus) : undefined,
-        is_shared: sharedFilter,
+        status: statusOf(query.status),
+        is_shared: sharedOf(query.shared),
         ...params,
       }),
-    [sharedFilter, statusFilter]
+    [query.shared, query.status],
+    { urlPageKey: 'page' },
   )
+  // 分段计数取列表接口的 facets:套用共享筛选、不套用状态筛选;读取中或失败时不显示数字
+  const facets = courses.status === 'success' || courses.status === 'empty' ? courses.data?.facets : undefined
+  const statusCounts = segmentCounts(facets, 'status', STATUS_SEGMENTS, (segment) => statusOf(segment.value))
 
   /** runStatusAction 执行状态流转并刷新列表。 */
   const runStatusAction = useCallback(async () => {
@@ -165,7 +166,7 @@ export default function TeacherCoursesPage() {
         setSharingCourseId(undefined)
       }
     },
-    [courses]
+    [courses],
   )
 
   /** refreshInviteCode 刷新邀请码:旧邀请码随之失效。 */
@@ -174,143 +175,22 @@ export default function TeacherCoursesPage() {
       setActionError(undefined)
       try {
         const updated = await api.teaching.refreshInviteCode(course.id)
-        toast.success(`新邀请码 ${updated.invite_code ?? ''}`)
+        toast.success(`新邀请码 ${updated.invite_code ?? ''},旧邀请码已失效`)
         courses.reload()
       } catch (error) {
         setActionError(userFacingErrorMessage(error, '刷新邀请码没有成功,请稍后重试。'))
       }
     },
-    [courses]
+    [courses],
   )
 
-  // 指标带取服务端全量口径,不随下方筛选变化(§6.5.4)。
-  // 「已共享」现在也走服务端 is_shared 参数,不再用当前页切片数 —— 那是错数。
-  const totalCount = useResourceTotal(
-    (params) => api.teaching.getCourses({ role: 'teacher', ...params }),
-    [],
-    courses.refreshVersion
-  )
-  const runningCount = useResourceTotal(
-    (params) =>
-      api.teaching.getCourses({ role: 'teacher', status: CourseStatus.RUNNING, ...params }),
-    [],
-    courses.refreshVersion
-  )
-  const draftCount = useResourceTotal(
-    (params) => api.teaching.getCourses({ role: 'teacher', status: CourseStatus.DRAFT, ...params }),
-    [],
-    courses.refreshVersion
-  )
-  const endedCount = useResourceTotal(
-    (params) => api.teaching.getCourses({ role: 'teacher', status: CourseStatus.ENDED, ...params }),
-    [],
-    courses.refreshVersion
-  )
-  const sharedCount = useResourceTotal(
-    (params) => api.teaching.getCourses({ role: 'teacher', is_shared: BOOL_FILTER.YES, ...params }),
-    [],
-    courses.refreshVersion
-  )
-
-  const columns: TableColumn<Course>[] = [
-    {
-      key: 'name',
-      header: '课程',
-      render: (course) => (
-        <CourseIdentityCell
-          course={course}
-          details={`${course.semester} · ${courseTypeLabel(course.type)} · ${teachingDifficultyLabel(course.difficulty)}`}
-        />
-      ),
-    },
-    { key: 'credits', header: '学分', align: 'right', mono: true },
-    {
-      key: 'schedule',
-      header: '开课时间',
-      render: (course) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDate(course.start_at)} — {formatDate(course.end_at)}
-        </span>
-      ),
-    },
-    {
-      key: 'invite_code',
-      header: '邀请码',
-      mono: true,
-      // 本页的用途就是「把邀请码发给学生」,所以邀请码必须能一键复制,
-      // 而不是让老师用鼠标框选一串等宽字符(规范 §6.5 动作就近)。
-      render: (course) => {
-        const inviteCode = course.invite_code
-        if (!inviteCode) return '—'
-        return (
-          <span className="flex items-center gap-1">
-            <span className="whitespace-nowrap">{inviteCode}</span>
-            <IconButton
-              variant="ghost"
-              size="sm"
-              icon={ClipboardCopy}
-              aria-label={`复制课程「${course.name}」的邀请码`}
-              onClick={() => {
-                void copyText(inviteCode, {
-                  what: '邀请码',
-                  operation: 'teaching.course.copyInviteCode',
-                }).then((ok) => {
-                  if (ok) toast.success('邀请码已复制')
-                })
-              }}
-            />
-          </span>
-        )
-      },
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (course) => (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <StatusIndicator
-            tone={courseStatusTone(course.status)}
-            label={courseStatusLabel(course.status)}
-          />
-          {course.visibility === CourseVisibility.SHARED ? <Badge tone="jade">已共享</Badge> : null}
-        </div>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (course) => (
-        <div className="flex items-center justify-end gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate(`/teacher/courses/${course.id}`)}
-          >
-            管理内容
-          </Button>
-          <CourseActionMenu
-            course={course}
-            onManage={() => navigate(`/teacher/courses/${course.id}`)}
-            onRequestStatus={(action) => setConfirm({ action, course })}
-            sharing={sharingCourseId === course.id}
-            onShare={() => void toggleCourseSharing(course)}
-            onRefreshInvite={() => void refreshInviteCode(course)}
-            onClone={() => setCloneTarget(course)}
-          />
-        </div>
-      ),
-    },
-  ]
+  const list = courses.data?.list ?? []
+  const filtered = query.status !== 'all' || query.shared !== 'any'
 
   return (
     <PageScaffold>
       <PageHeader
-        // 面包屑只到父级:末节与 h1 同名等于白占一行(§6.5.0 通则 1)
-        kicker={<Breadcrumb items={[{ label: '教学' }]} />}
         title="课程管理"
-        description="创建课程、组织章节课时与作业,把邀请码发给学生即可开课。"
-        icon={Book}
         actions={
           <Button variant="primary" leftIcon={BookPlus} onClick={() => setCreateOpen(true)}>
             新建课程
@@ -318,124 +198,99 @@ export default function TeacherCoursesPage() {
         }
       />
 
-      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是列表,四张 Display 大卡会把表格推到折叠线以下。
-          口径仍是服务端全量,不随下方状态筛选变化(§6.5.4) */}
-      <MetricStrip
-        label="课程总量摘要"
-        className="mb-5"
-        items={[
-          { label: '课程总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
-          { label: '进行中', value: runningCount ?? '—', hint: '学生可进入学习' },
-          { label: '草稿', value: draftCount ?? '—', hint: '发布后学生才可加入' },
-          { label: '已结课', value: endedCount ?? '—', hint: '可归档结算成绩' },
-          { label: '已共享', value: sharedCount ?? '—', hint: '其他学校可复用' },
-        ]}
-      />
+      <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <SegmentedControl
+          aria-label="按课程状态筛选"
+          options={STATUS_SEGMENTS.map((segment) => ({ value: segment.value, label: segment.label, count: statusCounts[segment.value] }))}
+          value={query.status}
+          onValueChange={(value) => setQuery({ status: value })}
+        />
+        <Select
+          aria-label="按共享状态筛选"
+          options={[
+            { value: 'any', label: '共享状态不限' },
+            { value: 'yes', label: '已共享' },
+            { value: 'no', label: '未共享' },
+          ]}
+          value={query.shared}
+          onValueChange={(value) => setQuery({ shared: value })}
+          className="w-full sm:w-44"
+        />
+      </div>
 
-      {/* 动作失败就近内联(§6.7 C),排在数据区之前,不被表格滚动带走 */}
       {actionError ? (
         <Callout tone="danger" className="mb-4">
           {actionError}
         </Callout>
       ) : null}
 
-      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2 / §6.5.3 第 ① 族):
-          井不得直接摆在光面上,一个逻辑数据区也不该被渲染成三个并排的盒子 */}
-      <DataPanel
-        label="课程列表"
-        filter={
-          <FilterBar label="课程筛选">
-            <FilterField label="课程状态" group>
-              <SegmentedControl
-                aria-label="按课程状态筛选"
-                size="sm"
-                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-                value={statusFilter}
-                onValueChange={setStatusFilter}
-              />
-            </FilterField>
-            <FilterField label="是否已共享" group>
-              <SegmentedControl
-                aria-label="按是否已共享筛选"
-                size="sm"
-                options={SHARED_FILTERS.map((item) => ({
-                  value: String(item.value),
-                  label: item.label,
-                }))}
-                value={String(sharedFilter)}
-                onValueChange={(value) => setSharedFilter(Number(value) as BoolFilter)}
-              />
-            </FilterField>
-          </FilterBar>
-        }
-        footer={
-          <Pagination
-            page={courses.page}
-            pageSize={courses.pageSize}
-            total={courses.total}
-            onPageChange={courses.setPage}
-          />
-        }
-      >
-        <ResourceState
-          resource={courses}
-          emptyIcon={Book}
-          emptyTitle={statusFilter ? '这个状态下没有课程' : '还没有课程'}
-          emptyDescription={
-            statusFilter ? '换个状态看看。' : '新建课程后可以添加章节课时、布置作业并邀请学生。'
-          }
-          emptyAction={
-            statusFilter ? undefined : (
-              <Button variant="primary" leftIcon={BookPlus} onClick={() => setCreateOpen(true)}>
-                新建课程
+      {courses.status === 'error' ? (
+        <ResourceError
+          message={courses.error?.message ?? '课程暂时读取不到'}
+          traceId={courses.error?.traceId}
+          onRetry={courses.reload}
+        />
+      ) : courses.status === 'loading' && list.length === 0 ? (
+        <ul className="card-grid gap-4" aria-busy="true" aria-label="正在读取课程">
+          {Array.from({ length: 3 }, (_, index) => (
+            <li key={index} className="flex flex-col gap-3 rounded-lg bg-surface p-5 shadow-xs">
+              <Skeleton variant="title" width="half" />
+              <Skeleton variant="line" lines={2} />
+            </li>
+          ))}
+        </ul>
+      ) : list.length === 0 ? (
+        <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-14 text-center shadow-xs">
+          <Icon icon={Book} size="lg" className="text-ink-faint" />
+          <p className="mt-3 text-md font-semibold text-ink">{filtered ? '这里暂时没有课程' : '还没有课程'}</p>
+          <p className="mt-1.5 text-sm text-ink-sub">
+            {filtered ? '切换到「全部」看看其他课程。' : '新建课程后可以添加章节课时、布置作业并邀请学生。'}
+          </p>
+          <div className="mt-5 flex flex-wrap justify-center gap-3">
+            {filtered ? (
+              <Button variant="outline" onClick={() => setQuery({ status: 'all', shared: 'any' })}>
+                看全部课程
               </Button>
-            )
-          }
-          skeleton={
-            <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
-          }
-        >
-          {(page) => (
-            <Table
-              columns={columns}
-              data={page.list}
-              rowKey={(course) => course.id}
-              // 表格在 DataPanel 内部,抬起片由容器给(§6.5.1 不出现第三级)
-              elevated={false}
-              // <md 六列挤不进 343px,换行卡(§6.4.1 规则 3):课程名一行、次要信息一行、状态在右
-              mobileCard={(course) => ({
-                title: course.name,
-                meta: `${course.credits} 学分 · ${course.semester} · ${course.invite_code ?? '无邀请码'}`,
-                badge: (
-                  <StatusIndicator
-                    tone={courseStatusTone(course.status)}
-                    label={courseStatusLabel(course.status)}
-                  />
-                ),
-                action: (
-                  <CourseActionMenu
-                    course={course}
-                    onManage={() => navigate(`/teacher/courses/${course.id}`)}
-                    onRequestStatus={(action) => setConfirm({ action, course })}
-                    sharing={sharingCourseId === course.id}
-                    onShare={() => void toggleCourseSharing(course)}
-                    onRefreshInvite={() => void refreshInviteCode(course)}
-                    onClone={() => setCloneTarget(course)}
-                  />
-                ),
-              })}
-              onRowClick={(course) => navigate(`/teacher/courses/${course.id}`)}
-            />
-          )}
-        </ResourceState>
-      </DataPanel>
+            ) : null}
+            <Button variant="primary" leftIcon={BookPlus} onClick={() => setCreateOpen(true)}>
+              新建课程
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <ul className="card-grid gap-4" aria-busy={courses.status === 'loading' || undefined}>
+            {list.map((course) => (
+              <li key={course.id}>
+                <TeacherCourseCard
+                  course={course}
+                  menu={
+                    <CourseActionMenu
+                      course={course}
+                      onManage={() => navigate(`/teacher/courses/${course.id}`)}
+                      onRequestStatus={(action) => setConfirm({ action, course })}
+                      sharing={sharingCourseId === course.id}
+                      onShare={() => void toggleCourseSharing(course)}
+                      onRefreshInvite={() => void refreshInviteCode(course)}
+                      onClone={() => setCloneTarget(course)}
+                    />
+                  }
+                />
+              </li>
+            ))}
+          </ul>
+          <div className="mt-6">
+            <Pagination page={courses.page} pageSize={courses.pageSize} total={courses.total} onPageChange={courses.setPage} />
+          </div>
+        </>
+      )}
 
       {createOpen ? (
         <CourseFormModal
           onClose={() => setCreateOpen(false)}
-          onSaved={() => {
+          onSaved={(created) => {
             setCreateOpen(false)
-            courses.reload()
+            navigate(`/teacher/courses/${created.id}`)
           }}
         />
       ) : null}
@@ -456,12 +311,11 @@ export default function TeacherCoursesPage() {
           {confirm ? (
             <>
               <ModalHeader>
-                <ModalTitle>{CONFIRM_COPY[confirm.action].title}</ModalTitle>
+                <ModalTitle>
+                  {CONFIRM_COPY[confirm.action].title}「{confirm.course.name}」?
+                </ModalTitle>
                 <ModalDescription>{CONFIRM_COPY[confirm.action].description}</ModalDescription>
               </ModalHeader>
-              <ModalBody>
-                <p className="text-base text-ink">{confirm.course.name}</p>
-              </ModalBody>
               <ModalFooter>
                 <Button variant="outline" onClick={() => setConfirm(undefined)}>
                   取消
@@ -479,6 +333,54 @@ export default function TeacherCoursesPage() {
         </ModalContent>
       </Modal>
     </PageScaffold>
+  )
+}
+
+/**
+ * TeacherCourseCard 一门课:课程名(整卡链接)、状态、学期 · 学分 · 类型 · 选课人数、开课区间、共享标记;
+ * 选课人数来自列表接口按当前页一次聚合的 member_count,不逐门课取统计;
+ * 已发布或进行中时显示邀请码与复制按钮;更多菜单与复制按钮浮在整卡链接之上单独可点。
+ */
+function TeacherCourseCard({ course, menu }: { course: Course; menu: React.ReactNode }) {
+  const showInvite =
+    Boolean(course.invite_code) && (course.status === CourseStatus.PUBLISHED || course.status === CourseStatus.RUNNING)
+  return (
+    <Card interactive className="flex h-full flex-col gap-2 p-5">
+      <div className="flex items-start justify-between gap-2">
+        <Link to={`/teacher/courses/${course.id}`} className="card-link line-clamp-2 text-lg font-bold text-ink">
+          {course.name}
+        </Link>
+        <div className="relative z-base -mr-2 -mt-1 shrink-0">{menu}</div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusIndicator tone={courseStatusTone(course.status)} label={courseStatusLabel(course.status)} />
+        {course.visibility === CourseVisibility.SHARED ? <Badge tone="jade">已共享</Badge> : null}
+      </div>
+      <p className="text-sm text-ink-sub">
+        {course.semester} · {course.credits} 学分 · {courseTypeLabel(course.type)} ·{' '}
+        <span className="tabular-nums">{course.member_count ?? 0} 人选课</span>
+      </p>
+      <p className="font-mono text-xs tabular-nums text-ink-sub">{formatDateRange(course.start_at, course.end_at)}</p>
+      {showInvite && course.invite_code ? (
+        <div className="relative z-base mt-auto flex items-center justify-between gap-2 rounded-md bg-surface-hover px-3 py-2">
+          <span className="text-xs text-ink-sub">
+            邀请码 <span className="ml-1 font-mono text-sm tabular-nums text-ink">{course.invite_code}</span>
+          </span>
+          <IconButton
+            variant="ghost"
+            size="sm"
+            icon={ClipboardCopy}
+            aria-label={`复制课程「${course.name}」的邀请码`}
+            onClick={() => {
+              const code = course.invite_code ?? ''
+              void copyText(code, { what: '邀请码', operation: 'teaching.course.copyInviteCode' }).then((ok) => {
+                if (ok) toast.success('邀请码已复制')
+              })
+            }}
+          />
+        </div>
+      ) : null}
+    </Card>
   )
 }
 

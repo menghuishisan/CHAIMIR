@@ -17,7 +17,9 @@ import { useFormValidation } from '../../../../hooks/useFormValidation'
 import {
   FlaskConical,
   FileUp,
+  Gavel,
   LoaderCircle,
+  MoreHorizontal,
   Pause,
   Play,
   RefreshCw,
@@ -48,6 +50,11 @@ import {
   Callout,
   ChainProgress,
   FormField,
+  IconButton,
+  Menu,
+  MenuContent,
+  MenuItem,
+  MenuTrigger,
   Modal,
   ModalBody,
   ModalContent,
@@ -57,6 +64,7 @@ import {
   ModalTitle,
   WorkbenchShell,
   WorkbenchTopbar,
+  type WorkbenchShortcut,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -70,7 +78,7 @@ import { experimentInstanceStatusLabel } from '../../../../utils/labels/experime
 import { experimentReportStatusLabel } from '../../../../utils/labels/experiment'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { formatDateTime, formatFileSize } from '../../../../utils/formatters'
-import { BlockIncubator, type WorkspaceCodeRef } from './block-incubator'
+import { BlockIncubator, useCheckpointJudge, type WorkspaceCodeRef } from './block-incubator'
 
 /** 查询参数名:实例编号随进入时写进地址,刷新与深链据此回到同一现场。 */
 const INSTANCE_PARAM = 'instance'
@@ -511,6 +519,27 @@ function ExperimentWorkbench({
     )
 
   const mintedCount = results.filter((result) => result.passed).length
+  const judging = useCheckpointJudge(instance.instance_id, codeRef, onReload)
+  // 顶栏主操作按状态(设计 §7.2):有未通过的检查点 → 判分当前检查点(顺序第一个未通过的);
+  // 全部通过且需交报告而未交 → 提交报告;否则 → 完成实验。实验已完成时不再给主操作。
+  const passedIds = new Set(results.filter((result) => result.passed).map((result) => result.id))
+  const pendingCheckpoint = checkpoints.find((checkpoint) => !passedIds.has(checkpoint.id))
+  const pendingIndex = pendingCheckpoint ? checkpoints.indexOf(pendingCheckpoint) : -1
+  const reportSubmitted = report !== undefined
+  // 主操作的快捷键只覆盖判分(设计 §7.3):提交报告要先在弹窗里选文件;
+  // 「完成实验」结束整个实验、收不回,只能点按钮
+  const judgeShortcuts: WorkbenchShortcut[] =
+    !finished && pendingCheckpoint
+      ? [
+          {
+            key: 'Enter',
+            mod: true,
+            description: `判分第 ${pendingIndex + 1} 个检查点`,
+            disabled: !canJudge || judging.judgingId !== undefined,
+            run: () => void judging.judge(pendingCheckpoint.id),
+          },
+        ]
+      : []
 
   return (
     <>
@@ -520,6 +549,7 @@ function ExperimentWorkbench({
           <WorkbenchTopbar
             onExit={onExit}
             exitLabel="保存并退出"
+            shortcuts={judgeShortcuts}
             title={title}
             subtitle={experiment.name}
             progress={
@@ -534,28 +564,65 @@ function ExperimentWorkbench({
               ) : undefined
             }
             cta={
-              experiment.require_report ? (
-                <Button
-                  variant="seal"
-                  size="sm"
-                  leftIcon={Send}
-                  disabled={busy || failed}
-                  onClick={() => setReportOpen(true)}
-                >
-                  提交报告
-                </Button>
-              ) : (
-                <Button
-                  variant="seal"
-                  size="sm"
-                  leftIcon={SquareCheckBig}
-                  loading={busy}
-                  disabled={finished || failed}
-                  onClick={() => void control('finish')}
-                >
-                  完成实验
-                </Button>
-              )
+              <div className="flex items-center gap-2">
+                {finished ? null : pendingCheckpoint ? (
+                  <Button
+                    variant="seal"
+                    size="sm"
+                    leftIcon={Gavel}
+                    loading={judging.judgingId === pendingCheckpoint.id}
+                    disabled={!canJudge || judging.judgingId !== undefined}
+                    onClick={() => void judging.judge(pendingCheckpoint.id)}
+                  >
+                    判分第 {pendingIndex + 1} 个检查点
+                  </Button>
+                ) : experiment.require_report && !reportSubmitted ? (
+                  <Button
+                    variant="seal"
+                    size="sm"
+                    leftIcon={Send}
+                    disabled={busy || failed}
+                    onClick={() => setReportOpen(true)}
+                  >
+                    提交报告
+                  </Button>
+                ) : (
+                  <Button
+                    variant="seal"
+                    size="sm"
+                    leftIcon={SquareCheckBig}
+                    loading={busy}
+                    disabled={failed}
+                    onClick={() => void control('finish')}
+                  >
+                    完成实验
+                  </Button>
+                )}
+                <Menu>
+                  <MenuTrigger asChild>
+                    <IconButton variant="on-dark" size="sm" icon={MoreHorizontal} aria-label="更多操作" />
+                  </MenuTrigger>
+                  <MenuContent align="end">
+                    {resumable ? (
+                      <MenuItem icon={Play} disabled={busy} onSelect={() => void control('resume')}>
+                        {released || failed ? '重建实验环境' : '恢复实验'}
+                      </MenuItem>
+                    ) : (
+                      <MenuItem icon={Pause} disabled={busy || !canPause} onSelect={() => void control('pause')}>
+                        暂停实验
+                      </MenuItem>
+                    )}
+                    {experiment.require_report && reportSubmitted && !finished ? (
+                      <MenuItem icon={Send} disabled={busy || failed} onSelect={() => setReportOpen(true)}>
+                        重新提交报告
+                      </MenuItem>
+                    ) : null}
+                    <MenuItem icon={RefreshCw} onSelect={onReload}>
+                      刷新状态
+                    </MenuItem>
+                  </MenuContent>
+                </Menu>
+              </div>
             }
           />
         }
@@ -596,13 +663,12 @@ function ExperimentWorkbench({
         right={
           <div className="flex h-full min-h-0 flex-col overflow-y-auto">
             <BlockIncubator
-              instanceId={instance.instance_id}
               checkpoints={checkpoints}
               results={results}
               stages={stages}
               codeRef={codeRef}
               canJudge={canJudge}
-              onJudged={onReload}
+              judging={judging}
               onActivateStage={(stage) => void activateStage(stage)}
             />
             {experiment.require_report ? <StudentReportPanel report={report} /> : null}
@@ -631,42 +697,13 @@ function ExperimentWorkbench({
                 </span>
               ) : null}
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Button variant="on-dark" size="sm" leftIcon={RefreshCw} onClick={onReload}>
-                刷新状态
-              </Button>
-              {resumable ? (
-                <Button
-                  variant="on-dark"
-                  size="sm"
-                  leftIcon={Play}
-                  loading={busy}
-                  onClick={() => void control('resume')}
-                >
-                  {released || failed ? '重建实验环境' : '恢复实验'}
-                </Button>
-              ) : (
-                <Button
-                  variant="on-dark"
-                  size="sm"
-                  leftIcon={Pause}
-                  loading={busy}
-                  disabled={!canPause}
-                  onClick={() => void control('pause')}
-                >
-                  暂停实验
-                </Button>
-              )}
-              {!resumable && !finished && !canPause ? (
-                <span className="max-w-xs text-right text-xs text-on-dark-sub">
-                  {environmentFailed
-                    ? '环境状态异常或暂时无法读取,请刷新状态后重试。'
-                    : environmentPreparing
-                      ? '环境准备完成后才能暂停。'
-                      : '当前实验状态不能暂停。'}
-                </span>
-              ) : null}
-            </div>
+            {!resumable && !finished && !canPause && (environmentFailed || environmentPreparing) ? (
+              <span className="max-w-xs text-right text-xs text-on-dark-sub">
+                {environmentFailed
+                  ? '环境状态异常或暂时读不到,请在右上角「更多操作」里刷新状态后重试。'
+                  : '环境准备好后才能判分或暂停。'}
+              </span>
+            ) : null}
           </div>
         }
       />

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	"chaimir/internal/contracts"
 	"chaimir/internal/modules/grade/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/pagex"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -16,6 +18,8 @@ import (
 type roleReader interface {
 	// HasRole 判断账号是否具备指定角色。
 	HasRole(ctx context.Context, accountID int64, role string) (bool, error)
+	// BatchGetAccounts 批量读取账号摘要,供列表随记录下发姓名与学号。
+	BatchGetAccounts(ctx context.Context, accountIDs []int64) ([]contracts.AccountInfo, error)
 }
 
 // Store 定义 M11 service 所需事务入口。
@@ -40,7 +44,8 @@ type TxStore interface {
 	LockSemesterCurrentScope(context.Context, int64) error
 	ClearCurrentSemesters(context.Context) error
 	CreateGradeReview(context.Context, int64, int64, int64, ReviewRequest) (ReviewDTO, error)
-	ListGradeReviews(context.Context, int16, int16, int, int) ([]ReviewDTO, int64, error)
+	ListGradeReviews(context.Context, int16, int16, int64, int, int) ([]ReviewDTO, int64, error)
+	CountGradeReviewsByStatus(context.Context, int16, int64) (pagex.FacetGroup, error)
 	ListOwnGradeReviews(context.Context, int64, int16, int, int) ([]ReviewDTO, int64, error)
 	GetGradeReview(context.Context, int64) (ReviewDTO, error)
 	GetLatestApprovedReviewByCourse(context.Context, int64) (ReviewDTO, error)
@@ -67,13 +72,15 @@ type TxStore interface {
 	HasOpenGradeAppeal(context.Context, int64, int64) (bool, error)
 	GetGradeAppeal(context.Context, int64) (AppealDTO, error)
 	ListGradeAppeals(context.Context, AppealListQuery) ([]AppealDTO, int64, error)
+	CountGradeAppealsByStatus(context.Context, AppealListQuery) (pagex.FacetGroup, error)
 	ListAcceptedAppealsByCourseStudent(context.Context, int64, int64) ([]AppealDTO, error)
 	UpdateGradeAppealStatus(context.Context, int64, int16, int16, int64, string) (AppealDTO, error)
 	CreateAcademicWarning(context.Context, int64, int64, int64, int64, int16, map[string]any) (WarningDTO, error)
 	ClaimGradeWarningNotifications(context.Context, int32, time.Time, string, time.Time) ([]WarningNotification, error)
 	MarkGradeWarningNotificationPublished(context.Context, int64, int64, string) (int64, error)
 	MarkGradeWarningNotificationFailed(context.Context, int64, int64, string, string, time.Time) (int64, error)
-	ListAcademicWarnings(context.Context, int64, int16, int, int) ([]WarningDTO, int64, error)
+	ListAcademicWarnings(context.Context, int64, int16, int64, int, int) ([]WarningDTO, int64, error)
+	CountAcademicWarningsByStatus(context.Context, int64, int64) (pagex.FacetGroup, error)
 	AckAcademicWarning(context.Context, int64, int64) (WarningDTO, error)
 	CreateTranscriptRecord(context.Context, int64, int64, TranscriptRequest, string) (TranscriptDTO, error)
 	GetTranscriptRecord(context.Context, int64) (TranscriptDTO, error)
@@ -82,6 +89,8 @@ type TxStore interface {
 
 // AppealListQuery 描述服务端确定的申诉读取范围,默认空课程集合不允许读取任何记录。
 type AppealListQuery struct {
+	// StudentID 非 0 时只读该学生本人的申诉(学生视角),忽略课程范围
+	StudentID  int64
 	Status     int16
 	AllCourses bool
 	CourseIDs  []int64

@@ -91,6 +91,15 @@ WHERE deleted_at IS NULL
   AND ($10::bigint = 0 OR author_id = $10)
   AND (visibility <> 1 OR author_id = $12);
 
+-- name: CountSharedContentItemsByType :many
+-- 共享资源库「按题型」分段计数:只数其他学校已发布且共享的题目,套用关键词,不套用题型筛选。
+SELECT type, COUNT(*)::bigint AS count
+FROM content_item
+WHERE deleted_at IS NULL
+  AND visibility = 3 AND status = 2
+  AND (sqlc.arg(keyword)::text = '' OR title ILIKE '%' || sqlc.arg(keyword)::text || '%' OR code ILIKE '%' || sqlc.arg(keyword)::text || '%')
+GROUP BY type;
+
 -- name: ListContentVersions :many
 SELECT id, tenant_id, code, version, type, title, category_id, difficulty, tags, knowledge_points, author_id, author_type, visibility, status, usage_count, version_hash, created_at, updated_at, deleted_at
 FROM content_item

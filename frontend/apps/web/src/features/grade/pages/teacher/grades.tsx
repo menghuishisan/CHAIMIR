@@ -1,492 +1,305 @@
-// 成绩报送页(教师侧栏,/teacher/grades)。
+// 成绩报送页(教师侧栏,/teacher/grades)。设计 §7.4:
+// 左栏本学期课程列表,每行显示报送状态(未报送 / 待审核 / 已通过 / 已驳回),驳回的显示原因;
+// 学期下拉在列表上方。右栏是所选课程的权重与全班成绩(学生姓名用成员列表解析),
+// 底部「报送成绩」(可填备注,朱砂落印按钮);待审核或已通过时不可用并写原因。
+// 所选课程与学期写进地址;默认选中第一门未报送的课。
 //
-// 两件事:把某门课程的成绩提交给学校审核、查看自己报送过的记录状态。
-// 课程成绩(权重/计算/调分/导出)是本页的内页 —— 选定课程后在下方展开,
-// 与课程管理里的「课程成绩」标签共用同一个 CourseGrades 组件,两处入口一个实现。
-//
-// 报送前需要先算出成绩:后端 SubmitReview 以课程成绩为依据,故本页把「配置权重 → 计算 → 报送」
-// 排成同一条动线,而不是让教师在两个页面间来回跳。
-//
-// 申诉处理在批改中心;本页不重复放入口(对齐清单 §3.2:成绩申诉是批改/成绩内页,不进侧栏)。
+// 报送以课程成绩为依据:「配置权重 → 计算 → 报送」在同一右栏里完成,与课程详情的「成绩」标签共用
+// CourseGrades 组件。报送时不指定学期,由后端按课程学期名解析;课程学期未登记时写明原因。
+// 学校暂未开放课程教学时,只显示自己的报送记录。申诉处理在批改中心,本页不重复放入口。
 
 import { useCallback, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
-import { FileText, Send } from 'lucide-react'
+import { Send } from 'lucide-react'
+import { GradeReviewStatus, PAGINATION_MAX_SIZE, TENANT_MODULE, type Course, type GradeReview, type Semester } from '@chaimir/api-client'
 import {
-  GradeReviewStatus,
-  PAGINATION_MAX_SIZE,
-  TENANT_MODULE,
-  type Course,
-  type GradeReview,
-  type Semester,
-} from '@chaimir/api-client'
-import {
-  Breadcrumb,
   Button,
   Callout,
-  Card,
-  CardBody,
-  CardHeader,
-  DataPanel,
-  Empty,
-  FilterBar,
-  FilterField,
   FormField,
-  MetricStrip,
-  PageBody,
+  Icon,
+  ListRow,
   PageHeader,
   PageScaffold,
-  PageSection,
-  Pagination,
-  SegmentedControl,
   Select,
-  Table,
+  Skeleton,
+  StatusIndicator,
   Textarea,
   toast,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { ResourceError } from '../../../../components/ResourceState'
 import { useSession } from '../../../../components/RoleGuard/session'
-import { ResourceState } from '../../../../components/ResourceState'
-import {
-  useAsyncResource,
-  usePagedResource,
-  useResourceTotal,
-  type AsyncResourceState,
-} from '../../../../hooks'
-import { CourseGrades } from '../../../teaching/components/CourseGrades'
+import { useAsyncResource, useUrlState } from '../../../../hooks'
+import { collectAllPages } from '../../../../utils/allPages'
 import { formatDateTime } from '../../../../utils/formatters'
+import { gradeReviewStatusLabel } from '../../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { useFormValidation } from '../../../../hooks/useFormValidation'
-import { GradeReviewStatusCell } from '../../components/GradeReviewStatusCell'
+import { CourseGrades } from '../../../teaching/components/CourseGrades'
+import { courseReportStates, defaultReportCourse, reportBlockedReason } from '../../reportStatus'
+import { gradeReviewStatusTone } from '../../statusPresentation'
 
-/** 状态筛选项:值为空串表示不过滤。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(GradeReviewStatus.PENDING), label: '待审核' },
-  { value: String(GradeReviewStatus.APPROVED), label: '已通过' },
-  { value: String(GradeReviewStatus.REJECTED), label: '已驳回' },
-] as const
+/** 地址参数:semester 学期(空为当前学期,all 为全部),course 所选课程 */
+const GRADES_QUERY = {
+  semester: { defaultValue: '' },
+  course: { defaultValue: '' },
+} as const
 
 /**
- * TeacherGradesPage 承载课程成绩维护与成绩报送。
+ * TeacherGradesPage 承载课程成绩维护与成绩报送;教学模块未开放时只显示报送记录。
  */
 export default function TeacherGradesPage() {
   const { me } = useSession()
-  return me.enabled_modules.includes(TENANT_MODULE.TEACHING) ? (
-    <TeacherGradesWithCourses />
-  ) : (
-    <TeacherGradeReviews />
-  )
-}
-
-/** TeacherGradesWithCourses 仅在教学开放时读取课程并挂载课程成绩维护与新报送。 */
-function TeacherGradesWithCourses() {
-  const [courseId, setCourseId] = useState<string>('')
-  const [refreshVersion, setRefreshVersion] = useState(0)
-
-  const courses = useAsyncResource(
-    () => api.teaching.getCourses({ role: 'teacher', page: 1, size: PAGINATION_MAX_SIZE }),
-    [],
-    () => false
-  )
-
-  const semesters = useAsyncResource(() => api.grade.listSemesters(), [])
-
-  const courseOptions = useMemo(
-    () => (courses.data?.list ?? []).map((course) => ({ value: course.id, label: course.name })),
-    [courses.data]
-  )
-
-  return (
-    <TeacherGradeReviews
-      courses={courses.data?.list}
-      courseId={courseId}
-      submission={
-        <SubmitReviewCard
-          courseOptions={courseOptions}
-          courseSemester={courses.data?.list.find((course) => course.id === courseId)?.semester}
-          semesters={semesters}
-          selectedCourseId={courseId}
-          onCourseChange={setCourseId}
-          onSubmitted={() => setRefreshVersion((value) => value + 1)}
-        />
-      }
-      refreshVersion={refreshVersion}
-    />
-  )
-}
-
-/** TeacherGradeReviews 保留成绩模块的报送历史，不从关闭的教学模块取数。 */
-function TeacherGradeReviews({
-  courses,
-  courseId,
-  submission,
-  refreshVersion = 0,
-}: {
-  courses?: Course[]
-  courseId?: string
-  submission?: ReactNode
-  refreshVersion?: number
-}) {
-  const [statusFilter, setStatusFilter] = useState<string>('')
-
-  const reviews = usePagedResource<GradeReview>(
-    (params) =>
-      api.grade.listOwnReviews({
-        status: statusFilter ? (Number(statusFilter) as GradeReviewStatus) : undefined,
-        ...params,
-      }),
-    [statusFilter, refreshVersion]
-  )
-
-  const courseNameById = useMemo(
-    () => new Map((courses ?? []).map((course) => [course.id, course.name])),
-    [courses]
-  )
-
-  // 指标带取服务端全量口径,不随下方状态筛选变化。
-  // 「已锁定」没有服务端筛选参数,故不做这张卡:锁定状态在每一行里可见(规范 §6.5)。
-  const totalCount = useResourceTotal(
-    (params) => api.grade.listOwnReviews(params),
-    [refreshVersion],
-    reviews.refreshVersion
-  )
-  const pendingCount = useResourceTotal(
-    (params) => api.grade.listOwnReviews({ status: GradeReviewStatus.PENDING, ...params }),
-    [refreshVersion],
-    reviews.refreshVersion
-  )
-  const approvedCount = useResourceTotal(
-    (params) => api.grade.listOwnReviews({ status: GradeReviewStatus.APPROVED, ...params }),
-    [refreshVersion],
-    reviews.refreshVersion
-  )
-  const rejectedCount = useResourceTotal(
-    (params) => api.grade.listOwnReviews({ status: GradeReviewStatus.REJECTED, ...params }),
-    [refreshVersion],
-    reviews.refreshVersion
-  )
-
-  const columns: TableColumn<GradeReview>[] = [
-    {
-      key: 'course_id',
-      header: '课程',
-      render: (review) => (
-        <span className="text-ink">
-          {courseNameById.get(review.course_id) ?? `课程编号 ${review.course_id}`}
-        </span>
-      ),
-    },
-    {
-      key: 'submitted_at',
-      header: '报送时间',
-      render: (review) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDateTime(review.submitted_at)}
-        </span>
-      ),
-    },
-    {
-      key: 'reviewed_at',
-      header: '审核时间',
-      render: (review) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {review.reviewed_at ? formatDateTime(review.reviewed_at) : '—'}
-        </span>
-      ),
-    },
-    {
-      key: 'comment',
-      header: '审核意见',
-      render: (review) =>
-        review.comment ? (
-          <span className="line-clamp-2 text-sm text-ink-sub">{review.comment}</span>
-        ) : (
-          <span className="text-ink-sub">—</span>
-        ),
-    },
-    {
-      key: 'status',
-      header: '状态',
-      render: (review) => <GradeReviewStatusCell review={review} />,
-    },
-  ]
-
   return (
     <PageScaffold>
-      <PageHeader
-        kicker={<Breadcrumb items={[{ label: '组织与成绩' }]} />}
-        title="成绩报送"
-        description="确认课程成绩后报送给学校审核。审核通过的成绩会锁定,进入学生的成绩中心。"
-        icon={Send}
-      />
-
-      {!submission ? (
-        <Callout tone="info" className="mb-5">
-          学校暂未开放课程教学，仍可查看已有报送记录；课程成绩维护与新报送待开放后使用。
-        </Callout>
-      ) : null}
-
-      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是报送记录与课程成绩明细 */}
-      <MetricStrip
-        label="报送总量摘要"
-        className="mb-5"
-        items={[
-          { label: '我的报送', value: totalCount ?? '—', hint: '不受下方筛选影响' },
-          { label: '待审核', value: pendingCount ?? '—', hint: '等待学校处理' },
-          { label: '已通过', value: approvedCount ?? '—', hint: '成绩已锁定' },
-          { label: '已驳回', value: rejectedCount ?? '—', hint: '改分后可重新报送' },
-        ]}
-      />
-
-      <PageBody rail={submission}>
-        {/*
-          归族说明:这一页**不是**审阅队列族。教师在这里是报送方而不是处理方 ——
-          记录状态由学校审核决定,本页列表是只读历史,真正的动作在右侧报送卡与下方课程成绩里。
-          按 §6.5.3 归族判据「要逐条产出处理结论吗」答否,故走资源列表族(第 ① 族)。
-        */}
-        <DataPanel
-          label="报送记录"
-          filter={
-            <FilterBar label="报送记录筛选">
-              <FilterField label="审核状态" group>
-                <SegmentedControl
-                  aria-label="按审核状态筛选"
-                  size="sm"
-                  options={STATUS_FILTERS.map((item) => ({
-                    value: item.value,
-                    label: item.label,
-                  }))}
-                  value={statusFilter}
-                  onValueChange={setStatusFilter}
-                />
-              </FilterField>
-            </FilterBar>
-          }
-          footer={
-            <Pagination
-              page={reviews.page}
-              pageSize={reviews.pageSize}
-              total={reviews.total}
-              onPageChange={reviews.setPage}
-            />
-          }
-        >
-          <ResourceState
-            resource={reviews}
-            emptyIcon={Send}
-            emptyTitle={statusFilter ? '这个状态下没有记录' : '还没有报送过成绩'}
-            emptyDescription={
-              statusFilter
-                ? '换个状态看看。'
-                : submission
-                  ? '在右侧选择课程并确认成绩后即可报送给学校审核。'
-                  : '学校开放课程教学后，可以维护课程成绩并报送给学校审核。'
-            }
-            skeleton={
-              <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
-            }
-          >
-            {(page) => (
-              <Table
-                columns={columns}
-                data={page.list}
-                rowKey={(item) => item.id}
-                elevated={false}
-                // <md 换行卡(§6.4.1 规则 3):课程名一行、报送时间一行,状态在右
-                mobileCard={(item) => ({
-                  title: courseNameById.get(item.course_id) ?? `课程编号 ${item.course_id}`,
-                  meta: `报送于 ${formatDateTime(item.submitted_at)}`,
-                  badge: <GradeReviewStatusCell review={item} />,
-                })}
-              />
-            )}
-          </ResourceState>
-        </DataPanel>
-      </PageBody>
-
-      {/* 课程成绩内页:选定课程后在此维护权重、计算、调分与导出 */}
-      {submission ? (
-        courseId ? (
-          <PageSection
-            title="课程成绩"
-            description={`${courseNameById.get(courseId) ?? '所选课程'} 的成绩明细。报送前请先按权重计算成绩。`}
-          >
-            <CourseGrades courseId={courseId} />
-          </PageSection>
-        ) : (
-          <PageSection title="课程成绩">
-            <Empty
-              icon={FileText}
-              title="请先选择课程"
-              description="在右侧选择要报送的课程,这里会展开该课程的成绩权重与全班成绩。"
-            />
-          </PageSection>
-        )
-      ) : null}
+      <PageHeader title="成绩报送" />
+      {me.enabled_modules.includes(TENANT_MODULE.TEACHING) ? <ReportWorkspace /> : <ReviewHistoryOnly />}
     </PageScaffold>
   )
 }
 
-interface SubmitReviewCardProps {
-  courseOptions: { value: string; label: string }[]
-  courseSemester: string | undefined
-  semesters: AsyncResourceState<Semester[]>
-  selectedCourseId: string
-  onCourseChange: (courseId: string) => void
-  onSubmitted: () => void
+/** ReportWorkspace 左栏课程与报送状态,右栏所选课程的成绩与报送 */
+function ReportWorkspace() {
+  const [query, setQuery] = useUrlState(GRADES_QUERY)
+  const courses = useAsyncResource(
+    () => collectAllPages((params) => api.teaching.getCourses({ role: 'teacher', ...params }), PAGINATION_MAX_SIZE),
+    [],
+    () => false,
+  )
+  const semesters = useAsyncResource(() => api.grade.listSemesters(), [], () => false)
+  const reviews = useAsyncResource(
+    () => collectAllPages((params) => api.grade.listOwnReviews(params), PAGINATION_MAX_SIZE),
+    [],
+    () => false,
+  )
+  const states = useMemo(() => courseReportStates(reviews.data ?? []), [reviews.data])
+
+  const currentSemester = semesters.data?.find((semester) => semester.is_current)
+  const semesterValue = query.semester || currentSemester?.id || 'all'
+  const semesterName = semesters.data?.find((semester) => semester.id === semesterValue)?.name
+  const visibleCourses = useMemo(
+    () => (courses.data ?? []).filter((course) => semesterValue === 'all' || course.semester === semesterName),
+    [courses.data, semesterName, semesterValue],
+  )
+  const selectedId =
+    visibleCourses.find((course) => course.id === query.course)?.id ??
+    defaultReportCourse(
+      visibleCourses.map((course) => course.id),
+      states,
+    )
+  const selected = visibleCourses.find((course) => course.id === selectedId)
+
+  if (courses.status === 'error') {
+    return <ResourceError message={courses.error?.message ?? '课程暂时读取不到'} traceId={courses.error?.traceId} onRetry={courses.reload} />
+  }
+
+  return (
+    <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+      <section aria-label="课程与报送状态" className="flex flex-col gap-3 lg:w-80 lg:shrink-0">
+        <Select
+          aria-label="按学期筛选课程"
+          options={[
+            { value: 'all', label: '全部学期' },
+            ...(semesters.data ?? []).map((semester: Semester) => ({
+              value: semester.id,
+              label: semester.is_current ? `${semester.name}(本学期)` : semester.name,
+            })),
+          ]}
+          value={semesterValue}
+          onValueChange={(value) => setQuery({ semester: value, course: '' })}
+        />
+        <div className="overflow-hidden rounded-lg bg-surface shadow-xs">
+          {courses.status === 'loading' || reviews.status === 'loading' ? (
+            <div aria-busy="true" className="p-4">
+              <Skeleton variant="line" lines={4} />
+            </div>
+          ) : visibleCourses.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm text-ink-sub">这个学期没有你的课程。</p>
+          ) : (
+            <ul className="divide-y divide-line">
+              {visibleCourses.map((course) => {
+                const state = states.get(course.id)
+                return (
+                  <li key={course.id}>
+                    <ListRow
+                      title={course.name}
+                      meta={
+                        state?.comment && state.status === GradeReviewStatus.REJECTED
+                          ? `驳回原因:${state.comment}`
+                          : state
+                            ? `${formatDateTime(state.submitted_at)} 报送`
+                            : course.semester
+                      }
+                      trailing={
+                        state ? (
+                          <StatusIndicator tone={gradeReviewStatusTone(state.status)} label={gradeReviewStatusLabel(state.status)} />
+                        ) : (
+                          <span className="text-sm text-ink-sub">未报送</span>
+                        )
+                      }
+                      selected={course.id === selectedId}
+                      onSelect={() => setQuery({ semester: query.semester, course: course.id })}
+                    />
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+        {reviews.status === 'error' ? (
+          <Callout tone="warning">
+            <span className="flex flex-wrap items-center gap-2">
+              报送状态暂时读不到。
+              <Button variant="outline" size="sm" onClick={reviews.reload}>
+                重新读取
+              </Button>
+            </span>
+          </Callout>
+        ) : null}
+      </section>
+
+      <section aria-label="所选课程的成绩" className="min-w-0 flex-1">
+        {selected ? (
+          <SelectedCourse
+            key={selected.id}
+            course={selected}
+            semesters={semesters.data ?? []}
+            semestersReady={semesters.status === 'success' || semesters.status === 'empty'}
+            review={states.get(selected.id)}
+            onSubmitted={reviews.reload}
+          />
+        ) : courses.status === 'loading' ? (
+          <Skeleton variant="block" />
+        ) : (
+          <div className="rounded-lg bg-surface px-6 py-12 text-center text-sm text-ink-sub shadow-xs">在左侧选一门课。</div>
+        )}
+      </section>
+    </div>
+  )
 }
 
 /**
- * SubmitReviewCard 提交课程成绩审核。
- * 学期可缺省，服务端精确解析；列表读取成功且名称匹配后才允许报送。
+ * SelectedCourse 所选课程:课程名与报送状态、成绩权重与全班成绩、底部报送。
+ * 报送时不指定学期(后端按课程学期名解析);课程没填学期或学期未登记时按钮不可用并写明原因。
  */
-function SubmitReviewCard({
-  courseOptions,
-  courseSemester,
+function SelectedCourse({
+  course,
   semesters,
-  selectedCourseId,
-  onCourseChange,
+  semestersReady,
+  review,
   onSubmitted,
-}: SubmitReviewCardProps) {
-  const [semesterId, setSemesterId] = useState<string>('')
+}: {
+  course: Course
+  semesters: Semester[]
+  semestersReady: boolean
+  review: GradeReview | undefined
+  onSubmitted: () => void
+}) {
   const [comment, setComment] = useState('')
-  const [submitError, setSubmitError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
-  const { errors, validate } = useFormValidation(() => ({
-    courseId: !selectedCourseId ? '请选择要报送的课程' : null,
-  }))
-  const selectedSemester = semesters.data?.find((semester) =>
-    semesterId ? semester.id === semesterId : semester.name === courseSemester
-  )
-  let semesterError: string | undefined
-  if (semesters.status === 'success' && selectedCourseId) {
-    if (!courseSemester) {
-      semesterError = '课程尚未填写学期,请先完善课程信息'
-    } else if (!selectedSemester) {
-      semesterError = semesterId
-        ? '所选学期已不可用,请重新选择'
-        : '课程学期尚未在学校登记,请联系学校管理员核对'
-    } else if (selectedSemester.name !== courseSemester) {
-      semesterError = '所选学期与课程学期不一致,请核对后重新选择'
-    }
-  }
+  const [submitError, setSubmitError] = useState<string>()
+  const blocked = reportBlockedReason(review)
+  const semesterProblem = !semestersReady
+    ? undefined
+    : !course.semester
+      ? '这门课还没填学期,请先在课程信息里补上'
+      : !semesters.some((semester) => semester.name === course.semester)
+        ? `学期「${course.semester}」还没有在学校登记,请联系学校管理员核对`
+        : undefined
+  const reason = blocked ?? semesterProblem
 
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!validate()) return
-      if (semesters.status !== 'success' || semesterError) return
-      setSubmitError(undefined)
-      setSubmitting(true)
-      try {
-        await api.grade.submitReview({
-          course_id: selectedCourseId,
-          semester_id: semesterId || undefined,
-          comment: comment.trim() || undefined,
-        })
-        toast.success('成绩已报送,等待学校审核')
-        setComment('')
-        onSubmitted()
-      } catch (error) {
-        setSubmitError(userFacingErrorMessage(error, '报送没有成功,请稍后重试。'))
-      } finally {
-        setSubmitting(false)
-      }
-    },
-    [comment, onSubmitted, selectedCourseId, semesterError, semesterId, semesters.status, validate]
-  )
+  const submit = useCallback(async () => {
+    setSubmitting(true)
+    setSubmitError(undefined)
+    try {
+      await api.grade.submitReview({ course_id: course.id, comment: comment.trim() || undefined })
+      toast.success('成绩已报送,等待学校审核')
+      setComment('')
+      onSubmitted()
+    } catch (error) {
+      setSubmitError(userFacingErrorMessage(error, '报送没有成功,请稍后重试。'))
+    } finally {
+      setSubmitting(false)
+    }
+  }, [comment, course.id, onSubmitted])
 
   return (
-    <Card>
-      <CardHeader title="报送成绩" description="选择课程后先确认下方成绩,再报送给学校审核。" />
-      <CardBody>
-        <form onSubmit={submit} noValidate>
-          <FormField label="课程" htmlFor="review-course" required error={errors.courseId}>
-            <Select
-              id="review-course"
-              options={courseOptions}
-              value={selectedCourseId}
-              placeholder={courseOptions.length > 0 ? '选择课程' : '暂无课程'}
-              disabled={submitting || courseOptions.length === 0}
-              invalid={Boolean(errors.courseId)}
-              onBlur={() => validate(['courseId'])}
-              onValueChange={(value) => {
-                onCourseChange(value)
-                setSemesterId('')
-              }}
-            />
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-lg font-semibold text-ink">{course.name}</h2>
+        {review ? (
+          <StatusIndicator tone={gradeReviewStatusTone(review.status)} label={gradeReviewStatusLabel(review.status)} />
+        ) : (
+          <span className="text-sm text-ink-sub">未报送</span>
+        )}
+      </div>
+      {review?.status === GradeReviewStatus.REJECTED && review.comment ? (
+        <Callout tone="warning" title="学校驳回了上次报送">
+          {review.comment}。按意见改好成绩后可以重新报送。
+        </Callout>
+      ) : null}
+
+      <CourseGrades courseId={course.id} />
+
+      <div className="sticky bottom-4 z-sticky flex flex-col gap-3 rounded-lg bg-surface p-4 shadow-md">
+        {reason ? null : (
+          <FormField label="报送说明" htmlFor="review-comment" helper="可以写明调分依据,学校审核时会看到(选填)">
+            <Textarea id="review-comment" value={comment} rows={2} onChange={(event) => setComment(event.target.value)} />
           </FormField>
-
-          <FormField
-            label="学期"
-            htmlFor="review-semester"
-            helper={
-              courseSemester
-                ? `课程学期：${courseSemester}。不选则按学校登记的同名学期归档。`
-                : '请先选择课程并确认课程学期'
-            }
-            error={semesterError}
-            className="mt-4"
-          >
-            <ResourceState
-              resource={semesters}
-              emptyIcon={FileText}
-              emptyTitle="学校尚未登记学期"
-              emptyDescription="请联系学校管理员登记与课程一致的学期,再报送成绩。"
-            >
-              {(items) => (
-                <Select
-                  id="review-semester"
-                  options={[
-                    { value: '', label: '按课程学期' },
-                    ...items.map((semester) => ({ value: semester.id, label: semester.name })),
-                  ]}
-                  value={semesterId}
-                  placeholder="按课程学期"
-                  invalid={Boolean(semesterError)}
-                  disabled={submitting}
-                  onValueChange={setSemesterId}
-                />
-              )}
-            </ResourceState>
-          </FormField>
-
-          <FormField
-            label="报送说明"
-            htmlFor="review-comment"
-            helper="可以写明调分依据,学校审核时会看到"
-            className="mt-4"
-          >
-            <Textarea
-              id="review-comment"
-              value={comment}
-              rows={3}
-              onChange={(event) => setComment(event.target.value)}
-            />
-          </FormField>
-
-          {submitError ? <Callout tone="danger" className="mt-4">{submitError}</Callout> : null}
-
-          <Button
-            type="submit"
-            variant="seal"
-            leftIcon={Send}
-            loading={submitting}
-            disabled={
-              courseOptions.length === 0 || semesters.status !== 'success' || Boolean(semesterError)
-            }
-            className="mt-4 w-full"
-          >
+        )}
+        {submitError ? <Callout tone="danger">{submitError}</Callout> : null}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="text-sm text-ink-sub">
+            {reason ?? '报送前请先按权重计算成绩。学校通过后成绩会锁定,并进入学生的成绩中心。'}
+          </span>
+          <Button variant="seal" leftIcon={Send} loading={submitting} disabled={Boolean(reason)} onClick={() => void submit()}>
             报送成绩
           </Button>
-        </form>
+        </div>
+      </div>
+    </div>
+  )
+}
 
-        <Callout tone="info" className="mt-4">
-          报送后学校可以通过或驳回。通过即锁定,需要改分要请学校先解锁。
-        </Callout>
-      </CardBody>
-    </Card>
+/**
+ * ReviewHistoryOnly 学校暂未开放课程教学时只列自己的报送记录(不从关闭的教学模块取课程名,
+ * 按学期与报送时间区分)。
+ */
+function ReviewHistoryOnly() {
+  const reviews = useAsyncResource(
+    () => collectAllPages((params) => api.grade.listOwnReviews(params), PAGINATION_MAX_SIZE),
+    [],
+  )
+  const semesters = useAsyncResource(() => api.grade.listSemesters(), [], () => false)
+  const semesterName = useMemo(
+    () => new Map((semesters.data ?? []).map((semester) => [semester.id, semester.name])),
+    [semesters.data],
+  )
+  return (
+    <div className="flex max-w-3xl flex-col gap-4">
+      <Callout tone="info">学校暂未开放课程教学,可以查看已有的报送记录;开放后可以维护课程成绩并报送。</Callout>
+      {reviews.status === 'error' ? (
+        <ResourceError message={reviews.error?.message ?? '报送记录暂时读取不到'} traceId={reviews.error?.traceId} onRetry={reviews.reload} />
+      ) : reviews.status === 'loading' ? (
+        <Skeleton variant="line" lines={4} />
+      ) : (reviews.data ?? []).length === 0 ? (
+        <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-12 text-center shadow-xs">
+          <Icon icon={Send} size="lg" className="text-ink-faint" />
+          <p className="mt-3 text-md font-semibold text-ink">还没有报送过成绩</p>
+        </div>
+      ) : (
+        <ul className="divide-y divide-line overflow-hidden rounded-lg bg-surface shadow-xs">
+          {[...(reviews.data ?? [])]
+            .sort((a, b) => b.submitted_at.localeCompare(a.submitted_at))
+            .map((review) => (
+              <li key={review.id}>
+                <ListRow
+                  title={`${review.semester_id ? (semesterName.get(review.semester_id) ?? '未登记学期') : '未登记学期'} · 课程成绩`}
+                  meta={review.comment ? `审核意见:${review.comment}` : `${formatDateTime(review.submitted_at)} 报送`}
+                  trailing={<StatusIndicator tone={gradeReviewStatusTone(review.status)} label={gradeReviewStatusLabel(review.status)} />}
+                />
+              </li>
+            ))}
+        </ul>
+      )}
+    </div>
   )
 }

@@ -26,10 +26,10 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
       aria-invalid={invalid || undefined}
       className={cn(
         // outline-hidden(非 outline-none):保留强制对比色模式下的系统焦点可见性
-        "w-full rounded-md border px-3 py-2 text-base transition-colors duration-fast focus:outline-hidden disabled:pointer-events-none disabled:opacity-50",
+        "w-full rounded-md border px-3 py-2 text-md md:text-base transition-colors duration-fast focus:outline-hidden disabled:pointer-events-none disabled:opacity-50",
         onDark
-          ? "border-dark-line bg-dark-surface text-on-dark placeholder:text-on-dark-faint hover:border-on-dark-faint focus:border-accent"
-          : "border-line-strong bg-surface text-ink placeholder:text-ink-faint read-only:bg-surface-sunken hover:border-ink-faint focus:border-primary focus:ring-2 focus:ring-primary-soft",
+          ? "border-dark-control bg-dark-elevated text-on-dark placeholder:text-on-dark-sub hover:border-on-dark-sub focus:border-accent focus:ring-2 focus:ring-on-dark-accent-soft"
+          : "border-line-control bg-surface text-ink placeholder:text-ink-sub read-only:bg-surface-sunken hover:border-ink-sub focus:border-primary focus:ring-2 focus:ring-primary-soft",
         // 错误态:hover/focus 均保持危险色(显式覆盖基类 hover),提示用户问题尚未解决
         invalid && "border-danger hover:border-danger focus:border-danger",
         !onDark && invalid && "focus:ring-danger-bg",

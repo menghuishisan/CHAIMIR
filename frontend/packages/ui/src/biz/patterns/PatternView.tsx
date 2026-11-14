@@ -13,6 +13,7 @@ import { TreePatternView } from "./TreePatternView";
 import type { PatternViewProps } from "./types";
 import type { PatternBinding } from "@chaimir/sim-sdk";
 
+/** PatternView 按 mode 把绑定分派到对应的模式渲染器(七种模式的唯一入口) */
 export function PatternView({ pattern, ...rest }: PatternViewProps<PatternBinding>) {
   switch (pattern.mode) {
     case "graph":

@@ -126,6 +126,8 @@ export interface SandboxRuntime extends Omit<SandboxRuntimeRequest, 'status'> {
   id: SnowflakeID
   status: RuntimeStatus
   selftest_status: RuntimeSelftestStatus
+  /** 可用镜像版本数;只在运行时列表里给出(详情页另有完整镜像列表) */
+  available_image_count?: number
 }
 
 export interface SandboxRuntimeImageRequest {

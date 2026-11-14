@@ -1,4 +1,7 @@
-// 试卷组卷页(教师侧栏,/teacher/exams)。
+// 试卷组卷页(教师侧栏,/teacher/exams)。设计 §7.4:
+// 页头 +「新建试卷」;卡片网格,卡片显示试卷名、组卷方式(手动选题 / 按条件抽题)、创建与更新时间
+// (题数和总分在详情抽屉里读取,列表里没有);整卡打开试卷详情抽屉(题目列表,「重新抽题」只对按条件抽题的试卷显示)。
+// 新建试卷在内容区内切换为表单视图,选题嵌入该视图(沿用规范现有定案)。
 //
 // 两种组卷方式:手动选题(逐题选定并给分)与按条件抽题(设定类型、难度、知识点与题数,
 // 由后端随机抽取)。按条件抽题可以重新抽取,手动选题不需要 —— 重抽会打乱教师的选择。
@@ -17,42 +20,35 @@ import {
 } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   Card,
-  CardBody,
-  CardHeader,
   Checkbox,
-  DataPanel,
-  DescriptionList,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   Empty,
   FormField,
+  Icon,
   Input,
-  MetricStrip,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
   PageHeader,
   PageScaffold,
   Pagination,
   SegmentedControl,
   Select,
   Skeleton,
-  Table,
   toast,
-  type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
+import { ResourceError, ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource, usePagedResource } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { facetCount } from '../../../../utils/facets'
-import { formatShortDateTime } from '../../../../utils/formatters'
+import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
 import { CONTENT_DIFFICULTIES, CONTENT_TYPES } from '../../options'
 import {
   contentDifficultyLabel,
@@ -62,61 +58,25 @@ import {
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { ContentItemPicker } from '../../components/ContentItemPicker'
 
+/** 每页卡片数 */
+const PAPER_PAGE_SIZE = 12
+
 /**
- * TeacherExamsPage 管理试卷。
+ * TeacherExamsPage 管理试卷:卡片网格 + 详情抽屉;新建时切换到表单视图。
  */
 export default function TeacherExamsPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [detailTarget, setDetailTarget] = useState<Paper>()
 
-  const papers = usePagedResource<Paper>((params) => api.content.listPapers(params), [])
+  const papers = usePagedResource<Paper>((params) => api.content.listPapers(params), [], {
+    urlPageKey: 'page',
+    pageSize: PAPER_PAGE_SIZE,
+  })
 
-  // 组卷方式分布取后端 facets.gen_mode:全量分组计数,不用当前页切片去数(§6.5.4)
+  // 组卷方式分布取后端 facets.gen_mode:全量分组计数,不用当前页切片去数
   const facets = papers.total === undefined ? undefined : papers.data?.facets
   const manualCount = facetCount(facets, 'gen_mode', PaperMode.MANUAL)
   const randomCount = facetCount(facets, 'gen_mode', PaperMode.RANDOM)
-
-  const columns: TableColumn<Paper>[] = [
-    {
-      key: 'name',
-      header: '试卷',
-      render: (paper) => <span className="font-medium text-ink">{paper.name}</span>,
-    },
-    {
-      key: 'gen_mode',
-      header: '组卷方式',
-      render: (paper) => <Badge tone="neutral">{paperModeLabel(paper.gen_mode)}</Badge>,
-    },
-    {
-      key: 'criteria',
-      header: '抽题条件',
-      render: (paper) =>
-        paper.gen_mode === PaperMode.RANDOM ? (
-          <span className="text-xs text-ink-sub">{criteriaSummary(paper.gen_criteria)}</span>
-        ) : (
-          <span className="text-ink-sub">手动选定</span>
-        ),
-    },
-    {
-      key: 'updated_at',
-      header: '更新时间',
-      render: (paper) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatShortDateTime(paper.updated_at)}
-        </span>
-      ),
-    },
-    {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
-      render: (paper) => (
-        <Button variant="ghost" size="sm" onClick={() => setDetailTarget(paper)}>
-          查看题目
-        </Button>
-      ),
-    },
-  ]
 
   if (createOpen) {
     return (
@@ -133,10 +93,16 @@ export default function TeacherExamsPage() {
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '资源' }]} />}
         title="试卷组卷"
-        description="把题库里的题目组成试卷。按条件抽题的试卷可以重新抽取,手动选定的保持不变。"
-        icon={FileText}
+        meta={
+          papers.total
+            ? [
+                { value: `共 ${papers.total} 份` },
+                { label: '手动选题', value: manualCount },
+                { label: '按条件抽题', value: randomCount },
+              ]
+            : undefined
+        }
         actions={
           <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
             新建试卷
@@ -144,79 +110,76 @@ export default function TeacherExamsPage() {
         }
       />
 
-      {/*
-        归族:资源列表族(§6.5.3 第 ①)。指标退为一行内联摘要:
-        组卷方式分布走后端聚合契约(facets.gen_mode),是全量口径而非当前页切片(§6.5.4)。
-        列表接口没有筛选参数,故不排筛选井。
-      */}
-      <MetricStrip
-        label="试卷总量摘要"
-        className="mb-5"
-        items={[
-          { label: '试卷份数', value: papers.total, hint: '全部试卷' },
-          { label: '手动选题', value: manualCount, hint: '题目固定不变' },
-          { label: '条件抽题', value: randomCount, hint: '可重新抽取' },
-        ]}
-      />
-      <DataPanel
-        label="试卷列表"
-        footer={
-          <Pagination
-            page={papers.page}
-            pageSize={papers.pageSize}
-            total={papers.total}
-            onPageChange={papers.setPage}
-          />
-        }
-      >
-        <ResourceState
-          resource={papers}
-          emptyIcon={FileText}
-          emptyTitle="还没有试卷"
-          emptyDescription="新建试卷后可以在作业里引用整卷题目。"
-          emptyAction={
-            <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
-              新建试卷
-            </Button>
-          }
-          skeleton={
-            <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
-          }
-        >
-          {(page) => (
-            <Table
-              columns={columns}
-              data={page.list}
-              rowKey={(paper) => paper.id}
-              elevated={false}
-              onRowClick={(paper) => setDetailTarget(paper)}
-              // <md 换行卡(§6.4.1 规则 3):试卷名一行、组卷方式与更新时间一行
-              mobileCard={(paper) => ({
-                title: paper.name,
-                meta: `${paperModeLabel(paper.gen_mode)} · ${formatShortDateTime(paper.updated_at)}`,
-                badge:
-                  paper.gen_mode === PaperMode.RANDOM ? (
-                    <Badge tone="neutral">可重抽</Badge>
-                  ) : undefined,
-                action: (
-                  <Button variant="ghost" size="sm" onClick={() => setDetailTarget(paper)}>
-                    查看题目
-                  </Button>
-                ),
-              })}
-            />
-          )}
-        </ResourceState>
-      </DataPanel>
+      {papers.status === 'error' ? (
+        <ResourceError
+          message={papers.error?.message ?? '试卷暂时读取不到'}
+          traceId={papers.error?.traceId}
+          onRetry={papers.reload}
+        />
+      ) : papers.status === 'empty' ? (
+        <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-14 text-center shadow-xs">
+          <Icon icon={FileText} size="lg" className="text-ink-faint" />
+          <p className="mt-3 text-md font-semibold text-ink">还没有试卷</p>
+          <p className="mt-1.5 text-sm text-ink-sub">把题库里已发布的题目组成试卷,布置作业时可以整卷引用。</p>
+          <Button variant="primary" leftIcon={Plus} className="mt-5" onClick={() => setCreateOpen(true)}>
+            新建试卷
+          </Button>
+        </div>
+      ) : papers.status === 'loading' && !papers.data ? (
+        <ul className="card-grid gap-4" aria-busy="true" aria-label="正在读取试卷">
+          {Array.from({ length: 3 }, (_, index) => (
+            <li key={index} className="flex flex-col gap-3 rounded-lg bg-surface p-5 shadow-xs">
+              <Skeleton variant="title" width="half" />
+              <Skeleton variant="line" lines={2} />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <>
+          <ul className="card-grid gap-4" aria-busy={papers.status === 'loading' || undefined}>
+            {(papers.data?.list ?? []).map((paper) => (
+              <li key={paper.id}>
+                <PaperCard paper={paper} onOpen={() => setDetailTarget(paper)} />
+              </li>
+            ))}
+          </ul>
+          <div className="mt-6">
+            <Pagination page={papers.page} pageSize={papers.pageSize} total={papers.total} onPageChange={papers.setPage} />
+          </div>
+        </>
+      )}
 
       {detailTarget ? (
-        <PaperDetailModal
-          paper={detailTarget}
-          onClose={() => setDetailTarget(undefined)}
-          onChanged={papers.reload}
-        />
+        <PaperDetailDrawer paper={detailTarget} onClose={() => setDetailTarget(undefined)} onChanged={papers.reload} />
       ) : null}
     </PageScaffold>
+  )
+}
+
+/**
+ * PaperCard 一份试卷:试卷名(整卡按钮,打开详情抽屉)、组卷方式、按条件抽题的条件、创建与更新时间。
+ * 题数和总分列表接口没有,不在卡片上猜。
+ */
+function PaperCard({ paper, onOpen }: { paper: Paper; onOpen: () => void }) {
+  const random = paper.gen_mode === PaperMode.RANDOM
+  return (
+    <Card interactive className="flex h-full flex-col gap-2 p-5">
+      <div className="flex items-start justify-between gap-3">
+        <button type="button" onClick={onOpen} className="card-link line-clamp-2 text-left text-lg font-bold text-ink">
+          {paper.name}
+        </button>
+        <Badge tone={random ? 'info' : 'neutral'} className="shrink-0">
+          {paperModeLabel(paper.gen_mode)}
+        </Badge>
+      </div>
+      {random ? <p className="line-clamp-2 text-sm text-ink-sub">{criteriaSummary(paper.gen_criteria)}</p> : null}
+      <p className="mt-auto pt-3 text-sm text-ink-sub">
+        <span title={formatDateTime(paper.created_at)}>创建于 {formatRelativeOccurrence(paper.created_at)}</span>
+        {paper.updated_at !== paper.created_at ? (
+          <span title={formatDateTime(paper.updated_at)}> · 更新于 {formatRelativeOccurrence(paper.updated_at)}</span>
+        ) : null}
+      </p>
+    </Card>
   )
 }
 
@@ -347,7 +310,7 @@ function PaperFormPage({ onClose, onSaved }: PaperFormPageProps) {
         />
       ) : (
         <form onSubmit={submit} noValidate>
-          <div className="flex flex-col gap-4 rounded-xl bg-surface p-5">
+          <div className="flex flex-col gap-4 rounded-lg bg-surface p-5 shadow-xs">
             <FormField label="试卷名称" htmlFor="paper-name" required error={errors.name}>
               <Input
                 id="paper-name"
@@ -371,7 +334,7 @@ function PaperFormPage({ onClose, onSaved }: PaperFormPageProps) {
             </FormField>
 
             {isRandom ? (
-              <div className="flex flex-col gap-4 well p-4">
+              <div className="flex flex-col gap-4 rounded-md bg-surface-hover p-4">
                 <div className="text-sm font-medium text-ink">抽题条件</div>
 
                 <div className="grid gap-4 sm:grid-cols-2">
@@ -541,32 +504,28 @@ function PaperFormPage({ onClose, onSaved }: PaperFormPageProps) {
   )
 }
 
-interface PaperDetailModalProps {
+interface PaperDetailDrawerProps {
   paper: Paper
   onClose: () => void
   onChanged: () => void
 }
 
 /**
- * PaperDetailModal 展示试卷题目并支持重新抽题。
- * 重抽只对条件抽题的试卷可用:手动选定的试卷重抽会丢掉教师的编排。
+ * PaperDetailDrawer 展示试卷题目(序号、题目、题型与难度、分值)与总分,并支持重新抽题。
+ * 重抽只对按条件抽题的试卷可用:手动选定的试卷重抽会丢掉教师的编排。
  */
-function PaperDetailModal({ paper, onClose, onChanged }: PaperDetailModalProps) {
+function PaperDetailDrawer({ paper, onClose, onChanged }: PaperDetailDrawerProps) {
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
-  const detail = useAsyncResource(
-    () => api.content.getPaper(paper.id),
-    [paper.id],
-    () => false
-  )
+  const detail = useAsyncResource(() => api.content.getPaper(paper.id), [paper.id], () => false)
 
   const regenerate = useCallback(async () => {
     setWorking(true)
     setActionError(undefined)
     try {
       await api.content.regeneratePaper(paper.id)
-      toast.success('已重新抽题')
+      toast.success('已按条件重新抽题')
       detail.reload()
       onChanged()
     } catch (error) {
@@ -579,64 +538,72 @@ function PaperDetailModal({ paper, onClose, onChanged }: PaperDetailModalProps) 
   const isRandom = paper.gen_mode === PaperMode.RANDOM
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>{paper.name}</ModalTitle>
-          <ModalDescription>
+    <Drawer open onOpenChange={(open) => !open && !working && onClose()}>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>{paper.name}</DrawerTitle>
+          <DrawerDescription>
             {paperModeLabel(paper.gen_mode)}
             {isRandom ? ` · ${criteriaSummary(paper.gen_criteria)}` : ''}
-          </ModalDescription>
-        </ModalHeader>
-        <ModalBody className="flex flex-col gap-4">
+          </DrawerDescription>
+        </DrawerHeader>
+        <DrawerBody className="flex flex-col gap-4">
           {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
           <ResourceState
             resource={detail}
             emptyIcon={FileText}
             emptyTitle="试卷里还没有题目"
             emptyDescription={isRandom ? '点「重新抽题」按条件抽取题目。' : '这份试卷没有题目。'}
-            skeleton={<Skeleton variant="line" lines={5} />}
+            skeleton={<Skeleton variant="line" lines={6} />}
           >
             {(data) => (
-              <Card>
-                <CardHeader
-                  title={`共 ${data.items.length} 题`}
-                  description={`合计 ${data.items.reduce((sum, item) => sum + item.score, 0)} 分`}
-                />
-                <CardBody>
-                  <DescriptionList
-                    items={data.items.map((item, index) => ({
-                      term: `第 ${index + 1} 题 · ${item.score} 分`,
-                      description: `${item.item.title}(${contentTypeLabel(item.item.type)} · ${contentDifficultyLabel(item.item.difficulty)})`,
-                    }))}
+              <>
+                <p className="text-sm text-ink-sub">
+                  共 {data.items.length} 题 · 合计 {data.items.reduce((sum, item) => sum + item.score, 0)} 分
+                </p>
+                {data.items.length === 0 ? (
+                  <Empty
+                    icon={FileText}
+                    title="试卷里还没有题目"
+                    description={isRandom ? '点「重新抽题」按条件抽取题目。' : '这份试卷没有题目。'}
                   />
-                </CardBody>
-              </Card>
+                ) : (
+                  <ol className="divide-y divide-line">
+                    {[...data.items]
+                      .sort((a, b) => a.seq - b.seq)
+                      .map((item, index) => (
+                        <li key={item.id} className="flex items-start gap-3 py-3">
+                          <span className="w-6 shrink-0 text-right text-sm tabular-nums text-ink-sub">{index + 1}</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-medium text-ink">{item.item.title}</span>
+                            <span className="block text-xs text-ink-sub">
+                              {contentTypeLabel(item.item.type)} · {contentDifficultyLabel(item.item.difficulty)}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-sm tabular-nums text-ink">{item.score} 分</span>
+                        </li>
+                      ))}
+                  </ol>
+                )}
+              </>
             )}
           </ResourceState>
-
           {isRandom ? (
-            <Callout tone="info">重新抽题会按同样的条件抽取一批新题目,替换当前题目列表。</Callout>
+            <p className="text-sm text-ink-sub">重新抽题会按同样的条件抽取一批新题目,替换当前题目列表。</p>
           ) : null}
-        </ModalBody>
-        <ModalFooter>
-          <Button variant="outline" onClick={onClose}>
+        </DrawerBody>
+        <DrawerFooter>
+          <Button variant="outline" disabled={working} onClick={onClose}>
             关闭
           </Button>
           {isRandom ? (
-            <Button
-              variant="primary"
-              leftIcon={RefreshCw}
-              loading={working}
-              onClick={() => void regenerate()}
-            >
+            <Button variant="primary" leftIcon={RefreshCw} loading={working} onClick={() => void regenerate()}>
               重新抽题
             </Button>
           ) : null}
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+        </DrawerFooter>
+      </DrawerContent>
+    </Drawer>
   )
 }
 

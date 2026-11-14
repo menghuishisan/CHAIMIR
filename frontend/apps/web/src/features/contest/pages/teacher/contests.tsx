@@ -1,242 +1,174 @@
-// 赛事组织页(教师侧栏,/teacher/contests)。
-// 赛事状态是有向流转:草稿→报名→进行中→封榜→结束→归档。
-// 归档会生成结果快照且不可逆,故走确认;其余流转也各自确认,避免误点改变学生可见性。
+// 赛事组织页(教师侧栏,/teacher/contests)。设计 §7.4:
+// 页头 +「新建赛事」,次要入口「漏洞题工坊」;分段按状态(进行中 / 报名中 / 未发布 / 已结束 / 全部)与搜索都写进地址;
+// 表格(名称、赛制、状态、当前阶段的关键时间及倒计时),整行链向赛事详情;行内只给「下一步」一个按钮
+// (草稿→发布、报名中→开赛、进行中→封榜或结束、已结束→归档),确认弹窗写清会发生什么。
+//
+// 列表接口只接受单个状态,而「进行中」「已结束」各对应两个状态,且排序要跨页(进行中的最前);
+// 一所学校的赛事通常几场到十几场,故按页取完后在浏览器里分段、排序、分页(与学生端竞赛列表同一做法)。
+// 列表接口返回本校全部赛事,详情与状态流转却只对组织者和学校管理员开放,所以只列自己能管的赛事。
 
-import { useCallback, useState } from 'react'
-import { useNavigate } from 'react-router'
-import { Bug, Lock, MoreVertical, Play, Plus, Snowflake, Trophy } from 'lucide-react'
-import { ContestStatus, type Contest } from '@chaimir/api-client'
+import { useMemo, useState } from 'react'
+import { Link, useNavigate, useSearchParams } from 'react-router'
+import { Bug, Plus, Trophy } from 'lucide-react'
+import { ContestStatus, PAGINATION_MAX_SIZE, type Contest } from '@chaimir/api-client'
 import {
-  Breadcrumb,
   Button,
-  Callout,
-  DataPanel,
-  FilterBar,
-  FilterField,
-  IconButton,
-  Input,
-  Menu,
-  MenuContent,
-  MenuItem,
-  MenuSeparator,
-  MenuTrigger,
-  MetricStrip,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
+  buttonVariants,
+  Icon,
   PageHeader,
   PageScaffold,
   Pagination,
   SegmentedControl,
   StatusIndicator,
   Table,
-  toast,
+  cn,
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
-import { usePagedResource, useResourceTotal } from '../../../../hooks'
+import { useSession } from '../../../../components/RoleGuard/session'
+import { ResourceError } from '../../../../components/ResourceState'
+import { SearchBox } from '../../../../components/SearchBox'
+import { useAsyncResource, useUrlState } from '../../../../hooks'
+import { collectAllPages } from '../../../../utils/allPages'
 import { formatDateTime } from '../../../../utils/formatters'
-import { contestStatusLabel } from '../../../../utils/labels/contest'
-import { userFacingErrorMessage } from '../../../../utils/userFacingError'
-import { ContestIdentityCell, ContestScheduleCell } from '../../components/ContestTableCells'
+import { contestModeLabel, contestStatusLabel, teamModeLabel } from '../../../../utils/labels/contest'
+import { readPage } from '../../../../utils/urlQuery'
 import { ContestFormModal } from '../../components/ContestFormModal'
-import { contestStatusFilterOptions, contestStatusTone } from '../../statusPresentation'
+import { ContestNextStepButton } from '../../components/ContestNextStep'
+import { sortTeacherContests, teacherContestSegmentOf, type TeacherContestSegment } from '../../contestOrder'
+import { contestTimeHint, contestTimeline } from '../../contestTimeline'
+import { canManageContest } from '../../rules'
+import { contestStatusTone } from '../../statusPresentation'
 
-/** 教师可筛选包含草稿的全部赛事状态。 */
-const STATUS_FILTERS = contestStatusFilterOptions(true)
+/** 前端分页的每页行数(与后端默认页大小一致) */
+const PAGE_SIZE = 20
 
-/** 可执行的状态流转动作。 */
-type LifecycleAction = 'publish' | 'start' | 'freeze' | 'end' | 'archive'
+const SEGMENTS: { value: 'all' | TeacherContestSegment; label: string }[] = [
+  { value: 'running', label: '进行中' },
+  { value: 'signup', label: '报名中' },
+  { value: 'draft', label: '未发布' },
+  { value: 'ended', label: '已结束' },
+  { value: 'all', label: '全部' },
+]
 
-const ACTION_COPY: Record<
-  LifecycleAction,
-  { title: string; description: string; confirm: string }
-> = {
-  publish: {
-    title: '确认发布赛事',
-    description: '发布后学生可以看到赛事并在报名窗口内报名。赛制与时间安排将不宜再改。',
-    confirm: '确认发布',
-  },
-  start: {
-    title: '确认开始比赛',
-    description: '开赛后报名关闭、队伍自动锁定,学生可以进入答题。',
-    confirm: '确认开赛',
-  },
-  freeze: {
-    title: '确认封榜',
-    description: '封榜后天梯榜停止对学生更新,学生仍可继续提交。',
-    confirm: '确认封榜',
-  },
-  end: {
-    title: '确认结束比赛',
-    description: '结束后学生不能再提交,榜单恢复显示最终名次。',
-    confirm: '确认结束',
-  },
-  archive: {
-    title: '确认归档赛事',
-    description: '归档会生成最终成绩快照,之后赛事转为只读。归档不可撤销。',
-    confirm: '确认归档',
-  },
-}
+/** 地址参数:status 是分段,q 是搜索词;页码在 page */
+const CONTESTS_QUERY = {
+  status: { defaultValue: 'all', allowed: ['running', 'signup', 'draft', 'ended', 'all'] },
+  q: { defaultValue: '' },
+} as const
 
 /**
- * TeacherContestsPage 列出赛事并承载状态流转。
+ * TeacherContestsPage 列出自己能管理的赛事,行内推进赛程;新建赛事后直接进入详情编排赛题。
  */
 export default function TeacherContestsPage() {
   const navigate = useNavigate()
-  const [statusFilter, setStatusFilter] = useState<string>('')
-  const [keyword, setKeyword] = useState('')
-  const [submittedKeyword, setSubmittedKeyword] = useState('')
+  const { me } = useSession()
+  const [query, setQuery] = useUrlState(CONTESTS_QUERY)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const page = readPage(searchParams, 'page')
   const [createOpen, setCreateOpen] = useState(false)
-  const [confirm, setConfirm] = useState<{ action: LifecycleAction; contest: Contest }>()
-  const [working, setWorking] = useState(false)
-  const [actionError, setActionError] = useState<string>()
 
-  const contests = usePagedResource<Contest>(
-    (params) =>
-      api.contest.getContests({
-        status: statusFilter ? (Number(statusFilter) as ContestStatus) : undefined,
-        keyword: submittedKeyword || undefined,
-        ...params,
-      }),
-    [statusFilter, submittedKeyword]
+  const contests = useAsyncResource(
+    () =>
+      collectAllPages(
+        (params) => api.contest.getContests({ keyword: query.q || undefined, ...params }),
+        PAGINATION_MAX_SIZE,
+      ),
+    [query.q],
+    () => false,
+  )
+  // 只列自己能管理的(组织者本人或学校管理员),其余赛事点进去也只会被拒绝
+  const manageable = useMemo(
+    () => (contests.data ?? []).filter((contest) => canManageContest(contest, me.account)),
+    [contests.data, me.account],
   )
 
-  const handleSearch = useCallback(() => {
-    setSubmittedKeyword(keyword.trim())
-  }, [keyword])
-
-  /** runAction 执行状态流转。归档返回结果快照,其余返回赛事本体。 */
-  const runAction = useCallback(async () => {
-    if (!confirm) return
-    setWorking(true)
-    setActionError(undefined)
-    try {
-      const { action, contest } = confirm
-      if (action === 'publish') await api.contest.publishContest(contest.id)
-      if (action === 'start') await api.contest.startContest(contest.id)
-      if (action === 'freeze') await api.contest.freezeContest(contest.id)
-      if (action === 'end') await api.contest.endContest(contest.id)
-      if (action === 'archive') await api.contest.archiveContest(contest.id)
-      toast.success('赛事状态已更新')
-      setConfirm(undefined)
-      contests.reload()
-    } catch (error) {
-      setActionError(userFacingErrorMessage(error, '操作没有完成,请稍后重试。'))
-    } finally {
-      setWorking(false)
+  const counts = useMemo(() => {
+    const result = { running: 0, signup: 0, draft: 0, ended: 0, all: 0 }
+    for (const contest of manageable) {
+      const segment = teacherContestSegmentOf(contest.status)
+      if (!segment) continue
+      result[segment] += 1
+      result.all += 1
     }
-  }, [confirm, contests])
+    return result
+  }, [manageable])
 
-  // 指标带取服务端全量口径,不随下方状态筛选变化。
-  // 「进行中」在后端是两个状态(进行中/封榜中),分别取总数后相加 —— 状态互斥,相加精确。
-  const totalCount = useResourceTotal((params) => api.contest.getContests(params), [], contests.refreshVersion)
-  const signupCount = useResourceTotal(
-    (params) => api.contest.getContests({ status: ContestStatus.SIGNUP, ...params }),
-    [],
-    contests.refreshVersion
+  const visible = useMemo(
+    () =>
+      sortTeacherContests(
+        manageable.filter(
+          (contest) => query.status === 'all' || teacherContestSegmentOf(contest.status) === query.status,
+        ),
+      ),
+    [manageable, query.status],
   )
-  const runningOnlyCount = useResourceTotal(
-    (params) => api.contest.getContests({ status: ContestStatus.RUNNING, ...params }),
-    [],
-    contests.refreshVersion
-  )
-  const frozenCount = useResourceTotal(
-    (params) => api.contest.getContests({ status: ContestStatus.FROZEN, ...params }),
-    [],
-    contests.refreshVersion
-  )
-  const draftCount = useResourceTotal(
-    (params) => api.contest.getContests({ status: ContestStatus.DRAFT, ...params }),
-    [],
-    contests.refreshVersion
-  )
-  const runningCount =
-    runningOnlyCount === undefined || frozenCount === undefined
-      ? undefined
-      : runningOnlyCount + frozenCount
+  // 手改地址或数据变少后页码可能越界:显示最后一页,不显示空列表
+  const lastPage = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
+  const currentPage = Math.min(page, lastPage)
+  const pageItems = visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+
+  /** setPage 把页码写进地址(替换历史记录,第 1 页不写) */
+  const setPage = (next: number) =>
+    setSearchParams(
+      (previous) => {
+        const params = new URLSearchParams(previous)
+        if (next === 1) params.delete('page')
+        else params.set('page', String(next))
+        return params
+      },
+      { replace: true },
+    )
+
+  const loaded = contests.status === 'success' || contests.status === 'empty'
+  const filtered = query.status !== 'all' || query.q !== ''
 
   const columns: TableColumn<Contest>[] = [
     {
       key: 'name',
       header: '赛事',
-      render: (contest) => <ContestIdentityCell contest={contest} />,
+      primary: true,
+      render: (contest) => <span className="line-clamp-2 font-medium text-ink">{contest.name}</span>,
     },
     {
-      key: 'signup',
-      header: '报名窗口',
+      key: 'mode',
+      header: '赛制',
       render: (contest) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDateTime(contest.signup_start)} — {formatDateTime(contest.signup_end)}
+        <span className="whitespace-nowrap text-ink-sub">
+          {contestModeLabel(contest.mode)} · {teamModeLabel(contest.team_mode)}
         </span>
       ),
-    },
-    {
-      key: 'schedule',
-      header: '比赛时间',
-      render: (contest) => <ContestScheduleCell contest={contest} />,
-    },
-    {
-      key: 'freeze_minutes',
-      header: '封榜时长',
-      align: 'right',
-      mono: true,
-      render: (contest) => `${contest.freeze_minutes} 分钟`,
     },
     {
       key: 'status',
       header: '状态',
       render: (contest) => (
-        <StatusIndicator
-          tone={contestStatusTone(contest.status)}
-          label={contestStatusLabel(contest.status)}
-        />
+        <StatusIndicator tone={contestStatusTone(contest.status)} label={contestStatusLabel(contest.status)} />
       ),
     },
     {
-      key: 'actions',
-      header: '操作',
+      key: 'time',
+      header: '关键时间',
+      render: (contest) => <ContestKeyTime contest={contest} />,
+    },
+    {
+      key: 'next',
+      header: '下一步',
       align: 'right',
-      render: (contest) => (
-        <div className="flex items-center justify-end gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => navigate(`/teacher/contests/${contest.id}`)}
-          >
-            管理赛事
-          </Button>
-          <ContestActionMenu
-            contest={contest}
-            onManage={() => navigate(`/teacher/contests/${contest.id}`)}
-            onRequest={(action) => setConfirm({ action, contest })}
-          />
-        </div>
-      ),
+      render: (contest) => <ContestNextStepButton contest={contest} placement="row" onDone={contests.reload} />,
     },
   ]
 
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '实践' }]} />}
         title="赛事组织"
-        description="创建赛事、编排赛题,并按赛程推进报名、开赛、封榜与结束。"
-        icon={Trophy}
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              leftIcon={Bug}
-              onClick={() => navigate('/teacher/vuln-workshop')}
-            >
+            <Link to="/teacher/vuln-workshop" className={buttonVariants({ variant: 'outline' })}>
+              <Icon icon={Bug} size="sm" />
               漏洞题工坊
-            </Button>
+            </Link>
             <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
               新建赛事
             </Button>
@@ -244,217 +176,106 @@ export default function TeacherContestsPage() {
         }
       />
 
-      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是赛事列表 */}
-      <MetricStrip
-        label="赛事总量摘要"
-        className="mb-5"
-        items={[
-          { label: '赛事总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
-          { label: '报名中', value: signupCount ?? '—', hint: '学生可报名' },
-          { label: '进行中', value: runningCount ?? '—', hint: '含封榜中' },
-          { label: '草稿', value: draftCount ?? '—', hint: '发布后学生可见' },
-        ]}
-      />
+      <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <SegmentedControl
+          aria-label="按赛事状态筛选"
+          options={SEGMENTS.map((segment) => ({
+            value: segment.value,
+            label: segment.label,
+            count: loaded ? counts[segment.value] : undefined,
+          }))}
+          value={query.status}
+          onValueChange={(value) => setQuery({ status: value })}
+          className="max-w-full overflow-x-auto"
+        />
+        <SearchBox label="搜索赛事" placeholder="搜索赛事名称" value={query.q} onSearch={(value) => setQuery({ q: value })} />
+      </div>
 
-      {/* 动作失败就近内联(§6.7 C) */}
-      {actionError ? (
-        <Callout tone="danger" className="mb-4">
-          {actionError}
-        </Callout>
-      ) : null}
-
-      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
-      <DataPanel
-        label="赛事列表"
-        filter={
-          <FilterBar label="赛事筛选" onSubmit={handleSearch} submitLabel="搜索">
-            <FilterField label="关键词" htmlFor="teacher-contest-keyword">
-              <Input
-                id="teacher-contest-keyword"
-                value={keyword}
-                onChange={(event) => setKeyword(event.target.value)}
-                placeholder="搜索赛事名称"
-              />
-            </FilterField>
-            <FilterField label="赛事状态" group>
-              <SegmentedControl
-                aria-label="按赛事状态筛选"
-                size="sm"
-                options={STATUS_FILTERS}
-                value={statusFilter}
-                onValueChange={setStatusFilter}
-              />
-            </FilterField>
-          </FilterBar>
-        }
-        footer={
-          <Pagination
-            page={contests.page}
-            pageSize={contests.pageSize}
-            total={contests.total}
-            onPageChange={contests.setPage}
-          />
-        }
-      >
-        <ResourceState
-          resource={contests}
-          emptyIcon={Trophy}
-          emptyTitle={submittedKeyword || statusFilter ? '没有匹配的赛事' : '还没有赛事'}
-          emptyDescription={
-            submittedKeyword || statusFilter
-              ? '换个关键词或状态看看。'
-              : '新建赛事后编排赛题,发布即可开放报名。'
-          }
-          emptyAction={
-            statusFilter ? undefined : (
-              <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
-                新建赛事
-              </Button>
-            )
-          }
-          skeleton={
-            <Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />
-          }
-        >
-          {(page) => (
-            <Table
-              columns={columns}
-              data={page.list}
-              rowKey={(item) => item.id}
-              elevated={false}
-              // <md 换行卡(§6.4.1 规则 3):赛事名一行、赛制与起止时间一行
-              mobileCard={(item) => ({
-                title: item.name,
-                meta: `${formatDateTime(item.start_at)} 开赛`,
-                badge: (
-                  <StatusIndicator
-                    tone={contestStatusTone(item.status)}
-                    label={contestStatusLabel(item.status)}
-                  />
-                ),
-                action: (
-                  <ContestActionMenu
-                    contest={item}
-                    onManage={() => navigate(`/teacher/contests/${item.id}`)}
-                    onRequest={(action) => setConfirm({ action, contest: item })}
-                  />
-                ),
-              })}
-            />
+      {contests.status === 'error' ? (
+        <ResourceError
+          message={contests.error?.message ?? '赛事暂时读取不到'}
+          traceId={contests.error?.traceId}
+          onRetry={contests.reload}
+        />
+      ) : loaded && pageItems.length === 0 ? (
+        <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-14 text-center shadow-xs">
+          <Icon icon={Trophy} size="lg" className="text-ink-faint" />
+          <p className="mt-3 text-md font-semibold text-ink">{filtered ? '没有符合条件的赛事' : '还没有赛事'}</p>
+          <p className="mt-1.5 text-sm text-ink-sub">
+            {filtered ? '换个状态或关键词试试。' : '新建赛事后编排赛题,发布即可开放报名。'}
+          </p>
+          {filtered ? (
+            <Button variant="outline" className="mt-5" onClick={() => setQuery({ status: 'all', q: '' })}>
+              看全部赛事
+            </Button>
+          ) : (
+            <Button variant="primary" leftIcon={Plus} className="mt-5" onClick={() => setCreateOpen(true)}>
+              新建赛事
+            </Button>
           )}
-        </ResourceState>
-      </DataPanel>
+        </div>
+      ) : (
+        <>
+          <Table
+            columns={columns}
+            data={pageItems}
+            rowKey={(contest) => contest.id}
+            loading={!loaded}
+            getRowHref={(contest) => `/teacher/contests/${contest.id}`}
+            onNavigate={(href) => navigate(href)}
+            // <md 换行卡(§6.4.1 规则 3):赛事名一行、赛制与关键时间一行,状态在右;下一步在详情页做
+            mobileCard={(contest) => ({
+              title: contest.name,
+              meta: `${contestModeLabel(contest.mode)} · ${contestTimeHint(contest) ?? formatDateTime(contest.start_at)}`,
+              badge: (
+                <StatusIndicator tone={contestStatusTone(contest.status)} label={contestStatusLabel(contest.status)} />
+              ),
+            })}
+          />
+          {loaded ? (
+            <div className="mt-4">
+              <Pagination page={currentPage} pageSize={PAGE_SIZE} total={visible.length} onPageChange={setPage} />
+            </div>
+          ) : null}
+        </>
+      )}
 
       {createOpen ? (
         <ContestFormModal
           onClose={() => setCreateOpen(false)}
-          onSaved={() => {
+          onSaved={(saved) => {
             setCreateOpen(false)
-            contests.reload()
+            navigate(`/teacher/contests/${saved.id}`)
           }}
         />
       ) : null}
-
-      <Modal open={confirm !== undefined} onOpenChange={(open) => !open && setConfirm(undefined)}>
-        <ModalContent size="sm">
-          {confirm ? (
-            <>
-              <ModalHeader>
-                <ModalTitle>{ACTION_COPY[confirm.action].title}</ModalTitle>
-                <ModalDescription>{ACTION_COPY[confirm.action].description}</ModalDescription>
-              </ModalHeader>
-              <ModalBody>
-                <p className="text-base text-ink">{confirm.contest.name}</p>
-              </ModalBody>
-              <ModalFooter>
-                <Button variant="outline" onClick={() => setConfirm(undefined)}>
-                  取消
-                </Button>
-                <Button
-                  variant={confirm.action === 'archive' ? 'danger' : 'seal'}
-                  loading={working}
-                  onClick={() => void runAction()}
-                >
-                  {ACTION_COPY[confirm.action].confirm}
-                </Button>
-              </ModalFooter>
-            </>
-          ) : null}
-        </ModalContent>
-      </Modal>
     </PageScaffold>
   )
 }
 
-interface ContestActionMenuProps {
-  contest: Contest
-  onManage: () => void
-  onRequest: (action: LifecycleAction) => void
-}
-
 /**
- * ContestActionMenu 按当前状态给出可执行的流转动作。
- * 归档是不可逆动作,与常规项用分隔线隔开。
+ * ContestKeyTime 当前阶段的关键时间:上行是倒计时或结果(「报名还剩 2 天」「距结束 3 小时」「3 天内须发布」),
+ * 下行是下一个赛程节点的完整时刻(草稿的发布期限就是报名截止,所以草稿显示报名截止);
+ * 已结束的只留上行。报名截止已过的草稿用警示色。
  */
-function ContestActionMenu({ contest, onManage, onRequest }: ContestActionMenuProps) {
-  const now = Date.now()
-  const startAt = Date.parse(contest.start_at)
-  const endAt = Date.parse(contest.end_at)
-  const freezeAt = endAt - contest.freeze_minutes * 60_000
-  const canPublish = contest.status === ContestStatus.DRAFT
-  const canStart = contest.status === ContestStatus.SIGNUP && now >= startAt && now < endAt
-  const canFreeze =
-    contest.status === ContestStatus.RUNNING &&
-    contest.freeze_minutes > 0 &&
-    now >= freezeAt &&
-    now < endAt
-  const canEnd =
-    (contest.status === ContestStatus.RUNNING || contest.status === ContestStatus.FROZEN) &&
-    now >= endAt
-  const canArchive = contest.status === ContestStatus.ENDED
-
+function ContestKeyTime({ contest }: { contest: Contest }) {
+  const hint = contestTimeHint(contest)
+  const nodes = contestTimeline(contest)
+  const next =
+    contest.status === ContestStatus.DRAFT
+      ? nodes.find((node) => node.key === 'signup_end')
+      : nodes.find((node) => node.state === 'upcoming')
+  const overdueDraft = hint === '报名截止时间已过'
   return (
-    <Menu>
-      <MenuTrigger asChild>
-        <IconButton
-          variant="ghost"
-          size="sm"
-          icon={MoreVertical}
-          aria-label={`${contest.name} 的更多操作`}
-        />
-      </MenuTrigger>
-      <MenuContent align="end">
-        <MenuItem icon={Trophy} onSelect={onManage}>
-          管理赛事
-        </MenuItem>
-        {canPublish ? <MenuItem onSelect={() => onRequest('publish')}>发布赛事</MenuItem> : null}
-        {canStart ? (
-          <MenuItem icon={Play} onSelect={() => onRequest('start')}>
-            开始比赛
-          </MenuItem>
-        ) : null}
-        {canFreeze ? (
-          <MenuItem icon={Snowflake} onSelect={() => onRequest('freeze')}>
-            封榜
-          </MenuItem>
-        ) : null}
-        {canEnd ? (
-          <MenuItem icon={Lock} onSelect={() => onRequest('end')}>
-            结束比赛
-          </MenuItem>
-        ) : null}
-        {canArchive ? (
-          <>
-            <MenuSeparator />
-            <MenuItem danger onSelect={() => onRequest('archive')}>
-              归档赛事
-            </MenuItem>
-          </>
-        ) : null}
-        {!canPublish && !canStart && !canFreeze && !canEnd && !canArchive ? (
-          <MenuItem disabled>当前状态没有可执行的操作</MenuItem>
-        ) : null}
-      </MenuContent>
-    </Menu>
+    <span className="flex flex-col">
+      <span className={cn('whitespace-nowrap font-medium tabular-nums', overdueDraft ? 'text-warning' : 'text-ink')}>
+        {hint ?? '—'}
+      </span>
+      {next && !overdueDraft ? (
+        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
+          {next.label} {formatDateTime(next.at)}
+        </span>
+      ) : null}
+    </span>
   )
 }

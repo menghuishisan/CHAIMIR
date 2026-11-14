@@ -68,18 +68,19 @@ function EventDot({ tone }: { tone: EventTone }) {
   );
 }
 
+/** EventTimeline 按天分组的事件轴(时间流族) */
 export function EventTimeline({ label, days, className }: EventTimelineProps) {
   return (
     <div aria-label={label} className={cn("min-w-0", className)}>
       {days.map((day) => (
         <section key={day.label} aria-label={day.label}>
           {/*
-            分节标记:凹陷井色横贯一条,与条目区分。
+            分节标记:一行小标题加下边线,与条目区分。
             不做 sticky —— 本组件的落点是 `DataPanel`,而那层为了收住圆角带 `overflow-hidden`,
             这会建立一个不可滚动的 scrollport,里面的 sticky 静默失效。
             要做粘性日期头,得让事件轴自己拥有滚动容器,那是另一个决定。
           */}
-          <h3 className="bg-surface-sunken px-4 py-1.5 font-mono text-xs text-ink-sub">
+          <h3 className="border-b border-line px-4 pb-1.5 pt-4 text-sm font-semibold text-ink-sub">
             {day.label}
           </h3>
           <ol>
@@ -88,7 +89,7 @@ export function EventTimeline({ label, days, className }: EventTimelineProps) {
                 key={event.id}
                 className="flex items-start gap-3 border-b border-line px-4 py-3 last:border-b-0"
               >
-                <time className="w-11 shrink-0 pt-0.5 font-mono text-xs text-ink-faint">
+                <time className="w-11 shrink-0 pt-0.5 font-mono text-xs text-ink-sub">
                   {event.time}
                 </time>
                 {/* 状态点:形状 + 色双载体 */}

@@ -9,6 +9,7 @@ import (
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/jsonx"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/question"
 )
 
 // GetContentFace 实现跨模块题面读取契约。
@@ -106,6 +107,17 @@ func (s *Service) GetJudgeSpec(ctx context.Context, tenantID int64, itemCode, it
 		return contracts.ContentJudgeSpec{}, err
 	}
 	spec := contracts.ContentJudgeSpec{ItemCode: item.ItemCode, ItemVersion: item.ItemVersion, VersionHash: item.VersionHash}
+	if item.Type == TypeTheoryQuestion {
+		definition, err := question.Decode(item.Body, true)
+		if err != nil || !definition.Automatic() {
+			return contracts.ContentJudgeSpec{}, apperr.ErrContentBodyInvalid.WithCause(err)
+		}
+		spec.JudgerCode = contracts.JudgerCodeTheoryQuestion
+		spec.MaxScore = definition.MaxScore
+		spec.Expectation = definition.Face()
+		spec.Expectation["answer"] = item.Body["answer"]
+		return spec, nil
+	}
 	if raw, ok := item.Body["judge_config"].(map[string]any); ok {
 		spec.JudgerCode = jsonx.StringValue(raw["judger_code"])
 		spec.SuiteRef = jsonx.StringValue(raw["suite_ref"])

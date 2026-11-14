@@ -54,6 +54,7 @@ export interface CalloutProps {
   className?: string;
 }
 
+/** Callout 段落级提示块 */
 export function Callout({ tone, title, children, className }: CalloutProps) {
   const { icon, className: iconClassName } = TONE_ICON[tone];
   return (

@@ -1,42 +1,28 @@
-// 沙箱工具页(平台侧栏,/platform-admin/sandbox-tools)。
-//
-// 工具是学生在实验环境里能用到的东西:平台内置面板、终端、网页工具(如在线编辑器)、
-// 受控命令工具(如编译器)。四类的声明形态完全不同,后端 validateToolResourceSpecShape
-// 对每类的必填与禁填都有硬要求,故本页按类型分别呈现,登记表单也按类型分叉。
-//
-// 只有登记与查看:后端平台组只给了 GET/POST /sandbox/tools,没有删除接口 ——
-// 不再使用的工具改成「已停用」,历史环境的引用不会因此断链。
+// 实验工具(平台侧栏,/platform-admin/sandbox-tools)。设计 §7.6:
+// 页头 +「登记工具」;分段按类别(学生工具 / 基础设施 / 全部,带数字,写进地址);
+// 列表行显示名称、类型、是否可部署、生态,不可部署的直接写原因;整行打开工具大抽屉(详情与修改同一处)。
+// 不再使用的工具只停用不删除(抽屉里说明)。指标条、平铺全部属性的卡片和常驻说明卡去掉。
+// 工具接口一次返回全部(不分页),计数在本页完成。
 
 import { useMemo, useState } from 'react'
 import { Package, Plus } from 'lucide-react'
 import {
   SANDBOX_COMPONENT_CATEGORY,
-  SandboxToolKind,
   ToolStatus,
   type SandboxToolDefinition,
 } from '@chaimir/api-client'
 import {
-  Badge,
-  Breadcrumb,
   Button,
-  Callout,
-  Card,
-  CardBody,
-  CardHeader,
-  DescriptionList,
-  FilterBar,
-  FilterField,
+  ListRow,
   PageHeader,
-  MetricStrip,
   PageScaffold,
-  PageSection,
   SegmentedControl,
   Skeleton,
   StatusIndicator,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
+import { useAsyncResource, useUrlState } from '../../../../hooks'
 import {
   ecoTagsLabel,
   sandboxToolKindLabel,
@@ -44,146 +30,96 @@ import {
 } from '../../../../utils/labels/sandbox'
 import { toolStatusTone } from '../../statusPresentation'
 import { ToolFormModal } from './tool-form'
-import { asRecord, readString } from '../../runtimeSpec'
 
-/** 类型筛选项:值为空串表示不过滤。 */
-const KIND_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(SandboxToolKind.BUILTIN), label: sandboxToolKindLabel(SandboxToolKind.BUILTIN) },
-  {
-    value: String(SandboxToolKind.TERMINAL),
-    label: sandboxToolKindLabel(SandboxToolKind.TERMINAL),
-  },
-  {
-    value: String(SandboxToolKind.WEB_EMBED),
-    label: sandboxToolKindLabel(SandboxToolKind.WEB_EMBED),
-  },
-  { value: String(SandboxToolKind.COMMAND), label: sandboxToolKindLabel(SandboxToolKind.COMMAND) },
+/** 地址参数:category 分段(默认学生工具) */
+const TOOLS_QUERY = {
+  category: { defaultValue: 'tool', allowed: ['tool', 'infra', 'all'] },
+} as const
+
+const CATEGORY_SEGMENTS = [
+  { value: 'tool', label: '学生工具' },
+  { value: 'infra', label: '基础设施' },
+  { value: 'all', label: '全部' },
 ] as const
 
-/** 各类工具的一句话说明:登记表单里给更细的要求。 */
-const KIND_HINTS: Record<SandboxToolKind, string> = {
-  [SandboxToolKind.BUILTIN]: '平台自带的面板,按实验环境编号生成入口,无需额外启动',
-  [SandboxToolKind.TERMINAL]: '直接连接实验环境的命令行,不需要额外声明',
-  [SandboxToolKind.WEB_EMBED]: '独立环境提供的网页工具,经平台代理嵌入工作台',
-  [SandboxToolKind.COMMAND]: '在受控白名单内执行命令,独立运行、不开放网络端口',
-  [SandboxToolKind.INFRA]: '只参与组合编排的基础设施,不作为学生工具入口',
-}
-
-/**
- * PlatformSandboxToolsPage 列出沙箱工具定义并承载登记。
- */
+/** PlatformSandboxToolsPage 工具清单:按类别分诊,整行打开详情与修改 */
 export default function PlatformSandboxToolsPage() {
-  const [kindFilter, setKindFilter] = useState<string>('')
-  const [createOpen, setCreateOpen] = useState(false)
-
+  const [query, setQuery] = useUrlState(TOOLS_QUERY)
+  const [target, setTarget] = useState<{ tool?: SandboxToolDefinition }>()
   const tools = useAsyncResource(
     () => api.sandbox.listTools(),
     [],
-    (value) => value.length === 0
+    (list) => list.length === 0
   )
+  const all = useMemo(() => tools.data ?? [], [tools.data])
 
-  const list = useMemo(() => tools.data ?? [], [tools.data])
-
-  const visible = useMemo(
-    () => (kindFilter ? list.filter((item) => item.kind === Number(kindFilter)) : list),
-    [kindFilter, list]
-  )
-
-  const stats = useMemo(() => {
-    if ((tools.status !== 'success' && tools.status !== 'empty') || !tools.data) return undefined
-    return {
-      total: list.length,
-      available: list.filter((item) => item.status === ToolStatus.AVAILABLE).length,
-      studentTools: list.filter((item) => item.category === SANDBOX_COMPONENT_CATEGORY.TOOL).length,
-      infra: list.filter((item) => item.category === SANDBOX_COMPONENT_CATEGORY.INFRA).length,
-    }
-  }, [list, tools.data, tools.status])
+  const counts: Record<string, number> = {
+    tool: all.filter((item) => item.category === SANDBOX_COMPONENT_CATEGORY.TOOL).length,
+    infra: all.filter((item) => item.category === SANDBOX_COMPONENT_CATEGORY.INFRA).length,
+    all: all.length,
+  }
+  const visible =
+    query.category === 'all' ? all : all.filter((item) => item.category === query.category)
+  const loaded = tools.status === 'success' || tools.status === 'empty'
 
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
         title="实验工具"
-        description="学生在实验环境里能用到的工具。教师在编排环境时显式选择,平台按能力依赖补齐必要组件。"
-        icon={Package}
         actions={
-          <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
+          <Button variant="primary" leftIcon={Plus} onClick={() => setTarget({})}>
             登记工具
           </Button>
         }
       />
 
-      {/*
-        归族:资源列表族的卡片网格形态(§6.5.3 第 ① 族)。指标降为内联摘要 ——
-        Stat 大卡属看板族,`<md` 竖排四张大卡违反 §6.4.1 规则 2。
-        四项由一次取齐的全量工具定义算出(接口不分页,故是全量口径,§6.5.4)。
-      */}
-      <MetricStrip
-        label="工具总量摘要"
-        className="mb-5"
-        items={[
-          { label: '组件总数', value: stats?.total, hint: '含已停用' },
-          { label: '可用', value: stats?.available, hint: '可被实验引用' },
-          { label: '学生工具', value: stats?.studentTools, hint: '学生能打开' },
-          { label: '基础设施', value: stats?.infra, hint: '只参与编排' },
-        ]}
+      <SegmentedControl
+        aria-label="按类别筛选"
+        options={CATEGORY_SEGMENTS.map((item) => ({
+          value: item.value,
+          label: item.label,
+          count: loaded ? counts[item.value] : undefined,
+        }))}
+        value={query.category}
+        onValueChange={(value) => setQuery({ category: value })}
+        className="mb-4 max-w-full overflow-x-auto"
       />
 
-      <PageSection
-        title="工具定义"
-        description="按类型筛选。不再使用的工具改成停用,不做删除 —— 历史环境仍引用着它。"
+      <ResourceState
+        resource={tools}
+        emptyIcon={Package}
+        emptyTitle="还没有登记实验工具"
+        emptyDescription="登记工具后,教师编排实验环境时才能选用。"
+        emptyAction={
+          <Button variant="primary" leftIcon={Plus} onClick={() => setTarget({})}>
+            登记工具
+          </Button>
+        }
+        skeleton={<Skeleton variant="line" lines={6} />}
       >
-        <div className="flex flex-col gap-4">
-          {/* 数据区是一排工具卡(已是抬起片),筛选走 bare 无底形态,避免片里套片(§6.5.2) */}
-          <FilterBar label="工具筛选" bare>
-            <FilterField label="工具类型" group>
-              <SegmentedControl
-                aria-label="按工具类型筛选"
-                size="sm"
-                options={KIND_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-                value={kindFilter}
-                onValueChange={setKindFilter}
-              />
-            </FilterField>
-          </FilterBar>
+        {() =>
+          visible.length === 0 ? (
+            <p className="rounded-lg bg-surface px-4 py-10 text-center text-sm text-ink-sub shadow-xs">
+              这个类别下没有工具。
+            </p>
+          ) : (
+            <ul className="divide-y divide-line rounded-lg bg-surface px-2 py-1 shadow-xs">
+              {visible.map((tool) => (
+                <li key={tool.id}>
+                  <ToolRow tool={tool} onOpen={() => setTarget({ tool })} />
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </ResourceState>
 
-          <ResourceState
-            resource={tools}
-            emptyIcon={Package}
-            emptyTitle="还没有登记沙箱工具"
-            emptyDescription="登记工具后,运行时与实验才能把它放进学生的工作台。"
-            emptyAction={
-              <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
-                登记工具
-              </Button>
-            }
-            skeleton={<Skeleton variant="line" lines={4} />}
-          >
-            {() =>
-              visible.length === 0 ? (
-                <Callout tone="info">这个类型下没有工具,换个类型看看。</Callout>
-              ) : (
-                <div className={visible.length > 1 ? 'grid gap-4 lg:grid-cols-2' : 'grid gap-4'}>
-                  {visible.map((tool) => (
-                    <ToolCard key={tool.id} tool={tool} />
-                  ))}
-                </div>
-              )
-            }
-          </ResourceState>
-
-          <Callout tone="info">
-            登记同一个编码会覆盖原有定义。改动对之后创建的环境生效,已在运行的环境保持原样。
-          </Callout>
-        </div>
-      </PageSection>
-
-      {createOpen ? (
+      {target ? (
         <ToolFormModal
-          onClose={() => setCreateOpen(false)}
+          tool={target.tool}
+          onClose={() => setTarget(undefined)}
           onSaved={() => {
-            setCreateOpen(false)
+            setTarget(undefined)
             tools.reload()
           }}
         />
@@ -192,104 +128,30 @@ export default function PlatformSandboxToolsPage() {
   )
 }
 
-/**
- * ToolCard 展示单个工具定义。
- * 按类型只呈现该类型真正用到的字段:命令工具给白名单与超时,网页工具给容器与路由,
- * 内置工具给入口模板 —— 不把其他类型的空字段摊在界面上。
- */
-function ToolCard({ tool }: { tool: SandboxToolDefinition }) {
-  const items = useMemo(() => {
-    const base = [
-      { term: '工具编码', description: tool.code, mono: true },
-      { term: '适用生态', description: ecoTagsLabel(tool.eco_tags) },
-    ]
-    switch (tool.kind) {
-      case SandboxToolKind.BUILTIN:
-        return [
-          ...base,
-          {
-            term: '入口地址模板',
-            description: tool.resource_spec.builtin_endpoint ?? '未配置',
-            mono: true,
-          },
-        ]
-      case SandboxToolKind.COMMAND: {
-        const policy = tool.resource_spec.command_policy
-        return [
-          ...base,
-          {
-            term: '允许的 argv',
-            description:
-              (policy?.allowed_argv ?? []).map((argv) => JSON.stringify(argv)).join('、') ||
-              '未配置',
-          },
-          {
-            term: '超时设置',
-            description: policy
-              ? `默认 ${policy.default_timeout_seconds} 秒,最长 ${policy.max_timeout_seconds} 秒`
-              : '未配置',
-          },
-          {
-            term: '执行环境',
-            description:
-              readString(asRecord(tool.resource_spec.components?.[0]), 'name') || '未配置',
-            mono: true,
-          },
-        ]
-      }
-      case SandboxToolKind.WEB_EMBED:
-        return [
-          ...base,
-          { term: '组件数量', description: `${tool.resource_spec.components?.length ?? 0} 个` },
-          { term: '代理路由数', description: `${tool.resource_spec.routes?.length ?? 0} 条` },
-          {
-            term: '网络放行规则',
-            description: `${tool.resource_spec.network_rules?.length ?? 0} 条`,
-          },
-        ]
-      default:
-        return base
-    }
-  }, [tool])
-
+/** ToolRow 一个工具:名称;类型 · 短码 · 生态,不可部署的写原因;右侧状态 */
+function ToolRow({ tool, onOpen }: { tool: SandboxToolDefinition; onOpen: () => void }) {
+  const reason = tool.resource_spec.disabled_reason
+  const deployable = !reason && tool.status === ToolStatus.AVAILABLE
   return (
-    <Card>
-      <CardHeader
-        title={
-          <span className="truncate font-semibold text-ink">
-            {tool.name}
+    <ListRow
+      title={tool.name}
+      meta={
+        reason ? (
+          <span className="text-warning">不可部署:{reason}</span>
+        ) : (
+          <span>
+            {sandboxToolKindLabel(tool.kind)} · <span className="font-mono">{tool.code}</span> ·{' '}
+            {ecoTagsLabel(tool.eco_tags)}
           </span>
-        }
-        description={sandboxToolKindLabel(tool.kind)}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            {/* 类别与类型是两件事:类别决定它是不是学生工具入口(§7.2),类型决定怎么用 */}
-            {tool.category === SANDBOX_COMPONENT_CATEGORY.INFRA ? (
-              <Badge tone="info">基础设施</Badge>
-            ) : (
-              <Badge tone="jade">学生工具</Badge>
-            )}
-            <Badge tone="neutral">{sandboxToolKindLabel(tool.kind)}</Badge>
-            <StatusIndicator
-              tone={toolStatusTone(tool.status)}
-              label={toolStatusLabel(tool.status)}
-            />
-          </div>
-        }
-      />
-      <CardBody className="flex flex-col gap-3">
-        <p className="text-sm text-ink-sub">{KIND_HINTS[tool.kind]}</p>
-        {/*
-          停用原因由服务端目录同步写入(镜像缺证明、工作负载声明不合当前契约等),
-          原样展示 —— 前端不推断也不隐藏(对齐清单 §6.3 / §8.3)。
-        */}
-        {tool.resource_spec.disabled_reason ? (
-          <Callout tone="warning" title="这个组件当前不可部署">
-            {tool.resource_spec.disabled_reason}
-          </Callout>
-        ) : null}
-        <DescriptionList dense items={items} />
-      </CardBody>
-    </Card>
+        )
+      }
+      trailing={
+        <StatusIndicator
+          tone={reason ? 'warning' : toolStatusTone(tool.status)}
+          label={reason ? '不可部署' : deployable ? '可部署' : toolStatusLabel(tool.status)}
+        />
+      }
+      onSelect={onOpen}
+    />
   )
 }

@@ -90,6 +90,7 @@ function BlockCard({ block, emphasis, isTip, selected, onSelect }: BlockCardProp
   );
 }
 
+/** ChainPatternView 区块链条视图(chain 模式) */
 export function ChainPatternView({
   pattern,
   focus,

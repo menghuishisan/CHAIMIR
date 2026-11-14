@@ -6,6 +6,7 @@
  */
 import { useSyncExternalStore } from "react";
 
+/** useMediaQuery 订阅媒体查询结果,供壳层在断点间切换形态 */
 export function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(
     (callback) => {

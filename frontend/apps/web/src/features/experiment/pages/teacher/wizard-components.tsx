@@ -11,7 +11,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { Network, Plus, Server, Trash2 } from 'lucide-react'
 import {
-  PAGINATION_MAX_SIZE,
   SANDBOX_ACCESS_PROFILE,
   SIM_PACKAGE_STATUS,
   type EnvComponentRequest,
@@ -37,10 +36,8 @@ import {
   ModalHeader,
   ModalTitle,
   Select,
-  Skeleton,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { CompositionDeclarationFields } from '../../../sandbox/components/CompositionDeclarationFields'
@@ -49,7 +46,7 @@ import {
   compositionSpecFromDeclaration,
   declarationFromSpec,
 } from '../../../sandbox/composition'
-import { simCategoryLabel } from '../../../../utils/labels/sim'
+import { SimPackageSelect } from '../../../sim/components/SimPackageSelect'
 import type { ExperimentDraft } from './wizard-state'
 
 const COMPONENT_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
@@ -145,7 +142,7 @@ export function WizardComponentsStep({ draft, errors, onChange }: WizardComponen
               {draft.components.envs.map((env, index) => (
                 <div
                   key={env.id}
-                  className="flex flex-wrap items-center justify-between gap-3 well p-3"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-hover p-3"
                 >
                   <div className="min-w-0">
                     <div className="truncate text-base text-ink">代码环境 {index + 1}</div>
@@ -210,7 +207,7 @@ export function WizardComponentsStep({ draft, errors, onChange }: WizardComponen
               {draft.components.sims.map((sim, index) => (
                 <div
                   key={sim.id}
-                  className="flex flex-wrap items-center justify-between gap-3 well p-3"
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-surface-hover p-3"
                 >
                   <div className="min-w-0">
                     <div className="truncate text-base text-ink">仿真场景 {index + 1}</div>
@@ -382,7 +379,7 @@ function EnvFormModal({ env, usedIds, onClose, onSave }: EnvFormModalProps) {
           />
           {errors.declaration ? <Callout tone="danger">{errors.declaration}</Callout> : null}
 
-          <div className="flex flex-col gap-3 well p-4">
+          <div className="flex flex-col gap-3 rounded-md bg-surface-hover p-4">
             <Checkbox
               checked={keepAlive}
               label="学生退出后保留环境一段时间"
@@ -472,37 +469,11 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
     seed: seed.trim() === '' || !Number.isSafeInteger(Number(seed)) || Number(seed) <= 0 ? '随机种子需要填写大于 0 的整数' : null,
   }))
 
-  const packages = useAsyncResource(
-    () =>
-      api.sim.getPackages({
-        status: SIM_PACKAGE_STATUS.PUBLISHED,
-        page: 1,
-        size: PAGINATION_MAX_SIZE,
-      }),
-    [],
-    () => false
-  )
-
   const versions = useAsyncResource(
     () => (packageCode ? api.sim.getPackageVersions(packageCode) : Promise.resolve([])),
     [packageCode],
     () => false
   )
-
-  const packageOptions = useMemo(() => {
-    // 同一 code 可能有多个版本行,选择器按 code 去重
-    const seen = new Set<string>()
-    return (packages.data?.list ?? [])
-      .filter((item) => {
-        if (seen.has(item.code)) return false
-        seen.add(item.code)
-        return true
-      })
-      .map((item) => ({
-        value: item.code,
-        label: `${item.name} · ${simCategoryLabel(item.category)}`,
-      }))
-  }, [packages.data])
 
   const versionOptions = useMemo(
     () =>
@@ -552,51 +523,39 @@ function SimFormModal({ sim, usedIds, onClose, onSave }: SimFormModalProps) {
             />
           </FormField>
 
-          <ResourceState
-            resource={packages}
-            emptyIcon={Network}
-            emptyTitle="平台还没有可用仿真场景"
-            emptyDescription="提交仿真包并通过平台审核后可在此选择。"
-            skeleton={<Skeleton variant="line" lines={2} />}
-          >
-            {() => (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label="仿真场景" htmlFor="sim-package" required error={errors.package}>
-                  <Select
-                    id="sim-package"
-                    options={packageOptions}
-                    value={packageCode}
-                    invalid={Boolean(errors.package)}
-                    onBlur={() => validate(['package'])}
-                    placeholder={packageOptions.length > 0 ? '选择场景' : '暂无可用场景'}
-                    disabled={packageOptions.length === 0}
-                    onValueChange={(value) => {
-                      setPackageCode(value)
-                      setVersion('')
-                    }}
-                  />
-                </FormField>
-                <FormField label="场景版本" htmlFor="sim-version" required error={errors.version}>
-                  <Select
-                    id="sim-version"
-                    options={versionOptions}
-                    value={version}
-                    invalid={Boolean(errors.version)}
-                    onBlur={() => validate(['version'])}
-                    placeholder={
-                      packageCode === ''
-                        ? '请先选择场景'
-                        : versionOptions.length > 0
-                          ? '选择版本'
-                          : '该场景暂无已发布版本'
-                    }
-                    disabled={versionOptions.length === 0}
-                    onValueChange={setVersion}
-                  />
-                </FormField>
-              </div>
-            )}
-          </ResourceState>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <FormField label="仿真场景" htmlFor="sim-package" required error={errors.package}>
+              <SimPackageSelect
+                id="sim-package"
+                label="仿真场景"
+                value={packageCode}
+                selectedName={versions.data?.[0]?.name}
+                invalid={Boolean(errors.package)}
+                onChange={(code) => {
+                  setPackageCode(code)
+                  setVersion('')
+                }}
+              />
+            </FormField>
+            <FormField label="场景版本" htmlFor="sim-version" required error={errors.version}>
+              <Select
+                id="sim-version"
+                options={versionOptions}
+                value={version}
+                invalid={Boolean(errors.version)}
+                onBlur={() => validate(['version'])}
+                placeholder={
+                  packageCode === ''
+                    ? '请先选择场景'
+                    : versionOptions.length > 0
+                      ? '选择版本'
+                      : '该场景暂无已发布版本'
+                }
+                disabled={versionOptions.length === 0}
+                onValueChange={setVersion}
+              />
+            </FormField>
+          </div>
 
           <FormField
             label="随机种子"

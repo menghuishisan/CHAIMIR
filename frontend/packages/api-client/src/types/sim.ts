@@ -17,6 +17,8 @@ export interface SimScaleLimit {
 }
 
 export interface SimPackageMeta {
+  /** 最近一次退回的审核意见;只在「我提交的」列表里已退回的包上给出 */
+  reject_comment?: string
   id: SnowflakeID
   code: string
   version: string
@@ -113,6 +115,8 @@ export interface SimPackageReview {
   id: SnowflakeID
   package_id: SnowflakeID
   submitter_id: SnowflakeID
+  /** 提交教师姓名;只在平台审核列表里给出,账号已移除时省略 */
+  submitter_name?: string
   preview_report: SimValidationReport
   reviewer_id?: SnowflakeID
   result: SimReviewResult

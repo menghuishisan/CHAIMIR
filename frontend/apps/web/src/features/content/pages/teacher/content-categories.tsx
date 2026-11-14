@@ -43,7 +43,7 @@ interface CategoryRow {
 /**
  * ContentCategories 管理题库分类树。
  */
-export function ContentCategories() {
+export function ContentCategories({ onChanged }: { onChanged?: () => void }) {
   const [formTarget, setFormTarget] = useState<{ category?: ContentCategory } | undefined>()
   const [deleteTarget, setDeleteTarget] = useState<CategoryRow>()
   const [working, setWorking] = useState(false)
@@ -62,12 +62,13 @@ export function ContentCategories() {
       toast.success('分类已删除')
       setDeleteTarget(undefined)
       categories.reload()
+      onChanged?.()
     } catch (error) {
       setActionError(userFacingErrorMessage(error, '删除没有成功,请稍后重试。'))
     } finally {
       setWorking(false)
     }
-  }, [categories, deleteTarget])
+  }, [categories, deleteTarget, onChanged])
 
   const columns: TableColumn<CategoryRow>[] = [
     {
@@ -108,10 +109,9 @@ export function ContentCategories() {
 
   return (
     <PageSection
-      title="题库分类"
-      description="按知识领域组织题目。分类支持两级,便于检索与组卷。"
+      description="按知识领域组织题目,支持两级,便于检索与组卷。"
       actions={
-        <Button variant="primary" leftIcon={Plus} onClick={() => setFormTarget({})}>
+        <Button variant="secondary" leftIcon={Plus} onClick={() => setFormTarget({})}>
           新建分类
         </Button>
       }
@@ -128,7 +128,7 @@ export function ContentCategories() {
             emptyTitle="还没有分类"
             emptyDescription="分类不是必填项,但按领域分类后检索与组卷会更方便。"
             emptyAction={
-              <Button variant="primary" leftIcon={Plus} onClick={() => setFormTarget({})}>
+              <Button variant="secondary" leftIcon={Plus} onClick={() => setFormTarget({})}>
                 新建分类
               </Button>
             }
@@ -179,6 +179,7 @@ export function ContentCategories() {
           onSaved={() => {
             setFormTarget(undefined)
             categories.reload()
+            onChanged?.()
           }}
         />
       ) : null}

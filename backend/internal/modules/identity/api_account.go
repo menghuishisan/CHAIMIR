@@ -29,6 +29,7 @@ func registerAccountRoutes(r gin.IRouter, svc *Service, authn *auth.Manager) {
 // register 绑定账号管理资源路由到具名 handler。
 func (a accountAPI) register(g gin.IRouter) {
 	g.GET("", a.listAccounts)
+	g.GET("/:id", a.getAccount)
 	g.POST("", a.createAccount)
 	g.PATCH("/:id", a.updateAccount)
 	g.POST("/:id/disable", a.disableAccount)
@@ -54,8 +55,18 @@ func (a accountAPI) listAccounts(c *gin.Context) {
 	if !ok {
 		return
 	}
-	list, total, page, size, err := a.svc.ListAccountsByAdmin(c.Request.Context(), query)
-	httpx.WritePage(c, list, total, page, size, err)
+	list, total, page, size, facets, err := a.svc.ListAccountsByAdmin(c.Request.Context(), query)
+	httpx.WritePageWithFacets(c, list, total, page, size, facets.Map(), err)
+}
+
+// getAccount 读取本校单个账号。
+func (a accountAPI) getAccount(c *gin.Context) {
+	id, ok := httpx.PathID(c, "id")
+	if !ok {
+		return
+	}
+	out, err := a.svc.GetAccountByAdmin(c.Request.Context(), id)
+	httpx.Write(c, out, err)
 }
 
 // createAccount 绑定单个账号创建请求。

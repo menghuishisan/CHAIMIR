@@ -141,6 +141,31 @@ func (s *Service) ListTenants(ctx context.Context) ([]contracts.TenantSummary, e
 	return out, nil
 }
 
+// PlatformAdminNames 按编号批量解析平台管理员姓名;只在平台事务里读,空列表不读库。
+func (s *Service) PlatformAdminNames(ctx context.Context, adminIDs []int64) (map[int64]string, error) {
+	if len(adminIDs) == 0 {
+		return map[int64]string{}, nil
+	}
+	var rows []PlatformAdmin
+	if err := s.store.PlatformTx(ctx, func(ctx context.Context, tx TxStore) error {
+		var err error
+		rows, err = tx.BatchGetPlatformAdminNames(ctx, adminIDs)
+		return err
+	}); err != nil {
+		return nil, apperr.ErrInternal.WithCause(err)
+	}
+	return platformAdminNameMap(rows), nil
+}
+
+// platformAdminNameMap 把读到的管理员整理成编号到姓名的映射。
+func platformAdminNameMap(rows []PlatformAdmin) map[int64]string {
+	out := make(map[int64]string, len(rows))
+	for _, row := range rows {
+		out[row.ID] = row.Name
+	}
+	return out
+}
+
 // GetTenant 读取单个租户摘要供聚合层只读使用。
 func (s *Service) GetTenant(ctx context.Context, tenantID int64) (contracts.TenantSummary, error) {
 	var t Tenant

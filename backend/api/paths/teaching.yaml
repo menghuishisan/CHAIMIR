@@ -3,6 +3,7 @@
   get:
     tags: [teaching]
     summary: 我的课程列表
+    description: 每门课带授课教师姓名 teacher_name；教师视角另带选课人数 member_count，学生视角另带本人学习进度 my_progress（lesson_count、completed_count）。补充信息按当前页一次聚合。facets.status：课程状态分段计数，套用共享筛选、不套用状态筛选。
     operationId: teachingListCourses
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -32,7 +33,7 @@
       - { name: keyword, in: query, schema: { type: string } }
       - { $ref: "#/components/parameters/PageQuery" }
       - { $ref: "#/components/parameters/SizeQuery" }
-    description: 仅返回其他租户当前共享课程的id/name/description/type/difficulty/semester/credits/updated_at，不包含邀请码与学生业务数据。克隆时重新校验共享状态。
+    description: 仅返回其他租户当前共享课程的id/name/description/type/difficulty/semester/credits/updated_at 与章节数 chapter_count（只给数量），不包含邀请码与学生业务数据。克隆时重新校验共享状态。
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/courses/cover:
   post:
@@ -259,6 +260,7 @@
   get:
     tags: [teaching]
     summary: 课程章节课时目录
+    description: 返回课程（带授课教师姓名 teacher_name）、章节、课时与本人进度。
     operationId: teachingGetOutline
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -287,6 +289,7 @@
   get:
     tags: [teaching]
     summary: 课程作业清单(教师含草稿,学生只见已发布)
+    description: 授课教师视角每份作业带全班提交统计 submission_stats（submitted_count 交过的人数、pending_count 最近一次提交在等老师评分的人数，与批改中心待批改同口径）；课程成员视角每份带本人提交情况 my_submission（attempts 已用次数、latest_status 最近一次提交状态，未交为 0）。
     operationId: teachingListCourseAssignments
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -299,7 +302,33 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [title, due_at, max_attempts, late_policy, items]
+            properties:
+              title: { type: string, minLength: 1 }
+              chapter_id: { type: string }
+              due_at: { type: string, format: date-time }
+              max_attempts: { type: integer, minimum: 1 }
+              late_policy: { type: integer, enum: [1, 2, 3] }
+              late_penalty: { type: object, additionalProperties: true }
+              items:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [item_code, item_version, score, seq]
+                  properties:
+                    item_code: { type: string, minLength: 1 }
+                    item_version: { type: string, minLength: 1 }
+                    score: { type: integer, minimum: 1 }
+                    seq: { type: integer, minimum: 1 }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/assignments/{id}:
   get:
@@ -317,7 +346,33 @@
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [title, due_at, max_attempts, late_policy, items]
+            properties:
+              title: { type: string, minLength: 1 }
+              chapter_id: { type: string }
+              due_at: { type: string, format: date-time }
+              max_attempts: { type: integer, minimum: 1 }
+              late_policy: { type: integer, enum: [1, 2, 3] }
+              late_penalty: { type: object, additionalProperties: true }
+              items:
+                type: array
+                minItems: 1
+                items:
+                  type: object
+                  additionalProperties: false
+                  required: [item_code, item_version, score, seq]
+                  properties:
+                    item_code: { type: string, minLength: 1 }
+                    item_version: { type: string, minLength: 1 }
+                    score: { type: integer, minimum: 1 }
+                    seq: { type: integer, minimum: 1 }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/assignments/{id}/publish:
   post:
@@ -332,6 +387,7 @@
   get:
     tags: [teaching]
     summary: 作业提交列表(教师见全班,学生只见本人)
+    description: facets.status、facets.is_late：批改台分段计数（同一组），两列都不套用本组筛选，范围同列表视角。
     operationId: teachingListSubmissions
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -358,7 +414,22 @@
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [content]
+            properties:
+              content:
+                type: object
+                additionalProperties:
+                  oneOf:
+                    - { type: string }
+                    - { type: boolean }
+                    - { type: array, items: { type: string } }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/assignments/{id}/submit:
   post:
@@ -368,7 +439,22 @@
     x-chaimir-audience: student
     security: [{ bearerAuth: [] }]
     parameters: [{ $ref: "#/components/parameters/IDPath" }]
-    requestBody: { $ref: "#/components/requestBodies/ObjectBody" }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [answers]
+            properties:
+              answers:
+                type: object
+                additionalProperties:
+                  oneOf:
+                    - { type: string }
+                    - { type: boolean }
+                    - { type: array, items: { type: string } }
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/teaching/submissions/{id}:
   get:

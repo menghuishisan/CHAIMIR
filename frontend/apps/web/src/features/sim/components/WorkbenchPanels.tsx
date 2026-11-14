@@ -168,7 +168,7 @@ function InteractionItem({
             />
           ) : (
             <Input
-              variant="underline"
+              variant="dark"
               type={field.type === 'string' ? 'text' : 'number'}
               value={String(values[field.name] ?? '')}
               min={field.min}

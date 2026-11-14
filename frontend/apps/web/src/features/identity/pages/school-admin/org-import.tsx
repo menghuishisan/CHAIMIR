@@ -1,4 +1,4 @@
-// 组织架构批量导入(组织架构页的流程页)。
+// 组织架构批量导入(组织架构页内的右侧大抽屉,与账号导入同一套交互,设计 §7.5)。
 //
 // 与账号导入同一模式(FE-7:预览态落服务端,确认后提交),但目标只有组织一种,
 // 故不需要选导入对象。一份表里同时建院系、专业与班级,层级关系按表里的列解析。
@@ -7,18 +7,18 @@ import { useCallback, useState } from 'react'
 import { Download } from 'lucide-react'
 import type { ImportPreviewResponse } from '@chaimir/api-client'
 import {
-  Badge,
   Button,
   Callout,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
   FormField,
   Input,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalHeader,
-  ModalTitle,
   Progress,
+  Steps,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -28,6 +28,13 @@ import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { ImportActionFooter } from '../../components/ImportActionFooter'
 import { ImportPreviewPanel } from '../../components/ImportPreviewPanel'
 import { ImportPreviewRecovery } from '../../components/ImportPreviewRecovery'
+
+/** 导入分三步(设计 §7.5):下载模板 → 上传并预览校验 → 确认导入 */
+const IMPORT_STEPS = [
+  { key: 'template', label: '下载模板' },
+  { key: 'preview', label: '上传并预览' },
+  { key: 'commit', label: '确认导入' },
+]
 
 export interface OrgImportModalProps {
   onClose: () => void
@@ -88,27 +95,16 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
   }, [onCommitted, preview])
 
   return (
-    <Modal open onOpenChange={(open) => !open && !working && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>批量导入组织架构</ModalTitle>
-          <ModalDescription>
+    <Drawer open onOpenChange={(open) => !open && !working && onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader>
+          <DrawerTitle>批量导入组织架构</DrawerTitle>
+          <DrawerDescription>
             一份表里同时建院系、专业与班级。先上传做校验预览,确认无误后提交。
-          </ModalDescription>
-        </ModalHeader>
-        <ModalBody className="flex flex-col gap-4">
-          <div className="grid gap-2 sm:grid-cols-3" aria-label="组织导入步骤">
-            {[
-              ['1', '下载模板'],
-              ['2', '上传并预览'],
-              ['3', '确认提交'],
-            ].map(([step, label]) => (
-              <div key={step} className="flex items-center gap-2 rounded-lg border border-border bg-surface p-3">
-                <Badge tone={preview ? 'success' : 'neutral'}>{step}</Badge>
-                <span className="text-sm text-ink">{label}</span>
-              </div>
-            ))}
-          </div>
+          </DrawerDescription>
+        </DrawerHeader>
+        <DrawerBody className="flex flex-col gap-4">
+          <Steps steps={IMPORT_STEPS} current={preview ? 2 : file ? 1 : 0} />
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" leftIcon={Download} onClick={() => void downloadTemplate()}>
               下载导入模板
@@ -151,7 +147,7 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
           />
 
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
-        </ModalBody>
+        </DrawerBody>
         <ImportActionFooter
           preview={preview}
           fileSelected={Boolean(file)}
@@ -161,7 +157,7 @@ export function OrgImportModal({ onClose, onCommitted }: OrgImportModalProps) {
           onPreview={() => void runPreview()}
           onCommit={() => void commit()}
         />
-      </ModalContent>
-    </Modal>
+      </DrawerContent>
+    </Drawer>
   )
 }

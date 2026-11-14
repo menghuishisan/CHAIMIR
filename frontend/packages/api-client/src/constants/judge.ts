@@ -29,6 +29,7 @@ export enum JudgerType {
   STATIC_SCAN = 4,
   SIM_CHECKPOINT = 5,
   MANUAL = 6,
+  THEORY_QUESTION = 7,
 }
 
 export enum JudgerStatus {

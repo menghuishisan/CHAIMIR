@@ -32,6 +32,7 @@ export interface BrandLockupProps {
   className?: string;
 }
 
+/** BrandLockup 平台 Logo 锁定组合(主标志 + Chaimir 名称) */
 export function BrandLockup({ variant = "narrow", markClassName, className }: BrandLockupProps) {
   const spec = LOCKUP_VARIANT[variant];
   return (

@@ -42,6 +42,7 @@ function summarize(pattern: ChartPattern): string {
   return `${pattern.title}:${parts.join(",")}`;
 }
 
+/** ChartPatternView 趋势视图(chart 模式) */
 export function ChartPatternView({ pattern, density }: PatternViewProps<ChartPattern>) {
   const rows = toRows(pattern.data.series);
   const trendSeries: TrendSeries[] = pattern.data.series.map((item) => ({

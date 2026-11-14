@@ -188,15 +188,17 @@
   get:
     tags: [contest]
     summary: 对抗赛对局分页列表(组织者见全部,学生见本队)
+    description: status 按对局状态筛选（省略或 0 为全部）；facets.status 按状态计数，视角同列表、不套用状态筛选。
     operationId: contestListBattleMatches
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
-    parameters: [{ $ref: "#/components/parameters/IDPath" }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
+    parameters: [{ $ref: "#/components/parameters/IDPath" }, { name: status, in: query, schema: { type: integer, minimum: 0, maximum: 4 } }, { $ref: "#/components/parameters/PageQuery" }, { $ref: "#/components/parameters/SizeQuery" }]
     responses: { "200": { $ref: "#/components/responses/Standard" }, default: { $ref: "#/components/responses/Error" } }
 /api/v1/contest/contests/{id}/ladder:
   get:
     tags: [contest]
     summary: 竞赛天梯排名(解题赛显示解题统计,对抗赛显示 ELO)
+    description: 每条带 team_name（读取时按当前页队伍编号一次取队名，榜单与快照只存 team_id）。
     operationId: contestListLadder
     x-chaimir-audience: user
     security: [{ bearerAuth: [] }]
@@ -215,6 +217,7 @@
   get:
     tags: [contest]
     summary: 作弊处理记录分页列表
+    description: 每条带 team_name（被处理的队伍，按当前页一次取队名）。
     operationId: contestListCheatRecords
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]
@@ -520,6 +523,7 @@
   get:
     tags: [contest]
     summary: 漏洞题草稿分页列表
+    description: facets.status、facets.prevalidate_status：两组分段计数，各组不套用本组筛选，但套用另一组与来源筛选。
     operationId: contestListVulnProblems
     x-chaimir-audience: teacher
     security: [{ bearerAuth: [] }]

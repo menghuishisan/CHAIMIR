@@ -67,10 +67,8 @@ export function transcriptScopeLabel(scope: TranscriptScope): string {
  * 页面只呈现已登记的键,未登记键不猜测语义、不把内部键名抛到界面上。
  */
 const WARNING_DETAIL_TERMS: Record<string, string> = {
+  failed_count: '不及格课程数',
   gpa: '平均学分绩点',
-  fail_count: '不及格课程数',
-  min_gpa: '预警阈值',
-  semester: '学期',
 }
 
 /** gradeWarningDetailTerm 返回预警明细字段的用户向名称,未登记键返回 undefined。 */

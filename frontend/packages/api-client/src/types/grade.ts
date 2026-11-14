@@ -58,8 +58,12 @@ export interface GradeReview {
   id: SnowflakeID
   tenant_id: SnowflakeID
   course_id: SnowflakeID
+  /** 课程名;列表里由服务端批量解析,课程已删除时省略 */
+  course_name?: string
   semester_id?: SnowflakeID
   submitter_id: SnowflakeID
+  /** 报送教师姓名;列表里由服务端批量解析,账号已移除时省略 */
+  submitter_name?: string
   reviewer_id?: SnowflakeID
   status: GradeReviewStatus
   is_locked: boolean
@@ -116,7 +120,12 @@ export interface GradeAppeal {
   id: SnowflakeID
   tenant_id: SnowflakeID
   student_id: SnowflakeID
+  /** 学生姓名与学号;列表里由服务端批量解析,账号已移除时省略 */
+  student_name?: string
+  student_no?: string
   course_id: SnowflakeID
+  /** 课程名;列表里由服务端批量解析,课程已删除时省略 */
+  course_name?: string
   reason: string
   status: GradeAppealStatus
   handler_id?: SnowflakeID
@@ -134,6 +143,9 @@ export interface GradeWarning {
   id: SnowflakeID
   tenant_id: SnowflakeID
   student_id: SnowflakeID
+  /** 学生姓名与学号;列表里由服务端批量解析,账号已移除时省略 */
+  student_name?: string
+  student_no?: string
   semester_id: SnowflakeID
   type: GradeWarningType
   detail: Record<string, unknown>

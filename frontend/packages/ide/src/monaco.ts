@@ -1,6 +1,13 @@
 // Monaco 封装：为实验 IDE 提供统一编辑器生命周期和只读/变更事件装配。
+// 编辑器把 Ctrl/⌘ + 回车 让给所在工作台(判分、提交,规范 §7.3),其余键位保持 Monaco 默认。
 
 import type { EditorMountOptions, MountedEditor } from './types'
+
+/** Monaco 默认把 Ctrl/⌘ + 回车 绑在「在下方插入一行」上;让出后按键冒泡到工作台 */
+const RELEASED_COMMAND = 'editor.action.insertLineAfter'
+
+/** 键位让出规则是全局的,整个页面生命周期只登记一次 */
+let keysReleased = false
 
 const monacoThemeTokens = {
   background: '--color-terminal',
@@ -18,6 +25,14 @@ export async function mountMonacoEditor(container: HTMLElement, options: EditorM
   const runtime = await import('./monaco-runtime')
   await runtime.prepareMonacoLanguage(options.language)
   const monaco = runtime.monaco
+  if (!keysReleased) {
+    // 「-命令」是 Monaco 的移除规则:撤下该命令的默认键位,而不是改绑到别的命令上
+    monaco.editor.addKeybindingRule({
+      keybinding: monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter,
+      command: `-${RELEASED_COMMAND}`,
+    })
+    keysReleased = true
+  }
   const editorBackground = cssColor(monacoThemeTokens.background)
 
   monaco.editor.defineTheme('chaimir-dark', {

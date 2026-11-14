@@ -105,6 +105,8 @@ export interface Account {
 
 export interface MeResponse {
   account: Account
+  /** 本次会话所属学校的名称;平台账号不属于任何学校,为空串 */
+  tenant_name: string
   enabled_modules: TenantModule[]
 }
 
@@ -125,6 +127,8 @@ export interface Session {
   status: SessionStatus
   expire_at: string
   created_at: string
+  /** 发起本次请求的会话,即正在用的这台设备 */
+  current: boolean
 }
 
 export interface CreateApplicationRequest {

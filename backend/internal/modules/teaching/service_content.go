@@ -416,6 +416,12 @@ func (s *Service) GetCourseOutline(ctx context.Context, courseID int64) (Outline
 	if err != nil {
 		return OutlineDTO{}, mapCourseError(err)
 	}
+	// 课程详情页头要写授课教师;教师档案在 identity 模块,事务外经契约读取
+	teachers, err := s.courseTeachers(ctx, []Course{course})
+	if err != nil {
+		return OutlineDTO{}, err
+	}
+	courseDTOValue.TeacherName = teachers[course.TeacherID].Name
 	// HTTP 契约中的集合字段始终返回空数组而不是 null,这样新课程没有章节/课时时
 	// 客户端仍可直接渲染,也不需要在每个消费者增加一套 null 兼容分支。
 	out := OutlineDTO{

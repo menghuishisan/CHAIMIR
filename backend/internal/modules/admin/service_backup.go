@@ -1,3 +1,5 @@
+// admin service_backup 文件承载受控运维任务写入备份结果的窄入口(BackupRecorder):
+// 组合根只经它记录备份,不直接装配或调用 M9 repo。
 package admin
 
 import (

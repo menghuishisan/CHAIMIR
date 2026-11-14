@@ -219,26 +219,31 @@ func (s *Service) ImportVulnProblem(ctx context.Context, req ImportVulnProblemRe
 }
 
 // ListVulnProblems 查询漏洞题草稿分页列表。
-func (s *Service) ListVulnProblems(ctx context.Context, sourceID int64, status, prevalidateStatus int16, page, size int) ([]VulnProblemDTO, int64, int, int, error) {
+func (s *Service) ListVulnProblems(ctx context.Context, sourceID int64, status, prevalidateStatus int16, page, size int) ([]VulnProblemDTO, int64, int, int, pagex.Facets, error) {
 	id, err := currentIdentity(ctx)
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
 	var items []VulnProblem
 	var total int64
+	var facetRows []vulnFacetRow
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
 		items, total, err = tx.ListVulnProblems(ctx, id.TenantID, sourceID, status, prevalidateStatus, page, size)
+		if err != nil {
+			return err
+		}
+		facetRows, err = tx.CountVulnProblemsByStatus(ctx, id.TenantID, sourceID)
 		return err
 	}); err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	out := make([]VulnProblemDTO, 0, len(items))
 	for _, item := range items {
 		out = append(out, vulnProblemDTOFromModel(item))
 	}
-	return out, total, page, size, nil
+	return out, total, page, size, vulnFacets(facetRows, status, prevalidateStatus), nil
 }
 
 // SetVulnPrevalidate 运行漏洞题正反向预验证并保存结果。

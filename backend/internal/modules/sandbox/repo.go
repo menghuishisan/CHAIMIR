@@ -30,6 +30,7 @@ type TxStore interface {
 	GetRuntimeByID(ctx context.Context, id int64) (Runtime, error)
 	GetRuntimeByIDForUpdate(ctx context.Context, id int64) (Runtime, error)
 	ListRuntimes(ctx context.Context) ([]Runtime, error)
+	CountAvailableRuntimeImages(ctx context.Context) (map[int64]int64, error)
 	UpsertRuntime(ctx context.Context, id int64, req RuntimeRequest, spec AdapterSpec, selftestStatus int16, selftestDetail []byte) (Runtime, error)
 	StartRuntimeSelftest(ctx context.Context, runtimeID int64, detail []byte) (Runtime, error)
 	FinishRuntimeSelftest(ctx context.Context, runtimeID int64, attemptID string, status, runtimeStatus int16, detail []byte) (Runtime, error)
@@ -181,6 +182,19 @@ func (s *txStore) GetRuntimeByIDForUpdate(ctx context.Context, id int64) (Runtim
 		return Runtime{}, err
 	}
 	return runtimeFromRow(row)
+}
+
+// CountAvailableRuntimeImages 按运行时统计可用镜像版本数;没有可用镜像的运行时不在结果里。
+func (s *txStore) CountAvailableRuntimeImages(ctx context.Context) (map[int64]int64, error) {
+	rows, err := s.q.CountAvailableRuntimeImagesByRuntime(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]int64, len(rows))
+	for _, row := range rows {
+		out[row.RuntimeID] = row.Count
+	}
+	return out, nil
 }
 
 // ListRuntimes 查询运行时列表。

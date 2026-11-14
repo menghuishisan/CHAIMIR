@@ -145,17 +145,30 @@ export interface WizardPersistence {
   saveStep: (draft: ExperimentDraft, nextIndex: number) => Promise<boolean>
   /** goBack 回到上一步:后退不需要保存(已保存过的内容不因后退丢失) */
   goBack: () => void
+  /** goTo 直接切到某一步;只能到达已经走到过的步骤,不能跳过没做的 */
+  goTo: (index: number) => void
+  /** 走到过的最远一步(下标) */
+  reachedIndex: number
+}
+
+/** clampStepIndex 把下标夹到有效步骤范围 */
+function clampStepIndex(index: number): number {
+  return Math.min(Math.max(index, 0), WIZARD_STEP_COUNT - 1)
 }
 
 /**
  * useWizardPersistence 管理向导的服务端持久化与步骤推进。
- * 步骤下标以服务端 wizard_step 为初值:刷新后回到上次所在的步骤。
+ * 步骤下标以服务端 wizard_step(或地址里的 step)为初值:刷新后回到上次所在的步骤。
+ * reachedStep 是已经走到过的最远一步(从 1 起),默认与 initialStep 相同。
  */
-export function useWizardPersistence(experimentId: string, initialStep: number): WizardPersistence {
+export function useWizardPersistence(
+  experimentId: string,
+  initialStep: number,
+  reachedStep: number = initialStep
+): WizardPersistence {
   // 服务端 wizard_step 从 1 起;越界时夹到有效范围,避免刷新后落到不存在的步骤
-  const [stepIndex, setStepIndex] = useState(() =>
-    Math.min(Math.max(initialStep - 1, 0), WIZARD_STEP_COUNT - 1)
-  )
+  const [stepIndex, setStepIndex] = useState(() => clampStepIndex(initialStep - 1))
+  const [reachedIndex, setReachedIndex] = useState(() => clampStepIndex(Math.max(reachedStep, initialStep) - 1))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string>()
   const [savedAt, setSavedAt] = useState<Date>()
@@ -172,6 +185,7 @@ export function useWizardPersistence(experimentId: string, initialStep: number):
         })
         setSavedAt(new Date())
         setStepIndex(nextIndex)
+        setReachedIndex((reached) => Math.max(reached, nextIndex))
         return true
       } catch (error) {
         setSaveError(userFacingErrorMessage(error, '这一步没有保存成功,请稍后重试。'))
@@ -187,5 +201,13 @@ export function useWizardPersistence(experimentId: string, initialStep: number):
     setStepIndex((current) => Math.max(0, current - 1))
   }, [])
 
-  return { stepIndex, saving, saveError, savedAt, saveStep, goBack }
+  // goTo 不保存,只切换显示;草稿在各步之间共用,切换不会丢改动
+  const goTo = useCallback(
+    (index: number) => {
+      setStepIndex(Math.min(clampStepIndex(index), reachedIndex))
+    },
+    [reachedIndex]
+  )
+
+  return { stepIndex, saving, saveError, savedAt, saveStep, goBack, goTo, reachedIndex }
 }

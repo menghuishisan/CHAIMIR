@@ -35,7 +35,7 @@ frontend/
 - `apps/web`: 统一的单体前端 SPA 入口。采用 **FSD (Feature-Sliced Design)** 架构，其内部 `src/` 目录的严格职责划分如下：
   - `src/app/`: **驱动层**。负责应用根装配 (`App.tsx`)、运行时配置读取 (`config.ts`)、HTTP 客户端装配 (`api.ts`) 与资源失效协议 (`resourceInvalidation.ts`)。
   - `src/routes/`: **路由边界层 (极其重要)**。`authRoutes.tsx` 维护公共认证路由；`roleRoutes.tsx` 只登记四个角色区前缀并懒加载对应 Section；每个角色区的路径清单与菜单数据收敛在 `routes/sections/`（`*Section.tsx` + `*Navigation.ts`），使非本角色的路由结构与菜单树不进入口包。这里可以引用 `features/*/pages` 页面实现，但不得编写业务逻辑、状态机或页面样式。
-  - `src/layouts/`: **布局层**。只维护三大外壳：`AuthLayout` (底层全裸露的认证页壳)、`MainLayout` (四角色共用的侧栏+顶栏光面壳)、`ImmersiveLayout` (无侧栏的全屏沉浸壳)。不得按角色复制布局。
+  - `src/layouts/`: **布局层**。只维护三大外壳：`AuthLayout` (底层全裸露的认证页壳)、`MainLayout` (四角色共用的墨色侧栏与顶栏 + 内容纸面,顶栏左侧显示当前位置)、`ImmersiveLayout` (无侧栏的全屏沉浸壳)。不得按角色复制布局。
   - `src/features/`: **业务领域层 (核心)**。**1:1 强映射后端 11 个业务模块**（如 `identity`, `teaching`, `experiment`, `contest`）。页面实现统一放在各模块的 `pages/` 子目录，同一功能在不同端的展示（如“提交作业”与“批改作业”）收敛于此，杜绝代码重复。
   - `src/components/`: **应用级组件**。仅存放跨业务领域的 UI 拼装与壳层状态屏（`AppStatusScreen`、`RoleGuard`、`RouteErrorBoundary`、`StatusPages`）。注意：基础和通用业务组件应沉淀至 `packages/ui`。
   - `src/hooks/`: 应用级通用 Hooks（`useAsyncResource`、`useMediaQuery`、`useOnlineStatus`）。
@@ -66,11 +66,13 @@ make dev-up
 ```bash
 pnpm type-check
 pnpm lint
+pnpm test
 pnpm build
 pnpm clean:artifacts
 ```
 
-- `pnpm type-check` 是独立的 TypeScript 静态门槛；`pnpm build` 只负责生成 Vite 生产产物。发布或镜像构建前必须先执行并通过 `pnpm type-check`、`pnpm lint`，再执行 `pnpm build`，避免在受限镜像构建层重复运行类型检查。
+- `pnpm type-check` 是独立的 TypeScript 静态门槛；`pnpm build` 只负责生成 Vite 生产产物。发布或镜像构建前必须先执行并通过 `pnpm type-check`、`pnpm lint`、`pnpm test`，再执行 `pnpm build`，避免在受限镜像构建层重复运行类型检查。
+- `pnpm test`: 用 Node 24 自带的 `node:test` 运行 `apps/web` 与 `packages/ui` 里的 `*.test.ts` 纯逻辑单元测试,不引入测试框架。
 - `clean:artifacts`: 清理 `.turbo` 和 `dist`，不删除依赖。
 - `clean:deps`: 清理根、app 和 package 下的 `node_modules`。
 - `clean`: 同时清理构建缓存和依赖。

@@ -2,6 +2,8 @@
 // 与呈现分开的理由是这些规则跨视图共享 —— 密码在手机号与校内账号两种方式间沿用,
 // 学校代号在校内账号与统一认证间沿用,切换方式只清错误不清输入,
 // 这些行为写在表单组件里就会随视图各长一套。表单长什么样见 login.tsx。
+// 当前登录方式与凭据类型写进地址(?view=account / ?method=sms),刷新不回到默认(设计 §7.1);
+// 密码与验证码只在内存里,不进地址和本地存储(CLAUDE.md §9)。
 
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
@@ -17,6 +19,7 @@ import {
   requiredError,
   useSmsCooldown,
 } from '../../authForm'
+import { useUrlState } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { clearPendingTenantLogin, setPendingTenantLogin } from './pendingLogin'
 
@@ -25,6 +28,12 @@ type LoginView = 'phone' | 'account' | 'sso'
 
 /** PhoneLoginMethod 手机号登录的凭据类型 */
 export type PhoneLoginMethod = 'password' | 'sms'
+
+/** 登录页地址参数:只有「用哪种方式」,不含任何输入内容 */
+const LOGIN_QUERY = {
+  view: { defaultValue: 'phone', allowed: ['phone', 'account', 'sso'] },
+  method: { defaultValue: 'password', allowed: ['password', 'sms'] },
+} as const
 
 export interface LoginController {
   view: LoginView
@@ -76,8 +85,10 @@ export function useLoginController(): LoginController {
   const location = useLocation()
   const returnPath = (location.state as { from?: string } | null)?.from
 
-  const [view, setView] = useState<LoginView>('phone')
-  const [phoneMethod, setPhoneMethod] = useState<PhoneLoginMethod>('password')
+  const [query, setQuery] = useUrlState(LOGIN_QUERY)
+  const view = query.view as LoginView
+  const phoneMethod = query.method as PhoneLoginMethod
+  const setPhoneMethod = useCallback((method: PhoneLoginMethod) => setQuery({ method }), [setQuery])
   const [phone, setPhone] = useState('')
   const [password, setPassword] = useState('')
   const [smsCode, setSmsCode] = useState('')
@@ -231,11 +242,11 @@ export function useLoginController(): LoginController {
   /** switchView 切换登录方式表单,清空上一种方式留下的错误 */
   const switchView = useCallback(
     (next: LoginView) => {
-      setView(next)
+      setQuery({ view: next })
       setFormError(null)
       resetValidation()
     },
-    [resetValidation],
+    [resetValidation, setQuery],
   )
 
   return {

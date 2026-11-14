@@ -32,6 +32,7 @@ export interface GuidePanelProps {
   className?: string;
 }
 
+/** GuidePanel 引导页骨架(引导族) */
 export function GuidePanel({ icon, title, reason, actions, hint, className }: GuidePanelProps) {
   // 区域名取自标题:无名 section 不会作为地标暴露给读屏,跳转时找不到这块
   const titleId = useId();

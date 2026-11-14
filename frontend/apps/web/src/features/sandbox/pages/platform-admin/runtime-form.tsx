@@ -14,18 +14,19 @@ import {
   Checkbox,
   FormField,
   Input,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   SegmentedControl,
   Select,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { FormGroup } from '../../../../components/FormGroup'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { runtimeStatusLabel } from '../../../../utils/labels/sandbox'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
@@ -126,11 +127,13 @@ interface FormSpec {
   capabilities: Record<'deploy' | 'tx' | 'query' | 'reset', CapabilityState>
 }
 
+/** emptyWorkspaceOps 工作区各项操作的空命令,每项先留一行空输入 */
 const emptyWorkspaceOps = (): Record<WorkspaceOpKey, string[]> =>
   Object.fromEntries(WORKSPACE_OP_KEYS.map((key) => [key, ['']])) as Record<
     WorkspaceOpKey,
     string[]
   >
+/** emptyCapabilities 链能力(部署、交易等)的空声明 */
 const emptyCapabilities = (): FormSpec['capabilities'] => ({
   deploy: { execTarget: '', command: [''], timeout: '' },
   tx: { execTarget: '', command: [''], timeout: '' },
@@ -138,18 +141,22 @@ const emptyCapabilities = (): FormSpec['capabilities'] => ({
   reset: { execTarget: '', command: [''], timeout: '' },
 })
 
+/** componentRecord 把未知值读成对象,不是对象时给空对象 */
 function componentRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {}
 }
 
+/** stringValue 文字原样读出,其余为空串 */
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value : ''
 }
+/** numberText 有限数值写成文字,其余为空串(回填数字输入框用) */
 function numberText(value: unknown): string {
   return typeof value === 'number' && Number.isFinite(value) ? String(value) : ''
 }
+/** commandText 只保留命令数组里的文字参数 */
 function commandText(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === 'string')
@@ -234,7 +241,10 @@ function buildAdapterSpec(form: FormSpec): SandboxAdapterSpec {
     workspace_dir: form.workspaceDir.trim(),
     runtime_container: {
       ...componentRecord(form.baseSpec.runtime_container),
-      ...runtimeContainerAccessFields(componentRecord(form.baseSpec.runtime_container), form.containerAccess),
+      ...runtimeContainerAccessFields(
+        componentRecord(form.baseSpec.runtime_container),
+        form.containerAccess
+      ),
       name: form.containerName.trim(),
       image_url: form.imageUrl.trim(),
       ports: form.ports
@@ -292,9 +302,11 @@ function buildAdapterSpec(form: FormSpec): SandboxAdapterSpec {
         ])
       ),
       reset_strategy: form.resetStrategy,
-      ...(form.resetStrategy === 'recreate_runtime' ? {
-        reset: { exec_target: '', command: [], timeout_seconds: 0 },
-      } : {}),
+      ...(form.resetStrategy === 'recreate_runtime'
+        ? {
+            reset: { exec_target: '', command: [], timeout_seconds: 0 },
+          }
+        : {}),
     },
   } as SandboxAdapterSpec
 }
@@ -356,64 +368,71 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
     []
   )
 
-  const { errors, validate } = useFormValidation(useCallback(() => {
-    const next: Record<string, string | null> = {
-      code: CODE_PATTERN.test(code.trim()) ? null : '短名只能使用小写字母、数字和连字符。',
-      name: name.trim() === '' ? '请输入运行时名称。' : null,
-      eco: eco.trim() === '' ? '请输入所属生态。' : null,
-      workspaceDir: form.workspaceDir.startsWith('/')
-        ? null
-        : '工作区目录必须是环境内的绝对路径。',
-      container: form.containerName.trim() === '' ? '请填写主环境名称。' : null,
-      containerAccess: validRuntimeContainerAccess(form.containerAccess) ? null : '请检查主环境的数据域与临时目录。',
-      ports: form.ports.some(
-        (port) =>
-          port.name.trim() !== '' &&
-          Number(port.containerPort) > 0 &&
-          Number(port.servicePort) > 0
-      )
-        ? null
-        : '请至少填写一个有效端口。',
-      sidecars:
-        form.sidecars.every(
-          (sidecar) =>
-            sidecar.name.trim() !== '' &&
-            sidecar.imageUrl.trim() !== '' &&
-            validRuntimeContainerAccess(sidecar.access) &&
-            sidecar.prepullCommand.some((item) => item.trim() !== '')
-        ) && form.sidecars.filter((sidecar) => sidecar.prepullHold).length === 1
+  const { errors, validate } = useFormValidation(
+    useCallback(() => {
+      const next: Record<string, string | null> = {
+        code: CODE_PATTERN.test(code.trim()) ? null : '短名只能使用小写字母、数字和连字符。',
+        name: name.trim() === '' ? '请输入运行时名称。' : null,
+        eco: eco.trim() === '' ? '请输入所属生态。' : null,
+        workspaceDir: form.workspaceDir.startsWith('/')
           ? null
-          : '附加组件必须填写名称、镜像和预拉取命令,并且只能选择一个保持容器。',
-      workspaceOps: EXEC_TARGET_PATTERN.test(form.workspaceExecTarget.trim())
-        && EXEC_TARGET_PATTERN.test(form.scriptExecTarget.trim())
-        && form.workspaceExecTarget.trim() !== form.scriptExecTarget.trim()
-        && WORKSPACE_OP_KEYS.every((key) =>
-        form.workspaceOps[key].some((item) => item.trim() !== '')
-      )
-        ? null
-        : '请明确不同的学生与私有脚本执行目标,并补齐工作区操作命令。',
-      privateArchive: EXEC_TARGET_PATTERN.test(form.privateArchive.execTarget.trim())
-        && form.privateArchive.unpackTar.some((part) => part.trim() !== '')
-        ? null : '请填写私有归档的执行目标与解包命令。',
-      capabilities:
-        Number(adapterLevel) < RuntimeAdapterLevel.STANDARD ||
-        capabilityImpl.trim() !== '' ||
-        pluginRef.trim() !== '' ||
-        (['deploy', 'tx', 'query', 'reset'] as const).every((key) => {
-          if (key === 'reset' && form.resetStrategy === 'recreate_runtime') return true
-          const capability = form.capabilities[key]
-          return (
-            capability.command.some((item) => item.trim() !== '') &&
-            EXEC_TARGET_PATTERN.test(capability.execTarget.trim()) &&
-            Number.isInteger(Number(capability.timeout)) &&
-            Number(capability.timeout) > 0
+          : '工作区目录必须是环境内的绝对路径。',
+        container: form.containerName.trim() === '' ? '请填写主环境名称。' : null,
+        containerAccess: validRuntimeContainerAccess(form.containerAccess)
+          ? null
+          : '请检查主环境的数据域与临时目录。',
+        ports: form.ports.some(
+          (port) =>
+            port.name.trim() !== '' &&
+            Number(port.containerPort) > 0 &&
+            Number(port.servicePort) > 0
+        )
+          ? null
+          : '请至少填写一个有效端口。',
+        sidecars:
+          form.sidecars.every(
+            (sidecar) =>
+              sidecar.name.trim() !== '' &&
+              sidecar.imageUrl.trim() !== '' &&
+              validRuntimeContainerAccess(sidecar.access) &&
+              sidecar.prepullCommand.some((item) => item.trim() !== '')
+          ) && form.sidecars.filter((sidecar) => sidecar.prepullHold).length === 1
+            ? null
+            : '附加组件必须填写名称、镜像和预拉取命令,并且只能选择一个保持容器。',
+        workspaceOps:
+          EXEC_TARGET_PATTERN.test(form.workspaceExecTarget.trim()) &&
+          EXEC_TARGET_PATTERN.test(form.scriptExecTarget.trim()) &&
+          form.workspaceExecTarget.trim() !== form.scriptExecTarget.trim() &&
+          WORKSPACE_OP_KEYS.every((key) =>
+            form.workspaceOps[key].some((item) => item.trim() !== '')
           )
-        })
-          ? null
-          : '请补齐链能力执行目标、命令和有效超时,并选择重置方式。',
-    }
-    return next
-  }, [adapterLevel, capabilityImpl, code, eco, form, name, pluginRef]))
+            ? null
+            : '请明确不同的学生与私有脚本执行目标,并补齐工作区操作命令。',
+        privateArchive:
+          EXEC_TARGET_PATTERN.test(form.privateArchive.execTarget.trim()) &&
+          form.privateArchive.unpackTar.some((part) => part.trim() !== '')
+            ? null
+            : '请填写私有归档的执行目标与解包命令。',
+        capabilities:
+          Number(adapterLevel) < RuntimeAdapterLevel.STANDARD ||
+          capabilityImpl.trim() !== '' ||
+          pluginRef.trim() !== '' ||
+          (['deploy', 'tx', 'query', 'reset'] as const).every((key) => {
+            if (key === 'reset' && form.resetStrategy === 'recreate_runtime') return true
+            const capability = form.capabilities[key]
+            return (
+              capability.command.some((item) => item.trim() !== '') &&
+              EXEC_TARGET_PATTERN.test(capability.execTarget.trim()) &&
+              Number.isInteger(Number(capability.timeout)) &&
+              Number(capability.timeout) > 0
+            )
+          })
+            ? null
+            : '请补齐链能力执行目标、命令和有效超时,并选择重置方式。',
+      }
+      return next
+    }, [adapterLevel, capabilityImpl, code, eco, form, name, pluginRef])
+  )
 
   const submit = useCallback(
     async (event: React.FormEvent<HTMLFormElement>) => {
@@ -460,16 +479,16 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
 
   const levelHint = ADAPTER_LEVELS.find((item) => item.value === adapterLevel)?.hint
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>{editing ? `修改运行时配置 · ${runtime.name}` : '登记链运行时'}</ModalTitle>
-          <ModalDescription>
-            运行时声明使用字段编辑器维护；登记后进入联调状态，需经节点镜像预拉取与全链路自检验证。
-          </ModalDescription>
-        </ModalHeader>
-        <form onSubmit={submit} noValidate>
-          <ModalBody className="flex max-h-screen flex-col gap-4 overflow-y-auto">
+    <Drawer open onOpenChange={(open) => !open && !submitting && onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader>
+          <DrawerTitle>{editing ? `修改运行时配置 · ${runtime.name}` : '登记链运行时'}</DrawerTitle>
+          <DrawerDescription>
+            登记后进入接入中:还要在详情里登记镜像版本并通过自检,才会开放给学校。修改影响启动方式的配置后需要重新自检。
+          </DrawerDescription>
+        </DrawerHeader>
+        <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
+          <DrawerBody className="flex flex-col gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
                 label="运行时短名"
@@ -558,8 +577,13 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                 onValueChange={setStatus}
               />
             </FormField>
-            <section className="well flex flex-col gap-3 p-3">
-              <h3 className="text-sm font-medium text-ink">主环境</h3>
+            <FormGroup
+              title="主环境"
+              invalid={Boolean(
+                errors.workspaceDir || errors.container || errors.containerAccess || errors.ports
+              )}
+              defaultOpen
+            >
               <div className="grid gap-3 sm:grid-cols-3">
                 <FormField label="工作区目录" error={errors.workspaceDir}>
                   <Input
@@ -582,33 +606,50 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                   />
                 </FormField>
               </div>
-              <RuntimeContainerAccessFields label="主环境" value={form.containerAccess}
-                onChange={(value) => updateForm('containerAccess', value)} />
-              {errors.containerAccess ? <Callout tone="danger">{errors.containerAccess}</Callout> : null}
+              <RuntimeContainerAccessFields
+                label="主环境"
+                value={form.containerAccess}
+                onChange={(value) => updateForm('containerAccess', value)}
+              />
+              {errors.containerAccess ? (
+                <Callout tone="danger">{errors.containerAccess}</Callout>
+              ) : null}
               <PortEditor
                 ports={form.ports}
                 error={errors.ports}
                 onChange={(ports) => updateForm('ports', ports)}
               />
-            </section>
-            <section className="well flex flex-col gap-3 p-3">
-              <h3 className="text-sm font-medium text-ink">附加组件</h3>
+            </FormGroup>
+            <FormGroup title="附加组件" invalid={Boolean(errors.sidecars)}>
               <SidecarEditor
                 sidecars={form.sidecars}
                 error={errors.sidecars}
                 onChange={(sidecars) => updateForm('sidecars', sidecars)}
               />
-            </section>
-            <section className="well flex flex-col gap-3 p-3">
-              <h3 className="text-sm font-medium text-ink">工作区操作</h3>
+            </FormGroup>
+            <FormGroup title="工作区操作" invalid={Boolean(errors.workspaceOps)}>
               <div className="grid gap-3 sm:grid-cols-2">
-                <FormField label="学生工作区执行目标" htmlFor={`${fieldId}-workspace-target`} helper="填写已声明的 Pod/容器,学生终端与文件操作使用此处。">
-                  <Input id={`${fieldId}-workspace-target`} value={form.workspaceExecTarget}
-                    onChange={(event) => updateForm('workspaceExecTarget', event.target.value)} />
+                <FormField
+                  label="学生工作区执行目标"
+                  htmlFor={`${fieldId}-workspace-target`}
+                  helper="填写已声明的 Pod/容器,学生终端与文件操作使用此处。"
+                >
+                  <Input
+                    id={`${fieldId}-workspace-target`}
+                    value={form.workspaceExecTarget}
+                    onChange={(event) => updateForm('workspaceExecTarget', event.target.value)}
+                  />
                 </FormField>
-                <FormField label="私有脚本执行目标" htmlFor={`${fieldId}-script-target`} helper="必须与学生入口分开,挂载工作区并独享临时目录。">
-                  <Input id={`${fieldId}-script-target`} value={form.scriptExecTarget}
-                    onChange={(event) => updateForm('scriptExecTarget', event.target.value)} />
+                <FormField
+                  label="私有脚本执行目标"
+                  htmlFor={`${fieldId}-script-target`}
+                  helper="必须与学生入口分开,挂载工作区并独享临时目录。"
+                >
+                  <Input
+                    id={`${fieldId}-script-target`}
+                    value={form.scriptExecTarget}
+                    onChange={(event) => updateForm('scriptExecTarget', event.target.value)}
+                  />
                 </FormField>
               </div>
               <fieldset
@@ -639,100 +680,129 @@ export function RuntimeFormModal({ runtime, onClose, onSaved }: RuntimeFormModal
                   </p>
                 ) : null}
               </fieldset>
-            </section>
-            <section className="well flex flex-col gap-3 p-3">
-              <h3 className="text-sm font-medium text-ink">私有判题归档</h3>
-              <FormField label="私有归档执行目标" htmlFor={`${fieldId}-archive-target`} error={errors.privateArchive}>
-                <Input id={`${fieldId}-archive-target`} value={form.privateArchive.execTarget} invalid={Boolean(errors.privateArchive)}
-                  onChange={(event) => updateForm('privateArchive', { ...form.privateArchive, execTarget: event.target.value })} />
+            </FormGroup>
+            <FormGroup title="私有判题归档" invalid={Boolean(errors.privateArchive)}>
+              <FormField
+                label="私有归档执行目标"
+                htmlFor={`${fieldId}-archive-target`}
+                error={errors.privateArchive}
+              >
+                <Input
+                  id={`${fieldId}-archive-target`}
+                  value={form.privateArchive.execTarget}
+                  invalid={Boolean(errors.privateArchive)}
+                  onChange={(event) =>
+                    updateForm('privateArchive', {
+                      ...form.privateArchive,
+                      execTarget: event.target.value,
+                    })
+                  }
+                />
               </FormField>
-              <ArgvEditor label="私有归档解包命令" value={form.privateArchive.unpackTar}
-                onChange={(unpackTar) => updateForm('privateArchive', { ...form.privateArchive, unpackTar })} />
-            </section>
-            <section className="well flex flex-col gap-3 p-3">
-              <h3 className="text-sm font-medium text-ink">标准链能力命令</h3>
+              <ArgvEditor
+                label="私有归档解包命令"
+                value={form.privateArchive.unpackTar}
+                onChange={(unpackTar) =>
+                  updateForm('privateArchive', { ...form.privateArchive, unpackTar })
+                }
+              />
+            </FormGroup>
+            <FormGroup title="标准链能力命令" invalid={Boolean(errors.capabilities)}>
               <FormField label="重置方式" htmlFor={`${fieldId}-reset-strategy`}>
-                <Select id={`${fieldId}-reset-strategy`} value={form.resetStrategy || 'command'} options={[
-                  { value: 'command', label: '执行原生重置命令' },
-                  { value: 'recreate_runtime', label: '重建运行环境' },
-                ]} onValueChange={(value) => updateForm('resetStrategy', value === 'command' ? '' : value)} />
+                <Select
+                  id={`${fieldId}-reset-strategy`}
+                  value={form.resetStrategy || 'command'}
+                  options={[
+                    { value: 'command', label: '执行原生重置命令' },
+                    { value: 'recreate_runtime', label: '重建运行环境' },
+                  ]}
+                  onValueChange={(value) =>
+                    updateForm('resetStrategy', value === 'command' ? '' : value)
+                  }
+                />
               </FormField>
               <div className="grid gap-3 sm:grid-cols-2">
-                {(['deploy', 'tx', 'query', 'reset'] as const).map((key) => (
-                  key === 'reset' && form.resetStrategy === 'recreate_runtime' ? null :
-                  <fieldset
-                    key={key}
-                    className="grid gap-2"
-                    aria-describedby={
-                      errors.capabilities ? `${fieldId}-${key}-capability-error` : undefined
-                    }
-                    aria-invalid={errors.capabilities ? true : undefined}
-                  >
-                    <legend className="text-sm font-medium text-ink">
-                      {key === 'deploy'
-                        ? '部署能力'
-                        : key === 'tx'
-                          ? '交易能力'
-                          : key === 'query'
-                            ? '查询能力'
-                            : '重置能力'}
-                    </legend>
-                    <FormField label="链能力执行目标" htmlFor={`${fieldId}-${key}-target`}>
-                      <Input id={`${fieldId}-${key}-target`} value={form.capabilities[key].execTarget}
-                        onChange={(event) => updateCapability(key, 'execTarget', event.target.value)} />
-                    </FormField>
-                    <ArgvEditor
-                      label="命令参数"
-                      value={form.capabilities[key].command}
-                      onChange={(value) => updateCapability(key, 'command', value)}
-                    />
-                    <FormField label="超时秒数">
-                      <Input
-                        type="number"
-                        min={0}
-                        value={form.capabilities[key].timeout}
-                        onChange={(event) => updateCapability(key, 'timeout', event.target.value)}
+                {(['deploy', 'tx', 'query', 'reset'] as const).map((key) =>
+                  key === 'reset' && form.resetStrategy === 'recreate_runtime' ? null : (
+                    <fieldset
+                      key={key}
+                      className="grid gap-2"
+                      aria-describedby={
+                        errors.capabilities ? `${fieldId}-${key}-capability-error` : undefined
+                      }
+                      aria-invalid={errors.capabilities ? true : undefined}
+                    >
+                      <legend className="text-sm font-medium text-ink">
+                        {key === 'deploy'
+                          ? '部署能力'
+                          : key === 'tx'
+                            ? '交易能力'
+                            : key === 'query'
+                              ? '查询能力'
+                              : '重置能力'}
+                      </legend>
+                      <FormField label="链能力执行目标" htmlFor={`${fieldId}-${key}-target`}>
+                        <Input
+                          id={`${fieldId}-${key}-target`}
+                          value={form.capabilities[key].execTarget}
+                          onChange={(event) =>
+                            updateCapability(key, 'execTarget', event.target.value)
+                          }
+                        />
+                      </FormField>
+                      <ArgvEditor
+                        label="命令参数"
+                        value={form.capabilities[key].command}
+                        onChange={(value) => updateCapability(key, 'command', value)}
                       />
-                    </FormField>
-                    {errors.capabilities ? (
-                      <p
-                        id={`${fieldId}-${key}-capability-error`}
-                        role="alert"
-                        className="text-xs text-danger"
-                      >
-                        {errors.capabilities}
-                      </p>
-                    ) : null}
-                  </fieldset>
-                ))}
+                      <FormField label="超时秒数">
+                        <Input
+                          type="number"
+                          min={0}
+                          value={form.capabilities[key].timeout}
+                          onChange={(event) => updateCapability(key, 'timeout', event.target.value)}
+                        />
+                      </FormField>
+                      {errors.capabilities ? (
+                        <p
+                          id={`${fieldId}-${key}-capability-error`}
+                          role="alert"
+                          className="text-xs text-danger"
+                        >
+                          {errors.capabilities}
+                        </p>
+                      ) : null}
+                    </fieldset>
+                  )
+                )}
               </div>
-            </section>
-            <section className="well flex flex-col gap-3 p-3">
-              <h3 className="text-sm font-medium text-ink">数据卷域</h3>
+            </FormGroup>
+            <FormGroup title="数据卷域" invalid={false}>
               <VolumeEditor
                 volumes={form.volumes}
                 onChange={(volumes) => updateForm('volumes', volumes)}
               />
-            </section>
+            </FormGroup>
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
-          </ModalBody>
-          <ModalFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+          </DrawerBody>
+          <DrawerFooter>
+            <Button type="button" variant="outline" disabled={submitting} onClick={onClose}>
               取消
             </Button>
             <Button type="submit" variant="primary" loading={submitting}>
-              {editing ? '保存声明' : '登记运行时'}
+              {editing ? '保存配置' : '登记运行时'}
             </Button>
-          </ModalFooter>
+          </DrawerFooter>
         </form>
-      </ModalContent>
-    </Modal>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
 const CODE_PATTERN = /^[a-z0-9][a-z0-9-]{1,62}[a-z0-9]$/
 const EXEC_TARGET_PATTERN = /^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/
 
+/** PortEditor 运行时对外端口的逐行编辑(名称、容器端口、服务端口、协议),错误挂在整组上 */
 function PortEditor({
   ports,
   error,
@@ -832,6 +902,7 @@ function PortEditor({
   )
 }
 
+/** ArgvEditor 命令参数的逐项编辑:每个参数一行,不拼成整条命令字符串 */
 function ArgvEditor({
   label,
   value,
@@ -889,6 +960,7 @@ function ArgvEditor({
   )
 }
 
+/** SidecarEditor 伴随容器的逐个编辑(名称、镜像、预拉取与启动命令、访问权限),错误挂在整组上 */
 function SidecarEditor({
   sidecars,
   error,
@@ -915,8 +987,14 @@ function SidecarEditor({
           onClick={() =>
             onChange([
               ...sidecars,
-              { name: '', imageUrl: '', prepullCommand: [''], prepullHold: false,
-                command: [], access: readRuntimeContainerAccess({}) },
+              {
+                name: '',
+                imageUrl: '',
+                prepullCommand: [''],
+                prepullHold: false,
+                command: [],
+                access: readRuntimeContainerAccess({}),
+              },
             ])
           }
         >
@@ -940,10 +1018,17 @@ function SidecarEditor({
           <ArgvEditor
             label="启动命令"
             value={sidecar.command}
-            onChange={(command) => onChange(sidecars.map((item, i) => i === index ? { ...item, command } : item))}
+            onChange={(command) =>
+              onChange(sidecars.map((item, i) => (i === index ? { ...item, command } : item)))
+            }
           />
-          <RuntimeContainerAccessFields label={sidecar.name || `组件 ${index + 1}`} value={sidecar.access}
-            onChange={(access) => onChange(sidecars.map((item, i) => i === index ? { ...item, access } : item))} />
+          <RuntimeContainerAccessFields
+            label={sidecar.name || `组件 ${index + 1}`}
+            value={sidecar.access}
+            onChange={(access) =>
+              onChange(sidecars.map((item, i) => (i === index ? { ...item, access } : item)))
+            }
+          />
           <ArgvEditor
             label="预拉取命令"
             value={sidecar.prepullCommand}
@@ -996,6 +1081,7 @@ function SidecarEditor({
   )
 }
 
+/** VolumeEditor 数据卷域的逐行编辑(名称、挂载路径、学生访问、持久化方式与快照范围) */
 function VolumeEditor({
   volumes,
   onChange,
@@ -1057,11 +1143,7 @@ function VolumeEditor({
               { value: 'read_write', label: '可读写' },
             ]}
             onValueChange={(studentAccess) =>
-              onChange(
-                volumes.map((item, i) =>
-                  i === index ? { ...item, studentAccess } : item
-                )
-              )
+              onChange(volumes.map((item, i) => (i === index ? { ...item, studentAccess } : item)))
             }
           />
           <Select
@@ -1074,11 +1156,7 @@ function VolumeEditor({
               { value: 'snapshot', label: '快照保留' },
             ]}
             onValueChange={(persistence) =>
-              onChange(
-                volumes.map((item, i) =>
-                  i === index ? { ...item, persistence } : item
-                )
-              )
+              onChange(volumes.map((item, i) => (i === index ? { ...item, persistence } : item)))
             }
           />
           <Select
@@ -1091,11 +1169,7 @@ function VolumeEditor({
               { value: 'snapshot_enabled', label: '开启快照时纳入' },
             ]}
             onValueChange={(snapshotScope) =>
-              onChange(
-                volumes.map((item, i) =>
-                  i === index ? { ...item, snapshotScope } : item
-                )
-              )
+              onChange(volumes.map((item, i) => (i === index ? { ...item, snapshotScope } : item)))
             }
           />
           <Button

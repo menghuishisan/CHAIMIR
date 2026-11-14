@@ -454,6 +454,8 @@ func infraResourceSpecFromManifest(manifest platformInfraManifest, imageURL stri
 	return spec, nil
 }
 
+// platformManifestSelftestCommand 取清单 selftest.commands 的第一条命令作为自检与预拉取命令;
+// 没有声明时返回空,结构不合法或带空参数时报错。
 func platformManifestSelftestCommand(raw map[string]any) ([]string, error) {
 	commandsRaw, ok := raw["commands"]
 	if !ok {
@@ -507,6 +509,8 @@ func secretEnvFromManifest(requirements []manifestSecretRequirement, component s
 	return out, nil
 }
 
+// toolKindOrDisabled 取清单声明的工具类型;认不出时该工具按停用写入(调用处写明停用原因),
+// 但 kind 列仍要一个合法取值,记为命令行工具。
 func toolKindOrDisabled(m toolManifest) int16 {
 	kind, err := toolKindFromManifest(m.Tool.Kind)
 	if err != nil {
@@ -626,6 +630,11 @@ func syncPlatformJudgers(ctx context.Context, database *db.DB, root string) erro
 		}
 		items = append(items, catalogJudger{id: platformJudgerID(m.Name), code: m.Name, name: m.Description, typ: platformJudgerType(m.Judger.Type), executorRef: m.Name, runtimeNeeded: strings.TrimSpace(m.Judger.RuntimeCode) != "", defaultTimeout: m.Resources.TimeoutSeconds, resource: resource})
 	}
+	items = append(items, catalogJudger{
+		id: platformJudgerID(contracts.JudgerCodeTheoryQuestion), code: contracts.JudgerCodeTheoryQuestion, name: "理论题判分",
+		typ: 7, executorRef: "m3-backend-strategy", defaultTimeout: 30,
+		resource: judge.JudgerResourceSpec{TimeoutSec: 30},
+	})
 	onchainResource := judge.JudgerResourceSpec{}
 	onchainComposition := contracts.SandboxCompositionSpec{ID: "judge:onchain-assert", Runtimes: []contracts.CompositionRuntimeRef{{InstanceCode: "source-chain", Code: "evm-foundry", ImageVersion: platformRuntimeImageVersion("evm-foundry")}}, WorkspaceRuntimeInstance: "source-chain", AccessProfile: contracts.SandboxAccessJudgePrivate}
 	genesisRef := strings.TrimSpace(genesisRefs["testcase-evm"])
@@ -786,6 +795,7 @@ func platformPrivateSidecars(items []workload.ComponentSpec) []contracts.Sandbox
 	return out
 }
 
+// clonePlatformStringMap 复制字符串映射,避免种子结构共用同一个底层 map;nil 原样返回。
 func clonePlatformStringMap(input map[string]string) map[string]string {
 	if input == nil {
 		return nil
@@ -797,6 +807,7 @@ func clonePlatformStringMap(input map[string]string) map[string]string {
 	return out
 }
 
+// platformJudgerType 把清单里的判题器类型换成库里的编号:static-scan 为静态扫描(4),其余为测试用例判题(1)。
 func platformJudgerType(raw string) int16 {
 	if strings.EqualFold(strings.TrimSpace(raw), "static-scan") {
 		return 4
@@ -804,6 +815,7 @@ func platformJudgerType(raw string) int16 {
 	return 1
 }
 
+// platformJudgerID 按判题器编码派生稳定编号,重复执行种子时同一判题器落到同一行。
 func platformJudgerID(code string) int64 {
 	return platformStableID("judger", code)
 }

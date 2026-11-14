@@ -15,6 +15,8 @@ export interface SegmentedOption {
   label: string;
   /** 可选前置图标(Lucide 组件) */
   icon?: LucideIcon;
+  /** 可选计数(接口返回分组计数时传);未知时不传,不显示 0 */
+  count?: number;
 }
 
 export interface SegmentedControlProps {
@@ -50,6 +52,7 @@ const segmentedItemVariants = cva(
   },
 );
 
+/** SegmentedControl 分段切换器(视图或模式切换,可带数量) */
 export function SegmentedControl({
   options,
   value,
@@ -81,6 +84,9 @@ export function SegmentedControl({
         >
           {option.icon && <Icon icon={option.icon} size="sm" />}
           {option.label}
+          {option.count !== undefined && (
+            <span className="text-xs tabular-nums opacity-70">{option.count}</span>
+          )}
         </RadioGroupPrimitive.Item>
       ))}
     </RadioGroupPrimitive.Root>

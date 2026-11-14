@@ -169,6 +169,12 @@ SELECT id, tenant_id, contest_id, name, invite_code, status, created_at
 FROM team
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: ListTeamNamesByIDs :many
+-- 榜单与成绩快照只存 team_id:读取时按当前页的队伍编号一次取队名(引用不拷贝,快照里不存名字)。
+SELECT id, name
+FROM team
+WHERE tenant_id = sqlc.arg(tenant_id) AND contest_id = sqlc.arg(contest_id) AND id = ANY(sqlc.arg(team_ids)::bigint[]);
+
 -- name: GetTeamByInviteCode :one
 SELECT id, tenant_id, contest_id, name, invite_code, status, created_at
 FROM team
@@ -556,6 +562,7 @@ JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
 WHERE m.tenant_id = $1 AND m.contest_id = $2
   AND (sqlc.arg(team_id)::bigint = 0 OR a.team_id = sqlc.arg(team_id)::bigint OR b.team_id = sqlc.arg(team_id)::bigint)
+  AND (sqlc.arg(status)::smallint = 0 OR m.status = sqlc.arg(status)::smallint)
 ORDER BY m.matched_at DESC, m.id DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
@@ -565,7 +572,18 @@ FROM battle_match m
 JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
 JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
 WHERE m.tenant_id = $1 AND m.contest_id = $2
-  AND (sqlc.arg(team_id)::bigint = 0 OR a.team_id = sqlc.arg(team_id)::bigint OR b.team_id = sqlc.arg(team_id)::bigint);
+  AND (sqlc.arg(team_id)::bigint = 0 OR a.team_id = sqlc.arg(team_id)::bigint OR b.team_id = sqlc.arg(team_id)::bigint)
+  AND (sqlc.arg(status)::smallint = 0 OR m.status = sqlc.arg(status)::smallint);
+
+-- name: CountBattleMatchesByStatus :many
+-- 对局列表的状态分段计数:视角与列表相同(组织者全部 / 学生本队),不套用状态筛选。
+SELECT m.status, count(*)::bigint AS count
+FROM battle_match m
+JOIN battle_entry a ON a.tenant_id = m.tenant_id AND a.id = m.entry_a_id
+JOIN battle_entry b ON b.tenant_id = m.tenant_id AND b.id = m.entry_b_id
+WHERE m.tenant_id = $1 AND m.contest_id = $2
+  AND (sqlc.arg(team_id)::bigint = 0 OR a.team_id = sqlc.arg(team_id)::bigint OR b.team_id = sqlc.arg(team_id)::bigint)
+GROUP BY m.status;
 
 -- name: ListBattleReplayMatchesForTeam :many
 -- 回放专用时间窗只读取已完成对局,并由服务端携带本队视角和当时生效的参战物。
@@ -811,6 +829,15 @@ WHERE tenant_id = sqlc.arg(tenant_id)::bigint
   AND (sqlc.arg(prevalidate_status)::smallint = 0 OR prevalidate_status = sqlc.arg(prevalidate_status)::smallint)
 ORDER BY updated_at DESC, id DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
+
+-- name: CountVulnProblemsByStatus :many
+-- 漏洞题工坊的两组分段计数:按状态与预验证结果分组;两组都套用来源筛选,各自不套用本组筛选,
+-- 但套用另一组的筛选(选了「草稿」后,验证结果的数字只数草稿)。
+SELECT status, prevalidate_status, COUNT(*)::bigint AS count
+FROM vuln_problem
+WHERE tenant_id = sqlc.arg(tenant_id)::bigint
+  AND (sqlc.arg(source_id)::bigint = 0 OR source_id = sqlc.arg(source_id)::bigint)
+GROUP BY status, prevalidate_status;
 
 -- name: CountVulnProblems :one
 SELECT count(*)::bigint

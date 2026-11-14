@@ -1,4 +1,4 @@
-// 漏洞题预验证(漏洞题工坊页内)。
+// 漏洞题预验证(漏洞题工坊页内)。设计 §7.4:在右侧大抽屉中进行,显示过程和结果。
 //
 // 预验证在隔离沙箱里跑两遍:正向执行 PoC 应让全部断言成立,反向不执行 PoC 应让全部断言不成立。
 // 双向通过才算这道题「可解可判」,才能固化进题库。
@@ -22,13 +22,13 @@ import {
   Button,
   Callout,
   DescriptionList,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   StatusIndicator,
   toast,
 } from '@chaimir/ui'
@@ -142,15 +142,15 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
       : result.prevalidate_status
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>预验证漏洞题</ModalTitle>
-          <ModalDescription>
+    <Drawer open onOpenChange={(open) => !open && onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader>
+          <DrawerTitle>预验证漏洞题</DrawerTitle>
+          <DrawerDescription>
             在隔离环境里跑两遍:执行攻击步骤时断言应全部成立,不执行时应全部不成立。
-          </ModalDescription>
-        </ModalHeader>
-        <ModalBody className="flex flex-col gap-4">
+          </DrawerDescription>
+        </DrawerHeader>
+        <DrawerBody className="flex flex-col gap-4">
           <DescriptionList
             dense
             columns={2}
@@ -172,6 +172,11 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
             toolsHelper="按攻击步骤的需要勾选;不确定就不勾"
           />
 
+          {running ? (
+            <Callout tone="info" title="正在验证">
+              正在准备隔离环境并依次跑正向、反向两遍,通常需要一两分钟。完成后结果会显示在下方。
+            </Callout>
+          ) : null}
           {formError ? <Callout tone="danger">{formError}</Callout> : null}
 
           {result.prevalidate_status === VulnPrevalidateStatus.PENDING &&
@@ -215,8 +220,8 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
               />
             </div>
           )}
-        </ModalBody>
-        <ModalFooter>
+        </DrawerBody>
+        <DrawerFooter>
           <Button variant="outline" onClick={onClose}>
             关闭
           </Button>
@@ -231,9 +236,9 @@ export function VulnPrevalidateModal({ problem, onClose, onDone }: VulnPrevalida
               {Object.keys(result.prevalidate_detail).length === 0 ? '开始验证' : '重新验证'}
             </Button>
           ) : null}
-        </ModalFooter>
-      </ModalContent>
-    </Modal>
+        </DrawerFooter>
+      </DrawerContent>
+    </Drawer>
   )
 }
 
@@ -261,7 +266,7 @@ interface ValidationSectionProps {
 function ValidationSection({ title, description, expectPassed, section }: ValidationSectionProps) {
   if (section === undefined) {
     return (
-      <div className="well p-4">
+      <div className="rounded-md bg-surface-hover p-4">
         <p className="text-base text-ink">{title}</p>
         <p className="text-sm text-ink-sub">这一段没有执行到。</p>
       </div>
@@ -269,7 +274,7 @@ function ValidationSection({ title, description, expectPassed, section }: Valida
   }
 
   return (
-    <div className="flex flex-col gap-3 well p-4">
+    <div className="flex flex-col gap-3 rounded-md bg-surface-hover p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-base text-ink">{title}</p>
@@ -308,7 +313,7 @@ function ValidationSection({ title, description, expectPassed, section }: Valida
                 <p className="text-xs text-ink-sub">期望:{assertion.expected}</p>
               ) : null}
               {assertion.actual ? (
-                <p className="truncate font-mono text-xs text-ink-faint">实际:{assertion.actual}</p>
+                <p className="truncate font-mono text-xs text-ink-sub">实际:{assertion.actual}</p>
               ) : null}
               {!assertion.passed && assertion.hint ? (
                 <p className="text-xs text-warning">{assertion.hint}</p>

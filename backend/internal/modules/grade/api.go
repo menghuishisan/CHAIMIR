@@ -40,7 +40,8 @@ func RegisterRoutes(r gin.IRouter, svc *Service, authn *auth.Manager, roles cont
 	all.GET("/students/:id/gpa", api.studentGPA)
 	admin.POST("/students/:id/recompute", api.recomputeStudentGrade)
 	student.POST("/appeals", api.createAppeal)
-	teacher.GET("/appeals", api.listAppeals)
+	// 申诉列表师生同路由按身份分视角:学生只见本人,教师见授课课程,校管见全校
+	all.GET("/appeals", api.listAppeals)
 	teacher.POST("/appeals/:id/accept", api.acceptAppeal)
 	teacher.POST("/appeals/:id/reject", api.rejectAppeal)
 	admin.GET("/warning-rules", api.getWarningRules)
@@ -140,8 +141,13 @@ func (a gradeAPI) listReviews(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out5, total, p, s, err := a.svc.ListReviews(c.Request.Context(), status, isLocked, page, size)
-	httpx.WritePage(c, out5, total, p, s, err)
+	// semester_id 省略表示不按学期筛选
+	semesterID, ok := httpx.QueryID(c, "semester_id", false)
+	if !ok {
+		return
+	}
+	out5, total, p, s, facets, err := a.svc.ListReviews(c.Request.Context(), status, isLocked, semesterID, page, size)
+	httpx.WritePageWithFacets(c, out5, total, p, s, facets.Map(), err)
 }
 
 // approveReview 绑定审核通过操作。
@@ -228,8 +234,8 @@ func (a gradeAPI) listAppeals(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out9, total, p, s, err := a.svc.ListAppeals(c.Request.Context(), status, page, size)
-	httpx.WritePage(c, out9, total, p, s, err)
+	out9, total, p, s, facets, err := a.svc.ListAppeals(c.Request.Context(), status, page, size)
+	httpx.WritePageWithFacets(c, out9, total, p, s, facets.Map(), err)
 }
 
 // acceptAppeal 绑定申诉受理操作。
@@ -283,8 +289,12 @@ func (a gradeAPI) listWarnings(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out11, total, p, s, err := a.svc.ListWarnings(c.Request.Context(), studentID, status, page, size)
-	httpx.WritePage(c, out11, total, p, s, err)
+	semesterID, ok := httpx.QueryID(c, "semester_id", false)
+	if !ok {
+		return
+	}
+	out11, total, p, s, facets, err := a.svc.ListWarnings(c.Request.Context(), studentID, status, semesterID, page, size)
+	httpx.WritePageWithFacets(c, out11, total, p, s, facets.Map(), err)
 }
 
 // ackWarning 绑定学生确认预警操作。

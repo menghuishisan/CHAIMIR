@@ -1,51 +1,46 @@
-// 学校看板页(校管侧栏,/school-admin/dashboard)。
-//
+// 学校看板页(校管侧栏,/school-admin/dashboard)。设计 §7.5:
+// 第一行关键数字小卡(自动排列):账号(总数 / 活跃)、师生(教师 / 学生,卡内比例条)、课程(进行中 / 总数)、
+// 实验(数量 / 运行中实例)、竞赛(进行中 / 总数)、实验环境(运行中 · 配额使用比例条);
+// 第二行「需要处理」(待审核成绩、待处理申诉、待处理告警,数字用已有列表的总数接口取,每项可点进对应页面);
+// 下方趋势图按数据形状选图,时间范围切换在图表区右上角。
 // 看板不是登录首屏(FE-5):校管登录直达账号管理,看板是主动查看的概览。
-// 一页承载本校当下概览 + 运营统计趋势 —— 统计是看板内页(对齐清单 §3.3),
-// 两者同源于 M9,拆成两个侧栏项会让管理员在两页之间来回对照。
-//
-// 指标带用真实聚合值;趋势区与平台看板共用 StatisticsTrendSection(两端接口同形,只有取数不同)。
 
-import { useNavigate } from 'react-router'
-import {
-  Activity,
-  LayoutDashboard,
-  Users,
-} from 'lucide-react'
-import type { Dashboard } from '@chaimir/api-client'
-import {
-  Breadcrumb,
-  Button,
-  PageHeader,
-  PageScaffold,
-  PageSection,
-  Skeleton,
-  Stat,
-} from '@chaimir/ui'
+import { LayoutDashboard } from 'lucide-react'
+import { AlertStatus, GradeAppealStatus, GradeReviewStatus } from '@chaimir/api-client'
+import { PageHeader, PageScaffold, Skeleton } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
-import {
-  DashboardCompositionSection,
-  DashboardGeneratedFooter,
-  DashboardQuotaSection,
-  DashboardTeachingPracticeSection,
-} from '../../components/DashboardSections'
+import { useAsyncResource, useResourceTotal } from '../../../../hooks'
+import { DashboardAttention, DashboardGeneratedNote, DashboardKeyFigures } from '../../components/DashboardSections'
 import { StatisticsTrendSection } from '../../components/StatisticsTrendSection'
 
 /**
- * SchoolAdminDashboardPage 呈现本校概览与运营统计。
+ * SchoolAdminDashboardPage 呈现本校概览、需要处理的事与运营趋势。
  */
 export default function SchoolAdminDashboardPage() {
   const dashboard = useAsyncResource(() => api.admin.getSchoolDashboard(), [], () => false)
+  // 「需要处理」的数字取各列表的服务端总数(只取一条),与对应页面同一口径
+  const pendingReviews = useResourceTotal(
+    (params) => api.grade.listReviews({ status: GradeReviewStatus.PENDING, ...params }),
+    [],
+    dashboard.refreshVersion,
+  )
+  const pendingAppeals = useResourceTotal(
+    (params) => api.grade.listAppeals({ status: GradeAppealStatus.PENDING, ...params }),
+    [],
+    dashboard.refreshVersion,
+  )
+  const pendingAlerts = useResourceTotal(
+    (params) => api.admin.listAlertEvents({ status: AlertStatus.PENDING, ...params }),
+    [],
+    dashboard.refreshVersion,
+  )
 
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '概览' }]} />}
         title="学校看板"
-        description="本校账号、课程、实验与竞赛的当下概览,以及近期的运营趋势。"
-        icon={LayoutDashboard}
+        actions={dashboard.status === 'success' && dashboard.data ? <DashboardGeneratedNote generatedAt={dashboard.data.generated_at} /> : undefined}
       />
 
       <ResourceState
@@ -54,83 +49,31 @@ export default function SchoolAdminDashboardPage() {
         emptyTitle="暂无看板数据"
         emptyDescription="学校开始使用后会在这里显示概览。"
         skeleton={
-          <div className="flex flex-col gap-4">
-            <Skeleton variant="block" />
-            <Skeleton variant="line" lines={4} />
+          <div className="metric-band mb-6 gap-4" aria-busy="true">
+            {Array.from({ length: 6 }, (_, index) => (
+              <div key={index} className="rounded-lg bg-surface p-4 shadow-xs">
+                <Skeleton variant="line" lines={3} />
+              </div>
+            ))}
           </div>
         }
       >
-        {(data) => <DashboardContent dashboard={data} />}
+        {(data) => <DashboardKeyFigures dashboard={data} />}
       </ResourceState>
+
+      <DashboardAttention
+        items={[
+          { key: 'reviews', label: '待审核成绩', count: pendingReviews, to: '/school-admin/approvals?status=pending' },
+          { key: 'appeals', label: '待处理申诉', count: pendingAppeals, to: '/school-admin/appeals' },
+          { key: 'alerts', label: '待处理告警', count: pendingAlerts, to: '/school-admin/system-alerts' },
+        ]}
+      />
 
       <StatisticsTrendSection
         load={(range) => api.admin.getSchoolStatistics(range)}
         idPrefix="school"
-        description="按日聚合的历史快照。先看趋势图,需要逐日数字时在每张图上切到数据表。"
+        description="按日聚合的历史快照;每张图都可以切到数据表看逐日数字。"
       />
     </PageScaffold>
-  )
-}
-
-/**
- * DashboardContent 渲染概览指标带与资源配额快照。
- *
- * 归族:看板族(规范 §6.5.3 第 ② 族)—— 全族唯一保留 Stat 大卡的一族,
- * 因为这一页的主体就是数字本身。指标带用 `metric-band`(auto-fit),项数变化时不留空版面。
- */
-function DashboardContent({ dashboard }: { dashboard: Dashboard }) {
-  const navigate = useNavigate()
-
-  return (
-    <>
-      {/* 教师/学生两项不在这里重复:它们的构成由下方环图回答(§6.5.0 通则 1 不重复说同一件事) */}
-      <PageSection title="账号" description="本校账号的开通规模与活跃情况。">
-        <div className="metric-band gap-4">
-          <Stat label="账号总数" value={dashboard.account_count} icon={Users} hint="含管理员" />
-          <Stat
-            label="活跃账号"
-            value={dashboard.active_account_count}
-            icon={Activity}
-            hint="近期有登录记录"
-          />
-        </div>
-      </PageSection>
-
-      <PageSection title="常用管理直达" description="从学校运行概览直接进入需要处理的管理任务。">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Button variant="outline" size="sm" className="justify-start" onClick={() => navigate('/school-admin/users')}>
-            账号管理
-          </Button>
-          <Button variant="outline" size="sm" className="justify-start" onClick={() => navigate('/school-admin/organization')}>
-            组织架构
-          </Button>
-          <Button variant="outline" size="sm" className="justify-start" onClick={() => navigate('/school-admin/approvals')}>
-            成绩审核
-          </Button>
-          <Button variant="outline" size="sm" className="justify-start" onClick={() => navigate('/school-admin/alerts')}>
-            学业预警
-          </Button>
-        </div>
-      </PageSection>
-
-      <DashboardCompositionSection dashboard={dashboard} />
-
-      <DashboardTeachingPracticeSection dashboard={dashboard} />
-
-      <DashboardQuotaSection
-        snapshot={dashboard.resource_quota_snapshot}
-        title="资源配额"
-        description="实验环境并发与资源上限由平台管理员设定。"
-      />
-
-      <DashboardGeneratedFooter generatedAt={dashboard.generated_at}>
-        <Button variant="outline" size="sm" onClick={() => navigate('/school-admin/users')}>
-          去账号管理
-        </Button>
-        <Button variant="ghost" size="sm" onClick={() => navigate('/school-admin/system-alerts')}>
-          去学校告警
-        </Button>
-      </DashboardGeneratedFooter>
-    </>
   )
 }

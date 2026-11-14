@@ -1,16 +1,16 @@
-// 账号管理页(校管首屏侧栏,/school-admin/users)。
+// 账号管理页(校管首屏侧栏,/school-admin/users)。设计 §7.5:
+// 页头 +「新增账号」,次要「批量导入」;工具条:状态分段(待激活 / 正常 / 已停用 / 已归档 / 全部)、身份、班级、搜索,
+// 都写进地址;表格(勾选、姓名与编号、身份、所属组织、角色、状态、开通时间),整行打开账号抽屉(详情与编辑同一处);
+// 行内更多菜单按状态给:停用或启用 / 重置密码 / 强制下线 / 授予或撤销管理员 / 归档或恢复 / 注销。
+// 勾选后表格上方出现批量条(已选 n 个、批量停用、批量恢复、取消选择);筛选或翻页后选择自动清空。
+// 导入在右侧大抽屉里分三步进行,导入记录也在那里。
 //
-// 学校管理员的第一件事:开通与维护教师/学生账号。一页承载列表、状态流转、
-// 管理员授权与批量操作;新增/编辑/导入是本页的流程页,从这里进入(对齐清单 §3.3)。
-//
-// 账号状态是有向流转:待激活 → 正常 ⇄ 已停用 → 已归档 ⇄ 恢复,注销不可逆。
-// 每个动作单独确认并说明后果,避免误点改变学生登录能力。
+// 账号状态是有向流转:待激活 → 正常 ⇄ 已停用 → 已归档 ⇄ 恢复,注销不可逆;每个动作单独确认并说明后果。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { Link } from 'react-router'
 import {
   CircleSlash,
-  Download,
   KeyRound,
   LogOut,
   MoreVertical,
@@ -21,29 +21,20 @@ import {
   UserPlus,
   Users,
 } from 'lucide-react'
-import {
-  AccountStatus,
-  BaseIdentity,
-  UserRole,
-  type Account,
-} from '@chaimir/api-client'
+import { AccountStatus, BaseIdentity, UserRole, type Account } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
+  buttonVariants,
   Callout,
   Checkbox,
-  DataPanel,
-  FilterBar,
-  FilterField,
+  Icon,
   IconButton,
-  Input,
   Menu,
   MenuContent,
   MenuItem,
   MenuSeparator,
   MenuTrigger,
-  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -53,7 +44,6 @@ import {
   ModalTitle,
   PageHeader,
   PageScaffold,
-  PageSection,
   Pagination,
   SegmentedControl,
   Select,
@@ -63,89 +53,72 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
-import { downloadAttachment } from '../../../../utils/downloadAttachment'
-import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
-import { formatDate } from '../../../../utils/formatters'
-import {
-  accountStatusLabel,
-  baseIdentityLabel,
-  userRoleLabel,
-} from '../../../../utils/labels/identity'
+import { ResourceError } from '../../../../components/ResourceState'
+import { SearchBox } from '../../../../components/SearchBox'
+import { useAsyncResource, usePagedResource, useUrlState } from '../../../../hooks'
+import { segmentCounts } from '../../../../utils/facets'
+import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
+import { accountStatusLabel, baseIdentityLabel, userRoleLabel } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { accountStatusTone } from '../../statusPresentation'
 import { AccountFormModal } from './account-form'
 import { AccountImportModal } from './account-import'
-import { AccountImportBatches } from './account-batches'
 import { ResetPasswordModal } from './account-reset-password'
 
-/** 状态筛选项:值为空串表示不过滤。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(AccountStatus.PENDING), label: '待激活' },
-  { value: String(AccountStatus.ACTIVE), label: '正常' },
-  { value: String(AccountStatus.DISABLED), label: '已停用' },
-  { value: String(AccountStatus.ARCHIVED), label: '已归档' },
+/** 地址参数:status 状态分段,role 身份,class 班级(空为全部),q 搜索;页码在 page */
+const USERS_QUERY = {
+  status: { defaultValue: 'all', allowed: ['all', 'pending', 'active', 'disabled', 'archived'] },
+  role: { defaultValue: 'all', allowed: ['all', 'teacher', 'student'] },
+  class: { defaultValue: '' },
+  q: { defaultValue: '' },
+} as const
+
+const STATUS_SEGMENTS = [
+  { value: 'pending', label: '待激活', status: AccountStatus.PENDING },
+  { value: 'active', label: '正常', status: AccountStatus.ACTIVE },
+  { value: 'disabled', label: '已停用', status: AccountStatus.DISABLED },
+  { value: 'archived', label: '已归档', status: AccountStatus.ARCHIVED },
+  { value: 'all', label: '全部' },
 ] as const
 
-/** 身份筛选项:值为空串表示不过滤。 */
-const ROLE_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(BaseIdentity.TEACHER), label: '教师' },
-  { value: String(BaseIdentity.STUDENT), label: '学生' },
-] as const
+/** 班级筛选里「全部班级」的取值(下拉不接受空串作选项值) */
+const ALL_CLASSES = 'all'
 
 /** 单账号可执行的状态动作。 */
-type AccountAction =
-  | 'disable'
-  | 'enable'
-  | 'archive'
-  | 'restore'
-  | 'cancel'
-  | 'force-logout'
-  | 'grant-admin'
-  | 'revoke-admin'
+type AccountAction = 'disable' | 'enable' | 'archive' | 'restore' | 'cancel' | 'force-logout' | 'grant-admin' | 'revoke-admin'
 
 const ACTION_COPY: Record<AccountAction, { title: string; description: string; confirm: string; danger?: boolean }> = {
   disable: {
-    title: '确认停用账号',
+    title: '停用这个账号?',
     description: '停用后这个人无法登录,已有的课程、作业与成绩记录保留。可以随时重新启用。',
     confirm: '确认停用',
   },
-  enable: {
-    title: '确认启用账号',
-    description: '启用后这个人可以正常登录。',
-    confirm: '确认启用',
-  },
+  enable: { title: '启用这个账号?', description: '启用后这个人可以正常登录。', confirm: '确认启用' },
   archive: {
-    title: '确认归档账号',
+    title: '归档这个账号?',
     description: '归档用于毕业或离职:账号不再出现在常规名单里,历史数据保留。可以恢复。',
     confirm: '确认归档',
   },
-  restore: {
-    title: '确认恢复账号',
-    description: '恢复后账号回到正常状态,可以重新登录。',
-    confirm: '确认恢复',
-  },
+  restore: { title: '恢复这个账号?', description: '恢复后账号回到正常状态,可以重新登录。', confirm: '确认恢复' },
   cancel: {
-    title: '确认注销账号',
-    description: '注销不可撤销。注销后手机号与学工号被释放,这个人无法再登录,历史数据以匿名形式保留。',
+    title: '注销这个账号?',
+    description: '注销不能撤销。注销后手机号与学工号被释放,这个人无法再登录,历史数据以匿名形式保留。',
     confirm: '确认注销',
     danger: true,
   },
   'force-logout': {
-    title: '确认强制下线',
-    description: '这个人当前所有登录会话会立即失效,需要重新登录。适用于设备丢失或账号异常。',
+    title: '强制下线?',
+    description: '这个人当前所有登录会立即失效,需要重新登录。适用于设备丢失或账号异常。',
     confirm: '确认下线',
   },
   'grant-admin': {
-    title: '确认授予学校管理员',
+    title: '授予学校管理员?',
     description: '授予后这个人可以管理全校账号、组织架构、成绩审核与学校配置。请谨慎授予。',
     confirm: '确认授予',
   },
   'revoke-admin': {
-    title: '确认撤销学校管理员',
-    description: '撤销后这个人回到原本的教师或学生身份,不能再进入管理端。',
+    title: '撤销学校管理员?',
+    description: '撤销后这个人回到原本的教师身份,不能再进入管理端。',
     confirm: '确认撤销',
   },
 }
@@ -154,36 +127,56 @@ const ACTION_COPY: Record<AccountAction, { title: string; description: string; c
  * SchoolAdminUsersPage 承载账号列表、状态流转与批量操作。
  */
 export default function SchoolAdminUsersPage() {
-  const navigate = useNavigate()
-  const [roleFilter, setRoleFilter] = useState<string>('')
-  const [statusFilter, setStatusFilter] = useState<string>('')
-  const [classFilter, setClassFilter] = useState<string>('')
-  const [keyword, setKeyword] = useState('')
-  const [searchTerm, setSearchTerm] = useState('')
+  const [query, setQuery] = useUrlState(USERS_QUERY)
   const [formTarget, setFormTarget] = useState<{ account?: Account } | undefined>()
   const [importOpen, setImportOpen] = useState(false)
   const [resetTarget, setResetTarget] = useState<Account>()
   const [confirm, setConfirm] = useState<{ action: AccountAction; account: Account }>()
-  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [batchAction, setBatchAction] = useState<'disable' | 'restore'>()
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
 
+  const statusFilter = STATUS_SEGMENTS.find((segment) => segment.value === query.status)
   const accounts = usePagedResource<Account>(
     (params) =>
       api.identity.getAccounts({
-        role: roleFilter ? (Number(roleFilter) as BaseIdentity) : undefined,
-        status: statusFilter ? (Number(statusFilter) as AccountStatus) : undefined,
-        class_id: classFilter || undefined,
-        keyword: searchTerm || undefined,
+        role: query.role === 'teacher' ? BaseIdentity.TEACHER : query.role === 'student' ? BaseIdentity.STUDENT : undefined,
+        status: statusFilter && 'status' in statusFilter ? statusFilter.status : undefined,
+        class_id: query.class || undefined,
+        keyword: query.q || undefined,
         ...params,
       }),
-    [roleFilter, statusFilter, classFilter, searchTerm],
+    [query.class, query.q, query.role, query.status],
+    { urlPageKey: 'page' },
   )
 
-  const classes = useAsyncResource(() => api.identity.listClasses(), [], () => false)
+  // 勾选只属于当前这一页、这组筛选:换筛选或翻页就作废,不对看不见的行做批量操作
+  const selectionScope = `${query.status}|${query.role}|${query.class}|${query.q}|${accounts.page}|${accounts.refreshVersion}`
+  const [selection, setSelection] = useState<{ scope: string; ids: Set<string> }>({ scope: '', ids: new Set() })
+  const selected = useMemo(
+    () => (selection.scope === selectionScope ? selection.ids : new Set<string>()),
+    [selection, selectionScope],
+  )
+  const setSelected = (ids: Set<string>) => setSelection({ scope: selectionScope, ids })
 
-  /** runAction 执行单账号动作。每个动作后清空选择,避免对已变更的账号继续批量操作。 */
+  // 组织名称:教师挂院系、学生挂班级(后端 validateAccountOrgForProfile 同一口径)
+  const org = useAsyncResource(
+    () => Promise.all([api.identity.listDepartments(), api.identity.listClasses()]).then(([departments, classes]) => ({ departments, classes })),
+    [],
+    () => false,
+  )
+  const orgName = useMemo(() => {
+    const names = new Map<string, string>()
+    for (const department of org.data?.departments ?? []) names.set(department.id, department.name)
+    for (const entity of org.data?.classes ?? []) names.set(entity.id, entity.name)
+    return names
+  }, [org.data])
+
+  // 分段计数取列表接口的 facets:套用身份、班级与搜索,不套用状态筛选
+  const facets = accounts.status === 'success' || accounts.status === 'empty' ? accounts.data?.facets : undefined
+  const counts = segmentCounts(facets, 'status', STATUS_SEGMENTS, (segment) => ('status' in segment ? segment.status : undefined))
+
+  /** runAction 执行单账号动作;列表重读后勾选随之作废 */
   const runAction = useCallback(async () => {
     if (!confirm) return
     setWorking(true)
@@ -198,9 +191,8 @@ export default function SchoolAdminUsersPage() {
       if (action === 'force-logout') await api.identity.forceLogoutAccount(account.id)
       if (action === 'grant-admin') await api.identity.grantSchoolAdmin(account.id)
       if (action === 'revoke-admin') await api.identity.revokeSchoolAdmin(account.id)
-      toast.success('操作已完成')
+      toast.success(`${ACTION_COPY[action].confirm.replace('确认', '已')}:${account.name}`)
       setConfirm(undefined)
-      setSelected(new Set())
       accounts.reload()
     } catch (error) {
       setActionError(userFacingErrorMessage(error, '操作没有完成,请稍后重试。'))
@@ -209,7 +201,7 @@ export default function SchoolAdminUsersPage() {
     }
   }, [accounts, confirm])
 
-  /** runBatch 批量停用或恢复。后端另有按入学年份的批量归档,归属组织架构的升届流程。 */
+  /** runBatch 批量停用或恢复。按入学年份的整届归档归组织架构的升届流程。 */
   const runBatch = useCallback(async () => {
     if (!batchAction || selected.size === 0) return
     setWorking(true)
@@ -218,9 +210,8 @@ export default function SchoolAdminUsersPage() {
       const accountIds = Array.from(selected)
       if (batchAction === 'disable') await api.identity.batchDisableAccounts({ account_ids: accountIds })
       if (batchAction === 'restore') await api.identity.batchRestoreAccounts({ account_ids: accountIds })
-      toast.success(`已处理 ${accountIds.length} 个账号`)
+      toast.success(`已${batchAction === 'disable' ? '停用' : '恢复'} ${accountIds.length} 个账号`)
       setBatchAction(undefined)
-      setSelected(new Set())
       accounts.reload()
     } catch (error) {
       setActionError(userFacingErrorMessage(error, '批量操作没有完成,请稍后重试。'))
@@ -229,132 +220,96 @@ export default function SchoolAdminUsersPage() {
     }
   }, [accounts, batchAction, selected])
 
-  /** downloadTemplate 下载导入模板:文件名取自响应头,页面不自造。 */
-  const downloadTemplate = useCallback(async (type: 'teacher' | 'student') => {
-    setActionError(undefined)
-    try {
-      const file = await api.identity.downloadAccountImportTemplate({ type })
-      downloadAttachment(file)
-    } catch (error) {
-      setActionError(userFacingErrorMessage(error, '模板下载没有成功,请稍后重试。'))
-    }
-  }, [])
+  const list = accounts.data?.list ?? []
+  const allSelected = list.length > 0 && list.every((account) => selected.has(account.id))
+  const toggle = (accountId: string) => {
+    const next = new Set(selected)
+    if (next.has(accountId)) next.delete(accountId)
+    else next.add(accountId)
+    setSelected(next)
+  }
 
-  const toggleSelect = useCallback((accountId: string) => {
-    setSelected((current) => {
-      const next = new Set(current)
-      if (next.has(accountId)) next.delete(accountId)
-      else next.add(accountId)
-      return next
-    })
-  }, [])
-
-  // 指标带取服务端全量口径,不随下方筛选变化:它回答「本校账号整体状况」
-  const totalCount = useResourceTotal((params) => api.identity.getAccounts(params), [], accounts.refreshVersion)
-  const pendingCount = useResourceTotal(
-    (params) => api.identity.getAccounts({ status: AccountStatus.PENDING, ...params }),
-    [],
-    accounts.refreshVersion,
-  )
-  const activeCount = useResourceTotal(
-    (params) => api.identity.getAccounts({ status: AccountStatus.ACTIVE, ...params }),
-    [],
-    accounts.refreshVersion,
-  )
-  const disabledCount = useResourceTotal(
-    (params) => api.identity.getAccounts({ status: AccountStatus.DISABLED, ...params }),
-    [],
-    accounts.refreshVersion,
-  )
-
-  const classOptions = useMemo(
-    () => [
-      { value: '', label: '全部班级' },
-      ...(classes.data ?? []).map((item) => ({ value: item.id, label: item.name })),
-    ],
-    [classes.data],
+  const menuFor = (account: Account) => (
+    <AccountActionMenu
+      account={account}
+      onRequest={(action) => setConfirm({ action, account })}
+      onResetPassword={() => setResetTarget(account)}
+    />
   )
 
   const columns: TableColumn<Account>[] = [
     {
       key: 'select',
-      header: '',
-      render: (account) => (
+      header: (
         <Checkbox
-          checked={selected.has(account.id)}
-          aria-label={`选择 ${account.name}`}
-          onCheckedChange={() => toggleSelect(account.id)}
+          checked={allSelected}
+          aria-label="选择本页全部账号"
+          disabled={list.length === 0}
+          onCheckedChange={(checked) => setSelected(checked === true ? new Set(list.map((account) => account.id)) : new Set())}
         />
       ),
+      render: (account) => <Checkbox checked={selected.has(account.id)} aria-label={`选择 ${account.name}`} onCheckedChange={() => toggle(account.id)} />,
     },
     {
       key: 'name',
       header: '姓名',
+      primary: true,
       render: (account) => (
-        <div className="min-w-0">
-          <div className="truncate font-medium text-ink">{account.name}</div>
-          <div className="truncate font-mono text-xs text-ink-sub">
-            {account.no ?? '未设学工号'}
-            {account.phone_masked ? ` · ${account.phone_masked}` : ''}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: 'base_identity',
-      header: '身份',
-      render: (account) => (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge tone="neutral">{baseIdentityLabel(account.base_identity)}</Badge>
-          {account.roles.includes(UserRole.SCHOOL_ADMIN) ? (
-            <Badge tone="jade">{userRoleLabel(UserRole.SCHOOL_ADMIN)}</Badge>
-          ) : null}
-          {account.title ? <span className="text-xs text-ink-sub">{account.title}</span> : null}
-        </div>
-      ),
-    },
-    {
-      key: 'created_at',
-      header: '开通时间',
-      render: (account) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {account.created_at ? formatDate(account.created_at) : '—'}
+        <span className="block min-w-0">
+          <span className="block truncate font-medium text-ink">{account.name}</span>
+          <span className="block truncate font-mono text-xs text-ink-sub">{account.no ?? '未设学工号'}</span>
         </span>
       ),
     },
     {
-      key: 'status',
-      header: '状态',
+      key: 'identity',
+      header: '身份',
       render: (account) => (
-        <StatusIndicator tone={accountStatusTone(account.status)} label={accountStatusLabel(account.status)} />
+        <span className="whitespace-nowrap text-ink-sub">
+          {baseIdentityLabel(account.base_identity)}
+          {account.title ? ` · ${account.title}` : ''}
+        </span>
       ),
     },
     {
-      key: 'actions',
-      header: '操作',
-      align: 'right',
+      key: 'org',
+      header: '所属组织',
       render: (account) => (
-        <div className="flex items-center justify-end gap-1">
-          <Button variant="ghost" size="sm" onClick={() => setFormTarget({ account })}>
-            编辑
-          </Button>
-          <AccountActionMenu
-            account={account}
-            onRequest={(action) => setConfirm({ action, account })}
-            onResetPassword={() => setResetTarget(account)}
-          />
-        </div>
+        <span className="text-ink-sub">{account.org_id ? (orgName.get(account.org_id) ?? (org.status === 'loading' ? '…' : '已撤销的组织')) : '—'}</span>
       ),
     },
+    {
+      key: 'roles',
+      header: '角色',
+      render: (account) =>
+        account.roles.includes(UserRole.SCHOOL_ADMIN) ? <Badge tone="jade">{userRoleLabel(UserRole.SCHOOL_ADMIN)}</Badge> : <span className="text-ink-sub">—</span>,
+    },
+    {
+      key: 'status',
+      header: '状态',
+      render: (account) => <StatusIndicator tone={accountStatusTone(account.status)} label={accountStatusLabel(account.status)} />,
+    },
+    {
+      key: 'created_at',
+      header: '开通时间',
+      render: (account) =>
+        account.created_at ? (
+          <span title={formatDateTime(account.created_at)} className="whitespace-nowrap text-ink-sub">
+            {formatRelativeOccurrence(account.created_at)}
+          </span>
+        ) : (
+          <span className="text-ink-sub">—</span>
+        ),
+    },
+    { key: 'actions', header: '操作', align: 'right', render: menuFor },
   ]
+
+  const filtered = query.status !== 'all' || query.role !== 'all' || query.class !== '' || query.q !== ''
 
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '用户与组织' }]} />}
         title="账号管理"
-        description="开通教师与学生账号、维护状态、授予管理员权限。批量开通请用导入。"
-        icon={Users}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" leftIcon={Upload} onClick={() => setImportOpen(true)}>
@@ -367,179 +322,124 @@ export default function SchoolAdminUsersPage() {
         }
       />
 
-      {/* 指标降为内联摘要(§6.5.3 第 ① 族):本页主体是账号列表,大卡会把表格推到折叠线以下 */}
-      <MetricStrip
-        label="账号总量摘要"
-        className="mb-5"
-        items={[
-          { label: '账号总数', value: totalCount ?? '—', hint: '不受下方筛选影响' },
-          { label: '待激活', value: pendingCount ?? '—', hint: '尚未设置密码' },
-          { label: '正常', value: activeCount ?? '—', hint: '可正常登录' },
-          { label: '已停用', value: disabledCount ?? '—', hint: '不能登录,数据保留' },
-        ]}
-      />
+      <div className="mb-4 flex flex-col gap-3">
+        <SegmentedControl
+          aria-label="按账号状态筛选"
+          options={STATUS_SEGMENTS.map((segment) => ({ value: segment.value, label: segment.label, count: counts[segment.value] }))}
+          value={query.status}
+          onValueChange={(value) => setQuery({ status: value })}
+          className="max-w-full self-start overflow-x-auto"
+        />
+        <div className="flex flex-wrap items-center gap-3">
+          <Select
+            aria-label="按身份筛选"
+            value={query.role}
+            onValueChange={(value) => setQuery({ role: value })}
+            options={[
+              { value: 'all', label: '全部身份' },
+              { value: 'teacher', label: '教师' },
+              { value: 'student', label: '学生' },
+            ]}
+            className="w-full sm:w-36"
+          />
+          <Select
+            aria-label="按班级筛选"
+            value={query.class || ALL_CLASSES}
+            onValueChange={(value) => setQuery({ class: value === ALL_CLASSES ? '' : value })}
+            options={[
+              { value: ALL_CLASSES, label: '全部班级' },
+              ...(org.data?.classes ?? []).map((entity) => ({ value: entity.id, label: entity.name })),
+            ]}
+            className="w-full sm:w-48"
+          />
+          <SearchBox
+            label="搜索账号"
+            placeholder="搜索姓名、学工号或完整手机号"
+            value={query.q}
+            onSearch={(value) => setQuery({ q: value })}
+            className="sm:ml-auto"
+          />
+        </div>
+      </div>
 
-      {/* 动作失败就近内联(§6.7 C),排在数据区之前 */}
       {actionError ? (
         <Callout tone="danger" className="mb-4">
           {actionError}
         </Callout>
       ) : null}
 
-      <DataPanel
-        label="账号列表"
-        filter={          <FilterBar
-            label="账号筛选"
-            onSubmit={() => setSearchTerm(keyword.trim())}
-            submitLabel="搜索"
-          >
-            <FilterField label="身份" group>
-              <SegmentedControl
-                aria-label="按身份筛选"
-                size="sm"
-                options={ROLE_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-                value={roleFilter}
-                onValueChange={(value) => {
-                  setRoleFilter(value)
-                  setSelected(new Set())
-                }}
-              />
-            </FilterField>
-            <FilterField label="账号状态" group>
-              <SegmentedControl
-                aria-label="按账号状态筛选"
-                size="sm"
-                options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-                value={statusFilter}
-                onValueChange={(value) => {
-                  setStatusFilter(value)
-                  setSelected(new Set())
-                }}
-              />
-            </FilterField>
-            <FilterField label="班级" htmlFor="users-class">
-              <Select
-                id="users-class"
-                options={classOptions}
-                value={classFilter}
-                placeholder="全部班级"
-                onValueChange={setClassFilter}
-              />
-            </FilterField>
-            <FilterField label="姓名或学工号" htmlFor="users-keyword">
-              <Input
-                id="users-keyword"
-                value={keyword}
-                placeholder="输入关键词"
-                onChange={(event) => setKeyword(event.target.value)}
-              />
-            </FilterField>
-          </FilterBar>
-        }
-        footer={
-          <Pagination
-            page={accounts.page}
-            pageSize={accounts.pageSize}
-            total={accounts.total}
-            onPageChange={accounts.setPage}
-          />
-        }
-      >
-        {/* 批量动作条:选中后出现在数据区顶部,紧贴它所操作的那批行 */}
-        {selected.size > 0 ? (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-surface-sunken px-4 py-2.5">
-            <span className="text-sm text-ink">已选择 {selected.size} 个账号</span>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setBatchAction('disable')}>
-                批量停用
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setBatchAction('restore')}>
-                批量恢复
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
-                取消选择
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        <ResourceState
-          resource={accounts}
-          emptyIcon={Users}
-          emptyTitle={
-              statusFilter || roleFilter || classFilter || searchTerm ? '没有匹配的账号' : '还没有账号'
-            }
-            emptyDescription={
-              statusFilter || roleFilter || classFilter || searchTerm
-                ? '换个条件再试,或清空筛选查看全部账号。'
-                : '先建立组织架构,再单个新增或批量导入教师与学生账号。'
-            }
-            emptyAction={
-              statusFilter || roleFilter || classFilter || searchTerm ? undefined : (
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="primary" leftIcon={UserPlus} onClick={() => setFormTarget({})}>
-                    新增账号
-                  </Button>
-                  <Button variant="outline" onClick={() => navigate('/school-admin/organization')}>
-                    先去建组织架构
-                  </Button>
-                </div>
-              )
-            }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
+      {selected.size > 0 ? (
+        <div
+          role="region"
+          aria-label="批量操作"
+          className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-primary-soft px-4 py-2.5"
         >
-          {(page) => (
-            <Table
-              columns={columns}
-              data={page.list}
-              rowKey={(item) => item.id}
-              elevated={false}
-              // <md 换行卡(§6.4.1 规则 3):姓名一行、学工号与身份一行、状态在右
-                mobileCard={(item) => ({
-                  title: item.name,
-                  meta: `${item.no ?? '—'} · ${baseIdentityLabel(item.base_identity)}`,
-                badge: (
-                  <StatusIndicator
-                    tone={accountStatusTone(item.status)}
-                    label={accountStatusLabel(item.status)}
-                  />
-                ),
-                action: (
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button variant="ghost" size="sm" onClick={() => setFormTarget({ account: item })}>
-                      编辑
-                    </Button>
-                    <AccountActionMenu
-                      account={item}
-                      onRequest={(action) => setConfirm({ action, account: item })}
-                      onResetPassword={() => setResetTarget(item)}
-                    />
-                  </div>
-                ),
-              })}
-            />
-          )}
-        </ResourceState>
-      </DataPanel>
-
-      <PageSection
-        title="导入模板"
-        description="按模板填写后上传,系统会先预览校验再提交。"
-      >
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" leftIcon={Download} onClick={() => void downloadTemplate('teacher')}>
-            教师导入模板
-          </Button>
-          <Button variant="outline" leftIcon={Download} onClick={() => void downloadTemplate('student')}>
-            学生导入模板
-          </Button>
-          <Button variant="ghost" leftIcon={Upload} onClick={() => setImportOpen(true)}>
-            开始导入
-          </Button>
+          <span className="text-sm font-medium text-ink">已选 {selected.size} 个账号</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" leftIcon={CircleSlash} onClick={() => setBatchAction('disable')}>
+              批量停用
+            </Button>
+            <Button variant="outline" size="sm" leftIcon={UserCheck} onClick={() => setBatchAction('restore')}>
+              批量恢复
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+              取消选择
+            </Button>
+          </div>
         </div>
-      </PageSection>
+      ) : null}
 
-      <AccountImportBatches />
+      {accounts.status === 'error' ? (
+        <ResourceError
+          message={accounts.error?.message ?? '账号暂时读取不到'}
+          traceId={accounts.error?.traceId}
+          onRetry={accounts.reload}
+        />
+      ) : accounts.status === 'empty' ? (
+        <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-14 text-center shadow-xs">
+          <Icon icon={Users} size="lg" className="text-ink-faint" />
+          <p className="mt-3 text-md font-semibold text-ink">{filtered ? '没有匹配的账号' : '还没有账号'}</p>
+          <p className="mt-1.5 text-sm text-ink-sub">
+            {filtered ? '换个条件再试,或清空筛选查看全部账号。' : '先建立组织架构,再单个新增或批量导入教师与学生账号。'}
+          </p>
+          <div className="mt-5 flex flex-wrap justify-center gap-2">
+            {filtered ? (
+              <Button variant="outline" onClick={() => setQuery({ status: 'all', role: 'all', class: '', q: '' })}>
+                清空筛选
+              </Button>
+            ) : (
+              <>
+                <Button variant="primary" leftIcon={UserPlus} onClick={() => setFormTarget({})}>
+                  新增账号
+                </Button>
+                <Link to="/school-admin/organization" className={buttonVariants({ variant: 'outline' })}>
+                  先去建组织架构
+                </Link>
+              </>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
+          <Table
+            columns={columns}
+            data={list}
+            rowKey={(account) => account.id}
+            loading={accounts.status === 'loading' && !accounts.data}
+            onRowClick={(account) => setFormTarget({ account })}
+            // <md 换行卡(§6.4.1 规则 3):姓名一行、学工号与身份一行,状态在右,更多菜单在行尾
+            mobileCard={(account) => ({
+              title: account.name,
+              meta: `${account.no ?? '—'} · ${baseIdentityLabel(account.base_identity)}${account.org_id && orgName.get(account.org_id) ? ` · ${orgName.get(account.org_id)}` : ''}`,
+              badge: <StatusIndicator tone={accountStatusTone(account.status)} label={accountStatusLabel(account.status)} />,
+              action: menuFor(account),
+            })}
+          />
+          <div className="mt-4">
+            <Pagination page={accounts.page} pageSize={accounts.pageSize} total={accounts.total} onPageChange={accounts.setPage} />
+          </div>
+        </>
+      )}
 
       {formTarget ? (
         <AccountFormModal
@@ -563,14 +463,10 @@ export default function SchoolAdminUsersPage() {
       ) : null}
 
       {resetTarget ? (
-        <ResetPasswordModal
-          account={resetTarget}
-          onClose={() => setResetTarget(undefined)}
-          onDone={() => setResetTarget(undefined)}
-        />
+        <ResetPasswordModal account={resetTarget} onClose={() => setResetTarget(undefined)} onDone={() => setResetTarget(undefined)} />
       ) : null}
 
-      <Modal open={confirm !== undefined} onOpenChange={(open) => !open && setConfirm(undefined)}>
+      <Modal open={confirm !== undefined} onOpenChange={(open) => !open && !working && setConfirm(undefined)}>
         <ModalContent size="sm">
           {confirm ? (
             <>
@@ -579,20 +475,16 @@ export default function SchoolAdminUsersPage() {
                 <ModalDescription>{ACTION_COPY[confirm.action].description}</ModalDescription>
               </ModalHeader>
               <ModalBody>
-                <p className="text-base text-ink">
+                <p className="text-base font-medium text-ink">
                   {confirm.account.name}
-                  {confirm.account.no ? ` · ${confirm.account.no}` : ''}
+                  {confirm.account.no ? <span className="ml-2 font-mono text-sm text-ink-sub">{confirm.account.no}</span> : null}
                 </p>
               </ModalBody>
               <ModalFooter>
-                <Button variant="outline" onClick={() => setConfirm(undefined)}>
+                <Button variant="outline" disabled={working} onClick={() => setConfirm(undefined)}>
                   取消
                 </Button>
-                <Button
-                  variant={ACTION_COPY[confirm.action].danger ? 'danger' : 'seal'}
-                  loading={working}
-                  onClick={() => void runAction()}
-                >
+                <Button variant={ACTION_COPY[confirm.action].danger ? 'danger' : 'primary'} loading={working} onClick={() => void runAction()}>
                   {ACTION_COPY[confirm.action].confirm}
                 </Button>
               </ModalFooter>
@@ -601,25 +493,22 @@ export default function SchoolAdminUsersPage() {
         </ModalContent>
       </Modal>
 
-      <Modal open={batchAction !== undefined} onOpenChange={(open) => !open && setBatchAction(undefined)}>
+      <Modal open={batchAction !== undefined} onOpenChange={(open) => !open && !working && setBatchAction(undefined)}>
         <ModalContent size="sm">
           <ModalHeader>
-            <ModalTitle>{batchAction === 'disable' ? '批量停用账号' : '批量恢复账号'}</ModalTitle>
+            <ModalTitle>{batchAction === 'disable' ? `停用选中的 ${selected.size} 个账号?` : `恢复选中的 ${selected.size} 个账号?`}</ModalTitle>
             <ModalDescription>
               {batchAction === 'disable'
                 ? '被选中的账号将无法登录,历史数据保留。可以随时恢复。'
                 : '被选中的账号回到正常状态,可以重新登录。'}
             </ModalDescription>
           </ModalHeader>
-          <ModalBody>
-            <p className="text-base text-ink">共 {selected.size} 个账号</p>
-          </ModalBody>
           <ModalFooter>
-            <Button variant="outline" onClick={() => setBatchAction(undefined)}>
+            <Button variant="outline" disabled={working} onClick={() => setBatchAction(undefined)}>
               取消
             </Button>
             <Button variant="primary" loading={working} onClick={() => void runBatch()}>
-              确认处理
+              {batchAction === 'disable' ? '确认停用' : '确认恢复'}
             </Button>
           </ModalFooter>
         </ModalContent>
@@ -635,81 +524,51 @@ interface AccountActionMenuProps {
 }
 
 /**
- * AccountActionMenu 按当前状态给出可执行动作。
- * 注销不可逆,与常规项用分隔线隔开;管理员授权只对教师开放
- * (后端 grantSchoolAdmin 要求账号是本租户教师)。
+ * AccountActionMenu 按当前状态只给可执行的动作。注销不可逆,与常规项用分隔线隔开;
+ * 管理员授权只对教师开放(后端 grantSchoolAdmin 要求账号是本租户教师);已注销的账号没有菜单。
  */
 function AccountActionMenu({ account, onRequest, onResetPassword }: AccountActionMenuProps) {
   const isActive = account.status === AccountStatus.ACTIVE
   const isDisabled = account.status === AccountStatus.DISABLED
   const isArchived = account.status === AccountStatus.ARCHIVED
-  const isCancelled = account.status === AccountStatus.CANCELLED
   const isTeacher = account.base_identity === BaseIdentity.TEACHER
   const isSchoolAdmin = account.roles.includes(UserRole.SCHOOL_ADMIN)
+
+  if (account.status === AccountStatus.CANCELLED) return <span className="text-sm text-ink-sub">已注销</span>
 
   return (
     <Menu>
       <MenuTrigger asChild>
-        <IconButton
-          variant="ghost"
-          size="sm"
-          icon={MoreVertical}
-          aria-label={`${account.name} 的更多操作`}
-        />
+        <IconButton variant="ghost" size="sm" icon={MoreVertical} aria-label={`${account.name} 的更多操作`} />
       </MenuTrigger>
       <MenuContent align="end">
         {isActive ? (
           <MenuItem icon={CircleSlash} onSelect={() => onRequest('disable')}>
-            停用账号
+            停用
           </MenuItem>
         ) : null}
         {isDisabled ? (
           <MenuItem icon={UserCheck} onSelect={() => onRequest('enable')}>
-            启用账号
+            启用
           </MenuItem>
         ) : null}
-        {isActive || isDisabled ? (
-          <MenuItem onSelect={() => onRequest('archive')}>归档账号</MenuItem>
+        <MenuItem icon={KeyRound} onSelect={onResetPassword}>
+          重置密码
+        </MenuItem>
+        <MenuItem icon={LogOut} onSelect={() => onRequest('force-logout')}>
+          强制下线
+        </MenuItem>
+        {isTeacher ? (
+          <MenuItem icon={ShieldCheck} onSelect={() => onRequest(isSchoolAdmin ? 'revoke-admin' : 'grant-admin')}>
+            {isSchoolAdmin ? '撤销管理员' : '授予管理员'}
+          </MenuItem>
         ) : null}
-        {isArchived ? <MenuItem onSelect={() => onRequest('restore')}>恢复账号</MenuItem> : null}
-
-        {isCancelled ? null : (
-          <>
-            <MenuSeparator />
-            <MenuItem icon={KeyRound} onSelect={onResetPassword}>
-              重置密码
-            </MenuItem>
-            <MenuItem icon={LogOut} onSelect={() => onRequest('force-logout')}>
-              强制下线
-            </MenuItem>
-          </>
-        )}
-
-        {isTeacher && !isCancelled ? (
-          <>
-            <MenuSeparator />
-            {isSchoolAdmin ? (
-              <MenuItem icon={ShieldCheck} onSelect={() => onRequest('revoke-admin')}>
-                撤销管理员
-              </MenuItem>
-            ) : (
-              <MenuItem icon={ShieldCheck} onSelect={() => onRequest('grant-admin')}>
-                授予管理员
-              </MenuItem>
-            )}
-          </>
-        ) : null}
-
-        {isCancelled ? (
-          <MenuItem disabled>账号已注销,无可执行操作</MenuItem>
-        ) : (
-          <>
-            <MenuSeparator />
-            <MenuItem danger icon={Trash2} onSelect={() => onRequest('cancel')}>
-              注销账号
-            </MenuItem>
-          </>
-        )}
+        {isActive || isDisabled ? <MenuItem onSelect={() => onRequest('archive')}>归档</MenuItem> : null}
+        {isArchived ? <MenuItem onSelect={() => onRequest('restore')}>恢复</MenuItem> : null}
+        <MenuSeparator />
+        <MenuItem danger icon={Trash2} onSelect={() => onRequest('cancel')}>
+          注销
+        </MenuItem>
       </MenuContent>
     </Menu>
   )

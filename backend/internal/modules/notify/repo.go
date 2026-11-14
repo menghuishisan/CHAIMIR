@@ -8,6 +8,7 @@ import (
 
 	"chaimir/internal/modules/notify/internal/sqlcgen"
 	"chaimir/internal/platform/db"
+	"chaimir/internal/platform/pagex"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -29,6 +30,7 @@ type TxStore interface {
 	CountNotificationsBySource(context.Context, int64, string, []int64) (int64, error)
 	CreateNotifications(context.Context, []notificationRecord) error
 	ListNotifications(context.Context, int64, *bool, string, int, int) ([]NotificationDTO, int64, error)
+	CountNotificationsByRead(context.Context, int64, string) (pagex.FacetGroup, error)
 	CountUnread(context.Context, int64) (int64, error)
 	MarkNotificationRead(context.Context, int64, int64) (NotificationDTO, error)
 	MarkAllNotificationsRead(context.Context, int64) error
@@ -39,7 +41,7 @@ type TxStore interface {
 	UpsertPreference(context.Context, int64, int64, int64, string, bool) (PreferenceDTO, error)
 	CreateAnnouncement(context.Context, int64, int64, int64, AnnouncementRequest) (AnnouncementDTO, error)
 	ListAnnouncements(context.Context, int64, int64, []int16, int, int) ([]AnnouncementDTO, int64, error)
-	CountVisibleAnnouncementsByScope(context.Context, int64, int64, []int16) (map[string]int64, error)
+	CountVisibleAnnouncementFacets(context.Context, int64, int64, []int16) (pagex.Facets, error)
 	GetVisibleAnnouncement(context.Context, int64, int64, []int16, int64) (AnnouncementDTO, error)
 	MarkAnnouncementRead(context.Context, int64, int64, int64, int64) error
 }

@@ -45,7 +45,20 @@ func (s *Service) UpsertSSOConfig(ctx context.Context, req SSOConfigRequest) (SS
 	}
 	var out SSOConfig
 	if err := s.store.TenantTx(ctx, id.TenantID, func(ctx context.Context, tx TxStore) error {
-		configData, err := s.secureSSOConfig(req)
+		// 修改已有 LDAP 配置时绑定密码留空表示不修改:同一事务里读出已保存的配置,沿用其中的密文
+		var stored map[string]any
+		if req.Type == SSOTypeLDAP {
+			current, err := tx.GetSSOConfig(ctx, id.TenantID, req.Type)
+			switch {
+			case err == nil:
+				if stored, err = jsonx.ObjectMapStrict(current.Config); err != nil {
+					return apperr.ErrIdentitySSOConfigInvalid.WithCause(err)
+				}
+			case !isNoRows(err):
+				return err
+			}
+		}
+		configData, err := s.secureSSOConfig(req, stored)
 		if err != nil {
 			return err
 		}
@@ -163,7 +176,8 @@ func (s *Service) validateSSOConfig(req SSOConfigRequest) error {
 		if _, err := netx.ValidatePublicLDAPSURL(raw); err != nil {
 			return apperr.ErrIdentityLDAPServerInsecure
 		}
-		required := []string{"bind_dn", "bind_password", "base_dn", "user_filter", "match_attribute"}
+		// 绑定密码不在这里要求:修改已有配置时留空表示不修改,是否必填由 resolveBindPassword 按有无已保存密码判定
+		required := []string{"bind_dn", "base_dn", "user_filter", "match_attribute"}
 		for _, key := range required {
 			if strings.TrimSpace(jsonx.StringField(req.Config, key)) == "" {
 				return apperr.ErrIdentitySSOConfigInvalid
@@ -178,8 +192,9 @@ func (s *Service) validateSSOConfig(req SSOConfigRequest) error {
 	return nil
 }
 
-// secureSSOConfig 在配置入库前复用基础层加密凭据字段,避免敏感配置明文落库。
-func (s *Service) secureSSOConfig(req SSOConfigRequest) (map[string]any, error) {
+// secureSSOConfig 在配置入库前复用基础层加密凭据字段,避免敏感配置明文落库;
+// stored 是已保存的配置(LDAP 修改时用于沿用留空的绑定密码,首次配置为 nil)。
+func (s *Service) secureSSOConfig(req SSOConfigRequest, stored map[string]any) (map[string]any, error) {
 	out := make(map[string]any, len(req.Config))
 	for key, value := range req.Config {
 		out[key] = value
@@ -187,18 +202,41 @@ func (s *Service) secureSSOConfig(req SSOConfigRequest) (map[string]any, error) 
 	if req.Type != SSOTypeLDAP {
 		return out, nil
 	}
-	password := strings.TrimSpace(jsonx.StringField(out, "bind_password"))
-	if password == "" {
-		return nil, apperr.ErrIdentitySSOConfigInvalid
-	}
-	if password == secretmap.MaskedValue {
-		return nil, apperr.ErrIdentitySSOConfigInvalid
+	out, keep, err := resolveBindPassword(out, stored)
+	if err != nil {
+		return nil, err
 	}
 	protected, err := secretmap.Protect(s.cipher, out, "identity sso config")
 	if err != nil {
 		return nil, apperr.ErrIdentitySSOSecretInvalid.WithCause(err)
 	}
+	if keep {
+		// 沿用已保存的密文:不解密、不重新加密,原样放回
+		protected["bind_password"] = stored["bind_password"]
+	}
 	return protected, nil
+}
+
+// resolveBindPassword 处理 LDAP 绑定密码:填了新密码就用新的;留空时沿用已保存的密文(keep=true,
+// 返回的配置不带该字段,由调用方在加密后放回);首次配置留空或提交脱敏占位一律拒绝。
+func resolveBindPassword(config, stored map[string]any) (map[string]any, bool, error) {
+	password := strings.TrimSpace(jsonx.StringField(config, "bind_password"))
+	if password == secretmap.MaskedValue {
+		return nil, false, apperr.ErrIdentitySSOConfigInvalid
+	}
+	if password != "" {
+		return config, false, nil
+	}
+	if _, ok := stored["bind_password"]; !ok {
+		return nil, false, apperr.ErrIdentitySSOConfigInvalid
+	}
+	out := make(map[string]any, len(config))
+	for key, value := range config {
+		if key != "bind_password" {
+			out[key] = value
+		}
+	}
+	return out, true, nil
 }
 
 // validateLDAPCredentials 通过 LDAPS 目录验证用户密码并读取名单匹配字段。

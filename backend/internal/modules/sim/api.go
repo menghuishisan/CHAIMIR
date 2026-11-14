@@ -200,8 +200,8 @@ func (a simAPI) listReviews(c *gin.Context) {
 		response.Fail(c, err)
 		return
 	}
-	items, total, p, s, err := a.svc.ListReviews(c.Request.Context(), result, page, size)
-	httpx.WritePage(c, items, total, p, s, err)
+	items, total, p, s, facets, err := a.svc.ListReviews(c.Request.Context(), result, page, size)
+	httpx.WritePageWithFacets(c, items, total, p, s, facets.Map(), err)
 }
 
 // approveReview 通过审核。

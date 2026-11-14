@@ -25,6 +25,7 @@ export interface ChainProgressProps {
   className?: string;
 }
 
+/** ChainProgress 链式区块进度(全站可枚举进度的统一表现) */
 export function ChainProgress({
   total,
   done,

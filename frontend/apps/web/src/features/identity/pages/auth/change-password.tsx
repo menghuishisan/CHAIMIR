@@ -18,11 +18,13 @@ import {
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import {
   AuthFormError,
+  AuthFormBrand,
   AuthHeading,
   AuthPanel,
   AuthQuietAction,
   AuthSubmit,
   AuthTextField,
+  PasswordRuleChecklist,
 } from '../../components/AuthUI'
 
 /**
@@ -86,8 +88,12 @@ export default function ChangePasswordPage() {
 
   return (
     <AuthPanel>
+      <AuthFormBrand />
       <form className="w-full max-w-sm" onSubmit={handleSubmit} noValidate>
-        <AuthHeading title="请先修改初始密码" description="完成密码修改后才能继续使用平台。" />
+        <AuthHeading
+          title="先把初始密码改掉"
+          description="初始密码由学校或平台下发,别人可能知道。改成只有你知道的密码后即可进入平台。"
+        />
 
         <AuthTextField
           label="当前密码"
@@ -110,6 +116,7 @@ export default function ChangePasswordPage() {
           onValueChange={setNewPassword}
           onBlur={() => validate(['new'])}
         />
+        <PasswordRuleChecklist value={newPassword} />
 
         <AuthTextField
           label="确认新密码"
@@ -124,7 +131,7 @@ export default function ChangePasswordPage() {
 
         <AuthFormError message={formError} />
 
-        <AuthSubmit loading={submitting}>确认修改</AuthSubmit>
+        <AuthSubmit loading={submitting}>保存并进入平台</AuthSubmit>
 
         <AuthQuietAction onClick={handleLogout}>退出登录</AuthQuietAction>
       </form>

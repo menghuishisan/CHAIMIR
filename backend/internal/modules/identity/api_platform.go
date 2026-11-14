@@ -117,8 +117,8 @@ func (a platformAPI) listTenants(c *gin.Context) {
 	if !ok {
 		return
 	}
-	out, total, p, s, err := a.svc.ListTenantsByPlatform(c.Request.Context(), status, c.Query("keyword"), page, size)
-	httpx.WritePage(c, out, total, p, s, err)
+	out, total, p, s, facets, err := a.svc.ListTenantsByPlatform(c.Request.Context(), status, c.Query("keyword"), page, size)
+	httpx.WritePageWithFacets(c, out, total, p, s, facets.Map(), err)
 }
 
 // getTenant 读取单个租户详情,路径 ID 解析失败时返回统一用户向错误。

@@ -6,11 +6,10 @@
 // 报告正文是对象存储引用,取件统一走 transfer/storage 授权,不暴露对象存储直链。
 // 小组分区只在协作方式为小组实验时出现 —— 后端 CreateGroup 对独立完成的实验直接拒绝。
 
-import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useParams } from 'react-router'
 import {
   ChevronLeft,
-  ClipboardCheck,
   Download,
   FileText,
   LayoutTemplate,
@@ -31,7 +30,6 @@ import {
 } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   cn,
@@ -66,7 +64,9 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
+import { locationLabel, useAsyncResource, usePageLocation, usePagedResource, useReviewQueue, useUrlState } from '../../../../hooks'
+import { facetCount, facetSum } from '../../../../utils/facets'
+import { collectAllPages } from '../../../../utils/allPages'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import type { PagedResourceState } from '../../../../hooks/usePagedResource'
 import { formatDateTime } from '../../../../utils/formatters'
@@ -74,6 +74,12 @@ import { experimentCollabModeLabel, experimentReportStatusLabel } from '../../..
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { experimentReportStatusTone } from '../../statusPresentation'
+
+/** 地址参数:tab 标签(小组实验才有小组编排),status 报告队列分段 */
+const REPORTS_QUERY = {
+  tab: { defaultValue: 'reports', allowed: ['reports', 'groups'] },
+  status: { defaultValue: 'all', allowed: ['all', 'pending', 'graded'] },
+} as const
 
 /**
  * TeacherExperimentReportsPage 读取实验本体并承载报告批改与分组编排。
@@ -87,6 +93,11 @@ export default function TeacherExperimentReportsPage() {
     [experimentId],
     () => false,
   )
+
+  usePageLocation([
+    { label: locationLabel(experiment, (data) => data.name, '实验详情'), to: `/teacher/experiments/${experimentId}` },
+    { label: '报告与小组' },
+  ])
 
   return (
     <PageScaffold>
@@ -106,7 +117,12 @@ export default function TeacherExperimentReportsPage() {
  * ReportsContent 渲染实验头部、报告批改队列与小组编排。
  */
 function ReportsContent({ experiment }: { experiment: Experiment }) {
-  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [query, setQuery] = useUrlState(REPORTS_QUERY)
+  const statusFilter = query.status === 'pending' ? String(ExperimentReportStatus.SUBMITTED) : query.status === 'graded' ? String(ExperimentReportStatus.GRADED) : ''
+  const setStatusFilter = (value: string) =>
+    setQuery({
+      status: value === String(ExperimentReportStatus.SUBMITTED) ? 'pending' : value === String(ExperimentReportStatus.GRADED) ? 'graded' : 'all',
+    })
   const isGroup = experiment.collab_mode === ExperimentCollabMode.GROUP
 
   const reports = usePagedResource<ReportDTO>(
@@ -116,32 +132,14 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
         ...params,
       }),
     [experiment.id, statusFilter],
+    { urlPageKey: 'page' },
   )
 
-  // 待办摘要取服务端全量口径:待批改是教师最常看的数字,不能用当前页数出来的近似值
-  const totalCount = useResourceTotal(
-    (params) => api.experiment.listReports(experiment.id, params),
-    [experiment.id],
-    reports.refreshVersion,
-  )
-  const pendingCount = useResourceTotal(
-    (params) =>
-      api.experiment.listReports(experiment.id, {
-        status: ExperimentReportStatus.SUBMITTED,
-        ...params,
-      }),
-    [experiment.id],
-    reports.refreshVersion,
-  )
-  const gradedCount = useResourceTotal(
-    (params) =>
-      api.experiment.listReports(experiment.id, {
-        status: ExperimentReportStatus.GRADED,
-        ...params,
-      }),
-    [experiment.id],
-    reports.refreshVersion,
-  )
+  // 待办摘要取列表接口的 facets:待批改是教师最常看的数字,按全量口径给出,不用当前页数出来的近似值
+  const facets = reports.status === 'success' || reports.status === 'empty' ? reports.data?.facets : undefined
+  const totalCount = facetSum(facets, 'status')
+  const pendingCount = facetCount(facets, 'status', ExperimentReportStatus.SUBMITTED)
+  const gradedCount = facetCount(facets, 'status', ExperimentReportStatus.GRADED)
 
   /** downloadReport 经业务授权和统一文件服务下载报告,不暴露对象存储地址。 */
   const downloadReport = useCallback(async (report: ReportDTO) => {
@@ -158,33 +156,13 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
   return (
     <>
       <PageHeader
-        kicker={
-          <Breadcrumb
-            items={[
-              { label: '实践' },
-              { label: '实验编排', href: '/teacher/experiments' },
-            ]}
-          />
-        }
-        title={`${experiment.name} · 报告与小组`}
-        description="批改学生提交的实验报告;小组实验在这里编排分组与角色。"
-        icon={ClipboardCheck}
-        actions={
-          <Badge tone="neutral">{experimentCollabModeLabel(experiment.collab_mode)}</Badge>
-        }
+        title="报告与小组"
+        meta={[
+          { value: experiment.name },
+          { value: experimentCollabModeLabel(experiment.collab_mode) },
+          { label: '检查点合计', value: `${experiment.components.checkpoints.reduce((sum, item) => sum + item.score, 0)} 分` },
+        ]}
       />
-
-      {/*
-        待办摘要一行(§6.5.3 第 ⑤ 族:审阅队列不做指标带,待办数量放标题下一行)。
-        三个数字都取服务端全量口径(§6.5.4);检查点合计是实验定义的静态属性,
-        故与报告数量分开表述,不混进「待办」里。
-      */}
-      <p className="mb-4 text-sm text-ink-sub">
-        共 {totalCount ?? '—'} 份报告,待批改 {pendingCount ?? '—'} 份、已批改{' '}
-        {gradedCount ?? '—'} 份。检查点合计{' '}
-        {experiment.components.checkpoints.reduce((sum, item) => sum + item.score, 0)} 分,
-        与报告分相加即实验得分。
-      </p>
 
       {experiment.require_report ? null : (
         <Callout tone="info" className="mb-4">
@@ -198,7 +176,7 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
         独立完成的实验没有小组可编排,那时不出 Tabs:一个标签的标签栏是纯噪声。
       */}
       {isGroup ? (
-        <Tabs defaultValue="reports">
+        <Tabs value={query.tab} onValueChange={(value) => setQuery({ tab: value })}>
           <TabsList aria-label="报告与小组">
             <TabsTrigger value="reports">实验报告</TabsTrigger>
             <TabsTrigger value="groups">小组编排</TabsTrigger>
@@ -210,6 +188,7 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
               onSaved={reports.reload}
               statusFilter={statusFilter}
               onStatusFilterChange={setStatusFilter}
+              counts={{ all: totalCount, pending: pendingCount, graded: gradedCount }}
             />
           </TabsContent>
           <TabsContent value="groups">
@@ -223,6 +202,7 @@ function ReportsContent({ experiment }: { experiment: Experiment }) {
           onSaved={reports.reload}
           statusFilter={statusFilter}
           onStatusFilterChange={setStatusFilter}
+          counts={{ all: totalCount, pending: pendingCount, graded: gradedCount }}
         />
       )}
     </>
@@ -242,6 +222,8 @@ interface ReportsQueueProps {
   onSaved: () => void
   statusFilter: string
   onStatusFilterChange: (value: string) => void
+  /** 各状态的全量计数(服务端口径);读取中为 undefined */
+  counts: { all?: number; pending?: number; graded?: number }
 }
 
 /**
@@ -257,6 +239,7 @@ function ReportsQueue({
   onSaved,
   statusFilter,
   onStatusFilterChange,
+  counts,
 }: ReportsQueueProps) {
   const [selectedId, setSelectedId] = useState<string>()
   /** <lg 走两级页面(§6.4.1 规则 4) */
@@ -266,22 +249,16 @@ function ReportsQueue({
   const selected = list.find((item) => item.id === selectedId) ?? list[0]
   const selectedIndex = selected ? list.findIndex((item) => item.id === selected.id) : -1
 
-  /** 批完一份直接落到下一份待批改报告;没有下一份就退回队列层 */
-  const advanceToNext = useCallback(() => {
-    const nextPending = list.find(
-      (item, index) => index > selectedIndex && item.status !== ExperimentReportStatus.GRADED,
-    )
-    setSelectedId(nextPending?.id ?? undefined)
-    if (!nextPending) setMobileView('queue')
-  }, [list, selectedIndex])
-
-  /** 键盘上下切条:整批批改靠键盘才快 */
-  const onQueueKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
-    event.preventDefault()
-    const step = event.key === 'ArrowDown' ? 1 : -1
-    const next = list[Math.min(Math.max(selectedIndex + step, 0), list.length - 1)]
-    if (next) setSelectedId(next.id)
+  // 上下方向键切条、处理完进下一条待处理:四处审阅队列共用同一套规则(useReviewQueue)
+  const queue = useReviewQueue({
+    items: list,
+    currentId: selected?.id,
+    onSelect: setSelectedId,
+    isPending: (item: (typeof list)[number]) => item.status !== ExperimentReportStatus.GRADED,
+  })
+  /** advanceToNext 处理完后到下一条待处理;没有就退回队列层 */
+  const advanceToNext = () => {
+    if (!queue.advance()) setMobileView('queue')
   }
 
   return (
@@ -314,7 +291,11 @@ function ReportsQueue({
                 <SegmentedControl
                   aria-label="按批改状态筛选"
                   size="sm"
-                  options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
+                  options={STATUS_FILTERS.map((item) => ({
+                    value: item.value,
+                    label: item.label,
+                    count: item.value === '' ? counts.all : item.value === String(ExperimentReportStatus.SUBMITTED) ? counts.pending : counts.graded,
+                  }))}
                   value={statusFilter}
                   onValueChange={(value) => {
                     onStatusFilterChange(value)
@@ -348,7 +329,7 @@ function ReportsQueue({
                 aria-label="报告队列"
                 aria-activedescendant={selected ? `report-${selected.id}` : undefined}
                 tabIndex={0}
-                onKeyDown={onQueueKeyDown}
+                onKeyDown={queue.onListKeyDown}
                 className="focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
               >
                 {page.list.map((report) => {
@@ -382,13 +363,13 @@ function ReportsQueue({
                           {report.student_no}
                         </p>
                       ) : null}
-                      <p className="mt-1 font-mono text-xs text-ink-faint">
+                      <p className="mt-1 font-mono text-xs text-ink-sub">
                         {formatDateTime(report.submitted_at)}
                       </p>
                     </div>
                   )
                 })}
-                <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">↑↓ 切换条目</p>
+                <p className="hidden border-t border-line px-4 py-2 text-xs text-ink-sub lg:block">↑↓ 切换 · Ctrl/⌘ + 回车提交批阅</p>
               </div>
             )}
           </ResourceState>
@@ -399,6 +380,7 @@ function ReportsQueue({
           <ReportGradePane
             key={selected.id}
             report={selected}
+            submitShortcut={queue.submitShortcut}
             onDownload={() => onDownload(selected)}
             onSaved={() => {
               advanceToNext()
@@ -419,6 +401,8 @@ interface ReportGradePaneProps {
   report: ReportDTO
   onDownload: () => void
   onSaved: () => void
+  /** Ctrl/⌘ + 回车提交的键盘处理(审阅队列共用) */
+  submitShortcut: (submit: () => void) => (event: React.KeyboardEvent<HTMLElement>) => void
 }
 
 /**
@@ -428,7 +412,7 @@ interface ReportGradePaneProps {
  *
  * key 由调用方按报告编号给出:切换条目时表单重建,上一份的草稿不会串到下一份。
  */
-function ReportGradePane({ report, onDownload, onSaved }: ReportGradePaneProps) {
+function ReportGradePane({ report, onDownload, onSaved, submitShortcut }: ReportGradePaneProps) {
   const [score, setScore] = useState(String(report.manual_score ?? ''))
   const [comment, setComment] = useState(report.comment ?? '')
   const [formError, setFormError] = useState<string>()
@@ -456,7 +440,10 @@ function ReportGradePane({ report, onDownload, onSaved }: ReportGradePaneProps) 
   }, [comment, onSaved, report.id, score, validate])
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg bg-surface p-5 shadow-xs">
+    <div
+      className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg bg-surface p-5 shadow-xs"
+      onKeyDown={submitShortcut(() => void submit())}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-md font-semibold text-ink">{report.student_name}</h3>
@@ -513,7 +500,7 @@ function ReportGradePane({ report, onDownload, onSaved }: ReportGradePaneProps) 
       <div className="mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
         <span className="mr-auto text-sm text-ink-sub">报告分与检查点得分相加成为实验总分。</span>
         <Button variant="primary" loading={working} onClick={() => void submit()}>
-          提交批改并看下一份
+          提交批阅并看下一份
         </Button>
       </div>
     </div>
@@ -538,18 +525,47 @@ function GroupsSection({ experiment }: { experiment: Experiment }) {
     [experiment.id],
     (value) => (value ?? []).length === 0,
   )
+  // 未分组的学生:实验所属课程的成员里还不在任何小组的(实验不属于课程时没有这一项)
+  const members = useAsyncResource(
+    () =>
+      experiment.course_id
+        ? collectAllPages((params) => api.teaching.listMembers(experiment.course_id as string, params), PAGINATION_MAX_SIZE)
+        : Promise.resolve([]),
+    [experiment.course_id],
+    () => false,
+  )
+  const ungrouped = useMemo(() => {
+    const grouped = new Set((groups.data ?? []).flatMap((group) => (group.members ?? []).map((member) => member.student_id)))
+    return (members.data ?? []).filter((member) => !grouped.has(member.student_id))
+  }, [groups.data, members.data])
 
   return (
     <PageSection
       title="小组编排"
       description={`每组 ${experiment.group_config?.size ?? 0} 人。同组成员共享同一套实验环境。`}
       actions={
-        <Button variant="outline" size="sm" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
+        <Button variant="primary" leftIcon={Plus} onClick={() => setCreateOpen(true)}>
           新建小组
         </Button>
       }
     >
       <div className="flex flex-col gap-4">
+        {experiment.course_id && members.status === 'success' && ungrouped.length > 0 ? (
+          <section aria-labelledby="ungrouped-title" className="rounded-lg bg-warning-bg p-4">
+            <h3 id="ungrouped-title" className="text-sm font-semibold text-ink">
+              还没分组的学生({ungrouped.length})
+            </h3>
+            <p className="mt-1 text-sm text-ink-sub">他们分入小组前不能开始这个实验。</p>
+            <ul className="mt-3 flex flex-wrap gap-2">
+              {ungrouped.map((member) => (
+                <li key={member.student_id} className="rounded-md bg-surface px-2.5 py-1 text-sm text-ink">
+                  {member.student_name}
+                  {member.student_no ? <span className="ml-1.5 font-mono text-xs text-ink-sub">{member.student_no}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
         {(experiment.group_config?.roles ?? []).length > 0 ? (
           <div className="flex flex-wrap gap-1.5">
             {(experiment.group_config?.roles ?? []).map((role) => (
@@ -576,15 +592,7 @@ function GroupsSection({ experiment }: { experiment: Experiment }) {
           }
         >
           {(list) => (
-            <div
-              className={
-                list.length > 2
-                  ? 'grid gap-4 lg:grid-cols-2 xl:grid-cols-3'
-                  : list.length > 1
-                    ? 'grid gap-4 lg:grid-cols-2'
-                    : 'grid gap-4'
-              }
-            >
+            <div className="card-grid gap-4">
               {list.map((group) => (
                 // 每个小组自成一块抬起片:它们是并列的编排入口,不是表格行
                 <div
@@ -730,7 +738,7 @@ function RemoveMemberModal({ group, studentId, studentName, onClose, onRemoved }
           <Button type="button" variant="outline" onClick={onClose} disabled={working}>
             取消
           </Button>
-          <Button type="button" variant="seal" onClick={() => void remove()} loading={working}>
+          <Button type="button" variant="danger" onClick={() => void remove()} loading={working}>
             移除成员
           </Button>
         </ModalFooter>
@@ -835,7 +843,7 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
     role: role.trim() === '' ? '请填写这名学生在组内的角色' : null,
   }), [classId, role, studentId]))
 
-  const classes = useAsyncResource(() => api.identity.listClasses(), [], () => false)
+  const classes = useAsyncResource(() => api.identity.listClasses(), [], (value) => value.length === 0)
 
   /**
    * 班内学生一次取齐(PAGINATION_MAX_SIZE)。
@@ -845,15 +853,10 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
   const students = useAsyncResource(
     () =>
       classId === ''
-        ? Promise.resolve({
-            list: [] as ClassStudent[],
-            total: 0,
-            page: 1,
-            size: PAGINATION_MAX_SIZE,
-          })
-        : api.identity.listClassStudents(classId, { page: 1, size: PAGINATION_MAX_SIZE }),
+        ? Promise.resolve([] as ClassStudent[])
+        : collectAllPages((params) => api.identity.listClassStudents(classId, params), PAGINATION_MAX_SIZE),
     [classId],
-    (value) => value.list.length === 0,
+    (value) => value.length === 0,
   )
 
   const classOptions = useMemo(
@@ -863,7 +866,7 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
 
   const studentOptions = useMemo(
     () =>
-      (students.data?.list ?? []).map((student) => ({
+      (students.data ?? []).map((student) => ({
         value: student.id,
         label: student.no ? `${student.name} · ${student.no}` : student.name,
       })),
@@ -984,7 +987,7 @@ function AddMemberModal({ group, roles, onClose, onSaved }: AddMemberModalProps)
             )}
 
             {group.members.length > 0 ? (
-              <div className="well p-3">
+              <div className="rounded-md bg-surface-hover p-3">
                 <p className="text-sm text-ink-sub">当前已有 {group.members.length} 名成员。</p>
               </div>
             ) : (

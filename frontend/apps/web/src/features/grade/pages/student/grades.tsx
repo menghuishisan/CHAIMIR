@@ -1,352 +1,339 @@
-// 成绩中心页(学生侧栏,/student/grades)。
-// 学生编号取自服务端会话(useSession 的 /me),不接受任何客户端传参 ——
-// 后端 normalizeReadableStudent 会二次校验,前端也不把编号放进可编辑位置。
+// 成绩中心页(学生侧栏,/student/grades)。设计 §7.2:
+// 页头右侧「生成并下载成绩单」(secondary,打开范围选择弹窗)。上方一行:累计绩点、已修学分两个数字 +
+// 各学期绩点柱状图(至少两个学期时才画,可切换数据表);下方学期筛选 + 成绩表(课程、学分、总评、
+// 等级、绩点),每行末尾「申诉」小按钮,打开右侧抽屉,课程已预先选好,只需填理由。学期筛选写进地址。
 //
-// 课程名:M11 成绩汇总只回 course_id(它只聚合分数,课程档案归 M6),
-// 故与 M6 学生课程列表在页面层做一次映射 —— 内部编号不进界面。
-//
-// 申诉只做提交:GET /grade-center/appeals 由 M11 定为教师/管理员能力,
-// grade 模块也不发申诉状态通知,故学生侧不建申诉列表(对齐清单 §6.6)。
+// 学生编号取自服务端会话(useSession 的 /me),不接受任何客户端传参。
+// 课程名:成绩汇总只回 course_id,与学生自己的课程列表做一次映射(一次请求,不逐行取大纲)。
+// 等级与绩点:成绩接口只回总评,按学校默认等级配置换算(与后端绩点计算同一口径,见 gradeLevel.ts)。
+// 申诉:每门课显示本人最近一次申诉的处理状态(申诉列表按身份分视角,学生只读本人);
+// 还在处理中的课不能再申诉(服务端同样只允许一门课一条进行中的申诉),按钮换成状态。
+// 成绩单由后端同步生成,生成后换一次性授权经统一文件服务下载,用户点一次即可。
 
 import { useCallback, useMemo, useState } from 'react'
-import { useFormValidation } from '../../../../hooks/useFormValidation'
-import { Download, FileText, GraduationCap, Layers, MessageSquareWarning } from 'lucide-react'
+import { Download, GraduationCap, MessageSquareWarning } from 'lucide-react'
 import {
   PAGINATION_DEFAULT_SIZE,
+  PAGINATION_MAX_SIZE,
   TranscriptScope,
-  type Course,
+  GradeAppealStatus,
   type CourseGrade,
+  type GradeAppeal,
   type GradeSummary,
   type Semester,
-  type StudentGradePage,
 } from '@chaimir/api-client'
 import {
-  Breadcrumb,
   Button,
   Callout,
-  Card,
-  CardBody,
-  CardHeader,
   ChartContainer,
   CompareBarChart,
-  DataPanel,
-  Empty,
-  FilterBar,
-  FilterField,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   FormField,
-  PageBody,
+  Icon,
+  Modal,
+  ModalBody,
+  ModalContent,
+  ModalDescription,
+  ModalFooter,
+  ModalHeader,
+  ModalTitle,
   PageHeader,
   PageScaffold,
   Pagination,
   SegmentedControl,
   Select,
-  Stat,
+  Skeleton,
+  StatusIndicator,
   Table,
   Textarea,
   toast,
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
+import { collectAllPages } from '../../../../utils/allPages'
+import { ResourceError } from '../../../../components/ResourceState'
 import { useSession } from '../../../../components/RoleGuard'
-import { useAsyncResource } from '../../../../hooks'
+import { useAsyncResource, useUrlState } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { downloadAttachment } from '../../../../utils/downloadAttachment'
 import { formatGpa, formatScore } from '../../../../utils/formatters'
-import { transcriptScopeLabel } from '../../../../utils/labels/grade'
+import { gradeAppealStatusLabel, transcriptScopeLabel } from '../../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
+import { levelForScore } from '../../gradeLevel'
 
-/** GradeView 是成绩中心一次读齐的数据。 */
-interface GradeView {
-  semesters: Semester[]
-  summary: StudentGradePage
-  history: GradeSummary[]
-  /** 课程编号 → 课程档案,用于把成绩行显示成课程名而不是内部编号 */
-  courses: Map<string, Course>
-}
+/** 地址参数:semester 是学期编号(空为全部学期),page 是成绩表页码 */
+const GRADES_QUERY = {
+  semester: { defaultValue: '' },
+  page: { defaultValue: '1' },
+} as const
+
+/** 学期筛选里「全部学期」的取值(Select 不接受空串) */
+const ALL_SEMESTERS = 'all'
 
 /**
- * StudentGradesPage 呈现 GPA、课程成绩明细,并提供申诉与成绩单入口。
+ * StudentGradesPage 呈现绩点、课程成绩明细,并提供申诉与成绩单入口。
  */
 export default function StudentGradesPage() {
   const { me } = useSession()
   const studentId = me.account.id
-  const [semesterId, setSemesterId] = useState<string>('')
-  const [page, setPage] = useState(1)
+  const [query, setQuery] = useUrlState(GRADES_QUERY)
+  const page = /^[1-9]\d*$/.test(query.page) ? Number(query.page) : 1
+  const [transcriptOpen, setTranscriptOpen] = useState(false)
+  const [appealCourse, setAppealCourse] = useState<CourseGrade>()
 
-  const view = useAsyncResource<GradeView>(
-    async () => {
-      const [semesters, summary, history] = await Promise.all([
-        api.grade.listSemesters(),
-        api.grade.studentGrades(studentId, {
-          semester: semesterId || undefined,
-          page,
-          size: PAGINATION_DEFAULT_SIZE,
-        }),
-        api.grade.studentGPA(studentId),
-      ])
-      const outlines = await Promise.all(
-        summary.list.map((grade) => api.teaching.getCourseOutline(grade.course_id))
-      )
-      return {
-        semesters,
-        summary,
-        history,
-        courses: new Map(outlines.map((outline) => [outline.course.id, outline.course])),
-      }
-    },
-    [page, semesterId, studentId],
-    () => false
+  const semesters = useAsyncResource(() => api.grade.listSemesters(), [], () => false)
+  const history = useAsyncResource(() => api.grade.studentGPA(studentId), [studentId], () => false)
+  const grades = useAsyncResource(
+    () =>
+      api.grade.studentGrades(studentId, {
+        semester: query.semester || undefined,
+        page,
+        size: PAGINATION_DEFAULT_SIZE,
+      }),
+    [page, query.semester, studentId],
+    () => false,
   )
-
-  return (
-    <PageScaffold>
-      <PageHeader
-        kicker={<Breadcrumb items={[{ label: '学业区' }]} />}
-        title="成绩中心"
-        description="这里是你的课程成绩、平均学分绩点与成绩单。对成绩有疑问可以在这里提出申诉。"
-        icon={GraduationCap}
-      />
-
-      <ResourceState
-        resource={view}
-        emptyIcon={GraduationCap}
-        emptyTitle="暂无成绩记录"
-        emptyDescription="课程结课并由学校审核通过后,成绩会显示在这里。"
-      >
-        {(data) => (
-          <GradeContent
-            studentId={studentId}
-            view={data}
-            semesterId={semesterId}
-            page={page}
-            onSemesterChange={(nextSemesterId) => {
-              setSemesterId(nextSemesterId)
-              setPage(1)
-            }}
-            onPageChange={setPage}
-          />
-        )}
-      </ResourceState>
-    </PageScaffold>
+  // 课程名与等级映射:读不到时课程列显示通用名、等级与绩点列显示「—」,不影响分数
+  const courses = useAsyncResource(
+    () => collectAllPages((params) => api.teaching.getCourses({ role: 'student', ...params }), PAGINATION_MAX_SIZE),
+    [],
+    () => false,
   )
-}
+  const levels = useAsyncResource(() => api.grade.listLevelConfigs(), [], () => false)
+  // 本人申诉:按课程取最近一条;读不到时成绩照常显示,只是不显示申诉状态
+  const appeals = useAsyncResource(() => collectAllPages((params) => api.grade.listAppeals(params), PAGINATION_MAX_SIZE), [], () => false)
+  const latestAppeal = useMemo(() => latestAppealByCourse(appeals.data ?? []), [appeals.data])
+  const courseName = useMemo(
+    () => new Map((courses.data ?? []).map((course) => [course.id, course.name])),
+    [courses.data],
+  )
+  const mapping = useMemo(() => levels.data?.find((config) => config.is_default)?.mapping ?? [], [levels.data])
 
-interface GradeContentProps {
-  studentId: string
-  view: GradeView
-  semesterId: string
-  page: number
-  onSemesterChange: (semesterId: string) => void
-  onPageChange: (page: number) => void
-}
-
-/**
- * GradeContent 渲染指标带、成绩明细与右侧动作区。
- */
-function GradeContent({
-  studentId,
-  view,
-  semesterId,
-  page,
-  onSemesterChange,
-  onPageChange,
-}: GradeContentProps) {
-  const { semesters, summary, history, courses } = view
-
-  // 学期筛选:空串表示全部学期(后端 semester 参数缺省即不按学期过滤)
   const semesterOptions = useMemo(
     () => [
-      { value: '', label: '全部学期' },
-      ...semesters.map((semester) => ({ value: semester.id, label: semester.name })),
+      { value: ALL_SEMESTERS, label: '全部学期' },
+      ...(semesters.data ?? []).map((semester) => ({ value: semester.id, label: semester.name })),
     ],
-    [semesters]
+    [semesters.data],
   )
 
   const columns: TableColumn<CourseGrade>[] = [
     {
       key: 'course_id',
       header: '课程',
-      render: (grade) => {
-        const course = courses.get(grade.course_id)
-        return (
-          <div className="min-w-0">
-            <div className="truncate font-medium text-ink">
-              {course ? course.name : '已结束的课程'}
-            </div>
-            {course ? <div className="truncate text-xs text-ink-sub">{course.semester}</div> : null}
-          </div>
-        )
-      },
+      render: (grade) => <span className="font-medium text-ink">{courseName.get(grade.course_id) ?? '已结束的课程'}</span>,
     },
     { key: 'credits', header: '学分', align: 'right', mono: true },
     {
       key: 'final_total',
-      header: '总评成绩',
+      header: '总评',
+      align: 'right',
+      render: (grade) => <span className="font-semibold tabular-nums text-ink">{formatScore(grade.final_total)}</span>,
+    },
+    {
+      key: 'level',
+      header: '等级',
+      render: (grade) => levelForScore(grade.final_total, mapping)?.grade ?? '—',
+    },
+    {
+      key: 'gpa',
+      header: '绩点',
       align: 'right',
       mono: true,
+      render: (grade) => {
+        const level = levelForScore(grade.final_total, mapping)
+        return level ? formatGpa(level.gpa) : '—'
+      },
+    },
+    {
+      key: 'appeal',
+      header: <span className="sr-only">申诉</span>,
+      align: 'right',
       render: (grade) => (
-        <span className="font-medium text-ink">{formatScore(grade.final_total)}</span>
+        <AppealCell appeal={latestAppeal.get(grade.course_id)} onAppeal={() => setAppealCourse(grade)} />
       ),
     },
   ]
 
+  const summary = grades.data
+  const filtered = query.semester !== ''
+
   return (
-    <>
-      {/*
-          归族:看板 + 资源列表混合。绩点与学分确实是这一页的主体读数(学生进来先看"我几分"),
-          故这四项**保留 Stat 大卡**(§6.5.3 第 ② 族:数字就是主角);下方课程成绩清单走第 ① 族。
-      */}
-      <div className="mb-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat
-          label="本范围绩点"
-          value={formatGpa(summary.gpa)}
-          icon={GraduationCap}
-          hint={semesterId ? '所选学期' : '全部学期'}
-        />
-        <Stat label="累计绩点" value={formatGpa(summary.cumulative_gpa)} icon={GraduationCap} hint="全部学期加权" />
-        <Stat label="本范围学分" value={summary.total_credits} icon={Layers} hint="用于绩点加权，含未通过课程" />
-        <Stat label="课程数" value={summary.total} icon={FileText} hint="本范围内" />
-      </div>
-
-      <PageBody
-        rail={
-          <div className="flex flex-col gap-4">
-            <TranscriptCard studentId={studentId} semesters={semesters} />
-            <AppealCard grades={summary.list} courses={courses} />
-          </div>
+    <PageScaffold>
+      <PageHeader
+        title="成绩中心"
+        actions={
+          <Button variant="secondary" leftIcon={Download} onClick={() => setTranscriptOpen(true)}>
+            生成并下载成绩单
+          </Button>
         }
-      >
-        {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2) */}
-        <DataPanel
-          label="课程成绩"
-          filter={
-            <FilterBar label="课程成绩筛选">
-              <FilterField label="学期" group>
-                <SegmentedControl
-                  aria-label="按学期筛选成绩"
-                  size="sm"
-                  options={semesterOptions.slice(0, 4)}
-                  value={semesterId}
-                  onValueChange={onSemesterChange}
-                />
-              </FilterField>
-            </FilterBar>
-          }
-          footer={
-            <Pagination
-              page={page}
-              pageSize={summary.size}
-              total={summary.total}
-              onPageChange={onPageChange}
-            />
-          }
-        >
-          <Table
-            columns={columns}
-            data={summary.list}
-            rowKey={(grade) => grade.course_id}
-            elevated={false}
-            // <md 换行卡(§6.4.1 规则 3):课程名一行、学分与绩点一行,等级在右
-            mobileCard={(grade) => ({
-              title: courses.get(grade.course_id)?.name ?? '已归档的课程',
-              meta: `${grade.credits} 学分 · 总评 ${formatScore(grade.final_total)}`,
-            })}
-            empty={
-              <Empty
-                icon={GraduationCap}
-                title="这个范围内还没有成绩"
-                description="换个学期看看,或等课程成绩审核通过后再来。"
-              />
-            }
+      />
+
+      <OverviewRow summary={summary?.cumulative_gpa} credits={history.data} semesters={semesters.data ?? []} loading={history.status === 'loading'} />
+
+      <section aria-labelledby="course-grades-title" className="mt-8">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <h2 id="course-grades-title" className="text-md font-semibold text-ink">
+            课程成绩
+            {summary ? (
+              <span className="ml-2 text-sm font-normal text-ink-sub">
+                {filtered ? '本学期' : '全部'}绩点 {formatGpa(summary.gpa)} · {summary.total_credits} 学分
+              </span>
+            ) : null}
+          </h2>
+          <Select
+            aria-label="按学期筛选"
+            options={semesterOptions}
+            value={query.semester || ALL_SEMESTERS}
+            onValueChange={(value) => setQuery({ semester: value === ALL_SEMESTERS ? '' : value, page: '1' })}
+            className="w-full sm:w-56"
           />
-        </DataPanel>
+        </div>
 
-        {history.length > 0 ? (
-          <div className="mt-6">
-            <SemesterGpaList history={history} semesters={semesters} />
+        {grades.status === 'error' ? (
+          <ResourceError
+            message={grades.error?.message ?? '成绩暂时读取不到'}
+            traceId={grades.error?.traceId}
+            onRetry={grades.reload}
+          />
+        ) : (summary?.list.length ?? 0) === 0 && grades.status !== 'loading' ? (
+          <div className="flex flex-col items-center rounded-lg bg-surface px-6 py-14 text-center shadow-xs">
+            <Icon icon={GraduationCap} size="lg" className="text-ink-faint" />
+            <p className="mt-3 text-md font-semibold text-ink">{filtered ? '这个学期还没有成绩' : '还没有成绩'}</p>
+            <p className="mt-1.5 text-sm text-ink-sub">课程结课并由学校审核通过后,成绩会显示在这里。</p>
           </div>
-        ) : null}
-      </PageBody>
-    </>
-  )
-}
+        ) : (
+          <>
+            <Table
+              columns={columns}
+              data={summary?.list ?? []}
+              rowKey={(grade) => grade.course_id}
+              loading={grades.status === 'loading' && !summary}
+              mobileCard={(grade) => {
+                const level = levelForScore(grade.final_total, mapping)
+                return {
+                  title: courseName.get(grade.course_id) ?? '已结束的课程',
+                  meta: `${grade.credits} 学分 · 总评 ${formatScore(grade.final_total)}${level ? ` · ${level.grade} · 绩点 ${formatGpa(level.gpa)}` : ''}`,
+                  action: (
+                    <AppealCell appeal={latestAppeal.get(grade.course_id)} onAppeal={() => setAppealCourse(grade)} />
+                  ),
+                }
+              }}
+            />
+            {summary ? (
+              <div className="mt-4">
+                <Pagination
+                  page={page}
+                  pageSize={summary.size}
+                  total={summary.total}
+                  onPageChange={(next) => setQuery({ page: String(next) })}
+                />
+              </div>
+            ) : null}
+          </>
+        )}
+      </section>
 
-interface SemesterGpaListProps {
-  history: GradeSummary[]
-  semesters: Semester[]
+      <TranscriptModal open={transcriptOpen} onOpenChange={setTranscriptOpen} studentId={studentId} semesters={semesters.data ?? []} />
+      <AppealDrawer
+        grade={appealCourse}
+        courseName={appealCourse ? courseName.get(appealCourse.course_id) : undefined}
+        onClose={() => setAppealCourse(undefined)}
+        onSubmitted={appeals.reload}
+      />
+    </PageScaffold>
+  )
 }
 
 /**
- * SemesterGpaList 呈现各学期结算绩点。
- * 学期名从学期清单换取:汇总记录只带 semester_id,不把内部编号显示给用户。
- * 学期是离散维度而不是连续时间轴,故按「维度对比」用柱状(规范 §8.1),
- * 逐学期数字仍可在图上切到数据表读(§8.2 的等价替代由 ChartContainer 提供)。
+ * OverviewRow 上方一行:累计绩点、已修学分 + 各学期绩点柱状图(至少两个学期才画)。
+ * 已修学分取各学期结算学分之和;学期名从学期清单换取,不显示内部编号。
  */
-function SemesterGpaList({ history, semesters }: SemesterGpaListProps) {
-  const semesterName = useMemo(
-    () => new Map(semesters.map((semester) => [semester.id, semester.name])),
-    [semesters]
-  )
+function OverviewRow({
+  summary,
+  credits,
+  semesters,
+  loading,
+}: {
+  summary: number | undefined
+  credits: GradeSummary[] | null
+  semesters: Semester[]
+  loading: boolean
+}) {
+  const semesterName = useMemo(() => new Map(semesters.map((semester) => [semester.id, semester.name])), [semesters])
+  const perSemester = (credits ?? []).filter((item) => item.semester_id)
+  const totalCredits = perSemester.reduce((sum, item) => sum + item.total_credits, 0)
+  const rows = perSemester.map((item) => ({
+    semester: semesterName.get(item.semester_id ?? '') ?? '未登记学期',
+    gpa: Number(item.gpa.toFixed(2)),
+  }))
+  const best = rows.reduce<(typeof rows)[number] | undefined>((top, row) => (!top || row.gpa > top.gpa ? row : top), undefined)
 
-  const rows = useMemo(
-    () =>
-      history.map((item) => ({
-        semester: item.semester_id
-          ? (semesterName.get(item.semester_id) ?? '未登记学期')
-          : '全部学期',
-        gpa: Number(item.gpa.toFixed(2)),
-        credits: item.total_credits,
-      })),
-    [history, semesterName]
-  )
-
-  const best = rows.reduce((top, row) => (row.gpa > top.gpa ? row : top), rows[0])
+  if (loading) {
+    return (
+      <div aria-busy="true" className="grid gap-4 lg:grid-cols-3">
+        <Skeleton variant="stat" />
+        <Skeleton variant="block" className="lg:col-span-2" />
+      </div>
+    )
+  }
 
   return (
-    <ChartContainer
-      title="各学期绩点"
-      description="按学期结算的平均学分绩点与已修学分。"
-      ariaSummary={`共 ${rows.length} 个学期:${rows
-        .map((row) => `${row.semester} 绩点 ${row.gpa}、${row.credits} 学分`)
-        .join(';')}。绩点最高的是 ${best.semester}(${best.gpa})。`}
-      dataTable={{
-        columns: ['学期', '绩点', '已修学分'],
-        rows: rows.map((row) => [row.semester, row.gpa, row.credits]),
-      }}
-    >
-      <CompareBarChart
-        data={rows}
-        xKey="semester"
-        series={[
-          { key: 'gpa', name: '平均学分绩点' },
-          { key: 'credits', name: '已修学分' },
-        ]}
-      />
-    </ChartContainer>
+    <div className="grid gap-4 lg:grid-cols-3">
+      <dl className="grid grid-cols-2 gap-4 rounded-lg bg-surface p-5 shadow-xs lg:grid-cols-1">
+        <div>
+          <dt className="text-sm text-ink-sub">累计平均学分绩点</dt>
+          <dd className="mt-1 text-stat font-bold tabular-nums text-ink">{summary !== undefined ? formatGpa(summary) : '—'}</dd>
+        </div>
+        <div>
+          <dt className="text-sm text-ink-sub">已修学分</dt>
+          <dd className="mt-1 text-stat font-bold tabular-nums text-ink">{perSemester.length > 0 ? totalCredits : '—'}</dd>
+        </div>
+      </dl>
+      {rows.length >= 2 ? (
+        <div className="lg:col-span-2">
+          <ChartContainer
+            title="各学期绩点"
+            height={200}
+            ariaSummary={`共 ${rows.length} 个学期:${rows.map((row) => `${row.semester} 绩点 ${row.gpa}`).join(';')}。${best ? `绩点最高的是 ${best.semester}(${best.gpa})。` : ''}`}
+            dataTable={{ columns: ['学期', '绩点'], rows: rows.map((row) => [row.semester, row.gpa]) }}
+          >
+            <CompareBarChart data={rows} xKey="semester" series={[{ key: 'gpa', name: '平均学分绩点' }]} />
+          </ChartContainer>
+        </div>
+      ) : null}
+    </div>
   )
 }
 
-interface TranscriptCardProps {
+/** TranscriptModal 选择成绩单范围(全部 / 某一学期),生成后立即下载 */
+function TranscriptModal({
+  open,
+  onOpenChange,
+  studentId,
+  semesters,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
   studentId: string
   semesters: Semester[]
-}
-
-/**
- * TranscriptCard 生成成绩单并取件。
- * 生成与下载是两步:生成落库产出记录,下载再换一次性授权(统一文件服务)。
- */
-function TranscriptCard({ studentId, semesters }: TranscriptCardProps) {
+}) {
   const [scope, setScope] = useState(String(TranscriptScope.FULL))
-  const [semesterId, setSemesterId] = useState<string>('')
+  const [semesterId, setSemesterId] = useState('')
   const [working, setWorking] = useState(false)
   const [actionError, setActionError] = useState<string>()
-
   const needsSemester = Number(scope) === TranscriptScope.SEMESTER
   const { errors, validate } = useFormValidation(() => ({
     semesterId: needsSemester && !semesterId ? '请选择要生成的学期' : null,
   }))
 
-  /** generateAndDownload 生成成绩单后立即取件,用户只需点一次。 */
+  /** generateAndDownload 生成成绩单后立即取件(一次性授权,经统一文件服务) */
   const generateAndDownload = useCallback(async () => {
     if (!validate()) return
     setWorking(true)
@@ -358,184 +345,191 @@ function TranscriptCard({ studentId, semesters }: TranscriptCardProps) {
         semester_id: needsSemester ? semesterId : undefined,
       })
       const grant = await api.grade.downloadTranscript(transcript.id)
-      const file = await api.storage.consumeGrant(grant.token)
-      downloadAttachment(file)
-      toast.success('成绩单已生成')
+      downloadAttachment(await api.storage.consumeGrant(grant.token))
+      toast.success('成绩单已生成,正在下载')
+      onOpenChange(false)
     } catch (error) {
-      setActionError(userFacingErrorMessage(error, '成绩单生成失败,请稍后重试。'))
+      setActionError(userFacingErrorMessage(error, '成绩单没有生成成功,请稍后重试。'))
     } finally {
       setWorking(false)
     }
-  }, [needsSemester, scope, semesterId, studentId, validate])
+  }, [needsSemester, onOpenChange, scope, semesterId, studentId, validate])
 
   return (
-    <Card>
-      <CardHeader title="成绩单" description="生成后立即下载,文件带学校电子签章。" />
-      <CardBody className="flex flex-col gap-4">
-        <FormField label="成绩单范围" required>
-          <SegmentedControl
-            aria-label="成绩单范围"
-            size="sm"
-            options={[
-              {
-                value: String(TranscriptScope.FULL),
-                label: transcriptScopeLabel(TranscriptScope.FULL),
-              },
-              {
-                value: String(TranscriptScope.SEMESTER),
-                label: transcriptScopeLabel(TranscriptScope.SEMESTER),
-              },
-            ]}
-            value={scope}
-            onValueChange={setScope}
-          />
-        </FormField>
-
-        {needsSemester ? (
-          <FormField label="学期" htmlFor="student-transcript-semester" required error={errors.semesterId}>
-            <Select
-              id="student-transcript-semester"
-              options={semesters.map((semester) => ({ value: semester.id, label: semester.name }))}
-              value={semesterId}
-              placeholder="选择学期"
-              onValueChange={setSemesterId}
-              invalid={Boolean(errors.semesterId)}
-              onBlur={() => validate(['semesterId'])}
+    <Modal open={open} onOpenChange={(next) => (working ? undefined : onOpenChange(next))}>
+      <ModalContent size="sm">
+        <ModalHeader>
+          <ModalTitle>生成成绩单</ModalTitle>
+          <ModalDescription>成绩单带学校电子签章,生成后会自动下载。</ModalDescription>
+        </ModalHeader>
+        <ModalBody className="flex flex-col gap-4">
+          <FormField label="范围" required>
+            <SegmentedControl
+              aria-label="成绩单范围"
+              size="sm"
+              options={[
+                { value: String(TranscriptScope.FULL), label: transcriptScopeLabel(TranscriptScope.FULL) },
+                { value: String(TranscriptScope.SEMESTER), label: transcriptScopeLabel(TranscriptScope.SEMESTER) },
+              ]}
+              value={scope}
+              onValueChange={setScope}
             />
           </FormField>
-        ) : null}
-
-        {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
-
-        <Button
-          variant="primary"
-          leftIcon={Download}
-          loading={working}
-          onClick={() => void generateAndDownload()}
-        >
-          生成并下载
-        </Button>
-      </CardBody>
-    </Card>
+          {needsSemester ? (
+            <FormField label="学期" htmlFor="student-transcript-semester" required error={errors.semesterId}>
+              <Select
+                id="student-transcript-semester"
+                options={semesters.map((semester) => ({ value: semester.id, label: semester.name }))}
+                value={semesterId}
+                placeholder="选择学期"
+                onValueChange={setSemesterId}
+                invalid={Boolean(errors.semesterId)}
+                onBlur={() => validate(['semesterId'])}
+              />
+            </FormField>
+          ) : null}
+          {actionError ? <Callout tone="danger">{actionError}</Callout> : null}
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="outline" disabled={working} onClick={() => onOpenChange(false)}>
+            取消
+          </Button>
+          <Button variant="primary" leftIcon={Download} loading={working} onClick={() => void generateAndDownload()}>
+            生成并下载
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
   )
-}
-
-interface AppealCardProps {
-  grades: CourseGrade[]
-  courses: Map<string, Course>
 }
 
 /**
- * AppealCard 提交成绩申诉。
- * 可申诉课程取自本人成绩明细(后端 validateAppealCourse 也要求成绩存在),
- * 选项显示课程名、值用课程编号 —— 用户不需要知道也不需要填内部编号。
- * 提交后只给就近反馈:申诉状态列表属教师/管理员能力,学生侧不显示进度(§6.6)。
+ * AppealDrawer 对一门课的成绩提出申诉:课程已预先选好,只需填理由。
+ * 可申诉范围以本人成绩明细为准(后端同样校验成绩存在与申诉期限);提交后这门课的状态换成「待处理」。
  */
-function AppealCard({ grades, courses }: AppealCardProps) {
-  const [courseId, setCourseId] = useState<string>('')
+function AppealDrawer({
+  grade,
+  courseName,
+  onClose,
+  onSubmitted,
+}: {
+  grade: CourseGrade | undefined
+  courseName: string | undefined
+  onClose: () => void
+  onSubmitted: () => void
+}) {
   const [reason, setReason] = useState('')
-  const [submitError, setSubmitError] = useState<string>()
   const [submitting, setSubmitting] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
-  const { errors, validate } = useFormValidation(() => ({
-    courseId: !courseId ? '请选择要申诉的课程' : null,
-    reason: !reason.trim() ? '请说明申诉理由' : null,
-  }))
+  const [submitError, setSubmitError] = useState<string>()
+  const { errors, validate } = useFormValidation(() => ({ reason: !reason.trim() ? '请说明申诉理由' : null }))
 
-  const courseOptions = useMemo(
-    () =>
-      grades.map((grade) => {
-        const course = courses.get(grade.course_id)
-        return {
-          value: grade.course_id,
-          label: course
-            ? `${course.name} · 总评 ${formatScore(grade.final_total)}`
-            : `已结束的课程 · 总评 ${formatScore(grade.final_total)}`,
-        }
-      }),
-    [courses, grades]
-  )
-
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!validate()) return
-      setSubmitError(undefined)
-      setSubmitting(true)
-      try {
-        await api.grade.submitAppeal({ course_id: courseId, reason: reason.trim() })
-        setSubmitted(true)
-        toast.success('申诉已提交')
-      } catch (error) {
-        setSubmitError(userFacingErrorMessage(error, '申诉提交失败,请稍后重试。'))
-      } finally {
-        setSubmitting(false)
-      }
-    },
-    [courseId, reason, validate]
-  )
-
-  if (submitted) {
-    return (
-      <Card>
-        <CardHeader title="成绩申诉" />
-        <CardBody>
-          <Callout tone="success" title="申诉已提交">
-            任课老师会核查你的成绩。处理结果以最终成绩为准,如需了解进度请直接联系老师。
-          </Callout>
-        </CardBody>
-      </Card>
-    )
+  const close = () => {
+    if (submitting) return
+    setReason('')
+    setSubmitError(undefined)
+    onClose()
   }
 
+  const submit = useCallback(async () => {
+    if (!grade || !validate()) return
+    setSubmitting(true)
+    setSubmitError(undefined)
+    try {
+      await api.grade.submitAppeal({ course_id: grade.course_id, reason: reason.trim() })
+      toast.success('申诉已提交,处理结果会显示在这门课的成绩旁')
+      onSubmitted()
+      setReason('')
+      onClose()
+    } catch (error) {
+      setSubmitError(userFacingErrorMessage(error, '申诉没有提交成功,请稍后重试。'))
+    } finally {
+      setSubmitting(false)
+    }
+  }, [grade, onClose, onSubmitted, reason, validate])
+
   return (
-    <Card>
-      <CardHeader title="成绩申诉" description="对成绩有疑问可以提出申诉,由任课老师核查。" />
-      <CardBody>
-        <form onSubmit={submit} noValidate>
-          <FormField label="申诉课程" htmlFor="appeal-course" required error={errors.courseId}>
-            <Select
-              id="appeal-course"
-              options={courseOptions}
-              value={courseId}
-              placeholder={courseOptions.length > 0 ? '选择课程' : '暂无可申诉的课程'}
-              disabled={courseOptions.length === 0}
-              onValueChange={setCourseId}
-              invalid={Boolean(errors.courseId)}
-              onBlur={() => validate(['courseId'])}
-            />
-          </FormField>
+    <Drawer open={grade !== undefined} onOpenChange={(open) => (open ? undefined : close())}>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>申诉成绩</DrawerTitle>
+          <DrawerDescription>任课老师会核查你的成绩,处理结果会显示在这门课的成绩旁,也会发站内通知。</DrawerDescription>
+        </DrawerHeader>
+        <DrawerBody className="flex flex-col gap-4">
+          {grade ? (
+            <div className="rounded-md bg-surface-hover p-4">
+              <p className="text-base font-semibold text-ink">{courseName ?? '已结束的课程'}</p>
+              <p className="mt-1 text-sm text-ink-sub">
+                {grade.credits} 学分 · 总评 {formatScore(grade.final_total)}
+              </p>
+            </div>
+          ) : null}
           <FormField
             label="申诉理由"
             htmlFor="appeal-reason"
             required
             error={errors.reason}
             helper="说清楚你认为哪部分成绩有问题、依据是什么"
-            className="mt-4"
           >
             <Textarea
               id="appeal-reason"
               value={reason}
-              rows={4}
-              placeholder="请具体说明"
+              rows={6}
+              placeholder="例如:第三次作业已按时提交,成绩里显示为缺交"
               invalid={Boolean(errors.reason)}
               onChange={(event) => setReason(event.target.value)}
               onBlur={() => validate(['reason'])}
             />
           </FormField>
-          {submitError ? <Callout tone="danger" className="mt-4">{submitError}</Callout> : null}
-          <Button
-            type="submit"
-            variant="primary"
-            leftIcon={MessageSquareWarning}
-            loading={submitting}
-            disabled={courseOptions.length === 0}
-            className="mt-4 w-full"
-          >
+          {submitError ? <Callout tone="danger">{submitError}</Callout> : null}
+        </DrawerBody>
+        <DrawerFooter>
+          <Button variant="outline" disabled={submitting} onClick={close}>
+            取消
+          </Button>
+          <Button variant="primary" leftIcon={MessageSquareWarning} loading={submitting} onClick={() => void submit()}>
             提交申诉
           </Button>
-        </form>
-      </CardBody>
-    </Card>
+        </DrawerFooter>
+      </DrawerContent>
+    </Drawer>
+  )
+}
+
+/** latestAppealByCourse 每门课只留本人最近一次申诉(列表已按提交时间倒序) */
+function latestAppealByCourse(appeals: readonly GradeAppeal[]): Map<string, GradeAppeal> {
+  const latest = new Map<string, GradeAppeal>()
+  for (const appeal of appeals) {
+    if (!latest.has(appeal.course_id)) latest.set(appeal.course_id, appeal)
+  }
+  return latest
+}
+
+/** 申诉状态的提示色:处理中为警示,通过或已改分为成功,未通过为中性 */
+const APPEAL_TONE: Record<GradeAppealStatus, 'warning' | 'success' | 'neutral'> = {
+  [GradeAppealStatus.PENDING]: 'warning',
+  [GradeAppealStatus.ACCEPTED]: 'warning',
+  [GradeAppealStatus.COMPLETED]: 'success',
+  [GradeAppealStatus.REJECTED]: 'neutral',
+}
+
+/**
+ * AppealCell 成绩行末尾的申诉位:没申诉过或上一次已结束时给「申诉」按钮;
+ * 还在处理中只显示状态(不能重复申诉);已结束的同时显示上一次的结果,处理意见悬停可见。
+ */
+function AppealCell({ appeal, onAppeal }: { appeal: GradeAppeal | undefined; onAppeal: () => void }) {
+  const active = appeal?.status === GradeAppealStatus.PENDING || appeal?.status === GradeAppealStatus.ACCEPTED
+  return (
+    <span className="inline-flex items-center justify-end gap-2">
+      {appeal ? (
+        <span title={appeal.result_comment || undefined}>
+          <StatusIndicator tone={APPEAL_TONE[appeal.status]} label={`申诉${gradeAppealStatusLabel(appeal.status)}`} />
+        </span>
+      ) : null}
+      {active ? null : (
+        <Button variant="ghost" size="sm" onClick={onAppeal}>
+          {appeal ? '再次申诉' : '申诉'}
+        </Button>
+      )}
+    </span>
   )
 }

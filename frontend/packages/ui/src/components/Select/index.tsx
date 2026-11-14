@@ -8,6 +8,7 @@
  */
 import * as SelectPrimitive from "@radix-ui/react-select";
 import type { FocusEventHandler } from "react";
+import { cva } from "class-variance-authority";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "../../lib/cn";
 import { Icon } from "../../lib/icon";
@@ -39,6 +40,27 @@ export interface SelectProps {
   className?: string;
 }
 
+/**
+ * 触发器外观:与盒式 Input 同视觉,占位态用弱化文字色(data-placeholder)。
+ * 导出给「看起来像下拉框」的选择器复用(如可搜索的账号选择),下拉框的外观只在这里定义一次。
+ */
+export const selectTriggerVariants = cva(
+  "inline-flex pointer-coarse:min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50",
+  {
+    variants: {
+      tone: {
+        light: "border-line-control bg-surface text-ink data-[placeholder]:text-ink-sub hover:border-ink-sub",
+        dark: "border-dark-control bg-dark-elevated text-on-dark data-[placeholder]:text-on-dark-sub hover:border-on-dark-sub",
+      },
+      size: { sm: "h-8 text-sm", md: "h-9 text-base" },
+      // 错误态:hover 同样保持危险色(显式覆盖基类 hover),避免误导为已修复
+      invalid: { true: "border-danger hover:border-danger", false: "" },
+    },
+    defaultVariants: { tone: "light", size: "md", invalid: false },
+  },
+);
+
+/** Select 单选下拉框;浮层在弹窗之上,失焦交给触发按钮做校验 */
 export function Select({
   value,
   onValueChange,
@@ -62,16 +84,7 @@ export function Select({
         onBlur={onBlur}
         aria-label={ariaLabel}
         aria-invalid={invalid || undefined}
-        className={cn(
-          "inline-flex min-h-11 w-full items-center justify-between gap-2 rounded-md border px-3 transition-colors duration-fast focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50",
-          onDark
-            ? "border-dark-line bg-dark-elevated text-on-dark data-[placeholder]:text-on-dark-faint hover:border-on-dark-faint"
-            : "border-line-strong bg-surface text-ink data-[placeholder]:text-ink-faint hover:border-ink-faint",
-          isSm ? "h-8 text-sm" : "h-9 text-base",
-          // 错误态:hover 同样保持危险色(显式覆盖基类 hover),避免误导为已修复
-          invalid && "border-danger hover:border-danger",
-          className,
-        )}
+        className={cn(selectTriggerVariants({ tone: onDark ? "dark" : "light", size: isSm ? "sm" : "md", invalid }), className)}
       >
         <SelectPrimitive.Value placeholder={placeholder} />
         <SelectPrimitive.Icon className={onDark ? "text-on-dark-sub" : "text-ink-sub"}>

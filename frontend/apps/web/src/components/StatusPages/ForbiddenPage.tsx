@@ -26,8 +26,8 @@ export function ForbiddenPage({ roles }: ForbiddenPageProps) {
     <AppStatusScreen
       icon={ShieldX}
       tone="danger"
-      title="没有访问这个页面的权限"
-      description="你当前的账号角色无法查看该区域。如果你认为这是误判,请联系本校管理员。"
+      title="你的账号没有打开这个页面的权限"
+      description="这个页面属于其他身份。可以回到自己的首页,或换一个有权限的账号登录。"
       actions={
         <>
           {homePath ? (
@@ -42,7 +42,7 @@ export function ForbiddenPage({ roles }: ForbiddenPageProps) {
               navigate('/auth/login', { replace: true })
             }}
           >
-            退出登录
+            换个账号登录
           </Button>
         </>
       }

@@ -20,6 +20,26 @@ func (s *Service) GetCourse(ctx context.Context, tenantID, courseID int64) (cont
 	return contractCourse(course), nil
 }
 
+// BatchGetCourses 实现 M6 对 M11 的课程摘要批量只读契约,供成绩审核与申诉列表随记录下发课程名。
+func (s *Service) BatchGetCourses(ctx context.Context, tenantID int64, courseIDs []int64) ([]contracts.TeachingCourseInfo, error) {
+	if len(courseIDs) == 0 {
+		return []contracts.TeachingCourseInfo{}, nil
+	}
+	var courses []Course
+	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
+		var err error
+		courses, err = tx.BatchGetCourses(ctx, tenantID, courseIDs)
+		return err
+	}); err != nil {
+		return nil, mapCourseError(err)
+	}
+	out := make([]contracts.TeachingCourseInfo, 0, len(courses))
+	for _, course := range courses {
+		out = append(out, contractCourse(course))
+	}
+	return out, nil
+}
+
 // ListTeacherCourseIDs 实现 M6 对 M11 的授课范围只读契约,不返回课程正文或成绩。
 func (s *Service) ListTeacherCourseIDs(ctx context.Context, tenantID, teacherID int64) ([]int64, error) {
 	var courseIDs []int64

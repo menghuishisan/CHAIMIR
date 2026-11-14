@@ -94,7 +94,9 @@ type ConfigChangeLogDTO struct {
 	OldValue   map[string]any `json:"old_value"`
 	NewValue   map[string]any `json:"new_value"`
 	OperatorID ids.ID         `json:"operator_id"`
-	CreatedAt  string         `json:"created_at"`
+	// OperatorName 操作人姓名:平台配置是平台管理员,学校配置是本校管理员;账号已移除时为空串
+	OperatorName string `json:"operator_name,omitempty"`
+	CreatedAt    string `json:"created_at"`
 }
 
 // AlertRuleDTO 表示告警规则响应。
@@ -152,11 +154,15 @@ type BackupRecordDTO struct {
 }
 
 type AuditLogEntryDTO struct {
-	ID         ids.ID `json:"id"`
-	TenantID   ids.ID `json:"tenant_id,omitempty"`
+	ID       ids.ID `json:"id"`
+	TenantID ids.ID `json:"tenant_id,omitempty"`
 	// ActorID 使用文本类型，因为系统审计记录合法使用 actor_id=0，
 	// 而 0 不是有效的正雪花 ID。
-	ActorID    string `json:"actor_id"`
+	ActorID string `json:"actor_id"`
+	// ActorName 操作人姓名:学校身份解析本校账号,平台身份只解析平台管理员;系统记录与解析不到的省略
+	ActorName string `json:"actor_name,omitempty"`
+	// ActorNo 操作人学工号,只有学校账号才有
+	ActorNo    string `json:"actor_no,omitempty"`
 	ActorRole  int16  `json:"actor_role"`
 	Action     string `json:"action"`
 	TargetType string `json:"target_type"`

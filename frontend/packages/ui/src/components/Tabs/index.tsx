@@ -26,6 +26,7 @@ const TabsValueContext = createContext<string | undefined>(undefined)
 
 export type TabsProps = ComponentPropsWithoutRef<typeof TabsPrimitive.Root>
 
+/** Tabs 选项卡根节点 */
 export function Tabs({ value, defaultValue, onValueChange, children, ...rest }: TabsProps) {
   // 非受控时在本层镜像一份当前值;受控时以外部 value 为准
   const [innerValue, setInnerValue] = useState(defaultValue)
@@ -50,6 +51,7 @@ export function Tabs({ value, defaultValue, onValueChange, children, ...rest }: 
 
 export type TabsListProps = ComponentPropsWithoutRef<typeof TabsPrimitive.List>
 
+/** TabsList 选项卡标签栏 */
 export function TabsList({ className, children, ...rest }: TabsListProps) {
   const activeValue = useContext(TabsValueContext)
   const listRef = useRef<HTMLDivElement>(null)
@@ -105,15 +107,18 @@ export function TabsList({ className, children, ...rest }: TabsListProps) {
 export interface TabsTriggerProps extends ComponentPropsWithoutRef<typeof TabsPrimitive.Trigger> {
   /** 可选前置图标(Lucide) */
   icon?: LucideIcon
+  /** 标签上的计数,如「成员 42」;未知时不传 */
+  count?: number
 }
 
-export function TabsTrigger({ icon, className, children, ...rest }: TabsTriggerProps) {
+/** TabsTrigger 一个选项卡标签,可带图标与数量 */
+export function TabsTrigger({ icon, count, className, children, ...rest }: TabsTriggerProps) {
   return (
     <TabsPrimitive.Trigger
       className={cn(
-        'inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-sm px-3 py-2 text-sm text-ink-sub',
+        'inline-flex pointer-coarse:min-h-11 shrink-0 items-center gap-1.5 rounded-sm px-3 py-2.5 text-base text-ink-sub',
         'transition-colors duration-fast hover:text-ink',
-        'data-[state=active]:font-medium data-[state=active]:text-primary',
+        'data-[state=active]:font-semibold data-[state=active]:text-primary',
         'focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2',
         'disabled:pointer-events-none disabled:opacity-50',
         className
@@ -122,12 +127,14 @@ export function TabsTrigger({ icon, className, children, ...rest }: TabsTriggerP
     >
       {icon && <Icon icon={icon} size="sm" />}
       {children}
+      {count !== undefined && <span className="text-sm font-normal tabular-nums text-ink-sub">{count}</span>}
     </TabsPrimitive.Trigger>
   )
 }
 
 export type TabsContentProps = ComponentPropsWithoutRef<typeof TabsPrimitive.Content>
 
+/** TabsContent 一个选项卡的内容区 */
 export function TabsContent({ className, ...rest }: TabsContentProps) {
   return (
     <TabsPrimitive.Content

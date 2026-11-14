@@ -149,6 +149,10 @@ type ReviewDTO struct {
 	CourseID    ids.ID `json:"course_id"`
 	SemesterID  ids.ID `json:"semester_id,omitempty"`
 	SubmitterID ids.ID `json:"submitter_id"`
+	// SubmitterName 报送教师姓名,只在列表里给出;账号已移除时省略
+	SubmitterName string `json:"submitter_name,omitempty"`
+	// CourseName 课程名,只在列表里给出;课程已删除时省略
+	CourseName  string `json:"course_name,omitempty"`
 	ReviewerID  ids.ID `json:"reviewer_id,omitempty"`
 	Status      int16  `json:"status"`
 	IsLocked    bool   `json:"is_locked"`
@@ -163,25 +167,33 @@ type AppealDTO struct {
 	ID             ids.ID `json:"id"`
 	TenantID       ids.ID `json:"tenant_id"`
 	StudentID      ids.ID `json:"student_id"`
-	CourseID       ids.ID `json:"course_id"`
-	Reason         string `json:"reason"`
-	Status         int16  `json:"status"`
-	HandlerID      ids.ID `json:"handler_id,omitempty"`
-	ResultComment  string `json:"result_comment,omitempty"`
-	CreatedAt      string `json:"created_at"`
-	HandledAt      string `json:"handled_at,omitempty"`
+	// StudentName、StudentNo 申诉学生的姓名与学号,只在列表里给出;账号已移除时省略
+	StudentName string `json:"student_name,omitempty"`
+	StudentNo   string `json:"student_no,omitempty"`
+	CourseID    ids.ID `json:"course_id"`
+	// CourseName 课程名,只在列表里给出;课程已删除时省略
+	CourseName    string `json:"course_name,omitempty"`
+	Reason        string `json:"reason"`
+	Status        int16  `json:"status"`
+	HandlerID     ids.ID `json:"handler_id,omitempty"`
+	ResultComment string `json:"result_comment,omitempty"`
+	CreatedAt     string `json:"created_at"`
+	HandledAt     string `json:"handled_at,omitempty"`
 }
 
 // WarningDTO 表示学业预警响应。
 type WarningDTO struct {
-	ID         ids.ID         `json:"id"`
-	TenantID   ids.ID         `json:"tenant_id"`
-	StudentID  ids.ID         `json:"student_id"`
-	SemesterID ids.ID         `json:"semester_id"`
-	Type       int16          `json:"type"`
-	Detail     map[string]any `json:"detail"`
-	Status     int16          `json:"status"`
-	CreatedAt  string         `json:"created_at"`
+	ID        ids.ID `json:"id"`
+	TenantID  ids.ID `json:"tenant_id"`
+	StudentID ids.ID `json:"student_id"`
+	// StudentName、StudentNo 学生姓名与学号,只在列表里给出;账号已移除时省略
+	StudentName string         `json:"student_name,omitempty"`
+	StudentNo   string         `json:"student_no,omitempty"`
+	SemesterID  ids.ID         `json:"semester_id"`
+	Type        int16          `json:"type"`
+	Detail      map[string]any `json:"detail"`
+	Status      int16          `json:"status"`
+	CreatedAt   string         `json:"created_at"`
 }
 
 // TranscriptDTO 表示成绩单元数据响应,PDFRef 仅供服务端下载授权使用。

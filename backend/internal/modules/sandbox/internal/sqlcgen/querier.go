@@ -13,6 +13,8 @@ type Querier interface {
 	// 用户写入必须携带最近一次读取到的 revision;不一致时不更新,由 service 返回冲突。
 	ClaimSandboxWorkspaceRevision(ctx context.Context, arg ClaimSandboxWorkspaceRevisionParams) (int64, error)
 	CountActiveSandboxes(ctx context.Context, tenantID int64) (int64, error)
+	// 运行时列表的接入进度要知道每个运行时有几个可用镜像版本:一次分组计数,不逐个运行时取镜像列表。
+	CountAvailableRuntimeImagesByRuntime(ctx context.Context) ([]CountAvailableRuntimeImagesByRuntimeRow, error)
 	CreateRuntimeImage(ctx context.Context, arg CreateRuntimeImageParams) (RuntimeImage, error)
 	CreateSandbox(ctx context.Context, arg CreateSandboxParams) (Sandbox, error)
 	CreateSandboxEvent(ctx context.Context, arg CreateSandboxEventParams) (SandboxEvent, error)

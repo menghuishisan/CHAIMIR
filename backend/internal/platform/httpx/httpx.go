@@ -15,6 +15,7 @@ import (
 	"chaimir/internal/platform/audit"
 	"chaimir/internal/platform/auth"
 	"chaimir/internal/platform/ids"
+	"chaimir/internal/platform/jsonx"
 	"chaimir/internal/platform/pagex"
 	platformredis "chaimir/internal/platform/redis"
 	"chaimir/internal/platform/response"
@@ -96,6 +97,31 @@ func BindJSONWithError(c *gin.Context, dst any, bindErr *apperr.Error) bool {
 		return false
 	}
 	return true
+}
+
+// BindJSONKnownFieldsWithError 复用严格 JSON 解析,拒绝请求体中未声明的字段和额外值。
+func BindJSONKnownFieldsWithError(c *gin.Context, dst any, bindErr *apperr.Error) bool {
+	raw, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return failJSONBinding(c, bindErr, err)
+	}
+	if len(raw) == 0 {
+		return failJSONBinding(c, bindErr, io.EOF)
+	}
+	if err := jsonx.DecodeStrictKnownFields(raw, dst); err != nil {
+		return failJSONBinding(c, bindErr, err)
+	}
+	return true
+}
+
+// failJSONBinding 返回稳定的用户向错误,保留原始解析错误供日志定位。
+func failJSONBinding(c *gin.Context, bindErr *apperr.Error, err error) bool {
+	if bindErr == nil {
+		response.Fail(c, apperr.ErrRequestBodyInvalid.WithCause(err))
+		return false
+	}
+	response.Fail(c, bindErr.WithCause(err))
+	return false
 }
 
 // Write 把 service 返回值转换成统一 HTTP 响应,让 API 文件不重复写成功/失败分支。

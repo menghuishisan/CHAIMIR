@@ -45,6 +45,7 @@ export interface TooltipProps {
   className?: string;
 }
 
+/** Tooltip 悬浮提示 */
 export function Tooltip({ content, side = "top", children, className }: TooltipProps) {
   return (
     <TooltipPrimitive.Root>

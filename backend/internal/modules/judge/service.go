@@ -27,6 +27,7 @@ import (
 	"chaimir/pkg/apperr"
 	pkgcrypto "chaimir/pkg/crypto"
 	"chaimir/pkg/logging"
+	"chaimir/pkg/question"
 	"chaimir/pkg/snowflake"
 )
 
@@ -130,6 +131,9 @@ func (s *Service) ListJudgers(ctx context.Context) ([]JudgerDTO, error) {
 	}
 	out := make([]JudgerDTO, 0, len(items))
 	for _, item := range items {
+		if item.Code == contracts.JudgerCodeTheoryQuestion {
+			continue
+		}
 		mapped, err := judgerDTOFromModel(item)
 		if err != nil {
 			return nil, err
@@ -154,11 +158,20 @@ func (s *Service) ListCatalogJudgers(ctx context.Context) ([]CatalogJudger, erro
 	}); err != nil {
 		return nil, err
 	}
-	return items, nil
+	out := items[:0]
+	for _, item := range items {
+		if item.Type != JudgerTypeTheoryQuestion {
+			out = append(out, item)
+		}
+	}
+	return out, nil
 }
 
 // CreateJudger 注册或更新判题器定义。
 func (s *Service) CreateJudger(ctx context.Context, req JudgerRequest) (JudgerDTO, error) {
+	if strings.TrimSpace(req.Code) == contracts.JudgerCodeTheoryQuestion {
+		return JudgerDTO{}, apperr.ErrJudgerConfigInvalid
+	}
 	execution, err := validateJudgerRequest(req)
 	if err != nil {
 		return JudgerDTO{}, err
@@ -202,6 +215,9 @@ func (s *Service) UpdateJudger(ctx context.Context, id int64, req JudgerRequest)
 		existing, err := tx.GetJudgerByID(ctx, id)
 		if err != nil {
 			return apperr.ErrJudgerNotFound.WithCause(err)
+		}
+		if existing.Code == contracts.JudgerCodeTheoryQuestion {
+			return apperr.ErrJudgerConfigInvalid
 		}
 		normalized := normalizeJudgerRequest(req)
 		normalized.Code = existing.Code
@@ -544,6 +560,19 @@ func validateJudgerSupportsSandboxMode(typ int16, mode int16) error {
 func (s *Service) snapshotExtraInputForJudger(typ int16, expectation map[string]any, extra map[string]any) (map[string]any, error) {
 	out := map[string]any{}
 	switch typ {
+	case JudgerTypeTheoryQuestion:
+		answer, exists := extra["student_answer"]
+		if !exists {
+			return out, nil
+		}
+		definition, err := question.Decode(expectation, false)
+		if err != nil {
+			return nil, apperr.ErrJudgerConfigInvalid.WithCause(err)
+		}
+		if _, err := definition.Normalize(answer, true); err != nil {
+			return nil, apperr.ErrJudgeSubmitInvalid.WithCause(err)
+		}
+		out["student_answer"] = answer
 	case JudgerTypeFlag:
 		if strings.TrimSpace(jsonx.StringFromAny(expectation["flag_chain_target"])) != "" {
 			return out, nil

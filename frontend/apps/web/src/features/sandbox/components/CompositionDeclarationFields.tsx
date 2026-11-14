@@ -13,7 +13,11 @@ import type { SandboxCatalogTool } from '@chaimir/api-client'
 import { ResourceState } from '../../../components/ResourceState'
 import { sandboxToolKindLabel } from '../../../utils/labels/sandbox'
 import { useOrchestrationCatalog } from '../useOrchestrationCatalog'
-import { compositionSelectionError, compositionSelectionKey, type CompositionDeclaration } from '../composition'
+import {
+  compositionSelectionError,
+  compositionSelectionKey,
+  type CompositionDeclaration,
+} from '../composition'
 import { CompositionConnectionsFields } from './CompositionConnectionsFields'
 import { CompositionParameterFields } from './CompositionParameterFields'
 
@@ -51,83 +55,199 @@ export function CompositionDeclarationFields({
     >
       {() => (
         <div className="flex flex-col gap-4">
-          <FormField label="运行时实例" required helper="每个实例需要唯一别名,跨链连接和链操作都按别名定位。">
+          <FormField
+            label="运行时实例"
+            required
+            helper="每个实例需要唯一别名,跨链连接和链操作都按别名定位。"
+          >
             <div className="flex flex-col gap-3">
               {value.runtimes.map((runtime, index) => {
                 const imageOptions = catalog.imageOptions(runtime.runtimeCode)
                 return (
-                  <div key={`${idPrefix}-runtime-${index}`} className="grid gap-3 rounded border border-line p-3 sm:grid-cols-4 sm:items-end">
-                    <FormField label="实例别名" htmlFor={`${idPrefix}-runtime-${index}-instance`} required>
+                  <div
+                    key={`${idPrefix}-runtime-${index}`}
+                    className="grid gap-3 rounded-md bg-surface-hover p-3 sm:grid-cols-4 sm:items-end"
+                  >
+                    <FormField
+                      label="实例别名"
+                      htmlFor={`${idPrefix}-runtime-${index}-instance`}
+                      required
+                    >
                       <Input
                         id={`${idPrefix}-runtime-${index}-instance`}
                         value={runtime.instanceCode}
                         placeholder="source-chain"
-                        onChange={(event) => onChange({
-                          ...value,
-                          runtimes: value.runtimes.map((item, itemIndex) => itemIndex === index ? { ...item, instanceCode: event.target.value } : item),
-                          workspaceRuntimeInstance: runtime.instanceCode === value.workspaceRuntimeInstance ? event.target.value : value.workspaceRuntimeInstance,
-                          links: value.links.map((link) => ({ ...link,
-                            source_component: link.source_component === runtime.instanceCode ? event.target.value : link.source_component,
-                            target_component: link.target_component === runtime.instanceCode ? event.target.value : link.target_component,
-                          })),
-                        })}
+                        onChange={(event) =>
+                          onChange({
+                            ...value,
+                            runtimes: value.runtimes.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? { ...item, instanceCode: event.target.value }
+                                : item
+                            ),
+                            workspaceRuntimeInstance:
+                              runtime.instanceCode === value.workspaceRuntimeInstance
+                                ? event.target.value
+                                : value.workspaceRuntimeInstance,
+                            links: value.links.map((link) => ({
+                              ...link,
+                              source_component:
+                                link.source_component === runtime.instanceCode
+                                  ? event.target.value
+                                  : link.source_component,
+                              target_component:
+                                link.target_component === runtime.instanceCode
+                                  ? event.target.value
+                                  : link.target_component,
+                            })),
+                          })
+                        }
                       />
                     </FormField>
-                    <FormField label="运行时" htmlFor={`${idPrefix}-runtime-${index}-code`} required>
+                    <FormField
+                      label="运行时"
+                      htmlFor={`${idPrefix}-runtime-${index}-code`}
+                      required
+                    >
                       <Select
                         id={`${idPrefix}-runtime-${index}-code`}
                         options={catalog.runtimeOptions}
                         value={runtime.runtimeCode}
                         placeholder="选择运行时"
-                        onValueChange={(runtimeCode) => onChange({ ...value, runtimes: value.runtimes.map((item, itemIndex) => itemIndex === index ? { ...item, runtimeCode, imageVersion: '', params: undefined } : item) })}
+                        onValueChange={(runtimeCode) =>
+                          onChange({
+                            ...value,
+                            runtimes: value.runtimes.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? { ...item, runtimeCode, imageVersion: '', params: undefined }
+                                : item
+                            ),
+                          })
+                        }
                       />
                     </FormField>
-                    <FormField label="镜像版本" htmlFor={`${idPrefix}-runtime-${index}-image`} required>
+                    <FormField
+                      label="镜像版本"
+                      htmlFor={`${idPrefix}-runtime-${index}-image`}
+                      required
+                    >
                       <Select
                         id={`${idPrefix}-runtime-${index}-image`}
                         options={imageOptions}
                         value={runtime.imageVersion}
-                        placeholder={runtime.runtimeCode === '' ? '请先选择运行时' : imageOptions.length > 0 ? '选择版本' : '该运行时暂无可用版本'}
+                        placeholder={
+                          runtime.runtimeCode === ''
+                            ? '请先选择运行时'
+                            : imageOptions.length > 0
+                              ? '选择版本'
+                              : '该运行时暂无可用版本'
+                        }
                         disabled={imageOptions.length === 0}
-                        onValueChange={(imageVersion) => onChange({ ...value, runtimes: value.runtimes.map((item, itemIndex) => itemIndex === index ? { ...item, imageVersion } : item) })}
+                        onValueChange={(imageVersion) =>
+                          onChange({
+                            ...value,
+                            runtimes: value.runtimes.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, imageVersion } : item
+                            ),
+                          })
+                        }
                       />
                     </FormField>
-                    <Button type="button" variant="ghost" size="sm" aria-label={`移除运行时实例 ${runtime.instanceCode || index + 1}`} title="移除运行时实例" disabled={value.runtimes.length <= 1 || runtime.initAssetBound === true} onClick={() => {
-                      const runtimes = value.runtimes.filter((_, itemIndex) => itemIndex !== index)
-                      onChange({ ...value, runtimes, workspaceRuntimeInstance: runtime.instanceCode === value.workspaceRuntimeInstance ? '' : value.workspaceRuntimeInstance,
-                        links: value.links.filter((link) => link.source_component !== runtime.instanceCode && link.target_component !== runtime.instanceCode) })
-                    }}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`移除运行时实例 ${runtime.instanceCode || index + 1}`}
+                      title="移除运行时实例"
+                      disabled={value.runtimes.length <= 1 || runtime.initAssetBound === true}
+                      onClick={() => {
+                        const runtimes = value.runtimes.filter(
+                          (_, itemIndex) => itemIndex !== index
+                        )
+                        onChange({
+                          ...value,
+                          runtimes,
+                          workspaceRuntimeInstance:
+                            runtime.instanceCode === value.workspaceRuntimeInstance
+                              ? ''
+                              : value.workspaceRuntimeInstance,
+                          links: value.links.filter(
+                            (link) =>
+                              link.source_component !== runtime.instanceCode &&
+                              link.target_component !== runtime.instanceCode
+                          ),
+                        })
+                      }}
+                    >
                       <Trash2 size={16} aria-hidden="true" />
                     </Button>
-                    {runtime.initAssetBound ? <p className="text-xs text-ink-sub sm:col-span-4">初始化材料仍关联此实例,调整材料关联后才能移除;更名会同步保留关联。</p> : null}
+                    {runtime.initAssetBound ? (
+                      <p className="text-xs text-ink-sub sm:col-span-4">
+                        初始化材料仍关联此实例,调整材料关联后才能移除;更名会同步保留关联。
+                      </p>
+                    ) : null}
                     <div className="sm:col-span-4">
                       <CompositionParameterFields
                         idPrefix={`${idPrefix}-runtime-${index}`}
-                        schema={catalog.resource.data?.runtimes.find((item) => item.code === runtime.runtimeCode)?.capabilities.config_schema}
+                        schema={
+                          catalog.resource.data?.runtimes.find(
+                            (item) => item.code === runtime.runtimeCode
+                          )?.capabilities.config_schema
+                        }
                         value={runtime.params}
-                        onChange={(params) => onChange({ ...value, runtimes: value.runtimes.map((item, itemIndex) => itemIndex === index ? { ...item, params } : item) })}
+                        onChange={(params) =>
+                          onChange({
+                            ...value,
+                            runtimes: value.runtimes.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, params } : item
+                            ),
+                          })
+                        }
                       />
                     </div>
                   </div>
                 )
               })}
-              <Button type="button" variant="outline" size="sm" leftIcon={Plus} onClick={() => {
-                let number = 1
-                while (value.runtimes.some((runtime) => runtime.instanceCode === `chain-${number}`)) number++
-                onChange({ ...value, runtimes: [...value.runtimes, { instanceCode: `chain-${number}`, runtimeCode: '', imageVersion: '' }] })
-              }}>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                leftIcon={Plus}
+                onClick={() => {
+                  let number = 1
+                  while (
+                    value.runtimes.some((runtime) => runtime.instanceCode === `chain-${number}`)
+                  )
+                    number++
+                  onChange({
+                    ...value,
+                    runtimes: [
+                      ...value.runtimes,
+                      { instanceCode: `chain-${number}`, runtimeCode: '', imageVersion: '' },
+                    ],
+                  })
+                }}
+              >
                 添加运行时实例
               </Button>
             </div>
           </FormField>
 
-          <FormField label="工作区运行时" required helper="文件、终端和初始化由这个实例的工作区能力承载。">
+          <FormField
+            label="工作区运行时"
+            required
+            helper="文件、终端和初始化由这个实例的工作区能力承载。"
+          >
             <Select
               id={`${idPrefix}-workspace-runtime`}
-              options={value.runtimes.filter((runtime) => runtime.instanceCode.trim() !== '').map((runtime) => ({ label: runtime.instanceCode, value: runtime.instanceCode }))}
+              options={value.runtimes
+                .filter((runtime) => runtime.instanceCode.trim() !== '')
+                .map((runtime) => ({ label: runtime.instanceCode, value: runtime.instanceCode }))}
               value={value.workspaceRuntimeInstance}
               placeholder="选择工作区运行时"
-              onValueChange={(workspaceRuntimeInstance) => onChange({ ...value, workspaceRuntimeInstance })}
+              onValueChange={(workspaceRuntimeInstance) =>
+                onChange({ ...value, workspaceRuntimeInstance })
+              }
             />
           </FormField>
 
@@ -137,9 +257,27 @@ export function CompositionDeclarationFields({
               selected={value.toolCodes}
               params={value.componentParams}
               idPrefix={`${idPrefix}-tool`}
-              onParamsChange={(code, params) => onChange({ ...value, componentParams: { ...value.componentParams, [code]: params } })}
+              onParamsChange={(code, params) =>
+                onChange({
+                  ...value,
+                  componentParams: { ...value.componentParams, [code]: params },
+                })
+              }
               emptyHint="平台还没有可用工具,可只使用运行时自身能力。"
-              onToggle={(toolCodes) => onChange({ ...value, toolCodes, links: value.links.filter((link) => !value.toolCodes.some((code) => !toolCodes.includes(code) && (link.source_component === code || link.target_component === code))) })}
+              onToggle={(toolCodes) =>
+                onChange({
+                  ...value,
+                  toolCodes,
+                  links: value.links.filter(
+                    (link) =>
+                      !value.toolCodes.some(
+                        (code) =>
+                          !toolCodes.includes(code) &&
+                          (link.source_component === code || link.target_component === code)
+                      )
+                  ),
+                })
+              }
             />
           </FormField>
 
@@ -152,17 +290,42 @@ export function CompositionDeclarationFields({
               selected={value.infraCodes}
               params={value.componentParams}
               idPrefix={`${idPrefix}-infra`}
-              onParamsChange={(code, params) => onChange({ ...value, componentParams: { ...value.componentParams, [code]: params } })}
+              onParamsChange={(code, params) =>
+                onChange({
+                  ...value,
+                  componentParams: { ...value.componentParams, [code]: params },
+                })
+              }
               emptyHint="平台还没有可声明的基础设施组件。"
-              onToggle={(infraCodes) => onChange({ ...value, infraCodes, links: value.links.filter((link) => !value.infraCodes.some((code) => !infraCodes.includes(code) && (link.source_component === code || link.target_component === code))) })}
+              onToggle={(infraCodes) =>
+                onChange({
+                  ...value,
+                  infraCodes,
+                  links: value.links.filter(
+                    (link) =>
+                      !value.infraCodes.some(
+                        (code) =>
+                          !infraCodes.includes(code) &&
+                          (link.source_component === code || link.target_component === code)
+                      )
+                  ),
+                })
+              }
             />
           </FormField>
 
           {selectionError === undefined ? (
             <FormField label="组件连接" helper="平台会检查依赖和可用目标;多个目标时请明确选择。">
-              <CompositionConnectionsFields key={compositionSelectionKey(value)} idPrefix={idPrefix} value={value} onChange={commit} />
+              <CompositionConnectionsFields
+                key={compositionSelectionKey(value)}
+                idPrefix={idPrefix}
+                value={value}
+                onChange={commit}
+              />
             </FormField>
-          ) : <Callout tone="info">{selectionError}</Callout>}
+          ) : (
+            <Callout tone="info">{selectionError}</Callout>
+          )}
         </div>
       )}
     </ResourceState>
@@ -180,7 +343,15 @@ interface ComponentChecklistProps {
 }
 
 /** ComponentChecklist 是工具与基础设施共用的勾选列表,两处口径一致。 */
-function ComponentChecklist({ items, selected, emptyHint, onToggle, idPrefix, params, onParamsChange }: ComponentChecklistProps) {
+function ComponentChecklist({
+  items,
+  selected,
+  emptyHint,
+  onToggle,
+  idPrefix,
+  params,
+  onParamsChange,
+}: ComponentChecklistProps) {
   if (items.length === 0) {
     return <p className="text-sm text-ink-sub">{emptyHint}</p>
   }
@@ -195,12 +366,17 @@ function ComponentChecklist({ items, selected, emptyHint, onToggle, idPrefix, pa
               onToggle(
                 checked === true
                   ? [...selected, item.code]
-                  : selected.filter((code) => code !== item.code),
+                  : selected.filter((code) => code !== item.code)
               )
             }
           />
           {selected.includes(item.code) ? (
-            <CompositionParameterFields idPrefix={`${idPrefix}-${item.code}`} schema={item.capabilities.config_schema} value={params?.[item.code]} onChange={(next) => onParamsChange(item.code, next)} />
+            <CompositionParameterFields
+              idPrefix={`${idPrefix}-${item.code}`}
+              schema={item.capabilities.config_schema}
+              value={params?.[item.code]}
+              onChange={(next) => onParamsChange(item.code, next)}
+            />
           ) : null}
         </div>
       ))}

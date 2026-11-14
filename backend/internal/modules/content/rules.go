@@ -7,6 +7,7 @@ import (
 
 	"chaimir/internal/platform/storage"
 	"chaimir/pkg/apperr"
+	"chaimir/pkg/question"
 )
 
 const contentBodyMaxInlineStringBytes = 16 * 1024
@@ -30,6 +31,11 @@ func validateCreateRequest(req CreateItemRequest) (CreateItemRequest, error) {
 	if err := validateContentBodyRefs(req.Body); err != nil {
 		return CreateItemRequest{}, err
 	}
+	if req.Type == TypeTheoryQuestion {
+		if err := validateTheoryQuestionBody(req.Body); err != nil {
+			return CreateItemRequest{}, err
+		}
+	}
 	return req, nil
 }
 
@@ -46,6 +52,21 @@ func validateUpdateRequest(req UpdateItemRequest) (UpdateItemRequest, error) {
 		return UpdateItemRequest{}, err
 	}
 	return req, nil
+}
+
+// validateTheoryQuestionBody 复用唯一理论题定义,在 M5 边界额外校验题干。
+func validateTheoryQuestionBody(body map[string]any) error {
+	statement, ok := body["statement"].(string)
+	if !ok || strings.TrimSpace(statement) == "" {
+		return apperr.ErrContentBodyInvalid
+	}
+	if _, exists := body["judge_config"]; exists {
+		return apperr.ErrContentBodyInvalid
+	}
+	if _, err := question.Decode(body, true); err != nil {
+		return apperr.ErrContentBodyInvalid.WithCause(err)
+	}
+	return nil
 }
 
 // validateSystemImport 校验内部系统建题请求,禁止伪装教师来源。

@@ -39,6 +39,7 @@ type Service struct {
 	audit        audit.Writer
 	roles        roleReader
 	identity     contracts.IdentityTenantReadService
+	accounts     accountReader
 	stats        contracts.IdentityStatsService
 	auditRead    contracts.IdentityAuditReadService
 	teaching     contracts.TeachingReadService
@@ -78,11 +79,13 @@ type transferService interface {
 
 // ServiceDeps 是 M9 服务装配依赖。
 type ServiceDeps struct {
-	Store       Store
-	IDs         snowflake.Generator
-	Audit       audit.Writer
-	Roles       roleReader
-	Identity    contracts.IdentityTenantReadService
+	Store    Store
+	IDs      snowflake.Generator
+	Audit    audit.Writer
+	Roles    roleReader
+	Identity contracts.IdentityTenantReadService
+	// Accounts 解析学校管理员姓名(学校配置的变更历史);平台管理员姓名经 Identity.PlatformAdminNames
+	Accounts    accountReader
 	Stats       contracts.IdentityStatsService
 	AuditRead   contracts.IdentityAuditReadService
 	Teaching    contracts.TeachingReadService
@@ -94,27 +97,23 @@ type ServiceDeps struct {
 	Config      config.AdminConfig
 	Cipher      *pkgcrypto.Cipher
 	Transfers   transferService
-	Storage     *storage.Storage
-	Objects     objectStorage
+	Storage     objectStorage
 	FileService fileService
 }
 
 // NewService 构造 M9 服务。
 func NewService(deps ServiceDeps) (*Service, error) {
-	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Identity == nil || deps.Stats == nil || deps.AuditRead == nil || deps.Teaching == nil || deps.Sandbox == nil || deps.Experiment == nil || deps.Contest == nil || deps.Bus == nil {
+	if deps.Store == nil || deps.IDs == nil || deps.Audit == nil || deps.Roles == nil || deps.Identity == nil || deps.Accounts == nil || deps.Stats == nil || deps.AuditRead == nil || deps.Teaching == nil || deps.Sandbox == nil || deps.Experiment == nil || deps.Contest == nil || deps.Bus == nil {
 		return nil, fmt.Errorf("admin service 依赖不完整")
 	}
-	objects := deps.Objects
-	if objects == nil {
-		objects = deps.Storage
-	}
+	objects := deps.Storage
 	if deps.Transfers == nil || objects == nil || deps.FileService == nil {
 		return nil, fmt.Errorf("admin service 缺少统一导入导出或文件服务依赖")
 	}
 	if deps.Config.AuditExportWorkerBatchSize <= 0 || deps.Config.AuditExportWorkerPollMs <= 0 {
 		return nil, fmt.Errorf("admin audit export worker 配置不完整")
 	}
-	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, bus: deps.Bus, monitoring: deps.Monitoring, secretCipher: deps.Cipher, transfers: deps.Transfers, storage: objects, files: deps.FileService, cfg: deps.Config}, nil
+	return &Service{store: deps.Store, ids: deps.IDs, audit: deps.Audit, roles: deps.Roles, identity: deps.Identity, accounts: deps.Accounts, stats: deps.Stats, auditRead: deps.AuditRead, teaching: deps.Teaching, sandbox: deps.Sandbox, experiment: deps.Experiment, contest: deps.Contest, bus: deps.Bus, monitoring: deps.Monitoring, secretCipher: deps.Cipher, transfers: deps.Transfers, storage: objects, files: deps.FileService, cfg: deps.Config}, nil
 }
 
 // PlatformDashboard 聚合平台级看板。
@@ -241,16 +240,69 @@ func (s *Service) QueryAudit(ctx context.Context, query contracts.AuditQuery) (c
 	if !ok {
 		return contracts.AuditQueryResult{}, apperr.ErrUnauthorized
 	}
-	if !id.IsPlatform {
-		query.TenantID = id.TenantID
-	} else {
-		query.IncludePlatform = true
-	}
+	query = scopedAuditQuery(id, query)
 	result, err := s.auditRead.QueryAuditLogs(ctx, query)
 	if err != nil {
 		return contracts.AuditQueryResult{}, apperr.ErrAdminAuditQueryInvalid.WithCause(err)
 	}
 	return result, nil
+}
+
+// AuditActor 是一条审计记录操作人的显示信息。
+type AuditActor struct {
+	Name string
+	No   string
+}
+
+// QueryAuditPage 查询审计分页并解析当前页操作人:学校身份解析本校账号;平台身份只解析平台管理员,
+// 不跨校读取学校人员姓名(学校的操作人在平台审计里只显示身份)。系统记录(操作人编号 0)没有姓名。
+func (s *Service) QueryAuditPage(ctx context.Context, query contracts.AuditQuery) (contracts.AuditQueryResult, map[int64]AuditActor, error) {
+	result, err := s.QueryAudit(ctx, query)
+	if err != nil {
+		return contracts.AuditQueryResult{}, nil, err
+	}
+	id, _ := tenant.FromContext(ctx)
+	actors, err := s.auditActors(ctx, id.IsPlatform, result.List)
+	if err != nil {
+		return contracts.AuditQueryResult{}, nil, err
+	}
+	return result, actors, nil
+}
+
+// auditActors 按身份范围批量解析当前页操作人:平台视角只取平台管理员,学校视角只取本校账号。
+func (s *Service) auditActors(ctx context.Context, platform bool, entries []contracts.AuditLogEntry) (map[int64]AuditActor, error) {
+	seen := map[int64]struct{}{}
+	wanted := make([]int64, 0, len(entries))
+	for _, entry := range entries {
+		platformAdmin := entry.ActorRole == contracts.RoleNumPlatformAdmin
+		if _, ok := seen[entry.ActorID]; ok || entry.ActorID <= 0 || platformAdmin != platform {
+			continue
+		}
+		seen[entry.ActorID] = struct{}{}
+		wanted = append(wanted, entry.ActorID)
+	}
+	actors := make(map[int64]AuditActor, len(wanted))
+	if len(wanted) == 0 {
+		return actors, nil
+	}
+	if platform {
+		names, err := s.identity.PlatformAdminNames(ctx, wanted)
+		if err != nil {
+			return nil, apperr.ErrInternal.WithCause(err)
+		}
+		for actorID, name := range names {
+			actors[actorID] = AuditActor{Name: name}
+		}
+		return actors, nil
+	}
+	accounts, err := s.accounts.BatchGetAccounts(ctx, wanted)
+	if err != nil {
+		return nil, apperr.ErrInternal.WithCause(err)
+	}
+	for _, account := range accounts {
+		actors[account.AccountID] = AuditActor{Name: account.Name, No: account.No}
+	}
+	return actors, nil
 }
 
 const auditExportSubject = "admin.audit_export"
@@ -261,7 +313,7 @@ func (s *Service) ExportAuditCSV(ctx context.Context, query contracts.AuditQuery
 	if err != nil {
 		return transfer.TaskDTO{}, err
 	}
-	query = scopedAuditExportQuery(id, query)
+	query = scopedAuditQuery(id, query)
 	snapshot, err := json.Marshal(query)
 	if err != nil {
 		return transfer.TaskDTO{}, apperr.ErrAdminAuditExportTaskCreateFailed.WithCause(err)
@@ -421,8 +473,9 @@ func (s *Service) deleteAuditExportRequest(ctx context.Context, req AuditExportR
 	})
 }
 
-// scopedAuditExportQuery freezes the requester's authorized tenant scope before persistence.
-func scopedAuditExportQuery(id tenant.Identity, query contracts.AuditQuery) contracts.AuditQuery {
+// scopedAuditQuery 按调用方身份冻结审计读取范围,查询与导出共用:
+// 平台身份可按学校筛选(TenantID 非 0 只读该校,为 0 读全平台含平台自身记录);学校身份永远固定在本校。
+func scopedAuditQuery(id tenant.Identity, query contracts.AuditQuery) contracts.AuditQuery {
 	if id.IsPlatform {
 		query.IncludePlatform = true
 		return query
@@ -619,7 +672,55 @@ func (s *Service) ListConfigHistory(ctx context.Context, scope int16, tenantID i
 		total = count
 		return maskConfigLogs(rows), nil
 	})
-	return rows, total, page, size, err
+	if err != nil {
+		return nil, 0, page, size, err
+	}
+	names, err := s.configOperatorNames(ctx, id.IsPlatform, rows)
+	if err != nil {
+		return nil, 0, page, size, err
+	}
+	return applyOperatorNames(rows, names), total, page, size, nil
+}
+
+// configOperatorNames 一次批量解析当前页变更记录的操作人姓名:平台配置的操作人是平台管理员,学校配置是本校账号。
+func (s *Service) configOperatorNames(ctx context.Context, platform bool, rows []ConfigChangeLogDTO) (map[int64]string, error) {
+	seen := map[int64]struct{}{}
+	operatorIDs := make([]int64, 0, len(rows))
+	for _, row := range rows {
+		if _, ok := seen[row.OperatorID.Int64()]; ok {
+			continue
+		}
+		seen[row.OperatorID.Int64()] = struct{}{}
+		operatorIDs = append(operatorIDs, row.OperatorID.Int64())
+	}
+	if len(operatorIDs) == 0 {
+		return map[int64]string{}, nil
+	}
+	if platform {
+		names, err := s.identity.PlatformAdminNames(ctx, operatorIDs)
+		if err != nil {
+			return nil, apperr.ErrAdminConfigInvalid.WithCause(err)
+		}
+		return names, nil
+	}
+	accounts, err := s.accounts.BatchGetAccounts(ctx, operatorIDs)
+	if err != nil {
+		return nil, apperr.ErrAdminConfigInvalid.WithCause(err)
+	}
+	names := make(map[int64]string, len(accounts))
+	for _, account := range accounts {
+		names[account.AccountID] = account.Name
+	}
+	return names, nil
+}
+
+// applyOperatorNames 把操作人姓名合并到变更记录(返回新切片);读不到的留空,页面显示「已移除的账号」。
+func applyOperatorNames(rows []ConfigChangeLogDTO, names map[int64]string) []ConfigChangeLogDTO {
+	out := append([]ConfigChangeLogDTO(nil), rows...)
+	for i := range out {
+		out[i].OperatorName = names[out[i].OperatorID.Int64()]
+	}
+	return out
 }
 
 // RollbackConfig 把配置回退到指定历史记录的变更前值。
@@ -755,10 +856,10 @@ func (s *Service) UpdateAlertRule(ctx context.Context, ruleID int64, req AlertRu
 }
 
 // ListAlertEvents 查询告警事件。
-func (s *Service) ListAlertEvents(ctx context.Context, status, level int16, page, size int) ([]AlertEventDTO, int64, int, int, error) {
+func (s *Service) ListAlertEvents(ctx context.Context, status, level int16, page, size int) ([]AlertEventDTO, int64, int, int, pagex.Facets, error) {
 	id, err := s.currentAdminIdentity(ctx)
 	if err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
 	tenantID := int64(0)
@@ -766,12 +867,18 @@ func (s *Service) ListAlertEvents(ctx context.Context, status, level int16, page
 		tenantID = id.TenantID
 	}
 	var total int64
+	var byStatus pagex.FacetGroup
 	rows, err := runAdminRead(ctx, s.store, tenantID, func(ctx context.Context, tx TxStore) ([]AlertEventDTO, error) {
 		out, count, err := tx.ListAlertEvents(ctx, status, level, tenantID, page, size)
+		if err != nil {
+			return nil, err
+		}
 		total = count
+		// 状态分段计数:套用级别与学校范围,不套用状态筛选
+		byStatus, err = tx.CountAlertEventsByStatus(ctx, level, tenantID)
 		return out, err
 	})
-	return rows, total, page, size, err
+	return rows, total, page, size, pagex.Facets{"status": byStatus}, err
 }
 
 // HandleAlertEvent 处理告警事件。
@@ -824,18 +931,23 @@ func (s *Service) MonitoringPanels(ctx context.Context) ([]MonitoringPanel, erro
 }
 
 // ListBackups 查询备份记录;status 传 0 表示不按结果过滤。
-func (s *Service) ListBackups(ctx context.Context, status int16, page, size int) ([]BackupRecordDTO, int64, int, int, error) {
+func (s *Service) ListBackups(ctx context.Context, status int16, page, size int) ([]BackupRecordDTO, int64, int, int, pagex.Facets, error) {
 	if _, err := requirePlatform(ctx); err != nil {
-		return nil, 0, page, size, err
+		return nil, 0, page, size, nil, err
 	}
 	page, size = pagex.Normalize(page, size)
 	var total int64
+	var byStatus pagex.FacetGroup
 	rows, err := runAdminRead(ctx, s.store, 0, func(ctx context.Context, tx TxStore) ([]BackupRecordDTO, error) {
 		out, count, err := tx.ListBackupRecords(ctx, status, page, size)
+		if err != nil {
+			return nil, err
+		}
 		total = count
+		byStatus, err = tx.CountBackupRecordsByStatus(ctx)
 		return out, err
 	})
-	return rows, total, page, size, err
+	return rows, total, page, size, pagex.Facets{"status": byStatus}, err
 }
 
 // runWrite 按是否存在 tenant_id 选择平台事务或租户 RLS 事务。

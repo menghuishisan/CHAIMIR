@@ -27,6 +27,7 @@ const JUDGER_TYPE_LABELS: Record<JudgerType, string> = {
   [JudgerType.STATIC_SCAN]: '静态扫描',
   [JudgerType.SIM_CHECKPOINT]: '仿真检查点',
   [JudgerType.MANUAL]: '人工评分',
+  [JudgerType.THEORY_QUESTION]: '理论题判分',
 }
 
 /** judgerTypeLabel 返回判题器类型文案。 */

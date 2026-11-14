@@ -314,18 +314,59 @@ SELECT count(*)::bigint
 FROM academic_warning
 WHERE ($1::bigint = 0 OR student_id = $1::bigint)
   AND ($2::smallint = 0 OR status = $2::smallint)
+  AND ($3::bigint = 0 OR semester_id = $3::bigint)
 `
 
 type CountAcademicWarningsParams struct {
-	StudentID int64 `json:"student_id"`
-	Status    int16 `json:"status"`
+	StudentID  int64 `json:"student_id"`
+	Status     int16 `json:"status"`
+	SemesterID int64 `json:"semester_id"`
 }
 
 func (q *Queries) CountAcademicWarnings(ctx context.Context, arg CountAcademicWarningsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countAcademicWarnings, arg.StudentID, arg.Status)
+	row := q.db.QueryRow(ctx, countAcademicWarnings, arg.StudentID, arg.Status, arg.SemesterID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countAcademicWarningsByStatus = `-- name: CountAcademicWarningsByStatus :many
+SELECT status, count(*)::bigint AS count
+FROM academic_warning
+WHERE ($1::bigint = 0 OR student_id = $1::bigint)
+  AND ($2::bigint = 0 OR semester_id = $2::bigint)
+GROUP BY status
+`
+
+type CountAcademicWarningsByStatusParams struct {
+	StudentID  int64 `json:"student_id"`
+	SemesterID int64 `json:"semester_id"`
+}
+
+type CountAcademicWarningsByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 学业预警的状态分段计数:套用学生筛选,不套用状态筛选。
+func (q *Queries) CountAcademicWarningsByStatus(ctx context.Context, arg CountAcademicWarningsByStatusParams) ([]CountAcademicWarningsByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countAcademicWarningsByStatus, arg.StudentID, arg.SemesterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountAcademicWarningsByStatusRow{}
+	for rows.Next() {
+		var i CountAcademicWarningsByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const countGradeAppeals = `-- name: CountGradeAppeals :one
@@ -348,23 +389,104 @@ func (q *Queries) CountGradeAppeals(ctx context.Context, arg CountGradeAppealsPa
 	return column_1, err
 }
 
+const countGradeAppealsByStatus = `-- name: CountGradeAppealsByStatus :many
+SELECT status, count(*)::bigint AS count
+FROM grade_appeal
+WHERE ($1::bigint = 0 OR student_id = $1::bigint)
+  AND ($1::bigint <> 0 OR $2::boolean OR course_id = ANY($3::bigint[]))
+GROUP BY status
+`
+
+type CountGradeAppealsByStatusParams struct {
+	StudentID  int64   `json:"student_id"`
+	AllCourses bool    `json:"all_courses"`
+	CourseIds  []int64 `json:"course_ids"`
+}
+
+type CountGradeAppealsByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 申诉列表的状态分段计数:范围与列表一致(学生只数本人,教师按任教课程,校管全校),不套用状态筛选。
+func (q *Queries) CountGradeAppealsByStatus(ctx context.Context, arg CountGradeAppealsByStatusParams) ([]CountGradeAppealsByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countGradeAppealsByStatus, arg.StudentID, arg.AllCourses, arg.CourseIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountGradeAppealsByStatusRow{}
+	for rows.Next() {
+		var i CountGradeAppealsByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countGradeReviews = `-- name: CountGradeReviews :one
 SELECT count(*)::bigint
 FROM grade_review
 WHERE ($1::smallint = 0 OR status = $1::smallint)
   AND ($2::smallint = 0 OR is_locked = ($2::smallint = 1))
+  AND ($3::bigint = 0 OR semester_id = $3::bigint)
 `
 
 type CountGradeReviewsParams struct {
-	Status   int16 `json:"status"`
-	IsLocked int16 `json:"is_locked"`
+	Status     int16 `json:"status"`
+	IsLocked   int16 `json:"is_locked"`
+	SemesterID int64 `json:"semester_id"`
 }
 
 func (q *Queries) CountGradeReviews(ctx context.Context, arg CountGradeReviewsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countGradeReviews, arg.Status, arg.IsLocked)
+	row := q.db.QueryRow(ctx, countGradeReviews, arg.Status, arg.IsLocked, arg.SemesterID)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countGradeReviewsByStatus = `-- name: CountGradeReviewsByStatus :many
+SELECT status, count(*)::bigint AS count
+FROM grade_review
+WHERE ($1::smallint = 0 OR is_locked = ($1::smallint = 1))
+  AND ($2::bigint = 0 OR semester_id = $2::bigint)
+GROUP BY status
+`
+
+type CountGradeReviewsByStatusParams struct {
+	IsLocked   int16 `json:"is_locked"`
+	SemesterID int64 `json:"semester_id"`
+}
+
+type CountGradeReviewsByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 成绩审核队列的状态分段计数:套用锁定筛选,不套用状态筛选。
+func (q *Queries) CountGradeReviewsByStatus(ctx context.Context, arg CountGradeReviewsByStatusParams) ([]CountGradeReviewsByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countGradeReviewsByStatus, arg.IsLocked, arg.SemesterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountGradeReviewsByStatusRow{}
+	for rows.Next() {
+		var i CountGradeReviewsByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const countOwnGradeReviews = `-- name: CountOwnGradeReviews :one
@@ -381,6 +503,25 @@ type CountOwnGradeReviewsParams struct {
 
 func (q *Queries) CountOwnGradeReviews(ctx context.Context, arg CountOwnGradeReviewsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countOwnGradeReviews, arg.SubmitterID, arg.Status)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countStudentGradeAppeals = `-- name: CountStudentGradeAppeals :one
+SELECT count(*)::bigint
+FROM grade_appeal
+WHERE student_id = $1::bigint
+  AND ($2::smallint = 0 OR status = $2::smallint)
+`
+
+type CountStudentGradeAppealsParams struct {
+	StudentID int64 `json:"student_id"`
+	Status    int16 `json:"status"`
+}
+
+func (q *Queries) CountStudentGradeAppeals(ctx context.Context, arg CountStudentGradeAppealsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countStudentGradeAppeals, arg.StudentID, arg.Status)
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
@@ -904,13 +1045,15 @@ SELECT id, tenant_id, student_id, semester_id, type, detail, status, created_at,
 FROM academic_warning
 WHERE ($1::bigint = 0 OR student_id = $1::bigint)
   AND ($2::smallint = 0 OR status = $2::smallint)
+  AND ($3::bigint = 0 OR semester_id = $3::bigint)
 ORDER BY created_at DESC
-LIMIT $4::int OFFSET $3::int
+LIMIT $5::int OFFSET $4::int
 `
 
 type ListAcademicWarningsParams struct {
 	StudentID  int64 `json:"student_id"`
 	Status     int16 `json:"status"`
+	SemesterID int64 `json:"semester_id"`
 	PageOffset int32 `json:"page_offset"`
 	PageLimit  int32 `json:"page_limit"`
 }
@@ -919,6 +1062,7 @@ func (q *Queries) ListAcademicWarnings(ctx context.Context, arg ListAcademicWarn
 	rows, err := q.db.Query(ctx, listAcademicWarnings,
 		arg.StudentID,
 		arg.Status,
+		arg.SemesterID,
 		arg.PageOffset,
 		arg.PageLimit,
 	)
@@ -1060,13 +1204,15 @@ SELECT id, tenant_id, course_id, semester_id, submitter_id, reviewer_id, status,
 FROM grade_review
 WHERE ($1::smallint = 0 OR status = $1::smallint)
   AND ($2::smallint = 0 OR is_locked = ($2::smallint = 1))
+  AND ($3::bigint = 0 OR semester_id = $3::bigint)
 ORDER BY submitted_at DESC
-LIMIT $4::int OFFSET $3::int
+LIMIT $5::int OFFSET $4::int
 `
 
 type ListGradeReviewsParams struct {
 	Status     int16 `json:"status"`
 	IsLocked   int16 `json:"is_locked"`
+	SemesterID int64 `json:"semester_id"`
 	PageOffset int32 `json:"page_offset"`
 	PageLimit  int32 `json:"page_limit"`
 }
@@ -1075,6 +1221,7 @@ func (q *Queries) ListGradeReviews(ctx context.Context, arg ListGradeReviewsPara
 	rows, err := q.db.Query(ctx, listGradeReviews,
 		arg.Status,
 		arg.IsLocked,
+		arg.SemesterID,
 		arg.PageOffset,
 		arg.PageLimit,
 	)
@@ -1254,6 +1401,60 @@ func (q *Queries) ListSemesters(ctx context.Context) ([]Semester, error) {
 			&i.StartDate,
 			&i.EndDate,
 			&i.IsCurrent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStudentGradeAppeals = `-- name: ListStudentGradeAppeals :many
+SELECT id, tenant_id, student_id, course_id, reason, status, handler_id, result_comment, created_at, handled_at, unlock_revision
+FROM grade_appeal
+WHERE student_id = $1::bigint
+  AND ($2::smallint = 0 OR status = $2::smallint)
+ORDER BY created_at DESC, id DESC
+LIMIT $4::int OFFSET $3::int
+`
+
+type ListStudentGradeAppealsParams struct {
+	StudentID  int64 `json:"student_id"`
+	Status     int16 `json:"status"`
+	PageOffset int32 `json:"page_offset"`
+	PageLimit  int32 `json:"page_limit"`
+}
+
+// 学生本人的申诉:成绩中心按课程显示处理状态与处理意见;student_id 由服务端填会话账号。
+func (q *Queries) ListStudentGradeAppeals(ctx context.Context, arg ListStudentGradeAppealsParams) ([]GradeAppeal, error) {
+	rows, err := q.db.Query(ctx, listStudentGradeAppeals,
+		arg.StudentID,
+		arg.Status,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GradeAppeal{}
+	for rows.Next() {
+		var i GradeAppeal
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.StudentID,
+			&i.CourseID,
+			&i.Reason,
+			&i.Status,
+			&i.HandlerID,
+			&i.ResultComment,
+			&i.CreatedAt,
+			&i.HandledAt,
+			&i.UnlockRevision,
 		); err != nil {
 			return nil, err
 		}

@@ -1,12 +1,11 @@
 /**
- * PageScaffold:日常页(光面语境)结构原语组合(规范 §6.5 页面族谱)。
- * 提供 PageScaffold(容器)/ PageHeader(页面头)/ PageBody(主区 + 右侧动作区)/
- * PageSection(分组区)四个原语,各族骨架用它们组装(§6.5.3)。
+ * PageScaffold:日常页结构原语(规范 §5.1 / §6.5)。
+ * 提供 PageScaffold(容器)/ PageHeader(页头)/ PageBody(主区 + 右侧栏)/ PageSection(分组)四个原语;
+ * 它们只管结构与间距,每一页的布局由该页的任务决定(§6.5.0),不套统一模子。
+ * 当前位置在顶栏(§6.2),页头不再放面包屑。
  */
-import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "../../lib/cn";
-import { Icon } from "../../lib/icon";
 
 /* ---------------------------------------------------------------- 容器 */
 
@@ -16,87 +15,94 @@ export interface PageScaffoldProps {
 }
 
 /**
- * PageScaffold:页面内容容器 —— 按纸宽铺满 + 分档内距。
- * 不做全局 max-width 居中(§2.4 `--content-max` 已废止):限宽会在宽屏把内容缩成居中一根柱子,
- * 两侧空白复现外壳刚去掉的隔离感。唯一需要限宽的正文在「学习阅读族」自己的骨架里写。
- * 内距分档(§6.4.1 规则 1):<md 用 16,≥md 用 32×24 —— 375 宽用桌面内距等于把 64px 交给空白。
+ * PageScaffold:页面内容容器 —— 按纸宽铺满 + 分档内距(§6.4.1 规则 1)。
+ * <md 16;md 24;≥lg 左右 36、上 28、下 40。
+ * 不做全局 max-width 居中:限宽会在宽屏把内容缩成居中一根柱子;需要限宽的内容由各页自己写。
  */
 export function PageScaffold({ children, className }: PageScaffoldProps) {
-  return <div className={cn("min-h-full min-w-0 w-full p-4 pb-10 md:px-8 md:py-6", className)}>{children}</div>;
+  return (
+    <div className={cn("min-h-full w-full min-w-0 p-4 pb-10 md:p-6 md:pb-10 lg:px-9 lg:pb-10 lg:pt-7", className)}>
+      {children}
+    </div>
+  );
 }
 
-/* ---------------------------------------------------------------- 页面头 */
+/* ---------------------------------------------------------------- 页头 */
+
+/** 页头属性行的一项:只给 value 时只显示值(如「2026 秋季」),值本身说不清时加 label(如「镜像版本 3 个」) */
+export interface PageHeaderMetaItem {
+  label?: string;
+  value: ReactNode;
+}
 
 export interface PageHeaderProps {
-  /** 面包屑插槽(kicker),渲染在标题上方 */
-  kicker?: ReactNode;
-  /**
-   * 页面主标题(h1,Display 字体)。
-   *
-   * **详情族(§6.5.3 第 ④)不传它**:那一族的 `h1` 由 `ObjectIdentity` 的对象名承担,
-   * 页面头只出面包屑 —— 一页只该有一个 h1,标题也不该说两遍(§6.5.0 通则 1)。
-   * 此时页面头退化为一条面包屑:不画底线、不占页头的行高,
-   * 因为紧接着的对象身份片自己就是一块抬起片,再来一条分隔线是重复的分层信号。
-   */
-  title?: string;
-  /** 用户向描述文案 */
+  /** 页面标题(h1);详情页就是对象名 */
+  title: string;
+  /** 状态徽记,紧跟标题;状态必须带文字,不靠颜色单一传达(FE-2) */
+  status?: ReactNode;
+  /** 一行关键属性;值为空的项自动略过 */
+  meta?: PageHeaderMetaItem[];
+  /** 一句说明;只在新用户确实需要的页面保留 */
   description?: string;
-  /** 页面图标(Lucide),渲染在标题左侧玉浅底容器内 */
-  icon?: LucideIcon;
-  /** 右侧页面级操作插槽 */
+  /** 右侧主操作(每页最多一个实底主按钮,§6.5.0 通则 3);窄屏占满一行 */
   actions?: ReactNode;
   className?: string;
 }
 
 /**
- * PageHeader:页面头 —— kicker + 图标 + h1 + 描述 + 右侧操作,底部细线收束。
- * 只给 kicker(详情族用法)时只渲染面包屑,不画底线。
+ * PageHeader:「标题 + 状态徽记 + 一行属性或说明 + 右侧主操作」,不带面包屑、图标和底线。
+ * 一页只有一个 h1。
  */
-export function PageHeader({ kicker, title, description, icon, actions, className }: PageHeaderProps) {
-  // 只有面包屑:详情族的页面头(§6.5.3 第 ④)。底线交给紧随其后的对象身份片,这里不画
-  if (!title && !description && !icon && !actions) {
-    return <header className={cn("mb-4", className)}>{kicker}</header>;
-  }
-
+export function PageHeader({ title, status, meta, description, actions, className }: PageHeaderProps) {
+  const metaItems = (meta ?? []).filter(
+    (item) => item.value !== null && item.value !== undefined && item.value !== false && item.value !== "",
+  );
   return (
-    <header className={cn("mb-6 border-b border-line pb-5", className)}>
-      {kicker && <div className="mb-3">{kicker}</div>}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-3">
-          {icon && (
-            <span className="mt-0.5 inline-flex shrink-0 rounded-lg bg-primary-soft p-2 text-primary">
-              <Icon icon={icon} size="lg" />
-            </span>
-          )}
-          <div className="min-w-0">
-            {title && <h1 className="font-display text-2xl leading-tight text-ink sm:text-3xl">{title}</h1>}
-            {description && <p className="mt-1 text-sm text-ink-sub">{description}</p>}
-          </div>
+    <header className={cn("mb-6 flex flex-wrap items-start justify-between gap-x-6 gap-y-4", className)}>
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <h1 className="min-w-0 break-words text-2xl font-bold leading-tight text-ink md:text-3xl">{title}</h1>
+          {status}
         </div>
-        {actions && (
-          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-            {actions}
-          </div>
+        {metaItems.length > 0 && (
+          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-sub">
+            {metaItems.map((item, index) => (
+              <span key={item.label ?? index} className="inline-flex items-center gap-2">
+                {index > 0 && (
+                  <span aria-hidden="true" className="text-ink-faint">
+                    ·
+                  </span>
+                )}
+                {item.label ? (
+                  <span>
+                    {item.label} <span className="text-ink">{item.value}</span>
+                  </span>
+                ) : (
+                  item.value
+                )}
+              </span>
+            ))}
+          </p>
         )}
+        {description && <p className="mt-2 max-w-3xl text-sm text-ink-sub">{description}</p>}
       </div>
+      {actions && (
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">{actions}</div>
+      )}
     </header>
   );
 }
 
-/* ---------------------------------------------------------------- 主体 */
+/* ---------------------------------------------------------------- 主区 + 右侧栏 */
 
 export interface PageBodyProps {
-  /** 右侧动作区(rail):桌面固定 320px 侧栏,窄屏移到主区之后单列 */
+  /** 右侧栏:桌面固定 320px,窄屏移到主区之后单列 */
   rail?: ReactNode;
   children: ReactNode;
   className?: string;
 }
 
-/**
- * PageBody:主工作区布局 —— 有 rail 时桌面「主区 1fr + 右栏 320px」双栏,
- * max-lg 单列(DOM 顺序主区在前,rail 自然落在其后);无 rail 时单列直排。
- * 双栏用 flex + w-80(标准刻度,恰为 320px)实现,等价 grid 1fr/320px 且不引入任意值语法。
- */
+/** PageBody:主区 + 可选右侧栏;<lg 右侧栏下沉到主区之后 */
 export function PageBody({ rail, children, className }: PageBodyProps) {
   if (!rail) {
     return <div className={cn("min-w-0", className)}>{children}</div>;
@@ -109,21 +115,21 @@ export function PageBody({ rail, children, className }: PageBodyProps) {
   );
 }
 
-/* ---------------------------------------------------------------- 分组区 */
+/* ---------------------------------------------------------------- 分组 */
 
 export interface PageSectionProps {
   /** 分组标题 */
   title?: string;
   /** 分组说明(用户向) */
   description?: string;
-  /** 分组右侧动作(如刷新/筛选) */
+  /** 分组右侧动作(刷新、导出、新建、视图切换) */
   actions?: ReactNode;
   children: ReactNode;
   className?: string;
 }
 
 /**
- * PageSection:页面内分组 —— 分组标题 + 说明 + 右侧动作 + 内容,组间以 mb-8 分隔。
+ * PageSection:页面内分组 —— 分组标题 + 说明 + 右侧动作 + 内容,组间以 mb-8 分隔;永远不画容器(§6.5.1)。
  */
 export function PageSection({ title, description, actions, children, className }: PageSectionProps) {
   const hasHeader = Boolean(title || description || actions);
@@ -132,7 +138,7 @@ export function PageSection({ title, description, actions, children, className }
       {hasHeader && (
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
-            {title && <h2 className="text-lg font-semibold text-ink">{title}</h2>}
+            {title && <h2 className="text-lg font-bold text-ink">{title}</h2>}
             {description && <p className="mt-0.5 text-sm text-ink-sub">{description}</p>}
           </div>
           {actions && (

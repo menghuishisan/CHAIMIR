@@ -1,136 +1,182 @@
-// DashboardSections 统一 admin 两种范围看板中同形的教学实践、资源配额与快照时间区块。
-// 数据来自强类型 Dashboard 契约,不再按未知 JSON 键动态猜测标签。
+// DashboardSections 学校看板与平台看板共用的区块(设计 §7.5 / §7.6):
+// 第一行关键数字小卡(自动排列,每张一个数字 + 一句口径 + 可选的次要数字);师生构成只有两类,
+// 放在数字卡里的比例条,不再画大环形图;实验环境卡显示运行中数量与并发上限的使用比例条。
+// 第二行「需要处理」:每项一个数字(用已有列表的总数接口取),整项可点进对应页面。
+// 数据来自强类型 Dashboard 契约,不按未知 JSON 键猜测。
 
 import type { ReactNode } from 'react'
-import { Activity, Book, FlaskConical, Swords } from 'lucide-react'
-import type { Dashboard, ResourceQuotaSnapshot } from '@chaimir/api-client'
-import {
-  ChartContainer,
-  DescriptionList,
-  PageSection,
-  ShareDonutChart,
-  Stat,
-} from '@chaimir/ui'
-import { formatDateTime } from '../../../utils/formatters'
+import { Link } from 'react-router'
+import { ChevronRight } from 'lucide-react'
+import type { Dashboard } from '@chaimir/api-client'
+import { cn, Icon, Skeleton } from '@chaimir/ui'
+import { formatDateTime, formatRelativeOccurrence } from '../../../utils/formatters'
 
-interface DashboardCompositionSectionProps {
-  dashboard: Dashboard
+interface KeyFigureProps {
+  label: string
+  value: number
+  /** 一句口径(这个数字数的是什么) */
+  hint: string
+  /** 次要数字,如「活跃 312」 */
+  secondary?: string
+  /** 可选的比例条(师生构成、配额使用) */
+  children?: ReactNode
+}
+
+/** KeyFigure 一张关键数字小卡:名称、大数字、次要数字、口径,可带比例条 */
+function KeyFigure({ label, value, hint, secondary, children }: KeyFigureProps) {
+  return (
+    <div className="flex flex-col gap-1 rounded-lg bg-surface p-4 shadow-xs">
+      <p className="text-sm text-ink-sub">{label}</p>
+      <p className="flex flex-wrap items-baseline gap-x-2">
+        <span className="text-stat font-bold tabular-nums text-ink">{value.toLocaleString('zh-CN')}</span>
+        {secondary ? <span className="text-sm tabular-nums text-ink-sub">{secondary}</span> : null}
+      </p>
+      {children}
+      <p className="text-xs text-ink-sub">{hint}</p>
+    </div>
+  )
 }
 
 /**
- * DashboardCompositionSection 用环图呈现师生构成。
- *
- * 选型按数据形状(规范 §8.1):这两项加起来就是「师生」这个整体,问的是「谁占多数」——
- * 那是占比而不是趋势也不是维度对比,故用环图而不是再排两张 Stat 大卡。
- * 「账号总数」不作为整体:它还含管理员,教师 + 学生凑不成它,拿它当分母就是错数(§6.5.4)。
- * 两端都只有这一对可构成整体的口径,故只出这一张环图。
+ * RatioBar 两部分的比例条(如教师 / 学生):两段用不同深浅的玉色,各带文字与人数,不只靠颜色。
+ * 宽度是运行时计算的百分比,按规范允许内联 style。
  */
-export function DashboardCompositionSection({ dashboard }: DashboardCompositionSectionProps) {
-  const total = dashboard.teacher_count + dashboard.student_count
-
+function RatioBar({ left, right }: { left: { label: string; value: number }; right: { label: string; value: number } }) {
+  const total = left.value + right.value
+  const leftShare = total > 0 ? Math.round((left.value / total) * 100) : 0
   return (
-    <PageSection title="师生构成" description="教师与学生的人数占比。管理员账号不计入这个整体。">
-      <ChartContainer
-        description="环心是师生合计人数。"
-        isEmpty={total === 0}
-        emptyHint="还没有开通教师或学生账号。开通后这里会显示构成占比。"
-        ariaSummary={`师生合计 ${total} 人:教师 ${dashboard.teacher_count} 人、学生 ${dashboard.student_count} 人。`}
-        dataTable={{
-          columns: ['身份', '人数'],
-          rows: [
-            ['教师', dashboard.teacher_count],
-            ['学生', dashboard.student_count],
-          ],
-        }}
+    <div className="mt-1 flex flex-col gap-1">
+      <div
+        role="img"
+        aria-label={`${left.label} ${left.value} 人,${right.label} ${right.value} 人`}
+        className="flex h-2 overflow-hidden rounded-full bg-surface-sunken"
       >
-        <ShareDonutChart
-          // 按数值降序:读者从大到小扫环
-          slices={[
-            { key: 'student', name: '学生', value: dashboard.student_count },
-            { key: 'teacher', name: '教师', value: dashboard.teacher_count },
-          ]}
-          totalLabel="师生合计"
-        />
-      </ChartContainer>
-    </PageSection>
-  )
-}
-
-interface DashboardTeachingPracticeSectionProps {
-  dashboard: Dashboard
-}
-
-/** DashboardTeachingPracticeSection 展示两个管理范围共用的课程、实验、竞赛与沙箱指标。 */
-export function DashboardTeachingPracticeSection({ dashboard }: DashboardTeachingPracticeSectionProps) {
-  return (
-    <PageSection title="教学与实践" description="课程、实验与竞赛的开展情况。">
-      <div className="metric-band gap-4">
-        <Stat label="课程" value={dashboard.course_count} icon={Book} hint={`进行中 ${dashboard.active_course_count}`} />
-        <Stat
-          label="实验"
-          value={dashboard.experiment_count}
-          icon={FlaskConical}
-          hint={`活跃环境 ${dashboard.active_instance_count}`}
-        />
-        <Stat
-          label="竞赛"
-          value={dashboard.contest_count}
-          icon={Swords}
-          hint={`进行中 ${dashboard.active_contest_count}`}
-        />
-        <Stat
-          label="活跃实验环境"
-          value={dashboard.active_sandbox_count}
-          icon={Activity}
-          hint="当前占用运行资源"
-        />
+        {total > 0 ? (
+          <>
+            {/* 动态宽度:占比来自接口数据,属于运行时计算值 */}
+            <span className="h-full bg-primary" style={{ width: `${leftShare}%` }} />
+            <span className="h-full flex-1 bg-primary-soft" />
+          </>
+        ) : null}
       </div>
-    </PageSection>
+      <p className="flex justify-between text-xs tabular-nums text-ink-sub">
+        <span>
+          {left.label} {left.value}
+        </span>
+        <span>
+          {right.label} {right.value}
+        </span>
+      </p>
+    </div>
   )
 }
 
-interface DashboardQuotaSectionProps {
-  snapshot?: ResourceQuotaSnapshot
-  title: string
-  description: string
+/** UsageBar 配额使用比例条:超过 85% 用警示色 */
+function UsageBar({ used, limit }: { used: number; limit: number }) {
+  const share = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0
+  return (
+    <div className="mt-1 flex flex-col gap-1">
+      <div
+        role="progressbar"
+        aria-label="实验环境并发使用比例"
+        aria-valuenow={share}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        className="h-2 overflow-hidden rounded-full bg-surface-sunken"
+      >
+        {/* 动态宽度:使用比例来自接口数据,属于运行时计算值 */}
+        <span className={cn('block h-full', share >= 85 ? 'bg-warning' : 'bg-primary')} style={{ width: `${share}%` }} />
+      </div>
+      <p className="text-xs tabular-nums text-ink-sub">
+        并发上限 {limit},已用 {share}%
+      </p>
+    </div>
+  )
 }
 
-/** DashboardQuotaSection 按公开 DTO 的固定字段展示资源上限。 */
-export function DashboardQuotaSection({ snapshot, title, description }: DashboardQuotaSectionProps) {
-  if (!snapshot) return null
-
+/**
+ * DashboardKeyFigures 关键数字小卡一行:账号(总数 / 活跃)、师生(教师 / 学生,比例条)、课程(进行中 / 总数)、
+ * 实验(数量 / 运行中实例)、竞赛(进行中 / 总数)、实验环境(运行中 · 配额使用比例条);平台范围多一张「学校」。
+ */
+export function DashboardKeyFigures({ dashboard }: { dashboard: Dashboard }) {
+  const quota = dashboard.resource_quota_snapshot
   return (
-    <PageSection title={title} description={description}>
-      <DescriptionList
-        dense
-        columns={2}
-        items={[
-          { term: '实验环境并发上限', description: String(snapshot.max_concurrent_sandbox), mono: true },
-          { term: 'CPU 上限', description: String(snapshot.max_cpu), mono: true },
-          { term: '内存上限(MB)', description: String(snapshot.max_memory_mb), mono: true },
-        ]}
+    <section aria-label="关键数字" className="metric-band mb-6 gap-4">
+      {dashboard.tenant_count !== undefined ? <KeyFigure label="学校" value={dashboard.tenant_count} hint="已开通的学校" /> : null}
+      <KeyFigure
+        label="账号"
+        value={dashboard.account_count}
+        secondary={`活跃 ${dashboard.active_account_count}`}
+        hint="含管理员;活跃指近期有登录"
       />
-    </PageSection>
+      <KeyFigure label="师生" value={dashboard.teacher_count + dashboard.student_count} hint="教师与学生合计,不含管理员">
+        <RatioBar left={{ label: '教师', value: dashboard.teacher_count }} right={{ label: '学生', value: dashboard.student_count }} />
+      </KeyFigure>
+      <KeyFigure label="课程" value={dashboard.course_count} secondary={`进行中 ${dashboard.active_course_count}`} hint="全部课程" />
+      <KeyFigure
+        label="实验"
+        value={dashboard.experiment_count}
+        secondary={`运行中实例 ${dashboard.active_instance_count}`}
+        hint="已编排的实验"
+      />
+      <KeyFigure label="竞赛" value={dashboard.contest_count} secondary={`进行中 ${dashboard.active_contest_count}`} hint="全部赛事" />
+      <KeyFigure label="实验环境" value={dashboard.active_sandbox_count} hint="正在占用运行资源的环境">
+        {quota && quota.max_concurrent_sandbox > 0 ? <UsageBar used={dashboard.active_sandbox_count} limit={quota.max_concurrent_sandbox} /> : null}
+      </KeyFigure>
+    </section>
   )
 }
 
-interface DashboardGeneratedFooterProps {
-  generatedAt: string
-  children: ReactNode
+/** 「需要处理」的一项:数字(读取中为 undefined)、说法与去处 */
+export interface AttentionItem {
+  key: string
+  label: string
+  count: number | undefined
+  to: string
 }
 
-/** DashboardGeneratedFooter 展示快照时间和各范围自己的快捷入口。 */
-export function DashboardGeneratedFooter({ generatedAt, children }: DashboardGeneratedFooterProps) {
+/**
+ * DashboardAttention 「需要处理」一行:每项一个数字,整项是真实链接;数字大于 0 时用警示色,
+ * 为 0 时写「没有待处理」;读取中显示占位。
+ */
+export function DashboardAttention({ items }: { items: AttentionItem[] }) {
   return (
-    <PageSection>
-      {/* 抬起片而非凹陷井(§6.5.1):这一条直接落在光面上,井色与光面只差一档、表达不出凹陷 */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-surface p-4 shadow-xs">
-        <div className="min-w-0">
-          <p className="text-sm text-ink">数据生成于 {formatDateTime(generatedAt)}</p>
-          <p className="text-xs text-ink-sub">概览按周期聚合,不是实时值。需要看实时状态请去对应功能页。</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">{children}</div>
-      </div>
-    </PageSection>
+    <section aria-labelledby="dashboard-attention-title" className="mb-8">
+      <h2 id="dashboard-attention-title" className="mb-3 text-md font-semibold text-ink">
+        需要处理
+      </h2>
+      <ul className="card-grid gap-4">
+        {items.map((item) => (
+          <li key={item.key}>
+            <Link
+              to={item.to}
+              className="group flex h-full items-center justify-between gap-3 rounded-lg bg-surface p-4 shadow-xs transition-shadow duration-fast hover:shadow-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            >
+              <span className="min-w-0">
+                <span className="block text-sm text-ink-sub">{item.label}</span>
+                {item.count === undefined ? (
+                  <Skeleton variant="line" width="half" className="mt-2" />
+                ) : (
+                  <span className={cn('mt-1 block text-stat font-bold tabular-nums', item.count > 0 ? 'text-warning' : 'text-ink')}>
+                    {item.count}
+                  </span>
+                )}
+                {item.count === 0 ? <span className="block text-xs text-ink-sub">没有待处理</span> : null}
+              </span>
+              <Icon icon={ChevronRight} size="sm" className="shrink-0 text-ink-faint group-hover:text-primary" />
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+/** DashboardGeneratedNote 概览的快照时间:概览按周期聚合,不是实时值 */
+export function DashboardGeneratedNote({ generatedAt }: { generatedAt: string }) {
+  return (
+    <span className="text-sm text-ink-sub" title={formatDateTime(generatedAt)}>
+      概览生成于 {formatRelativeOccurrence(generatedAt)},不是实时值
+    </span>
   )
 }

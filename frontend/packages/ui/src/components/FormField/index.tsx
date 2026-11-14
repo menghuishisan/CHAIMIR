@@ -28,6 +28,7 @@ export interface FormFieldProps {
   className?: string;
 }
 
+/** FormField 表单字段包装器:标签、必填标记、说明与错误文案,并关联到控件 */
 export function FormField({
   label,
   htmlFor,

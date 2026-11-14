@@ -455,10 +455,6 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx, refs acceptanceMaterialRefs) 
 	if err != nil {
 		return err
 	}
-	teachingSubmissionHash, err := acceptanceContestAssetHash(refs.TeachingSubmissionRef, refs)
-	if err != nil {
-		return err
-	}
 	contestSubmissionHash, err := acceptanceContestAssetHash(refs.ContestSubmissionRef, refs)
 	if err != nil {
 		return err
@@ -489,58 +485,6 @@ func seedJudgeRows(ctx context.Context, tx pgx.Tx, refs acceptanceMaterialRefs) 
 		return err
 	}
 	if err := seedPublishedComposition(ctx, tx, battleCompositionSnapshot); err != nil {
-		return err
-	}
-	snapshot, err := jsonb(map[string]any{
-		"item_code":                   "ctf-reentrancy-vault",
-		"item_version":                "1.0.0",
-		"trace_id":                    "trace-acceptance-judge",
-		"judger_code":                 "testcase-evm",
-		"judger_type":                 1,
-		"judger_version":              judgerImageURL,
-		"suite_ref":                   refs.JudgeSuiteRef,
-		"suite_archive_name":          "public-regression.tar",
-		"version_hash":                contestVersionHash,
-		"code_hash":                   teachingSubmissionHash,
-		"composition_snapshot":        judgeSnapshot,
-		"genesis_ref":                 evmGenesisRef,
-		"command":                     []string{"run-evm-tests"},
-		"exec_target":                 "sandbox/testcase-evm",
-		"execution_sidecars":          []workload.ComponentSpec{acceptanceEVMJudgerSidecar(judgerImageURL)},
-		"timeout_sec":                 60,
-		"max_retries":                 1,
-		"max_score":                   100,
-		"expectation":                 map[string]any{"public": true},
-		"sanitized_code_archive_name": "reentrancy-fixed.tar",
-		"sanitized_code_archive_ref":  refs.TeachingSanitizedRef,
-	})
-	if err != nil {
-		return fmt.Errorf("编码判题输入快照失败: %w", err)
-	}
-	details, err := jsonb([]map[string]any{{"case": "public-visible-tests", "passed": true, "actual": "全部公开断言通过"}})
-	if err != nil {
-		return fmt.Errorf("编码判题结果详情失败: %w", err)
-	}
-	if err := execJSON(ctx, tx, `
-INSERT INTO judge_task (
-	id, tenant_id, judger_id, source_ref, source_owner_id, source_course_id, source_scope,
-	submitter_tenant_id, submitter_id, problem_ref, code_storage_key, code_hash, input_snapshot, sandbox_mode,
-	target_sandbox_ref, priority, status, retry_count, max_retries
-) VALUES (
-	$1,$2,(SELECT id FROM judger WHERE code='testcase-evm'),'teaching:2026:submission-item:910000000000005041-910000000000005032',$3,$4,'teaching',$2,$5,'ctf-reentrancy-vault:1.0.0',
-	$7,$8,
-		$6,1,NULL,5,$9,0,1
-)
-
-ON CONFLICT (tenant_id, source_ref, problem_ref) DO UPDATE SET judger_id=EXCLUDED.judger_id, source_owner_id=EXCLUDED.source_owner_id, source_course_id=EXCLUDED.source_course_id, source_scope=EXCLUDED.source_scope, submitter_tenant_id=EXCLUDED.submitter_tenant_id, submitter_id=EXCLUDED.submitter_id, code_storage_key=EXCLUDED.code_storage_key, code_hash=EXCLUDED.code_hash, input_snapshot=EXCLUDED.input_snapshot, sandbox_mode=EXCLUDED.sandbox_mode, target_sandbox_ref=EXCLUDED.target_sandbox_ref, priority=EXCLUDED.priority, status=EXCLUDED.status, retry_count=EXCLUDED.retry_count, max_retries=EXCLUDED.max_retries, updated_at=now()`,
-		acceptanceIDs.JudgeTask, acceptanceIDs.TenantID, acceptanceIDs.TeacherMain, acceptanceIDs.Course, acceptanceIDs.StudentA, snapshot, refs.TeachingSubmissionRef, teachingSubmissionHash, contracts.JudgeTaskStatusDone); err != nil {
-		return err
-	}
-	if err := execJSON(ctx, tx, `
-INSERT INTO judge_result (id, task_id, tenant_id, version, passed, score, max_score, details, judge_sandbox_ref, judged_at, is_rejudge)
-VALUES ($1,$2,$3,1,true,92,100,$4,'sandbox:910000000000001021',now(),false)
-ON CONFLICT (tenant_id, task_id, version) DO UPDATE SET passed=EXCLUDED.passed, score=EXCLUDED.score, max_score=EXCLUDED.max_score, details=EXCLUDED.details, judge_sandbox_ref=EXCLUDED.judge_sandbox_ref, judged_at=EXCLUDED.judged_at, is_rejudge=EXCLUDED.is_rejudge`,
-		acceptanceIDs.JudgeResult, acceptanceIDs.JudgeTask, acceptanceIDs.TenantID, details); err != nil {
 		return err
 	}
 	for _, checkpoint := range []struct {
@@ -849,6 +793,7 @@ func acceptanceTheoryBody() map[string]any {
 	return map[string]any{
 		"statement":   "在部分节点作恶时,拜占庭容错共识需要优先保证哪项性质?",
 		"q_type":      "single_choice",
+		"max_score":   40,
 		"options":     []string{"只提高出块速度", "在部分节点作恶时仍保持一致性", "取消交易签名", "跳过网络传播"},
 		"answer":      "在部分节点作恶时仍保持一致性",
 		"explanation": "安全性要求诚实节点对同一高度保持一致状态;活性则要求在网络条件满足时继续推进,两者不能通过取消签名或跳过传播获得。",
@@ -935,34 +880,30 @@ ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE SET join_mode=EXCLUDED.
 	due := time.Date(2026, 10, 20, 23, 59, 59, 0, time.UTC)
 	if err := execJSON(ctx, tx, `
 INSERT INTO assignment (id, tenant_id, course_id, title, chapter_id, due_at, max_attempts, late_policy, late_penalty, status)
-VALUES ($1,$2,$3,'作业一: 可重入漏洞攻击与修复报告',$4,$5,3,2,$6,2)
+VALUES ($1,$2,$3,'作业一: 拜占庭容错基础',$4,$5,3,2,$6,2)
 ON CONFLICT (id) DO UPDATE SET course_id=EXCLUDED.course_id, title=EXCLUDED.title, chapter_id=EXCLUDED.chapter_id, due_at=EXCLUDED.due_at, max_attempts=EXCLUDED.max_attempts, late_policy=EXCLUDED.late_policy, late_penalty=EXCLUDED.late_penalty, status=EXCLUDED.status, deleted_at=NULL, updated_at=now()`,
 		acceptanceIDs.Assignment, acceptanceIDs.TenantID, acceptanceIDs.Course, acceptanceIDs.ChapterLab, due, latePolicy); err != nil {
 		return err
 	}
 	if err := execJSON(ctx, tx, `
-INSERT INTO assignment_item (id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code)
-VALUES ($1,$2,$3,'ctf-reentrancy-vault','1.0.0',100,1,1,'testcase-evm')
-ON CONFLICT (tenant_id, assignment_id, seq) DO UPDATE SET item_code=EXCLUDED.item_code, item_version=EXCLUDED.item_version, score=EXCLUDED.score, grading_mode=EXCLUDED.grading_mode, judger_code=EXCLUDED.judger_code`,
+INSERT INTO assignment_item (id, tenant_id, assignment_id, item_code, item_version, score, seq)
+VALUES ($1,$2,$3,'quiz-bft-safety-liveness','1.0.0',40,1)
+ON CONFLICT (tenant_id, assignment_id, seq) DO UPDATE SET item_code=EXCLUDED.item_code, item_version=EXCLUDED.item_version, score=EXCLUDED.score`,
 		acceptanceIDs.AssignmentItem, acceptanceIDs.TenantID, acceptanceIDs.Assignment); err != nil {
 		return err
 	}
-	teachingSubmissionObject, err := storage.ParseObjectRef(refs.TeachingSubmissionRef)
+	submissionRef, err := jsonb(map[string]any{"answers": map[string]any{ids.Format(acceptanceIDs.AssignmentItem): "在部分节点作恶时仍保持一致性"}, "manual_max_score": 0, "auto_max_score": 40})
 	if err != nil {
-		return fmt.Errorf("解析作业提交对象引用失败: %w", err)
-	}
-	submissionRef, err := jsonb(map[string]any{"bucket": teachingSubmissionObject.Bucket, "key": teachingSubmissionObject.Key})
-	if err != nil {
-		return fmt.Errorf("编码提交存储引用失败: %w", err)
+		return fmt.Errorf("编码理论题作答失败: %w", err)
 	}
 	if err := execJSON(ctx, tx, `
 INSERT INTO submission (id, tenant_id, assignment_id, student_id, attempt_no, content_ref, auto_score, final_score, comment, is_late, status)
-VALUES ($1,$2,$3,$4,1,$5,92,92,'修复思路完整,测试覆盖了重复提款路径。',false,3)
+VALUES ($1,$2,$3,$4,1,$5,40,40,'答案正确,符合拜占庭安全性要求。',false,3)
 ON CONFLICT (tenant_id, assignment_id, student_id, attempt_no) DO UPDATE SET content_ref=EXCLUDED.content_ref, auto_score=EXCLUDED.auto_score, final_score=EXCLUDED.final_score, comment=EXCLUDED.comment, is_late=EXCLUDED.is_late, status=EXCLUDED.status`,
 		acceptanceIDs.SubmissionA, acceptanceIDs.TenantID, acceptanceIDs.Assignment, acceptanceIDs.StudentA, submissionRef); err != nil {
 		return err
 	}
-	draft, err := jsonb(map[string]any{"note": "攻击合约已完成,正在补充修复说明。"})
+	draft, err := jsonb(map[string]any{ids.Format(acceptanceIDs.AssignmentItem): ""})
 	if err != nil {
 		return fmt.Errorf("编码作业草稿失败: %w", err)
 	}
@@ -1016,7 +957,7 @@ ON CONFLICT (id) DO UPDATE SET tenant_id=EXCLUDED.tenant_id, course_id=EXCLUDED.
 	}
 	return execJSON(ctx, tx, `
 INSERT INTO course_grade (id, tenant_id, course_id, student_id, auto_total, override_total, is_overridden)
-VALUES ($1,$2,$3,$4,92.00,NULL,false)
+VALUES ($1,$2,$3,$4,40.00,NULL,false)
 ON CONFLICT (tenant_id, course_id, student_id) DO UPDATE SET auto_total=EXCLUDED.auto_total, override_total=EXCLUDED.override_total, is_overridden=EXCLUDED.is_overridden, updated_at=now()`,
 		acceptanceIDs.CourseGradeA, acceptanceIDs.TenantID, acceptanceIDs.Course, acceptanceIDs.StudentA)
 }

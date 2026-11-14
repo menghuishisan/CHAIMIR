@@ -17,27 +17,28 @@ import (
 
 // ListTasks 按租户分页查询判题任务,供教师和学校管理员查看队列与人工评分项。
 // state 取运维分组(空串不筛 / active 排队与执行中 / abnormal 判题失败),非法值按不筛处理前先拒绝。
-func (s *Service) ListTasks(ctx context.Context, tenantID, accountID int64, sourceRef string, pendingManual bool, state string, page, size int) ([]JudgeTaskDTO, int64, int, int, error) {
+func (s *Service) ListTasks(ctx context.Context, tenantID, accountID int64, sourceRef string, pendingManual bool, state string, page, size int) ([]JudgeTaskDTO, int64, int, int, pagex.Facets, error) {
 	if tenantID <= 0 || accountID <= 0 {
-		return nil, 0, 0, 0, apperr.ErrJudgeSubmitInvalid
+		return nil, 0, 0, 0, nil, apperr.ErrJudgeSubmitInvalid
 	}
 	if !validTaskState(state) {
-		return nil, 0, 0, 0, apperr.ErrJudgeSubmitInvalid
+		return nil, 0, 0, 0, nil, apperr.ErrJudgeSubmitInvalid
 	}
 	page, size = pagex.Normalize(page, size)
 	modules, err := s.identity.EnabledTenantModules(ctx, tenantID)
 	if err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, 0, 0, nil, err
 	}
 	if strings.TrimSpace(sourceRef) != "" {
 		if err := s.requireTaskModule(ctx, JudgeTask{TenantID: tenantID, SourceRef: strings.TrimSpace(sourceRef)}); err != nil {
-			return nil, 0, 0, 0, err
+			return nil, 0, 0, 0, nil, err
 		}
 	}
 	limit, offset := pagex.LimitOffset(page, size)
 	var (
-		items []JudgeTaskInfo
-		total int64
+		items   []JudgeTaskInfo
+		total   int64
+		byState pagex.FacetGroup
 	)
 	if err := s.store.TenantTx(ctx, tenantID, func(ctx context.Context, tx TxStore) error {
 		var err error
@@ -45,15 +46,20 @@ func (s *Service) ListTasks(ctx context.Context, tenantID, accountID int64, sour
 		if err != nil {
 			return apperr.ErrInternal.WithCause(err)
 		}
+		// 运维分组计数:套用其余筛选,不套用 state
+		byState, err = tx.CountJudgeTasksByState(ctx, tenantID, strings.TrimSpace(sourceRef), pendingManual, accountID, modules)
+		if err != nil {
+			return apperr.ErrInternal.WithCause(err)
+		}
 		return nil
 	}); err != nil {
-		return nil, 0, 0, 0, err
+		return nil, 0, 0, 0, nil, err
 	}
 	out := make([]JudgeTaskDTO, 0, len(items))
 	for _, item := range items {
 		out = append(out, judgeTaskDTOFromModel(item))
 	}
-	return out, total, page, size, nil
+	return out, total, page, size, pagex.Facets{"state": byState}, nil
 }
 
 // CancelTask 取消仍在排队中的任务,防止执行中任务被静默打断。

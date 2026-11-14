@@ -108,6 +108,7 @@ function pointOnEdge(from: Point, to: Point, progress: number): Point {
   return { x: from.x + (to.x - from.x) * ratio, y: from.y + (to.y - from.y) * ratio };
 }
 
+/** GraphPatternView 拓扑视图(graph 模式) */
 export function GraphPatternView({
   pattern,
   focus,

@@ -3,7 +3,7 @@
 import { ApiClient, encodePathSegment } from '../client'
 import { API_BASE_PATH } from '../constants'
 import type { IdentityApi } from './identity'
-import type { ContestStatus, VulnPrevalidateStatus, VulnProblemStatus } from '../constants/contest'
+import type { BattleMatchStatus, ContestStatus, VulnPrevalidateStatus, VulnProblemStatus } from '../constants/contest'
 import type { PaginatedResponse, SnowflakeID } from '../types/common'
 import type {
   BattleEntryRequest,
@@ -383,7 +383,8 @@ export class ContestApi {
    */
   async listBattleMatches(
     contestId: string,
-    params?: { page?: number; size?: number }
+    /** status 按对局状态筛选,省略为全部;响应带 facets.status(视角同列表,不套用状态筛选) */
+    params?: { status?: BattleMatchStatus; page?: number; size?: number }
   ): Promise<PaginatedResponse<BattleMatch>> {
     return this.client.get(
       `/contest/contests/${encodePathSegment(contestId)}/battle/matches`,
@@ -582,6 +583,7 @@ function normalizeProxyPath(proxyPath: string): string {
   return segments.join('/')
 }
 
+/** hasControlCharacter 是否含控制字符(路径里出现就拒绝,防止伪造路径段) */
 function hasControlCharacter(value: string): boolean {
   return [...value].some((char) => char.charCodeAt(0) < 0x20 || char.charCodeAt(0) === 0x7f)
 }

@@ -330,6 +330,60 @@ func (q *Queries) CountJudgeTasks(ctx context.Context, arg CountJudgeTasksParams
 	return column_1, err
 }
 
+const countJudgeTasksByState = `-- name: CountJudgeTasksByState :many
+SELECT CASE WHEN judge_task.status IN (1, 2) THEN 'active' WHEN judge_task.status = 4 THEN 'abnormal' ELSE 'other' END::text AS state,
+       COUNT(*)::bigint AS count
+FROM judge_task
+JOIN judger ON judger.id = judge_task.judger_id
+WHERE judge_task.tenant_id = $1::bigint
+  AND split_part(judge_task.source_ref, ':', 1) = ANY($2::text[])
+  AND ($3::text = '' OR judge_task.source_ref = $3::text)
+  AND ($4::boolean = false OR (judge_task.status = 2 AND judger.type = 6))
+  AND ($5::bigint = 0 OR judge_task.source_owner_id = $5::bigint OR judge_task.submitter_id = $5::bigint)
+GROUP BY 1
+`
+
+type CountJudgeTasksByStateParams struct {
+	TenantID       int64    `json:"tenant_id"`
+	EnabledModules []string `json:"enabled_modules"`
+	SourceRef      string   `json:"source_ref"`
+	PendingManual  bool     `json:"pending_manual"`
+	SourceOwnerID  int64    `json:"source_owner_id"`
+}
+
+type CountJudgeTasksByStateRow struct {
+	State string `json:"state"`
+	Count int64  `json:"count"`
+}
+
+// 判题任务的运维分组计数(active=排队/执行中,abnormal=失败;其余状态不在任何分组里):
+// 套用来源、人工评分与本人范围,不套用 state 筛选;口径与 ListJudgeTasks 一致。
+func (q *Queries) CountJudgeTasksByState(ctx context.Context, arg CountJudgeTasksByStateParams) ([]CountJudgeTasksByStateRow, error) {
+	rows, err := q.db.Query(ctx, countJudgeTasksByState,
+		arg.TenantID,
+		arg.EnabledModules,
+		arg.SourceRef,
+		arg.PendingManual,
+		arg.SourceOwnerID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountJudgeTasksByStateRow{}
+	for rows.Next() {
+		var i CountJudgeTasksByStateRow
+		if err := rows.Scan(&i.State, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createJudgeOutbox = `-- name: CreateJudgeOutbox :one
 INSERT INTO judge_event_outbox (id, tenant_id, task_id, subject, payload, status, retry_count, last_error, created_at, updated_at, lease_token, lease_until)
 VALUES ($1, $2, $3, $4, $5, 1, 0, NULL, now(), now(), '', NULL)

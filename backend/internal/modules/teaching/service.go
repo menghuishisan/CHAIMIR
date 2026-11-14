@@ -81,8 +81,7 @@ type ServiceDeps struct {
 	Judge                  contracts.JudgeService
 	Bus                    eventbus.Bus
 	Transfers              transferService
-	Storage                *storage.Storage
-	Objects                objectStorage
+	Storage                objectStorage
 	FileService            fileService
 	Config                 config.TeachingConfig
 	CourseMaterialMaxBytes int64
@@ -113,10 +112,7 @@ func NewService(deps ServiceDeps) (*Service, error) {
 	if deps.Bus == nil {
 		return nil, fmt.Errorf("teaching service 缺少事件总线")
 	}
-	objects := deps.Objects
-	if objects == nil {
-		objects = deps.Storage
-	}
+	objects := deps.Storage
 	if deps.Transfers == nil || objects == nil || deps.FileService == nil {
 		return nil, fmt.Errorf("teaching service 缺少统一导入导出或文件服务依赖")
 	}

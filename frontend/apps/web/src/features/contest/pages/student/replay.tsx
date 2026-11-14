@@ -36,6 +36,7 @@ import {
   Pagination,
   WorkbenchShell,
   WorkbenchTopbar,
+  type WorkbenchShortcut,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
@@ -65,7 +66,7 @@ export default function StudentContestReplayPage() {
   const replay = usePagedResource<BattleReplayWindowItem, BattleReplayWindow>(
     (params) => api.contest.getBattleReplayWindow(contestId, params),
     [contestId],
-    PAGINATION_MAX_SIZE
+    { pageSize: PAGINATION_MAX_SIZE }
   )
   const ladder = useAsyncResource(
     () =>
@@ -229,6 +230,45 @@ function Rewinder({ window, ranks, page, pageSize, onPageChange }: RewinderProps
     }
   }, [currentMatch])
 
+  const [topbarError, setTopbarError] = useState<string>()
+  const topbarDownload = useReplayDownload(setTopbarError)
+
+  // 时间轴的方向键(设计 §7.2 C):←/→ 按局回溯,Shift + ←/→ 在已读取的轨迹里逐帧回溯。
+  // 两条游标都只是本地重算,按住不放连续移动;可用条件与底栏按钮、滑条的边界一致。
+  const actionCount = trace.archive?.actions.length
+  const timelineShortcuts: WorkbenchShortcut[] = [
+    {
+      key: 'ArrowLeft',
+      repeat: true,
+      description: '回退一局',
+      disabled: cursor === 0,
+      run: () => setCursor((current) => Math.max(0, current - 1)),
+    },
+    {
+      key: 'ArrowRight',
+      repeat: true,
+      description: '前进一局',
+      disabled: cursor >= timeline.length,
+      run: () => setCursor((current) => Math.min(timeline.length, current + 1)),
+    },
+    {
+      key: 'ArrowLeft',
+      shift: true,
+      repeat: true,
+      description: '逐帧回退一步',
+      disabled: actionCount === undefined || step === 0,
+      run: () => setStep((current) => Math.max(0, current - 1)),
+    },
+    {
+      key: 'ArrowRight',
+      shift: true,
+      repeat: true,
+      description: '逐帧前进一步',
+      disabled: actionCount === undefined || step >= actionCount,
+      run: () => setStep((current) => Math.min(actionCount ?? 0, current + 1)),
+    },
+  ]
+
   return (
     <WorkbenchShell
       workbench="replay"
@@ -236,6 +276,7 @@ function Rewinder({ window, ranks, page, pageSize, onPageChange }: RewinderProps
         <WorkbenchTopbar
           onExit={exit}
           exitLabel="退出回放"
+          shortcuts={timelineShortcuts}
           title={title}
           subtitle={
             '已完成 ' +
@@ -252,6 +293,26 @@ function Rewinder({ window, ranks, page, pageSize, onPageChange }: RewinderProps
               done={timelineStart + cursor}
               failedIndexes={failedIndexes}
             />
+          }
+          cta={
+            <div className="flex items-center gap-2">
+              {topbarError ? <span className="hidden text-xs text-on-dark-danger md:inline">{topbarError}</span> : null}
+              <Button
+                variant="primary"
+                size="sm"
+                leftIcon={Download}
+                loading={topbarDownload.downloading}
+                disabled={!currentMatch?.replay_available}
+                title={currentMatch?.replay_available ? undefined : '这一局没有留下轨迹记录'}
+                onClick={() => {
+                  if (!currentMatch) return
+                  setTopbarError(undefined)
+                  void topbarDownload.download(currentMatch.id)
+                }}
+              >
+                下载回放归档
+              </Button>
+            </div>
           }
         />
       }
@@ -699,6 +760,31 @@ function TimelineStage({
   )
 }
 
+/**
+ * useReplayDownload 下载一局的回放归档:每次重新签发一次性授权,再交给统一文件服务。
+ * 顶栏主操作与「这一局」里的按钮共用,失败原因交给调用方就近显示。
+ */
+function useReplayDownload(onError: (message: string) => void) {
+  const [downloading, setDownloading] = useState(false)
+  const download = useCallback(
+    async (matchId: string) => {
+      setDownloading(true)
+      try {
+        const grant = await api.contest.issueBattleReplayDownloadGrant(matchId)
+        const file = await api.storage.consumeGrant(grant.token)
+        downloadAttachment(file)
+        toast.success('回放归档已开始下载')
+      } catch (error) {
+        onError(userFacingErrorMessage(error, '回放下载没有完成,请稍后重试。'))
+      } finally {
+        setDownloading(false)
+      }
+    },
+    [onError],
+  )
+  return { downloading, download }
+}
+
 /** outcomeClass 按结果与是否已回溯给出区块样式;色彩之外用实心/描边双通道区分。 */
 function outcomeClass(outcome: Outcome, reached: boolean): string {
   if (!reached) return 'border-dark-line text-on-dark-faint'
@@ -718,7 +804,7 @@ interface MatchDetailProps {
 function MatchDetail({ match, mySide }: MatchDetailProps) {
   const [archived, setArchived] = useState<boolean>()
   const [checkError, setCheckError] = useState<string>()
-  const [downloading, setDownloading] = useState(false)
+  const { downloading, download } = useReplayDownload(setCheckError)
 
   const side = mySide
   const outcome = side ? outcomeOf({ match, my_side: side, sequence: 0 }) : 'unknown'
@@ -732,22 +818,6 @@ function MatchDetail({ match, mySide }: MatchDetailProps) {
     } catch (error) {
       setArchived(false)
       setCheckError(userFacingErrorMessage(error, '这一局的轨迹暂时确认不了。'))
-    }
-  }, [match.id])
-
-  /** downloadReplay 每次重新签发一次性授权,再交给统一文件服务下载。 */
-  const downloadReplay = useCallback(async () => {
-    setDownloading(true)
-    setCheckError(undefined)
-    try {
-      const grant = await api.contest.issueBattleReplayDownloadGrant(match.id)
-      const file = await api.storage.consumeGrant(grant.token)
-      downloadAttachment(file)
-      toast.success('回放归档已开始下载')
-    } catch (error) {
-      setCheckError(userFacingErrorMessage(error, '回放下载没有完成,请稍后重试。'))
-    } finally {
-      setDownloading(false)
     }
   }, [match.id])
 
@@ -824,7 +894,10 @@ function MatchDetail({ match, mySide }: MatchDetailProps) {
                 size="sm"
                 leftIcon={Download}
                 loading={downloading}
-                onClick={() => void downloadReplay()}
+                onClick={() => {
+                  setCheckError(undefined)
+                  void download(match.id)
+                }}
               >
                 下载回放归档
               </Button>
@@ -881,8 +954,8 @@ function LadderSection({ ranks, pending }: LadderSectionProps) {
                 key={rank.team_id}
                 className="flex items-center justify-between gap-2 rounded-md border border-dark-line bg-dark-surface px-2 py-1.5"
               >
-                <span className="font-mono text-xs tabular-nums text-on-dark-sub">
-                  第 {rank.rank} 名
+                <span className="min-w-0 truncate font-mono text-xs tabular-nums text-on-dark-sub">
+                  第 {rank.rank} 名 · {rank.team_name}
                 </span>
                 <span className="font-mono text-xs tabular-nums text-on-dark">{rank.score} 分</span>
               </li>

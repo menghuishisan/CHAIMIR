@@ -20,12 +20,3 @@ export async function loadOrganizationView(): Promise<OrganizationView> {
   ])
   return { departments, majors, classes }
 }
-
-/** countClassesByMajor 统计每个专业当前关联的班级数。 */
-export function countClassesByMajor(classes: Class[]): Map<string, number> {
-  const counts = new Map<string, number>()
-  for (const entity of classes) {
-    counts.set(entity.major_id, (counts.get(entity.major_id) ?? 0) + 1)
-  }
-  return counts
-}

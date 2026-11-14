@@ -2,9 +2,10 @@
 //
 // 仿真工作台与公开回放页共用它 —— 两页的播放语义一致(M4 需求 C2/C3:单步推进/回退、变速/暂停),
 // 差别只在"一步是什么"与是否提供换随机条件,故按 props 门控而不是各写一套控制区。
+// 快捷键随控制区一起声明(规范 §7.3):空格播放/暂停、← 上一步、→ 下一步,可用性与按钮完全一致。
 
 import { Pause, Play, RotateCcw, StepBack, StepForward } from 'lucide-react'
-import { Button, SegmentedControl } from '@chaimir/ui'
+import { Button, SegmentedControl, useWorkbenchShortcuts } from '@chaimir/ui'
 import { SIM_SPEED_OPTIONS } from '../playback'
 
 export interface SimPlaybackControlsProps {
@@ -46,6 +47,13 @@ export function SimPlaybackControls({
   atStart,
   playLabel,
 }: SimPlaybackControlsProps) {
+  // 推进与回退都要等快照回来,按住不放会一次排出几十条命令,故只在按下时执行一次
+  useWorkbenchShortcuts([
+    { key: ' ', description: `${playLabel} / 暂停`, run: onToggle, disabled: disabled || atEnd },
+    { key: 'ArrowLeft', description: '上一步', run: onStepBack, disabled: disabled || atStart },
+    { key: 'ArrowRight', description: '下一步', run: onStep, disabled: disabled || atEnd },
+  ])
+
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-2">
       <SegmentedControl

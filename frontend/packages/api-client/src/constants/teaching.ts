@@ -51,11 +51,6 @@ export enum LatePolicy {
   NO_PENALTY = 3,
 }
 
-export enum GradingMode {
-  AUTO = 1,
-  MANUAL = 2,
-}
-
 export enum SubmissionStatus {
   SUBMITTED = 1,
   PENDING = 2,

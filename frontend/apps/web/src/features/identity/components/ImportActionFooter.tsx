@@ -1,8 +1,8 @@
-// ImportActionFooter 统一身份域批量导入在上传、预览和提交阶段的底部操作。
+// ImportActionFooter 统一身份域批量导入(右侧大抽屉)在上传、预览和提交阶段的底部操作。
 
 import { CircleCheck, FileSpreadsheet, Upload } from 'lucide-react'
 import type { ImportPreviewResponse } from '@chaimir/api-client'
-import { Button, ModalFooter } from '@chaimir/ui'
+import { Button, DrawerFooter } from '@chaimir/ui'
 
 interface ImportActionFooterProps {
   preview?: ImportPreviewResponse
@@ -25,7 +25,7 @@ export function ImportActionFooter({
   onCommit,
 }: ImportActionFooterProps) {
   return (
-    <ModalFooter>
+    <DrawerFooter>
       <Button variant="outline" disabled={working} onClick={onClose}>
         取消
       </Button>
@@ -55,7 +55,7 @@ export function ImportActionFooter({
           上传并校验
         </Button>
       )}
-    </ModalFooter>
+    </DrawerFooter>
   )
 }
 

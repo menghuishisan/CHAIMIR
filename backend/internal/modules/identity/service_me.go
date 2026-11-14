@@ -44,7 +44,7 @@ func (s *Service) GetMe(ctx context.Context) (MeResponse, error) {
 	if err != nil {
 		return MeResponse{}, err
 	}
-	return MeResponse{Account: ToAccountDTO(account, phone), EnabledModules: modules}, nil
+	return MeResponse{Account: ToAccountDTO(account, phone), TenantName: current.Name, EnabledModules: modules}, nil
 }
 
 // ChangeMyPassword 校验旧密码后更新为新密码,保留当前会话并吊销其他设备会话。
@@ -142,14 +142,15 @@ func (s *Service) ChangeMyPhone(ctx context.Context, req ChangePhoneRequest) err
 	return s.auditSelfAccount(ctx, id, account, "account.phone.change")
 }
 
-// ListMySessions 读取当前账号的服务端 Refresh 会话,不返回任何令牌明文或哈希。
-func (s *Service) ListMySessions(ctx context.Context) ([]SessionDTO, error) {
+// ListMySessions 读取当前账号的服务端 Refresh 会话,不返回任何令牌明文或哈希;
+// currentSessionID 来自本次请求的访问令牌,据此标出「这台设备」。
+func (s *Service) ListMySessions(ctx context.Context, currentSessionID int64) ([]SessionDTO, error) {
 	id, ok := tenant.FromContext(ctx)
 	if !ok {
 		return nil, apperr.ErrUnauthorized
 	}
 	if id.IsPlatform {
-		return s.listPlatformSessions(ctx, id.AccountID)
+		return s.listPlatformSessions(ctx, id.AccountID, currentSessionID)
 	}
 	if id.TenantID <= 0 || id.AccountID <= 0 {
 		return nil, apperr.ErrForbidden
@@ -167,7 +168,7 @@ func (s *Service) ListMySessions(ctx context.Context) ([]SessionDTO, error) {
 	}
 	out := make([]SessionDTO, 0, len(sessions))
 	for _, session := range sessions {
-		out = append(out, ToSessionDTO(session))
+		out = append(out, ToSessionDTO(session, currentSessionID))
 	}
 	return out, nil
 }
@@ -231,7 +232,7 @@ func (s *Service) changePlatformPassword(ctx context.Context, accountID, current
 }
 
 // listPlatformSessions 返回平台管理员服务端会话列表,不暴露 Refresh 哈希。
-func (s *Service) listPlatformSessions(ctx context.Context, accountID int64) ([]SessionDTO, error) {
+func (s *Service) listPlatformSessions(ctx context.Context, accountID, currentSessionID int64) ([]SessionDTO, error) {
 	if accountID <= 0 {
 		return nil, apperr.ErrForbidden
 	}
@@ -248,7 +249,7 @@ func (s *Service) listPlatformSessions(ctx context.Context, accountID int64) ([]
 	}
 	out := make([]SessionDTO, 0, len(sessions))
 	for _, session := range sessions {
-		out = append(out, ToPlatformSessionDTO(session))
+		out = append(out, ToPlatformSessionDTO(session, currentSessionID))
 	}
 	return out, nil
 }

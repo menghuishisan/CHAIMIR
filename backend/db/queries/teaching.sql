@@ -8,6 +8,12 @@ SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref
 FROM course
 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL;
 
+-- name: BatchGetCourses :many
+-- 按编号一次读取本租户未删除课程,供成绩中心列表随记录下发课程名。
+SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
+FROM course
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = ANY(sqlc.arg(course_ids)::bigint[]) AND deleted_at IS NULL;
+
 -- name: GetCloneableCourseByID :one
 SELECT id, tenant_id, teacher_id, name, description, type, difficulty, cover_ref, semester, credits::float8 AS credits, schedule, start_at, end_at, invite_code, status, visibility, created_at, updated_at, deleted_at
 FROM course
@@ -32,6 +38,18 @@ WHERE tenant_id <> sqlc.arg(exclude_tenant_id)::bigint AND visibility = 2 AND st
   AND (sqlc.arg(keyword)::text = '' OR strpos(lower(name), lower(sqlc.arg(keyword))) > 0 OR strpos(lower(description), lower(sqlc.arg(keyword))) > 0)
 ORDER BY updated_at DESC, id DESC
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+
+-- name: CountChaptersOfSharedCourses :many
+-- 共享目录预览的章节数:只数此刻仍共享、非草稿、未删除且不属于本校的课程,只返回数量(见 M6 安全设计 §5)。
+-- 在受控特权事务里执行:chapter 的行级安全只开放本校。
+SELECT ch.course_id, COUNT(*)::bigint AS chapter_count
+FROM chapter ch
+JOIN course c ON c.id = ch.course_id AND c.tenant_id = ch.tenant_id
+WHERE ch.course_id = ANY(sqlc.arg(course_ids)::bigint[])
+  AND ch.deleted_at IS NULL
+  AND c.visibility = 2 AND c.status <> 1 AND c.deleted_at IS NULL
+  AND c.tenant_id <> sqlc.arg(exclude_tenant_id)::bigint
+GROUP BY ch.course_id;
 
 -- name: CountSharedCourses :one
 SELECT COUNT(*)
@@ -80,6 +98,27 @@ WHERE c.tenant_id = sqlc.arg(tenant_id)::bigint AND m.student_id = sqlc.arg(stud
   AND (sqlc.arg(is_shared)::smallint = 0
     OR (sqlc.arg(is_shared)::smallint = 1 AND c.visibility = 2)
     OR (sqlc.arg(is_shared)::smallint = 2 AND c.visibility = 1));
+
+-- name: CountTeacherCoursesByStatus :many
+-- 教师课程列表的状态分段计数:套用共享筛选,不套用状态筛选(选中一个分段后其他分段的数字仍可见)。
+SELECT status, COUNT(*)::bigint AS count
+FROM course
+WHERE tenant_id = sqlc.arg(tenant_id)::bigint AND teacher_id = sqlc.arg(teacher_id)::bigint AND deleted_at IS NULL
+  AND (sqlc.arg(is_shared)::smallint = 0
+    OR (sqlc.arg(is_shared)::smallint = 1 AND visibility = 2)
+    OR (sqlc.arg(is_shared)::smallint = 2 AND visibility = 1))
+GROUP BY status;
+
+-- name: CountStudentCoursesByStatus :many
+-- 学生课程列表的状态分段计数,口径同学生课程列表。
+SELECT c.status, COUNT(*)::bigint AS count
+FROM course c
+JOIN course_member m ON m.tenant_id = c.tenant_id AND m.course_id = c.id
+WHERE c.tenant_id = sqlc.arg(tenant_id)::bigint AND m.student_id = sqlc.arg(student_id)::bigint AND c.deleted_at IS NULL
+  AND (sqlc.arg(is_shared)::smallint = 0
+    OR (sqlc.arg(is_shared)::smallint = 1 AND c.visibility = 2)
+    OR (sqlc.arg(is_shared)::smallint = 2 AND c.visibility = 1))
+GROUP BY c.status;
 
 -- name: UpdateCourse :one
 UPDATE course
@@ -278,12 +317,12 @@ RETURNING id, tenant_id, course_id, title, chapter_id, due_at, max_attempts, lat
 DELETE FROM assignment_item WHERE tenant_id = $1 AND assignment_id = $2;
 
 -- name: CreateAssignmentItem :one
-INSERT INTO assignment_item (id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code, created_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
-RETURNING id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code, created_at;
+INSERT INTO assignment_item (id, tenant_id, assignment_id, item_code, item_version, score, seq, created_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+RETURNING id, tenant_id, assignment_id, item_code, item_version, score, seq, created_at;
 
 -- name: ListAssignmentItems :many
-SELECT id, tenant_id, assignment_id, item_code, item_version, score, seq, grading_mode, judger_code, created_at
+SELECT id, tenant_id, assignment_id, item_code, item_version, score, seq, created_at
 FROM assignment_item
 WHERE tenant_id = $1 AND assignment_id = $2
 ORDER BY seq ASC;
@@ -294,6 +333,52 @@ SELECT COUNT(*)::bigint FROM submission WHERE tenant_id = $1 AND assignment_id =
 -- name: CountStudentAttempts :one
 SELECT COUNT(*)::bigint FROM submission WHERE tenant_id = $1 AND assignment_id = $2 AND student_id = $3;
 
+-- name: CountMembersByCourses :many
+-- 课程卡片的选课人数:一次按当前页课程编号聚合,不逐门课取统计。
+SELECT course_id, COUNT(*)::bigint AS member_count
+FROM course_member
+WHERE tenant_id = sqlc.arg(tenant_id)::bigint AND course_id = ANY(sqlc.arg(course_ids)::bigint[])
+GROUP BY course_id;
+
+-- name: CountStudentLessonProgressByCourses :many
+-- 学生课程卡片的学习进度:当前页每门课的有效课时数与本人学完的课时数,一次聚合。
+-- 只数未删除的章节与课时,与课程大纲同口径。
+SELECT c.course_id,
+COUNT(l.id)::bigint AS lesson_count,
+       COUNT(p.id) FILTER (WHERE p.status = 3)::bigint AS completed_count
+FROM chapter c
+JOIN lesson l ON l.tenant_id = c.tenant_id AND l.chapter_id = c.id AND l.deleted_at IS NULL
+LEFT JOIN lesson_progress p ON p.tenant_id = l.tenant_id AND p.lesson_id = l.id AND p.student_id = sqlc.arg(student_id)::bigint
+WHERE c.tenant_id = sqlc.arg(tenant_id)::bigint AND c.course_id = ANY(sqlc.arg(course_ids)::bigint[]) AND c.deleted_at IS NULL
+GROUP BY c.course_id;
+
+-- name: SummarizeStudentSubmissionsByAssignments :many
+-- 学生作业列表的本人提交情况:当前页每份作业的已用次数与最近一次提交的状态,一次聚合。
+SELECT DISTINCT ON (assignment_id)
+assignment_id,
+       COUNT(*) OVER (PARTITION BY assignment_id)::bigint AS attempts,
+       status AS latest_status
+FROM submission
+WHERE tenant_id = sqlc.arg(tenant_id)::bigint
+  AND student_id = sqlc.arg(student_id)::bigint
+  AND assignment_id = ANY(sqlc.arg(assignment_ids)::bigint[])
+ORDER BY assignment_id, attempt_no DESC;
+
+-- name: CountSubmittersByAssignments :many
+-- 教师作业列表的提交统计:当前页每份作业的已交人数,以及最近一次提交在等老师评分的人数(待批改)。
+-- 按学生去重:同一学生交过多次只算一人,待批改看他最近一次提交;口径与批改中心「待批改」同为 status = 2,
+-- 自动判题还没回来的(status = 1)不算,免得两处数字对不上。
+SELECT assignment_id,
+       COUNT(*)::bigint AS submitted_count,
+       COUNT(*) FILTER (WHERE status = 2)::bigint AS pending_count
+FROM (
+  SELECT DISTINCT ON (assignment_id, student_id) assignment_id, student_id, status
+  FROM submission
+  WHERE tenant_id = sqlc.arg(tenant_id)::bigint AND assignment_id = ANY(sqlc.arg(assignment_ids)::bigint[])
+  ORDER BY assignment_id, student_id, attempt_no DESC
+) latest
+GROUP BY assignment_id;
+
 -- name: CreateSubmission :one
 INSERT INTO submission (id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at)
 VALUES ($1, $2, $3, $4, $5, $6, NULL, NULL, NULL, $7, NULL, $8, $9, now())
@@ -302,16 +387,18 @@ RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, jud
 -- name: GetSubmission :one
 SELECT id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at
 FROM submission
-WHERE tenant_id = $1 AND id = $2;
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE;
 
 -- name: GetSubmissionBySourceRef :one
 SELECT s.id, s.tenant_id, s.assignment_id, s.student_id, s.attempt_no, s.content_ref, s.judge_task_ref, s.auto_score, s.manual_score, s.final_score, s.comment, s.is_late, s.status, s.submitted_at
 FROM submission s
 JOIN submission_judge_outbox o ON o.tenant_id = s.tenant_id AND o.submission_id = s.id
-WHERE o.tenant_id = $1 AND o.source_ref = $2;
+WHERE o.tenant_id = $1 AND o.source_ref = $2
+FOR UPDATE OF s;
 
 -- name: ListJudgeOutboxBySubmission :many
-SELECT id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
+SELECT id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until
 FROM submission_judge_outbox
 WHERE tenant_id = $1 AND submission_id = $2
 ORDER BY id ASC;
@@ -339,9 +426,33 @@ WHERE tenant_id = $1
   AND (sqlc.arg(status)::smallint = 0 OR submission.status = sqlc.arg(status)::smallint)
   AND (sqlc.arg(is_late)::smallint = 0 OR submission.is_late = (sqlc.arg(is_late)::smallint = 1));
 
+-- name: CountSubmissionsByStatusAndLate :many
+-- 批改台的分段计数(待批改 / 已出分 / 迟交 是同一组分段):按状态与是否迟交分组,两列都不套用本组筛选。
+SELECT status, is_late, COUNT(*)::bigint AS count
+FROM submission
+WHERE tenant_id = sqlc.arg(tenant_id)::bigint
+  AND assignment_id = sqlc.arg(assignment_id)::bigint
+  AND (sqlc.arg(student_id)::bigint = 0 OR student_id = sqlc.arg(student_id)::bigint)
+GROUP BY status, is_late;
+
 -- name: UpdateSubmissionManualGrade :one
 UPDATE submission
-SET manual_score = $3, final_score = $4, comment = $5, status = 3
+SET manual_score = $3,
+    final_score = CASE
+        WHEN auto_score IS NULL AND EXISTS (
+            SELECT 1 FROM submission_judge_outbox o
+            WHERE o.tenant_id = $1 AND o.submission_id = $2
+        ) THEN NULL
+        ELSE $4
+    END,
+    comment = $5,
+    status = CASE
+        WHEN auto_score IS NULL AND EXISTS (
+            SELECT 1 FROM submission_judge_outbox o
+            WHERE o.tenant_id = $1 AND o.submission_id = $2
+        ) THEN status
+        ELSE 3
+    END
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at;
 
@@ -353,14 +464,30 @@ RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, jud
 
 -- name: UpdateSubmissionAutoScore :one
 UPDATE submission
-SET auto_score = $3, final_score = $4, status = 3
+SET auto_score = $3,
+    final_score = CASE
+        WHEN COALESCE((content_ref->>'manual_max_score')::integer, 0) > 0 AND manual_score IS NULL THEN NULL
+        ELSE $4
+    END,
+    status = CASE
+        WHEN COALESCE((content_ref->>'manual_max_score')::integer, 0) > 0 AND manual_score IS NULL THEN 2
+        ELSE 3
+    END
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at;
+
+-- name: RevokeSubmissionAutoScore :one
+UPDATE submission
+SET auto_score = NULL,
+    final_score = NULL,
+    status = 1
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, tenant_id, assignment_id, student_id, attempt_no, content_ref, judge_task_ref, auto_score, manual_score, final_score, comment, is_late, status, submitted_at;
 
 -- name: CreateJudgeOutbox :one
-INSERT INTO submission_judge_outbox (id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, 1, 0, NULL, NULL, NULL, now(), now(), '', NULL)
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+INSERT INTO submission_judge_outbox (id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 1, 0, NULL, NULL, NULL, now(), now(), '', NULL)
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: ClaimJudgeOutbox :many
 UPDATE submission_judge_outbox
@@ -374,7 +501,7 @@ WHERE id IN (
     LIMIT $2
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: ClaimJudgeOutboxAcrossTenants :many
 UPDATE submission_judge_outbox
@@ -387,7 +514,7 @@ WHERE id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: CompleteJudgeOutbox :one
 UPDATE submission_judge_outbox
@@ -398,14 +525,14 @@ SET status = 3,
     lease_until = NULL
 WHERE (tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $3 AND lease_until > now())
    OR (tenant_id = $1 AND id = $2 AND status = 3)
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: RetryJudgeOutbox :one
 UPDATE submission_judge_outbox
 SET status = CASE WHEN retry_count >= @max_attempts THEN 4 ELSE 1 END,
     last_error = $3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND id = $2 AND status = 2 AND lease_token = $4 AND lease_until > now()
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: ExhaustExpiredJudgeOutbox :execrows
 UPDATE submission_judge_outbox
@@ -434,15 +561,15 @@ WHERE status = 2
 UPDATE submission_judge_outbox
 SET score = $3, last_error = NULL, completed_at = $4, status = 3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND source_ref = $2 AND status IN (2, 3, 4)
-  AND (completed_at IS NULL OR (completed_at = $4 AND score = $3))
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+  AND (completed_at IS NULL OR completed_at < $4 OR (completed_at = $4 AND score = $3 AND last_error IS NULL))
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: MarkJudgeOutboxFailedResult :one
 UPDATE submission_judge_outbox
 SET last_error = $3, completed_at = $4, status = 3, updated_at = now(), lease_token = '', lease_until = NULL
 WHERE tenant_id = $1 AND source_ref = $2 AND status IN (2, 3, 4)
-  AND (completed_at IS NULL OR (completed_at = $4 AND last_error = $3))
-RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, judger_code, code_storage_key, code_hash, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
+  AND (completed_at IS NULL OR completed_at < $4 OR (completed_at = $4 AND last_error = $3))
+RETURNING id, tenant_id, submission_id, assignment_item_id, assignment_id, source_owner_id, source_course_id, source_scope, student_id, item_code, item_version, extra_input, source_ref, status, retry_count, last_error, score, completed_at, created_at, updated_at, lease_token, lease_until;
 
 -- name: UpsertSubmissionDraft :one
 INSERT INTO submission_draft (id, tenant_id, assignment_id, student_id, content, updated_at)

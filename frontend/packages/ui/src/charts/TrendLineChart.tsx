@@ -85,6 +85,7 @@ function AnomalyMarker({ cx, cy, fill }: { cx?: number; cy?: number; fill: strin
   );
 }
 
+/** TrendLineChart 趋势折线图(连续时间序列) */
 export function TrendLineChart({
   data,
   xKey,

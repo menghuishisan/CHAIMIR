@@ -4,7 +4,7 @@
 // 不把 content_ref 作为裸 JSON 交给用户。
 
 import { useCallback, useMemo, useState } from 'react'
-import { FilePlus2, Layers, Pencil, Plus, Trash2, Upload } from 'lucide-react'
+import { ArrowDown, ArrowUp, FilePlus2, Layers, Pencil, Plus, Trash2, Upload } from 'lucide-react'
 import {
   LessonContentType,
   type Chapter,
@@ -38,6 +38,7 @@ import {
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
+import { moveItem } from '../../reorder'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatFileSize } from '../../../../utils/formatters'
 import {
@@ -103,6 +104,63 @@ export function CourseChapters({ courseId, outline, onChanged }: CourseChaptersP
     [outline.chapters],
   )
 
+  /**
+   * moveChapter 章节上移 / 下移:与相邻章互换序号并写回(改写现有序号字段,设计 §7.4)。
+   * 序号有重复或空档时一并理顺;写回是逐条的,中途失败则刷新以服务端为准。
+   */
+  const moveChapter = useCallback(
+    async (chapter: Chapter, step: 1 | -1) => {
+      setWorking(true)
+      setActionError(undefined)
+      try {
+        const byId = new Map(outline.chapters.map((item) => [item.id, item]))
+        for (const change of moveItem(outline.chapters, chapter.id, step)) {
+          const target = byId.get(change.id)
+          if (target) await api.teaching.updateChapter(courseId, target.id, { title: target.title, sort: change.sort })
+        }
+      } catch (error) {
+        setActionError(userFacingErrorMessage(error, '顺序没有调整成功,请稍后重试。'))
+      } finally {
+        setWorking(false)
+        onChanged()
+      }
+    },
+    [courseId, onChanged, outline.chapters],
+  )
+
+  /** moveLesson 课时在本章内上移 / 下移;更新时原样带上标题、形态与内容(材料类课时的文件由服务端保留) */
+  const moveLesson = useCallback(
+    async (chapterId: string, lesson: Lesson, step: 1 | -1) => {
+      const siblings = lessonsByChapter.get(chapterId) ?? []
+      setWorking(true)
+      setActionError(undefined)
+      try {
+        const byId = new Map(siblings.map((item) => [item.id, item]))
+        for (const change of moveItem(siblings, lesson.id, step)) {
+          const target = byId.get(change.id)
+          if (!target) continue
+          await api.teaching.updateLesson(chapterId, target.id, {
+            title: target.title,
+            content_type: target.content_type,
+            content_ref: {
+              markdown: target.content_ref.markdown,
+              experiment_id: target.content_ref.experiment_id,
+              package_code: target.content_ref.package_code,
+              version: target.content_ref.version,
+            },
+            sort: change.sort,
+          })
+        }
+      } catch (error) {
+        setActionError(userFacingErrorMessage(error, '顺序没有调整成功,请稍后重试。'))
+      } finally {
+        setWorking(false)
+        onChanged()
+      }
+    },
+    [lessonsByChapter, onChanged],
+  )
+
   return (
     <PageSection
       title="章节课时"
@@ -128,11 +186,17 @@ export function CourseChapters({ courseId, outline, onChanged }: CourseChaptersP
             }
           />
         ) : (
-          sortedChapters.map((chapter) => (
+          sortedChapters.map((chapter, chapterIndex) => (
             <ChapterCard
               key={chapter.id}
               chapter={chapter}
+              position={chapterIndex + 1}
               lessons={lessonsByChapter.get(chapter.id) ?? []}
+              busy={working}
+              canMoveUp={chapterIndex > 0}
+              canMoveDown={chapterIndex < sortedChapters.length - 1}
+              onMoveChapter={(step) => void moveChapter(chapter, step)}
+              onMoveLesson={(lesson, step) => void moveLesson(chapter.id, lesson, step)}
               onEditChapter={() => setChapterModal({ chapter })}
               onDeleteChapter={() => setDeleteTarget({ kind: 'chapter', chapter })}
               onAddLesson={() => setLessonModal({ chapterId: chapter.id })}
@@ -204,7 +268,14 @@ export function CourseChapters({ courseId, outline, onChanged }: CourseChaptersP
 
 interface ChapterCardProps {
   chapter: Chapter
+  /** 第几章(按当前顺序) */
+  position: number
   lessons: Lesson[]
+  busy: boolean
+  canMoveUp: boolean
+  canMoveDown: boolean
+  onMoveChapter: (step: 1 | -1) => void
+  onMoveLesson: (lesson: Lesson, step: 1 | -1) => void
   onEditChapter: () => void
   onDeleteChapter: () => void
   onAddLesson: () => void
@@ -217,7 +288,13 @@ interface ChapterCardProps {
  */
 function ChapterCard({
   chapter,
+  position,
   lessons,
+  busy,
+  canMoveUp,
+  canMoveDown,
+  onMoveChapter,
+  onMoveLesson,
   onEditChapter,
   onDeleteChapter,
   onAddLesson,
@@ -225,7 +302,15 @@ function ChapterCard({
   onDeleteLesson,
 }: ChapterCardProps) {
   const columns: TableColumn<Lesson>[] = [
-    { key: 'sort', header: '序号', align: 'right', mono: true },
+    // 序号是窄的数字列:定宽,各章的课时表上下对齐,也不把它摊成一大片空白
+    {
+      key: 'sort',
+      header: '序号',
+      align: 'right',
+      mono: true,
+      width: '88px',
+      render: (lesson) => lessons.indexOf(lesson) + 1,
+    },
     {
       key: 'title',
       header: '课时',
@@ -250,6 +335,22 @@ function ChapterCard({
           <IconButton
             variant="ghost"
             size="sm"
+            icon={ArrowUp}
+            aria-label={`把课时 ${lesson.title} 上移`}
+            disabled={busy || lessons.indexOf(lesson) === 0}
+            onClick={() => onMoveLesson(lesson, -1)}
+          />
+          <IconButton
+            variant="ghost"
+            size="sm"
+            icon={ArrowDown}
+            aria-label={`把课时 ${lesson.title} 下移`}
+            disabled={busy || lessons.indexOf(lesson) === lessons.length - 1}
+            onClick={() => onMoveLesson(lesson, 1)}
+          />
+          <IconButton
+            variant="ghost"
+            size="sm"
             icon={Pencil}
             aria-label={`编辑课时 ${lesson.title}`}
             onClick={() => onEditLesson(lesson)}
@@ -269,13 +370,26 @@ function ChapterCard({
   return (
     <Card>
       <CardHeader
-        title={chapter.title}
-        description={`第 ${chapter.sort} 章 · ${lessons.length} 个课时`}
+        title={`第 ${position} 章 ${chapter.title}`}
+        description={`${lessons.length} 个课时`}
         actions={
           <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" leftIcon={FilePlus2} onClick={onAddLesson}>
-              添加课时
-            </Button>
+            <IconButton
+              variant="ghost"
+              size="sm"
+              icon={ArrowUp}
+              aria-label={`把章节 ${chapter.title} 上移`}
+              disabled={busy || !canMoveUp}
+              onClick={() => onMoveChapter(-1)}
+            />
+            <IconButton
+              variant="ghost"
+              size="sm"
+              icon={ArrowDown}
+              aria-label={`把章节 ${chapter.title} 下移`}
+              disabled={busy || !canMoveDown}
+              onClick={() => onMoveChapter(1)}
+            />
             <IconButton
               variant="ghost"
               size="sm"
@@ -293,7 +407,7 @@ function ChapterCard({
           </div>
         }
       />
-      <CardBody>
+      <CardBody className="flex flex-col gap-3">
         <Table
           columns={columns}
           data={lessons}
@@ -335,6 +449,11 @@ function ChapterCard({
             />
           }
         />
+        <div>
+          <Button variant="ghost" size="sm" leftIcon={FilePlus2} onClick={onAddLesson}>
+            添加课时
+          </Button>
+        </div>
       </CardBody>
     </Card>
   )

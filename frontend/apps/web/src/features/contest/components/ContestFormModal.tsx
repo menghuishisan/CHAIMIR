@@ -1,4 +1,5 @@
-// 竞赛配置表单(赛事组织页与赛事详情页共用)。
+// 竞赛配置表单(赛事组织页与赛事详情页共用)。设计 §7.4:字段分组且超过一屏,用右侧大抽屉
+// (宽 880px、整高、底部固定操作条),保留背后列表的上下文;字段、校验与保存逻辑不变。
 // 创建与编辑共用同一表单:后端 ContestRequest 两者字段一致。
 //
 // 赛制规则(rules)是 JSONB 开放对象。这里按赛制渲染结构化字段
@@ -6,21 +7,22 @@
 // 不把它作为裸 JSON 文本域交给用户。
 
 import { useCallback, useId, useMemo, useState } from 'react'
-import { ContestMode, MatchMode, TeamMode, type Contest, type ContestRequest } from '@chaimir/api-client'
+import { ContestMode, ContestStatus, MatchMode, TeamMode, type Contest, type ContestRequest } from '@chaimir/api-client'
 import {
   Button,
   Callout,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
   FormField,
   Input,
-  Modal,
-  ModalBody,
-  ModalContent,
-  ModalDescription,
-  ModalFooter,
-  ModalHeader,
-  ModalTitle,
   SegmentedControl,
   Select,
+  cn,
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
@@ -38,7 +40,8 @@ export interface ContestFormModalProps {
   /** 传入即为编辑模式;缺省为新建 */
   contest?: Contest
   onClose: () => void
-  onSaved: () => void
+  /** 保存成功;参数是保存后的赛事(新建时调用方据此进入新赛事详情) */
+  onSaved: (contest: Contest) => void
 }
 
 /**
@@ -47,6 +50,8 @@ export interface ContestFormModalProps {
 export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModalProps) {
   const fieldId = useId()
   const editing = contest !== undefined
+  // 发布后赛制与参赛形式不能再改:赛题按赛制锁定、报名按参赛形式组队(服务端同样拒绝)
+  const structureLocked = editing && contest.status !== ContestStatus.DRAFT
 
   const [name, setName] = useState(contest?.name ?? '')
   const [mode, setMode] = useState(String(contest?.mode ?? ContestMode.SOLVE))
@@ -121,14 +126,11 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
             },
       }
       try {
-        if (editing) {
-          await api.contest.updateContest(contest.id, payload)
-          toast.success('赛事已更新')
-        } else {
-          await api.contest.createContest(payload)
-          toast.success('赛事已创建为草稿')
-        }
-        onSaved()
+        const saved = editing
+          ? await api.contest.updateContest(contest.id, payload)
+          : await api.contest.createContest(payload)
+        toast.success(editing ? '赛事已更新' : '赛事已创建为草稿')
+        onSaved(saved)
       } catch (error) {
         setFormError(
           userFacingErrorMessage(error, editing ? '赛事更新失败,请稍后重试。' : '赛事创建失败,请稍后重试。'),
@@ -167,18 +169,19 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
   )
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="xl">
-        <ModalHeader>
-          <ModalTitle>{editing ? '编辑赛事' : '新建赛事'}</ModalTitle>
-          <ModalDescription>
+    <Drawer open onOpenChange={(open) => !open && onClose()}>
+      <DrawerContent size="wide">
+        <DrawerHeader>
+          <DrawerTitle>{editing ? '编辑赛事' : '新建赛事'}</DrawerTitle>
+          <DrawerDescription>
             {editing
               ? '修改赛事配置。已发布赛事的时间与赛制变更会影响学生,请谨慎。'
               : '新建后为草稿状态,编排赛题再发布开放报名。'}
-          </ModalDescription>
-        </ModalHeader>
-        <form onSubmit={submit} noValidate>
-          <ModalBody className="flex flex-col gap-4">
+          </DrawerDescription>
+        </DrawerHeader>
+        <form onSubmit={submit} noValidate className="flex min-h-0 flex-1 flex-col">
+          <DrawerBody className="flex flex-col gap-4">
+            <FormSectionTitle>基本信息</FormSectionTitle>
             <FormField label="赛事名称" htmlFor={`${fieldId}-name`} required error={errors.name}>
               <Input
                 id={`${fieldId}-name`}
@@ -188,7 +191,15 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
               />
             </FormField>
 
-            <FormField label="赛制" required helper="解题赛按题目通过数与用时排名;对抗赛按对局胜负积分">
+            <FormField
+              label="赛制"
+              required
+              helper={
+                structureLocked
+                  ? '赛事已发布,赛制不能再改'
+                  : '解题赛按题目通过数与用时排名;对抗赛按对局胜负积分'
+              }
+            >
               <SegmentedControl
                 aria-label="赛制"
                 options={[
@@ -197,10 +208,15 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
                 ]}
                 value={mode}
                 onValueChange={setMode}
+                disabled={structureLocked}
               />
             </FormField>
 
-            <FormField label="参赛形式" required>
+            <FormField
+              label="参赛形式"
+              required
+              helper={structureLocked ? '赛事已发布,参赛形式不能再改' : undefined}
+            >
               <SegmentedControl
                 aria-label="参赛形式"
                 options={[
@@ -209,9 +225,11 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
                 ]}
                 value={teamMode}
                 onValueChange={setTeamMode}
+                disabled={structureLocked}
               />
             </FormField>
 
+            <FormSectionTitle className="mt-2">时间安排</FormSectionTitle>
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
                 label="报名开始"
@@ -279,8 +297,9 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
               />
             </FormField>
 
+            <FormSectionTitle className="mt-2">赛制规则</FormSectionTitle>
             {isBattle ? (
-              <div className="grid gap-4 well p-4 sm:grid-cols-2">
+              <div className="grid gap-4 rounded-md bg-surface-hover p-4 sm:grid-cols-2">
                 <FormField label="对局匹配方式" htmlFor={`${fieldId}-match`} required>
                   <Select
                     id={`${fieldId}-match`}
@@ -304,7 +323,7 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
                 </FormField>
               </div>
             ) : (
-              <div className="grid gap-4 well p-4 sm:grid-cols-2">
+              <div className="grid gap-4 rounded-md bg-surface-hover p-4 sm:grid-cols-2">
                 <FormField label="允许重复提交" required>
                   <SegmentedControl
                     aria-label="是否允许重复提交"
@@ -334,19 +353,24 @@ export function ContestFormModal({ contest, onClose, onSaved }: ContestFormModal
             )}
 
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
-          </ModalBody>
-          <ModalFooter>
+          </DrawerBody>
+          <DrawerFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               取消
             </Button>
             <Button type="submit" variant="primary" loading={submitting}>
               {editing ? '保存修改' : '创建赛事'}
             </Button>
-          </ModalFooter>
+          </DrawerFooter>
         </form>
-      </ModalContent>
-    </Modal>
+      </DrawerContent>
+    </Drawer>
   )
+}
+
+/** FormSectionTitle 抽屉表单里一组字段的小标题;后续分组由调用方加上边距与上一组拉开 */
+function FormSectionTitle({ children, className }: { children: string; className?: string }) {
+  return <h3 className={cn('text-sm font-semibold text-ink', className)}>{children}</h3>
 }
 
 /** readBoolean 从赛制规则里读布尔字段;非布尔回默认值(不把对象塞进控件)。 */

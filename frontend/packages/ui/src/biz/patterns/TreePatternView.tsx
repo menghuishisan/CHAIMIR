@@ -97,6 +97,7 @@ function TreeRow({
   );
 }
 
+/** TreePatternView 树结构视图(tree 模式,如 Merkle 树) */
 export function TreePatternView({
   pattern,
   focus,

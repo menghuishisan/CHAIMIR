@@ -1,33 +1,21 @@
-// 导入记录(账号管理页内页)。
-//
-// 展示服务端持久化的导入批次:每次导入的文件、总数、成功与失败数。
-// 归属账号管理而不是侧栏(对齐清单 §3.3:导入记录是账号管理内页)。
+// 导入记录(账号批量导入抽屉内,设计 §7.5)。
+// 展示服务端持久化的导入批次:每次导入的文件、对象、时间、成功与失败数、状态;按时间从新到旧。
+// 导入是账号管理的一部分,记录跟着导入抽屉走,不单独占页面。
 
-import { useMemo } from 'react'
-import { FileClock } from 'lucide-react'
-import { ImportBatchStatus, ImportTarget, type ImportBatch } from '@chaimir/api-client'
-import {
-  Badge,
-  DataPanel,
-  PageSection,
-  StatusIndicator,
-  Table,
-  type StatusTone,
-  type TableColumn,
-} from '@chaimir/ui'
+import { ImportBatchStatus, ImportTarget } from '@chaimir/api-client'
+import { Skeleton, StatusIndicator, type StatusTone } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { ResourceState } from '../../../../components/ResourceState'
+import { ResourceError } from '../../../../components/ResourceState'
 import { useAsyncResource } from '../../../../hooks'
-import { formatDateTime } from '../../../../utils/formatters'
+import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
 
-/** 导入对象文案:只在本页用到,不进全局 labels(其他端无导入记录视图)。 */
+/** 导入对象文案:只在导入记录里用到,不进全局 labels */
 const TARGET_LABELS: Record<ImportTarget, string> = {
   [ImportTarget.TEACHER]: '教师账号',
   [ImportTarget.STUDENT]: '学生账号',
   [ImportTarget.ORG]: '组织架构',
 }
 
-/** 批次状态文案与语义色。 */
 const BATCH_STATUS_LABELS: Record<ImportBatchStatus, string> = {
   [ImportBatchStatus.PROCESSING]: '处理中',
   [ImportBatchStatus.COMPLETED]: '已完成',
@@ -41,119 +29,43 @@ const BATCH_STATUS_TONES: Record<ImportBatchStatus, StatusTone> = {
 }
 
 /**
- * AccountImportBatches 列出历史导入批次。
+ * AccountImportBatches 列出历史导入批次;没有记录时一句说明,读不到时就地重试。
  */
 export function AccountImportBatches() {
-  const batches = useAsyncResource(
-    () => api.identity.listAccountImportBatches(),
-    [],
-    (value) => value.length === 0,
-  )
-
-  const columns: TableColumn<ImportBatch>[] = useMemo(
-    () => [
-      {
-        key: 'file_name',
-        header: '导入文件',
-        render: (batch) => (
-          <div className="min-w-0">
-            <div className="truncate font-medium text-ink">{batch.file_name}</div>
-            <div className="truncate text-xs text-ink-sub">{TARGET_LABELS[batch.target_type]}</div>
-          </div>
-        ),
-      },
-      {
-        key: 'created_at',
-        header: '导入时间',
-        render: (batch) => (
-          <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-            {formatDateTime(batch.created_at)}
-          </span>
-        ),
-      },
-      { key: 'total', header: '总行数', align: 'right', mono: true },
-      {
-        key: 'result',
-        header: '结果',
-        render: (batch) => (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <Badge tone="success">成功 {batch.success}</Badge>
-            {batch.failed > 0 ? <Badge tone="danger">失败 {batch.failed}</Badge> : null}
-          </div>
-        ),
-      },
-      {
-        key: 'status',
-        header: '状态',
-        render: (batch) => (
-          <StatusIndicator
-            tone={BATCH_STATUS_TONES[batch.status]}
-            label={BATCH_STATUS_LABELS[batch.status]}
-            loading={batch.status === ImportBatchStatus.PROCESSING}
-          />
-        ),
-      },
-    ],
-    [],
-  )
+  const batches = useAsyncResource(() => api.identity.listAccountImportBatches(), [], () => false)
 
   return (
-    // 列表型页内子视图(§6.5.5 B):不自带页面头,数据区收进一块抬起片。
-    // 三态由本子视图自己给 —— 批次是它独立拉的资源,不来自父页的账号列表。
-    <PageSection title="导入记录" description="按导入时间从新到旧排列。">
-      <DataPanel label="导入记录">
-        <ResourceState
-          resource={batches}
-          emptyIcon={FileClock}
-          emptyTitle="还没有导入记录"
-          emptyDescription="用批量导入开通账号后,每次导入的结果会记录在这里。"
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-        >
-          {(list) => (
-            <div className="flex flex-col gap-4">
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
-                  <p className="text-sm font-medium text-ink">导入批次</p>
-                  <p className="mt-1 text-lg font-medium text-ink">{list.length}</p>
-                  <p className="mt-1 text-xs text-ink-sub">当前已加载的历史记录</p>
-                </div>
-                <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
-                  <p className="text-sm font-medium text-ink">处理中</p>
-                  <p className="mt-1 text-lg font-medium text-ink">
-                    {list.filter((item) => item.status === ImportBatchStatus.PROCESSING).length}
-                  </p>
-                  <p className="mt-1 text-xs text-ink-sub">服务端完成后刷新列表</p>
-                </div>
-                <div className="rounded-lg border border-border bg-surface p-4 shadow-xs">
-                  <p className="text-sm font-medium text-ink">处理失败</p>
-                  <p className="mt-1 text-lg font-medium text-ink">
-                    {list.filter((item) => item.status === ImportBatchStatus.FAILED).length}
-                  </p>
-                  <p className="mt-1 text-xs text-ink-sub">请根据失败行重新导入</p>
-                </div>
-              </div>
-              <Table
-                columns={columns}
-                data={list}
-                rowKey={(item) => item.id}
-                elevated={false}
-                // <md 换行卡(§6.4.1 规则 3):文件名一行、时间与行数一行,状态在右
-                mobileCard={(item) => ({
-                  title: item.file_name,
-                  meta: `${TARGET_LABELS[item.target_type]} · ${formatDateTime(item.created_at)} · 成功 ${item.success}/${item.total}`,
-                  badge: (
-                    <StatusIndicator
-                      tone={BATCH_STATUS_TONES[item.status]}
-                      label={BATCH_STATUS_LABELS[item.status]}
-                      loading={item.status === ImportBatchStatus.PROCESSING}
-                    />
-                  ),
-                })}
+    <section aria-labelledby="import-batches-title" className="flex flex-col gap-2">
+      <h3 id="import-batches-title" className="text-sm font-semibold text-ink">
+        导入记录
+      </h3>
+      {batches.status === 'loading' ? (
+        <Skeleton variant="line" lines={3} />
+      ) : batches.status === 'error' ? (
+        <ResourceError message={batches.error?.message ?? '导入记录暂时读取不到'} traceId={batches.error?.traceId} onRetry={batches.reload} />
+      ) : (batches.data ?? []).length === 0 ? (
+        <p className="text-sm text-ink-sub">还没有导入记录。每次导入的结果会记录在这里。</p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {(batches.data ?? []).map((batch) => (
+            <li key={batch.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2.5">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-ink">{batch.file_name}</span>
+                <span className="block text-xs text-ink-sub">
+                  {TARGET_LABELS[batch.target_type]} ·{' '}
+                  <span title={formatDateTime(batch.created_at)}>{formatRelativeOccurrence(batch.created_at)}</span> · 共 {batch.total} 行,成功{' '}
+                  {batch.success} 行{batch.failed > 0 ? `,失败 ${batch.failed} 行` : ''}
+                </span>
+              </span>
+              <StatusIndicator
+                tone={BATCH_STATUS_TONES[batch.status]}
+                label={BATCH_STATUS_LABELS[batch.status]}
+                loading={batch.status === ImportBatchStatus.PROCESSING}
               />
-            </div>
-          )}
-        </ResourceState>
-      </DataPanel>
-    </PageSection>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }

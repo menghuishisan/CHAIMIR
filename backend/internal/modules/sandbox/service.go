@@ -349,7 +349,7 @@ func (s *Service) resolveSandboxCreateDependencies(ctx context.Context, tx TxSto
 		}
 		// 冻结快照保存的是组合编译后的声明;执行前统一按实例编码物化 Pod
 		// 及所有 exec target,确保重启恢复和历史快照都指向真实运行时拓扑。
-		runtime.AdapterSpec = materializeRuntimeTopology(frozen.InstanceCode, frozenAdapter)
+		runtime.AdapterSpec = MaterializeRuntimeTopology(frozen.InstanceCode, frozenAdapter)
 		runtime.AdapterLevel = frozen.AdapterLevel
 		runtime.CapabilityImpl = frozen.CapabilityImpl
 		runtime.PluginRef = frozen.PluginRef
@@ -449,6 +449,7 @@ func aggregateRuntimeAdapterSpecs(plans []RuntimePlan) AdapterSpec {
 	return aggregateRuntimeAdapterSpecsByMap(items)
 }
 
+// aggregateRuntimeAdapterSpecsByMap 合并多个运行时适配声明里的卷域与网络规则,得到整个沙箱要准备的集合。
 func aggregateRuntimeAdapterSpecsByMap(items map[string]AdapterSpec) AdapterSpec {
 	var out AdapterSpec
 	for _, item := range items {
@@ -458,6 +459,7 @@ func aggregateRuntimeAdapterSpecsByMap(items map[string]AdapterSpec) AdapterSpec
 	return out
 }
 
+// runtimePlanAuditCodes 把运行时计划写成「实例编码:运行时编码」列表,审计记录这次创建用了哪些运行时。
 func runtimePlanAuditCodes(plans []RuntimePlan) []string {
 	out := make([]string, 0, len(plans))
 	for _, plan := range plans {
@@ -796,7 +798,7 @@ func (s *Service) planForExistingSandbox(ctx context.Context, sb Sandbox) (Creat
 			if err := jsonx.DecodeStrictKnownFields(frozen.AdapterSpec, &frozenAdapter); err != nil {
 				return apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
 			}
-			runtime.AdapterSpec = materializeRuntimeTopology(frozen.InstanceCode, frozenAdapter)
+			runtime.AdapterSpec = MaterializeRuntimeTopology(frozen.InstanceCode, frozenAdapter)
 			runtime.AdapterLevel = frozen.AdapterLevel
 			runtime.CapabilityImpl = frozen.CapabilityImpl
 			runtime.PluginRef = frozen.PluginRef
@@ -1071,7 +1073,10 @@ func (s *Service) info(ctx context.Context, tenantID, sandboxID int64) (contract
 	}); err != nil {
 		return contracts.SandboxInfo{}, err
 	}
-	var err error
+	snapshot, err := verifiedCompositionSnapshot(sb)
+	if err != nil {
+		return contracts.SandboxInfo{}, apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
+	}
 	runtime, image, err = workspaceRuntimeSnapshot(sb)
 	if err != nil {
 		return contracts.SandboxInfo{}, apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
@@ -1080,8 +1085,11 @@ func (s *Service) info(ctx context.Context, tenantID, sandboxID int64) (contract
 	if err != nil {
 		return contracts.SandboxInfo{}, err
 	}
-	out := sandboxInfoFromModel(sb, runtime, image, tools)
-	out.Capabilities = sandboxCapabilitiesFromSnapshot(sb, runtime, tools, s.capabilities)
+	out := sandboxInfoFromModel(sb, snapshot, runtime, image, tools)
+	out.Capabilities, err = sandboxCapabilitiesFromSnapshot(snapshot, tools, s.capabilities)
+	if err != nil {
+		return contracts.SandboxInfo{}, apperr.ErrSandboxCreateRequestInvalid.WithCause(err)
+	}
 	if sb.Status == SandboxStatusCreating {
 		// 重启恢复必须从发布时保存的完整组合快照重建计划，不能从租户挂载表反推基础设施。
 		plan, err := s.planForExistingSandbox(ctx, sb)
@@ -1106,18 +1114,27 @@ func (s *Service) info(ctx context.Context, tenantID, sandboxID int64) (contract
 	return out, nil
 }
 
-// workspaceRuntimeSnapshot 校验准确摘要并解析冻结工作区身份,供状态观察和执行准入共同使用。
-func workspaceRuntimeSnapshot(sb Sandbox) (Runtime, RuntimeImage, error) {
+// verifiedCompositionSnapshot 严格解码沙箱的组合快照并核对摘要,是读取快照的唯一入口。
+func verifiedCompositionSnapshot(sb Sandbox) (contracts.SandboxCompositionSnapshot, error) {
 	var snapshot contracts.SandboxCompositionSnapshot
 	if err := jsonx.DecodeStrictKnownFields(sb.CompositionSnapshot, &snapshot); err != nil {
-		return Runtime{}, RuntimeImage{}, err
+		return contracts.SandboxCompositionSnapshot{}, err
 	}
 	digest, err := contracts.CanonicalSnapshotDigest(snapshot)
 	if err != nil {
-		return Runtime{}, RuntimeImage{}, fmt.Errorf("沙箱组合快照无效: %w", err)
+		return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("沙箱组合快照无效: %w", err)
 	}
 	if digest != sb.CompositionDigest || snapshot.Digest != sb.CompositionDigest {
-		return Runtime{}, RuntimeImage{}, fmt.Errorf("沙箱组合快照无效")
+		return contracts.SandboxCompositionSnapshot{}, fmt.Errorf("沙箱组合快照无效")
+	}
+	return snapshot, nil
+}
+
+// workspaceRuntimeSnapshot 校验准确摘要并解析冻结工作区身份,供状态观察和执行准入共同使用。
+func workspaceRuntimeSnapshot(sb Sandbox) (Runtime, RuntimeImage, error) {
+	snapshot, err := verifiedCompositionSnapshot(sb)
+	if err != nil {
+		return Runtime{}, RuntimeImage{}, err
 	}
 	var frozen contracts.CompiledRuntimeSnapshot
 	found := false
@@ -1140,7 +1157,7 @@ func workspaceRuntimeSnapshot(sb Sandbox) (Runtime, RuntimeImage, error) {
 	return Runtime{
 		ID: frozen.RuntimeID, Code: frozen.Code, Eco: frozen.Eco,
 		AdapterLevel: frozen.AdapterLevel, CapabilityImpl: frozen.CapabilityImpl, PluginRef: frozen.PluginRef,
-		AdapterSpec: materializeRuntimeTopology(frozen.InstanceCode, adapter),
+		AdapterSpec: MaterializeRuntimeTopology(frozen.InstanceCode, adapter),
 	}, RuntimeImage{ID: frozen.ImageID, RuntimeID: frozen.RuntimeID, Version: frozen.ImageVersion, ImageURL: frozen.ImageURL}, nil
 }
 
@@ -1418,6 +1435,8 @@ func sandboxNeedsInitialization(plan CreateSandboxPlan) bool {
 	return strings.TrimSpace(plan.Sandbox.InitCodeRef) != "" || strings.TrimSpace(plan.Sandbox.InitScriptRef) != ""
 }
 
+// workspaceRuntimeForPlan 取计划里工作区所在的运行时;计划里找不到工作区实例时返回零值,
+// 由调用方的执行目标校验拒绝,不在这里另造默认运行时。
 func workspaceRuntimeForPlan(plan CreateSandboxPlan) Runtime {
 	runtime, ok := plan.WorkspaceRuntime(plan.WorkspaceRuntimeInstance)
 	if !ok {

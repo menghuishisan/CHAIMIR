@@ -10,12 +10,14 @@ import { useSyncExternalStore } from "react";
 
 const QUERY = "(prefers-reduced-motion: reduce)";
 
+/** subscribe 监听系统「减少动态」偏好的变化 */
 function subscribe(callback: () => void): () => void {
   const mql = window.matchMedia(QUERY);
   mql.addEventListener("change", callback);
   return () => mql.removeEventListener("change", callback);
 }
 
+/** getSnapshot 读当前是否开启了「减少动态」 */
 function getSnapshot(): boolean {
   return window.matchMedia(QUERY).matches;
 }
@@ -25,6 +27,7 @@ function getServerSnapshot(): boolean {
   return false;
 }
 
+/** useReducedMotion 响应系统「减少动态」偏好 */
 export function useReducedMotion(): boolean {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

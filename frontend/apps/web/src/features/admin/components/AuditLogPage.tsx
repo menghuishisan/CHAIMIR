@@ -1,315 +1,424 @@
-// AuditLogPage 统一 admin 领域的平台与学校审计查询、导出、分页和结果展示骨架。
-// 调用页只提供各自权限范围内的筛选项、主体列和说明,本组件不推断当前角色。
+// AuditLogPage 是校管「审计日志」与平台「平台审计」共用的审计查询页(设计 §7.7)。
+// 布局:工具条(对象类型、动作、操作人、时间范围,平台端另有学校;全部写进地址)+ 右上「导出」;
+// 表格列为时间(精确到秒)、操作人、动作、对象、来源地址、追踪编号(可复制),整行打开详情抽屉看完整字段。
+// 动作下拉里的数字来自接口返回的分组计数(与当前其他筛选同口径的全量)。只能查询与导出,不能修改或删除。
+// 两个入口只在四处不同,由调用方传入:操作人怎么显示与筛选、对象类型清单、学校筛选(只有平台端)、任务与下载页的路径。
 
-import { useCallback, useMemo, useState, type ReactNode } from 'react'
-import { useNavigate } from 'react-router'
+import { useMemo, useState, type ReactNode } from 'react'
 import { Download, FileText } from 'lucide-react'
-import type { AuditLogEntry, AuditQueryParams } from '@chaimir/api-client'
+import type { AuditLogEntry } from '@chaimir/api-client'
 import {
-  Badge,
-  Breadcrumb,
   Button,
   Callout,
-  DataPanel,
-  FilterBar,
-  FilterField,
+  DescriptionList,
+  Drawer,
+  DrawerBody,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
   Input,
-  MetricStrip,
   PageHeader,
   PageScaffold,
   Pagination,
   Select,
   Table,
   toast,
-  type BreadcrumbItem,
-  type SelectOption,
+  type DescriptionItem,
   type TableColumn,
 } from '@chaimir/ui'
+import { Link } from 'react-router'
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
-import { usePagedResource } from '../../../hooks'
-import { formatDateTime } from '../../../utils/formatters'
-import { auditActionLabel, auditTargetTypeLabel } from '../../../utils/labels/admin'
-import { facetGroup, facetTopEntries } from '../../../utils/facets'
+import { usePagedResource, useUrlState } from '../../../hooks'
+import { facetGroup } from '../../../utils/facets'
+import { formatDateTimeSeconds, formatRelativeOccurrence } from '../../../utils/formatters'
+import {
+  auditActionLabel,
+  auditActorRoleLabel,
+  auditTargetTypeLabel,
+} from '../../../utils/labels/admin'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
+import { auditDetailRows, auditObjectHint, type AuditDetailLookups } from '../auditDetail'
+import { auditActionFilter, auditActorFilter, auditDayRange } from '../auditFilters'
 import { TraceIdCell } from './TraceIdCell'
 
-interface AuditLogPageProps {
-  idPrefix: string
-  breadcrumbItems: BreadcrumbItem[]
-  title: string
-  description: string
-  actionOptions: readonly SelectOption[]
-  targetTypeOptions: readonly SelectOption[]
-  subjectColumn: TableColumn<AuditLogEntry>
-  actorOptions?: SelectOption[]
-  taskPath: string
-  scopeNote?: ReactNode
+/** 「不限」在下拉框里的取值(Select 不接受空串作选项值) */
+export const AUDIT_ALL = 'all'
+
+/** 地址参数:target 对象类型、action 动作、actor 操作人、school 学校(平台端)、from/to 起止日期(YYYY-MM-DD);页码在 page */
+const AUDIT_QUERY = {
+  target: { defaultValue: AUDIT_ALL },
+  action: { defaultValue: AUDIT_ALL },
+  actor: { defaultValue: '' },
+  school: { defaultValue: '' },
+  from: { defaultValue: '' },
+  to: { defaultValue: '' },
+} as const
+
+/** 一个对象类型筛选项:值是 target_type,文字取自标签表 */
+export interface AuditTargetOption {
+  value: string
+  label: string
 }
 
-/** AuditLogPage 承载两种管理范围共用的审计只读工作流。 */
+/** 操作人筛选:学校端按人筛,平台端没有跨校的人员名单,不提供 */
+export interface AuditActorFilter {
+  /** 渲染操作人选择器;value 为空串表示不限 */
+  render: (value: string, onChange: (accountId: string) => void) => ReactNode
+}
+
+export interface AuditLogPageProps {
+  title: string
+  /** 页头下的一句范围说明 */
+  description: string
+  /** 对象类型筛选项(不含「全部」) */
+  targetOptions: readonly AuditTargetOption[]
+  /** 表格里「操作人」一列的内容 */
+  renderActor: (entry: AuditLogEntry) => ReactNode
+  /** 详情抽屉里「操作人」一行的文字 */
+  actorText: (entry: AuditLogEntry) => string
+  /** 详情里需要查表的附加项(如学生姓名);不传则这些项不展示 */
+  detailLookups?: AuditDetailLookups
+  /** 打开一条记录的详情时调用:页面可借此按需读取详情里要查表的项(如那位学生是谁) */
+  onDetailOpen?: (entry: AuditLogEntry) => void
+  /** 操作人筛选;不传则工具条上没有这一项 */
+  actorFilter?: AuditActorFilter
+  /** 学校筛选(只有平台端):渲染学校选择器,value 为空串表示全平台;学校端不传 */
+  schoolFilter?: AuditActorFilter
+  /** 平台端额外的一列与一行(所属学校);学校端不传 */
+  tenantColumn?: {
+    header: string
+    render: (entry: AuditLogEntry) => ReactNode
+    text: (entry: AuditLogEntry) => string
+  }
+  /** 任务与下载页路径(导出后去那里取文件) */
+  taskPath: string
+}
+
+/** AuditLogPage 审计查询:筛选全部写进地址,导出按当前筛选生成文件 */
 export function AuditLogPage({
-  idPrefix,
-  breadcrumbItems,
   title,
   description,
-  actionOptions,
-  targetTypeOptions,
-  subjectColumn,
-  actorOptions,
+  targetOptions,
+  renderActor,
+  actorText,
+  detailLookups,
+  onDetailOpen,
+  actorFilter,
+  schoolFilter,
+  tenantColumn,
   taskPath,
-  scopeNote,
 }: AuditLogPageProps) {
-  const navigate = useNavigate()
-  const [actorId, setActorId] = useState('')
-  const [action, setAction] = useState('')
-  const [targetType, setTargetType] = useState('')
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
-  const [query, setQuery] = useState<AuditQueryParams>({})
+  const [query, setQuery] = useUrlState(AUDIT_QUERY)
+  const [detail, setDetail] = useState<AuditLogEntry>()
+  /** openDetail 打开一条记录的详情,并告诉页面打开的是哪一条 */
+  const openDetail = (entry: AuditLogEntry) => {
+    setDetail(entry)
+    onDetailOpen?.(entry)
+  }
   const [exporting, setExporting] = useState(false)
-  const [actionError, setActionError] = useState<string>()
+  const [exportError, setExportError] = useState<string>()
+
+  // 地址是外部输入:认不出的对象类型、动作、操作人和日期都当作不筛选
+  const target = targetOptions.some((option) => option.value === query.target)
+    ? query.target
+    : undefined
+  const action = auditActionFilter(query.action)
+  const actor = actorFilter ? auditActorFilter(query.actor) : undefined
+  // 学校编号与账号编号同为雪花编号,复用同一校验;学校端没有这一项
+  const school = schoolFilter ? auditActorFilter(query.school) : undefined
+  const range = auditDayRange(query.from, query.to)
+  const filters = useMemo(
+    () => ({
+      target_type: target,
+      action,
+      tenant_id: school,
+      actor_id: actor,
+      from: range.params.from,
+      to: range.params.to,
+    }),
+    [action, actor, range.params.from, range.params.to, school, target]
+  )
+  const filtered = Object.values(filters).some((value) => value !== undefined)
 
   const logs = usePagedResource<AuditLogEntry>(
-    (params) => api.admin.queryAudit({ ...query, ...params }),
-    [query],
-  )
-  // 动作分布来自后端聚合契约:facets 与筛选同口径,且是全量分组计数(§6.5.4)
-  const facets = logs.total === undefined ? undefined : logs.data?.facets
-  const actionFacets = useMemo(() => facetGroup(facets, 'action'), [facets])
-  const actionKinds = actionFacets ? Object.keys(actionFacets).length : undefined
-  const topAction = useMemo(
-    () => facetTopEntries(facets, 'action', 1)?.[0],
-    [facets],
+    (params) => api.admin.queryAudit({ ...filters, ...params }),
+    [filters],
+    { urlPageKey: 'page' }
   )
 
+  // 动作下拉:接口按当前筛选返回各动作的全量条数,按条数从多到少排;当前选中但不在分组里的动作也保留
+  const actionCounts = facetGroup(
+    logs.total === undefined ? undefined : logs.data?.facets,
+    'action'
+  )
+  const actionOptions = useMemo(() => {
+    const entries = Object.entries(actionCounts ?? {}).sort(
+      (a, b) => b[1] - a[1] || a[0].localeCompare(b[0])
+    )
+    if (action && !entries.some(([value]) => value === action)) entries.unshift([action, 0])
+    return [
+      { value: AUDIT_ALL, label: '全部动作' },
+      ...entries.map(([value, count]) => ({
+        value,
+        label: `${auditActionLabel(value)}(${count})`,
+      })),
+    ]
+  }, [action, actionCounts])
 
-  /** applyFilters 把界面筛选值收敛为后端审计查询契约。 */
-  const applyFilters = useCallback(() => {
-    setQuery({
-      actor_id: actorOptions && actorId ? actorId : undefined,
-      action: action || undefined,
-      target_type: targetType || undefined,
-      from: from ? new Date(from).toISOString() : undefined,
-      to: to ? new Date(to).toISOString() : undefined,
-    })
-  }, [action, actorId, actorOptions, from, targetType, to])
-
-  /** clearFilters 同时清空编辑态和已提交查询,避免界面与结果口径不一致。 */
-  const clearFilters = useCallback(() => {
-    setActorId('')
-    setAction('')
-    setTargetType('')
-    setFrom('')
-    setTo('')
-    setQuery({})
-  }, [])
-
-  /** exportLogs 按当前已提交查询创建异步导出任务。 */
-  const exportLogs = useCallback(async () => {
+  /** exportLogs 按当前筛选创建导出任务;文件在任务与下载页取 */
+  const exportLogs = async () => {
     setExporting(true)
-    setActionError(undefined)
+    setExportError(undefined)
     try {
-      await api.admin.exportAudit(query)
-      toast.success('导出任务已创建,完成后到任务与下载页取件')
+      await api.admin.exportAudit(filters)
+      toast.success('导出任务已创建,完成后可在「任务与下载」取文件')
     } catch (error) {
-      setActionError(userFacingErrorMessage(error, '导出任务创建失败,请稍后重试。'))
+      setExportError(userFacingErrorMessage(error, '导出任务没有创建成功,请稍后重试。'))
     } finally {
       setExporting(false)
     }
-  }, [query])
+  }
 
-  const hasFilters = Object.values(query).some((value) => value !== undefined)
-  const filterScope = actorOptions ? '按人、按动作、按对象或按时间范围筛选' : '按动作、对象类型或时间范围筛选'
-
-  const columns = useMemo<TableColumn<AuditLogEntry>[]>(
-    () => [
-      {
-        key: 'created_at',
-        header: '时间',
-        render: (entry) => (
-          <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-            {formatDateTime(entry.created_at)}
+  const columns: TableColumn<AuditLogEntry>[] = [
+    {
+      key: 'created_at',
+      header: '时间',
+      render: (entry) => (
+        <span
+          className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub"
+          title={formatRelativeOccurrence(entry.created_at)}
+        >
+          {formatDateTimeSeconds(entry.created_at)}
+        </span>
+      ),
+    },
+    ...(tenantColumn
+      ? [{ key: 'tenant_id', header: tenantColumn.header, render: tenantColumn.render }]
+      : []),
+    { key: 'actor_id', header: '操作人', render: renderActor },
+    {
+      key: 'action',
+      header: '动作',
+      primary: true,
+      render: (entry) => (
+        <span className="font-medium text-ink">{auditActionLabel(entry.action)}</span>
+      ),
+    },
+    {
+      key: 'target_type',
+      header: '对象',
+      render: (entry) => {
+        const hint = auditObjectHint(entry.detail)
+        return (
+          <span className="min-w-0">
+            <span className="block text-sm text-ink">
+              {auditTargetTypeLabel(entry.target_type)}
+            </span>
+            {hint ? (
+              <span className="block max-w-56 truncate text-xs text-ink-sub">{hint}</span>
+            ) : null}
           </span>
-        ),
+        )
       },
-      subjectColumn,
-      {
-        key: 'action',
-        header: '操作',
-        render: (entry) => <Badge tone="neutral">{auditActionLabel(entry.action)}</Badge>,
-      },
-      {
-        key: 'target_type',
-        header: '操作对象',
-        render: (entry) => (
-          <span className="text-sm text-ink-sub">{auditTargetTypeLabel(entry.target_type)}</span>
-        ),
-      },
-      {
-        key: 'ip',
-        header: '来源地址',
-        render: (entry) => (
-          <span className="whitespace-nowrap font-mono text-xs text-ink-sub">{entry.ip ?? '—'}</span>
-        ),
-      },
-      {
-        key: 'trace_id',
-        header: '操作编号',
-        render: (entry) => <TraceIdCell traceId={entry.trace_id} />,
-      },
-    ],
-    [subjectColumn],
-  )
+    },
+    {
+      key: 'ip',
+      header: '来源地址',
+      render: (entry) => (
+        <span className="whitespace-nowrap font-mono text-xs text-ink-sub">{entry.ip || '—'}</span>
+      ),
+    },
+    {
+      key: 'trace_id',
+      header: '追踪编号',
+      render: (entry) => <TraceIdCell traceId={entry.trace_id} />,
+    },
+  ]
 
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={breadcrumbItems} />}
         title={title}
         description={description}
-        icon={FileText}
         actions={
-          <Button variant="outline" leftIcon={Download} loading={exporting} onClick={() => void exportLogs()}>
-            导出当前结果
+          <Button
+            variant="outline"
+            leftIcon={Download}
+            loading={exporting}
+            onClick={() => void exportLogs()}
+          >
+            导出
           </Button>
         }
       />
 
-      {/*
-        归族:资源列表族(§6.5.3 第 ①)。审计是「在一批记录里找一条」,
-        故指标退为一行内联摘要 —— 记录总数与筛选口径都是这一页要先交代的两句话。
-        动作分布取后端 facets.action(与当前筛选同口径的全量分组计数),
-        不用当前页切片去数 —— 那在总量更大时是错数(§6.5.4)。
-      */}
-      <MetricStrip
-        label="审计记录摘要"
-        className="mb-5"
-        items={[
-          { label: '记录条数', value: logs.total, hint: hasFilters ? '当前条件下' : '全部记录' },
-          { label: '涵盖动作类型', value: actionKinds, hint: '按当前筛选统计' },
-          {
-            label: '最常见动作',
-            value: topAction ? auditActionLabel(topAction.value) : '—',
-            hint: topAction ? `共 ${topAction.count} 条` : logs.total === 0 ? '暂无记录' : undefined,
-          },
-          { label: '每页条数', value: logs.pageSize, hint: `第 ${logs.page} 页` },
-        ]}
-      />
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <Select
+          aria-label="按对象类型筛选"
+          value={target ?? AUDIT_ALL}
+          onValueChange={(value) => setQuery({ target: value })}
+          options={[{ value: AUDIT_ALL, label: '全部对象' }, ...targetOptions]}
+          className="w-full sm:w-40"
+        />
+        <Select
+          aria-label="按动作筛选"
+          value={action ?? AUDIT_ALL}
+          onValueChange={(value) => setQuery({ action: value })}
+          options={actionOptions}
+          className="w-full sm:w-56"
+        />
+        {schoolFilter ? (
+          <div className="w-full sm:w-56">
+            {schoolFilter.render(school ?? '', (tenantId) => setQuery({ school: tenantId }))}
+          </div>
+        ) : null}
+        {actorFilter ? (
+          <div className="w-full sm:w-56">
+            {actorFilter.render(actor ?? '', (accountId) => setQuery({ actor: accountId }))}
+          </div>
+        ) : null}
+        <div className="flex w-full items-center gap-2 sm:w-auto">
+          <Input
+            type="date"
+            aria-label="开始日期"
+            value={range.from}
+            max={range.to || undefined}
+            onChange={(event) => setQuery({ from: event.target.value })}
+            className="sm:w-40"
+          />
+          <span className="shrink-0 text-sm text-ink-sub">至</span>
+          <Input
+            type="date"
+            aria-label="结束日期"
+            value={range.to}
+            min={range.from || undefined}
+            onChange={(event) => setQuery({ to: event.target.value })}
+            className="sm:w-40"
+          />
+        </div>
+        {filtered ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() =>
+              setQuery({ target: AUDIT_ALL, action: AUDIT_ALL, actor: '', from: '', to: '' })
+            }
+          >
+            清空筛选
+          </Button>
+        ) : null}
+      </div>
 
-      {actionError ? (
+      {exportError ? (
         <Callout tone="danger" className="mb-4">
-          {actionError}
+          {exportError}
         </Callout>
       ) : null}
 
-      {/* 筛选井、数据表、分页同处一块抬起片(§6.5.2):审计条件需要确认才生效,故走 FilterBar 的 onSubmit */}
-      <DataPanel
-        label="操作记录"
-        filter={
-          <FilterBar
-            label="审计条件"
-            onSubmit={applyFilters}
-            onReset={hasFilters || actorId || action || targetType || from || to ? clearFilters : undefined}
-          >
-            {actorOptions ? (
-              <FilterField label="操作者" htmlFor={`${idPrefix}-actor`}>
-                <Select
-                  id={`${idPrefix}-actor`}
-                  options={actorOptions}
-                  value={actorId}
-                  placeholder="全部操作者"
-                  onValueChange={setActorId}
-                />
-              </FilterField>
-            ) : null}
-
-            <FilterField label="操作类型" htmlFor={`${idPrefix}-action`}>
-              <Select
-                id={`${idPrefix}-action`}
-                options={[...actionOptions]}
-                value={action}
-                placeholder="全部动作"
-                onValueChange={setAction}
-              />
-            </FilterField>
-
-            <FilterField label="操作对象类型" htmlFor={`${idPrefix}-target`}>
-              <Select
-                id={`${idPrefix}-target`}
-                options={[...targetTypeOptions]}
-                value={targetType}
-                placeholder="全部对象"
-                onValueChange={setTargetType}
-              />
-            </FilterField>
-
-            <FilterField label="开始时间" htmlFor={`${idPrefix}-from`}>
-              <Input
-                id={`${idPrefix}-from`}
-                type="datetime-local"
-                value={from}
-                onChange={(event) => setFrom(event.target.value)}
-              />
-            </FilterField>
-
-            <FilterField label="结束时间" htmlFor={`${idPrefix}-to`}>
-              <Input
-                id={`${idPrefix}-to`}
-                type="datetime-local"
-                value={to}
-                onChange={(event) => setTo(event.target.value)}
-              />
-            </FilterField>
-          </FilterBar>
+      <ResourceState
+        resource={logs}
+        emptyIcon={FileText}
+        emptyTitle={filtered ? '没有符合条件的记录' : '还没有审计记录'}
+        emptyDescription={
+          filtered
+            ? '换个条件再试,或清空筛选查看全部记录。'
+            : '账号、配置、成绩等敏感操作发生后会记录在这里。'
         }
-        footer={
-          <Pagination
-            page={logs.page}
-            pageSize={logs.pageSize}
-            total={logs.total}
-            onPageChange={logs.setPage}
-          />
-        }
+        skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
       >
-        <ResourceState
-          resource={logs}
-          emptyIcon={FileText}
-          emptyTitle={hasFilters ? '没有匹配的记录' : '暂无审计记录'}
-          emptyDescription={
-            hasFilters ? '换个条件再试,或清空条件查看全部。' : '敏感操作发生后会记录在这里。'
-          }
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-        >
-          {(page) => (
+        {(page) => (
+          <>
             <Table
               columns={columns}
               data={page.list}
-              rowKey={(item) => item.id}
-              elevated={false}
-              // <md 换行卡(§6.4.1 规则 3):时间一行、动作与对象一行,操作编号在右
-              mobileCard={(item) => ({
-                title: formatDateTime(item.created_at),
-                meta: `${auditActionLabel(item.action)} · ${auditTargetTypeLabel(item.target_type)}${item.ip ? ` · ${item.ip}` : ''}`,
-                badge: <TraceIdCell traceId={item.trace_id} />,
+              rowKey={(entry) => entry.id}
+              onRowClick={openDetail}
+              // <md 换行卡:动作一行;时间、操作人、对象一行
+              mobileCard={(entry) => ({
+                title: auditActionLabel(entry.action),
+                meta: `${formatDateTimeSeconds(entry.created_at)} · ${actorText(entry)} · ${auditTargetTypeLabel(entry.target_type)}`,
               })}
             />
-          )}
-        </ResourceState>
-      </DataPanel>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <Pagination
+                page={logs.page}
+                pageSize={logs.pageSize}
+                total={logs.total}
+                onPageChange={logs.setPage}
+              />
+              <Link
+                to={taskPath}
+                className="text-sm text-ink-sub underline-offset-4 hover:text-ink hover:underline"
+              >
+                导出的文件在「任务与下载」
+              </Link>
+            </div>
+          </>
+        )}
+      </ResourceState>
 
-      {/* 取件出口与查询范围说明排在片外:它们讲的是「这页之外的事」,不属于数据区 */}
-      <div className="mt-4 flex flex-col gap-3">
-        {scopeNote ? <Callout tone="info">{scopeNote}</Callout> : null}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-ink-sub">
-            {filterScope}。导出的文件在任务与下载页取件。
-          </span>
-          <Button variant="ghost" size="sm" onClick={() => navigate(taskPath)}>
-            去任务与下载
-          </Button>
-        </div>
-      </div>
+      {detail ? (
+        <AuditDetailDrawer
+          entry={detail}
+          actorText={actorText}
+          tenantText={tenantColumn?.text}
+          detailLookups={detailLookups}
+          onClose={() => setDetail(undefined)}
+        />
+      ) : null}
     </PageScaffold>
+  )
+}
+
+interface AuditDetailDrawerProps {
+  entry: AuditLogEntry
+  actorText: (entry: AuditLogEntry) => string
+  tenantText?: (entry: AuditLogEntry) => string
+  detailLookups?: AuditDetailLookups
+  onClose: () => void
+}
+
+/**
+ * AuditDetailDrawer 一条审计记录的完整字段:时间、操作人与身份、动作、对象、来源地址、追踪编号,
+ * 以及 detail 里登记过的附加项(如题目编码、版本、导入条数)。只读,没有修改和删除。
+ */
+function AuditDetailDrawer({
+  entry,
+  actorText,
+  tenantText,
+  detailLookups,
+  onClose,
+}: AuditDetailDrawerProps) {
+  const items: DescriptionItem[] = [
+    { term: '时间', description: formatDateTimeSeconds(entry.created_at), mono: true },
+    ...(tenantText ? [{ term: '所属', description: tenantText(entry) }] : []),
+    { term: '操作人', description: actorText(entry) },
+    { term: '操作人身份', description: auditActorRoleLabel(entry.actor_role) },
+    { term: '动作', description: auditActionLabel(entry.action) },
+    { term: '对象类型', description: auditTargetTypeLabel(entry.target_type) },
+    ...auditDetailRows(entry.detail, detailLookups).map((row) => ({
+      term: row.term,
+      description: row.value,
+      mono: row.mono,
+    })),
+    { term: '来源地址', description: entry.ip || '没有记录', mono: Boolean(entry.ip) },
+    { term: '追踪编号', description: <TraceIdCell traceId={entry.trace_id} full /> },
+  ]
+  return (
+    <Drawer open onOpenChange={(open) => !open && onClose()}>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>{auditActionLabel(entry.action)}</DrawerTitle>
+          <DrawerDescription>
+            审计记录只能查看,不能修改或删除。报障时请提供追踪编号。
+          </DrawerDescription>
+        </DrawerHeader>
+        <DrawerBody>
+          <DescriptionList items={items} />
+        </DrawerBody>
+      </DrawerContent>
+    </Drawer>
   )
 }

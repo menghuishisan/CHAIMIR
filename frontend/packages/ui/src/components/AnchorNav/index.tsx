@@ -30,17 +30,18 @@ export interface AnchorNavProps {
   className?: string;
 }
 
+/** AnchorNav 页内分组锚点导航(配置表单族) */
 export function AnchorNav({ label, items, activeId, onSelect, className }: AnchorNavProps) {
   return (
     <nav
       aria-label={label}
       className={cn(
-        // <lg:横向一条可滚 chips;≥lg:竖列吸顶(top 取顶栏高度令牌,不写裸数字)
+        // <lg:横向一条可滚 chips;≥lg:竖列吸顶。顶栏在纸面滚动区之外,
+        // 吸顶位置只留与页面边距一致的空隙,不再让出顶栏高度
         "flex gap-2 overflow-x-auto pb-1",
-        "lg:sticky lg:flex-col lg:gap-0.5 lg:overflow-visible lg:pb-0",
+        "lg:sticky lg:top-6 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:pb-0",
         className,
       )}
-      style={{ top: "var(--topnav-h)" }}
     >
       {items.map((item) => {
         const isActive = item.id === activeId;

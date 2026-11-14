@@ -12,14 +12,12 @@ import {
   CircleCheck,
   GraduationCap,
   Plus,
-  Settings2,
   Trash2,
   TriangleAlert,
 } from 'lucide-react'
 import type { LevelConfig, LevelRule, Semester, WarningRules } from '@chaimir/api-client'
 import {
   Badge,
-  Breadcrumb,
   Button,
   Callout,
   Card,
@@ -43,62 +41,59 @@ import {
   PageSection,
   Skeleton,
   StickySaveBar,
+  AnchorNav,
   Table,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
   toast,
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
+import { useActiveAnchor, useAsyncResource } from '../../../../hooks'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { formatDate, formatGpa } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 
+/** 三个分组的锚点(左侧目录与外部链接共用,如学业预警页的「调整预警规则」) */
+const GRADE_GROUPS = [
+  { id: 'level-rules', label: '等级规则' },
+  { id: 'semesters', label: '学期' },
+  { id: 'warning-rules', label: '预警规则' },
+]
+const GRADE_GROUP_IDS = GRADE_GROUPS.map((group) => group.id)
+
 /**
- * SchoolAdminGradeSettingsPage 承载等级规则、学期与预警规则三项配置。
+ * SchoolAdminGradeSettingsPage 承载等级规则、学期与预警规则三项配置。设计 §7.5:
+ * 分组配置页,≥1024px 左侧分组目录,右侧依次三个分组(滚动时目录高亮当前分组)。
+ * 三项配置各有自己的提交动作;配置项不多,一页看完更方便对照(不再用标签页把它们隔开)。
  */
 export default function SchoolAdminGradeSettingsPage() {
+  const [active, setActive] = useActiveAnchor(GRADE_GROUP_IDS)
   return (
     <PageScaffold>
-      <PageHeader
-        kicker={<Breadcrumb items={[{ label: '教务与成绩' }]} />}
-        title="成绩配置"
-        description="等级换算、学期区间与学业预警阈值。这些配置影响全校成绩的计算与预警。"
-        icon={Settings2}
-      />
-
-      {/*
-        归族:配置表单族(§6.5.3 第 ③)。三项配置各有自己的提交动作与服务端接口,
-        故用 Tabs 承担该族的「分组」而不是左侧锚点 —— 锚点是「同一份表单里的几段」,
-        这里是三份互不相干的配置,一次只该出现一份,底部保存条也只服务当前那一份。
-      */}
-      <Tabs defaultValue="levels">
-        <TabsList>
-          <TabsTrigger value="levels" icon={GraduationCap}>
-            等级规则
-          </TabsTrigger>
-          <TabsTrigger value="semesters" icon={CalendarDays}>
-            学期
-          </TabsTrigger>
-          <TabsTrigger value="warnings" icon={TriangleAlert}>
-            预警规则
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="levels">
-          <LevelConfigsSection />
-        </TabsContent>
-        <TabsContent value="semesters">
-          <SemestersSection />
-        </TabsContent>
-        <TabsContent value="warnings">
-          <WarningRulesSection />
-        </TabsContent>
-      </Tabs>
+      <PageHeader title="成绩配置" description="等级换算、学期与学业预警阈值,影响全校成绩的计算与预警。" />
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        <AnchorNav
+          label="成绩配置分组"
+          items={GRADE_GROUPS}
+          activeId={active}
+          onSelect={(id) => {
+            setActive(id)
+            document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }}
+          className="lg:w-48 lg:shrink-0"
+        />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <section id="level-rules" className="scroll-mt-6">
+            <LevelConfigsSection />
+          </section>
+          <section id="semesters" className="scroll-mt-6">
+            <SemestersSection />
+          </section>
+          <section id="warning-rules" className="scroll-mt-6">
+            <WarningRulesSection />
+          </section>
+        </div>
+      </div>
     </PageScaffold>
   )
 }
@@ -322,7 +317,7 @@ function LevelConfigFormModal({ config, onClose, onSaved }: LevelConfigFormModal
             </FormField>
           </div>
 
-          <div className="flex flex-col gap-3 well p-4">
+          <div className="flex flex-col gap-3 rounded-md bg-surface-hover p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-base text-ink">等级档位</p>
               <Button
@@ -395,7 +390,7 @@ function LevelConfigFormModal({ config, onClose, onSaved }: LevelConfigFormModal
           </div>
 
           {errors.mapping ? <Callout tone="danger">{errors.mapping}</Callout> : null}
-          <div className="grid gap-4 well p-4 sm:grid-cols-2">
+          <div className="grid gap-4 rounded-md bg-surface-hover p-4 sm:grid-cols-2">
             <FormField
               label="不及格门数上限"
               htmlFor="level-fail"

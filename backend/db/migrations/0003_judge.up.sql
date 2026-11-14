@@ -2,7 +2,7 @@ CREATE TABLE IF NOT EXISTS judger (
     id BIGINT PRIMARY KEY,
     code VARCHAR(64) NOT NULL UNIQUE,
     name VARCHAR(128) NOT NULL,
-    type SMALLINT NOT NULL CHECK (type IN (1, 2, 3, 4, 5, 6)),
+    type SMALLINT NOT NULL CHECK (type IN (1, 2, 3, 4, 5, 6, 7)),
     executor_ref VARCHAR(128) NOT NULL,
     runtime_required BOOLEAN NOT NULL DEFAULT false,
     default_timeout_sec INT NOT NULL CHECK (default_timeout_sec > 0),

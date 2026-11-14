@@ -247,8 +247,8 @@ func (a contentAPI) listShared(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, total, page, size, err := a.svc.ListShared(c.Request.Context(), filter)
-	httpx.WritePage(c, items, total, page, size, err)
+	items, total, page, size, facets, err := a.svc.ListShared(c.Request.Context(), filter)
+	httpx.WritePageWithFacets(c, items, total, page, size, facets.Map(), err)
 }
 
 // batchItems 绑定内部批量题面读取。

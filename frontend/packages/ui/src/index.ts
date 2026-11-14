@@ -8,13 +8,13 @@
 /* 工具与钩子 */
 export { cn } from "./lib/cn";
 export { Icon, type IconProps, type IconSize } from "./lib/icon";
+export { linkActivation, type LinkActivation, type PointerActivation } from "./lib/linkActivation";
 export * from "./hooks";
 
 /* 基础组件(每个目录单组件,全部命名导出) */
 export * from "./components/AnchorNav";
 export * from "./components/Autosave";
 export * from "./components/Badge";
-export * from "./components/Breadcrumb";
 export * from "./components/Button";
 export * from "./components/Callout";
 export * from "./components/Card";
@@ -30,15 +30,15 @@ export * from "./components/FormField";
 export * from "./components/GuidePanel";
 export * from "./components/IconButton";
 export * from "./components/Input";
+export * from "./components/ListRow";
 export * from "./components/Menu";
 export * from "./components/MetricStrip";
 export * from "./components/Modal";
-export * from "./components/ObjectIdentity";
 export * from "./components/PageScaffold";
 export * from "./components/Pagination";
-export * from "./components/PanelHeader";
 export * from "./components/Popover";
 export * from "./components/Progress";
+export * from "./components/ProgressRing";
 export * from "./components/QueueDetailLayout";
 export * from "./components/Radio";
 export * from "./components/ReadingLayout";

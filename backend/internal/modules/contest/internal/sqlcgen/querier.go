@@ -23,6 +23,8 @@ type Querier interface {
 	CompleteBattleMatchFinalization(ctx context.Context, arg CompleteBattleMatchFinalizationParams) (int64, error)
 	ContestStats(ctx context.Context, tenantID int64) (ContestStatsRow, error)
 	CountBattleEntriesForTeam(ctx context.Context, arg CountBattleEntriesForTeamParams) (int64, error)
+	// 对局列表的状态分段计数:视角与列表相同(组织者全部 / 学生本队),不套用状态筛选。
+	CountBattleMatchesByStatus(ctx context.Context, arg CountBattleMatchesByStatusParams) ([]CountBattleMatchesByStatusRow, error)
 	CountBattleMatchesForTeam(ctx context.Context, arg CountBattleMatchesForTeamParams) (int64, error)
 	CountBattleReplayCompletedForTeam(ctx context.Context, arg CountBattleReplayCompletedForTeamParams) (int64, error)
 	CountBattleReplayPendingForTeam(ctx context.Context, arg CountBattleReplayPendingForTeamParams) (int64, error)
@@ -32,6 +34,9 @@ type Querier interface {
 	CountProblemSolvedTeams(ctx context.Context, arg CountProblemSolvedTeamsParams) (int64, error)
 	CountStudentContests(ctx context.Context, arg CountStudentContestsParams) (int64, error)
 	CountVulnProblems(ctx context.Context, arg CountVulnProblemsParams) (int64, error)
+	// 漏洞题工坊的两组分段计数:按状态与预验证结果分组;两组都套用来源筛选,各自不套用本组筛选,
+	// 但套用另一组的筛选(选了「草稿」后,验证结果的数字只数草稿)。
+	CountVulnProblemsByStatus(ctx context.Context, arg CountVulnProblemsByStatusParams) ([]CountVulnProblemsByStatusRow, error)
 	CreateBattleEntry(ctx context.Context, arg CreateBattleEntryParams) (BattleEntry, error)
 	CreateBattleMatch(ctx context.Context, arg CreateBattleMatchParams) (BattleMatch, error)
 	CreateCheatRecord(ctx context.Context, arg CreateCheatRecordParams) (CheatRecord, error)
@@ -98,6 +103,8 @@ type Querier interface {
 	// status 传 0 回学生可发现的全部赛事(草稿态不可见);传具体状态时仍受可见区间约束。
 	ListStudentContests(ctx context.Context, arg ListStudentContestsParams) ([]Contest, error)
 	ListTeamMembers(ctx context.Context, arg ListTeamMembersParams) ([]TeamMember, error)
+	// 榜单与成绩快照只存 team_id:读取时按当前页的队伍编号一次取队名(引用不拷贝,快照里不存名字)。
+	ListTeamNamesByIDs(ctx context.Context, arg ListTeamNamesByIDsParams) ([]ListTeamNamesByIDsRow, error)
 	ListVulnProblems(ctx context.Context, arg ListVulnProblemsParams) ([]ListVulnProblemsRow, error)
 	ListVulnSources(ctx context.Context, tenantID pgtype.Int8) ([]VulnSource, error)
 	// 结算统一锁赛事和对局,同一赛事的 ELO 读取与回写串行完成。

@@ -289,8 +289,6 @@ type acceptanceMaterialRefs struct {
 	InitCodeRef             string
 	InitScriptRef           string
 	JudgeSuiteRef           string
-	TeachingSubmissionRef   string
-	TeachingSanitizedRef    string
 	ContestSubmissionRef    string
 	ContestSanitizedRef     string
 	ExperimentSanitizedARef string
@@ -320,14 +318,6 @@ func acceptanceMaterialRefsForBucket(codeBucket string) (acceptanceMaterialRefs,
 	if err != nil {
 		return acceptanceMaterialRefs{}, fmt.Errorf("生成验收判题套件引用失败: %w", err)
 	}
-	teachingSubmissionRef, err := objectRef("teaching", "submission", ids.Format(acceptanceIDs.SubmissionA), "submission.tar")
-	if err != nil {
-		return acceptanceMaterialRefs{}, fmt.Errorf("生成验收教学提交引用失败: %w", err)
-	}
-	teachingSanitizedRef, err := objectRef("judge", "input", ids.Format(acceptanceIDs.JudgeTask), "submission.tar")
-	if err != nil {
-		return acceptanceMaterialRefs{}, fmt.Errorf("生成验收教学脱敏归档引用失败: %w", err)
-	}
 	contestSubmissionRef, err := objectRef("contest", "submission", ids.Format(acceptanceIDs.SolveSubmission), "submission.tar")
 	if err != nil {
 		return acceptanceMaterialRefs{}, fmt.Errorf("生成验收竞赛提交引用失败: %w", err)
@@ -356,8 +346,6 @@ func acceptanceMaterialRefsForBucket(codeBucket string) (acceptanceMaterialRefs,
 		InitCodeRef:             initCodeRef,
 		InitScriptRef:           initScriptRef,
 		JudgeSuiteRef:           judgeSuiteRef,
-		TeachingSubmissionRef:   teachingSubmissionRef,
-		TeachingSanitizedRef:    teachingSanitizedRef,
 		ContestSubmissionRef:    contestSubmissionRef,
 		ContestSanitizedRef:     contestSanitizedRef,
 		ExperimentSanitizedARef: experimentSanitizedARef,
@@ -427,8 +415,6 @@ func acceptanceContestAssets(refs acceptanceMaterialRefs) ([]acceptanceSeedObjec
 	}
 	return []acceptanceSeedObject{
 		{ObjectRef: refs.JudgeSuiteRef, Content: suite, ContentType: "application/x-tar"},
-		{ObjectRef: refs.TeachingSubmissionRef, Content: submission, ContentType: "application/x-tar"},
-		{ObjectRef: refs.TeachingSanitizedRef, Content: sanitizedSubmission, ContentType: "application/x-tar"},
 		{ObjectRef: refs.ContestSubmissionRef, Content: submission, ContentType: "application/x-tar"},
 		{ObjectRef: refs.ContestSanitizedRef, Content: sanitizedSubmission, ContentType: "application/x-tar"},
 		{ObjectRef: refs.BattleEntryARef, Content: attack, ContentType: "application/x-tar"},
@@ -1033,6 +1019,8 @@ func acceptanceBattleReplayActions() []contracts.JudgeReplayAction {
 
 // acceptanceBattleReplayArchive 构造与 M8 正式归档协议一致的历史对局回放。
 
+// acceptanceBattleReplayArchive 生成验收对抗赛那一局的回放归档(版本、对局与判题任务编号、双方参战物版本与产物摘要、
+// 链上动作序列);种子把它写进对象存储,回放页按它重建时间轴。
 func acceptanceBattleReplayArchive(artifactAHash, artifactBHash string) map[string]any {
 	return map[string]any{
 		"version":    1,

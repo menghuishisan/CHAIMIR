@@ -1,18 +1,10 @@
 // identity options 文件维护身份与租户表单使用的封闭选项顺序。
 
-import { ClassStatus, TenantStatus, TENANT_MODULE } from '@chaimir/api-client'
+import { TenantStatus, TENANT_MODULE } from '@chaimir/api-client'
 import {
-  CLASS_STATUS_LABELS,
   TENANT_MODULE_DESCRIPTIONS,
   TENANT_MODULE_LABELS,
 } from '../../utils/labels/identity'
-
-/** CLASS_STATUS_FILTERS 是组织页面共同使用的状态筛选清单。 */
-export const CLASS_STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(ClassStatus.ACTIVE), label: CLASS_STATUS_LABELS[ClassStatus.ACTIVE] },
-  { value: String(ClassStatus.ARCHIVED), label: CLASS_STATUS_LABELS[ClassStatus.ARCHIVED] },
-] as const
 
 /** TENANT_MODULE_OPTIONS 是校管端模块开关的唯一选项清单。 */
 export const TENANT_MODULE_OPTIONS = Object.values(TENANT_MODULE).map((value) => ({

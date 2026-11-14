@@ -43,6 +43,7 @@ const STYLES: Record<ChartContext, { value: string; label: string }> = {
   dark: { value: "text-on-dark", label: "text-on-dark-sub" },
 };
 
+/** StreamAreaChart 实时流式面积图(仍在变化的连续时间序列) */
 export function StreamAreaChart({
   data,
   xKey,
@@ -75,7 +76,7 @@ export function StreamAreaChart({
             {name}
             {unit ? ` · ${unit}` : ""}
           </div>
-          <div className={cn("font-display text-3xl tabular-nums", styles.value)}>
+          <div className={cn("text-3xl font-bold tabular-nums", styles.value)}>
             {latest ?? "—"}
           </div>
         </div>

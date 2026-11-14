@@ -48,6 +48,15 @@ WHERE tenant_id = $1
   AND ($3::varchar = '' OR channel = $3)
   AND ($4::varchar = '' OR status = $4);
 
+-- name: CountTransferTasksByChannel :many
+-- 任务与下载「全部 / 导入 / 导出」分段计数:本人任务,套用状态筛选,不套用类型筛选。
+SELECT channel, count(*)::bigint AS count
+FROM transfer_task
+WHERE tenant_id = sqlc.arg(tenant_id)::bigint
+  AND account_id = sqlc.arg(account_id)::bigint
+  AND (sqlc.arg(status)::varchar = '' OR status = sqlc.arg(status)::varchar)
+GROUP BY channel;
+
 -- name: ClaimTransferTask :one
 WITH expire_exhausted AS (
     UPDATE transfer_task AS task

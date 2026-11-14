@@ -20,6 +20,7 @@
   get:
     tags: [sandbox]
     summary: 运行时列表
+    description: 每条带 available_image_count（可用镜像版本数，一次分组计数取出），供列表卡片算接入进度；单条读取不带该字段。
     operationId: sandboxListRuntimes
     x-chaimir-audience: platform-admin
     security: [{ bearerAuth: [] }]

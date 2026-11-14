@@ -5,7 +5,7 @@
 
 import { useId, useState } from 'react'
 import { FileText, Search } from 'lucide-react'
-import { ContentStatus, type ContentItem } from '@chaimir/api-client'
+import { ContentStatus, type ContentItem, type ContentType } from '@chaimir/api-client'
 import {
   Button,
   DataPanel,
@@ -26,6 +26,7 @@ export interface ContentItemPickerProps {
   selectedCodes: ReadonlySet<string>
   /** 用于向用户说明题目已被哪个对象占用。 */
   targetName: '试卷' | '作业'
+  type?: ContentType
   onClose: () => void
   onPick: (items: ContentItem[]) => void
 }
@@ -37,6 +38,7 @@ export interface ContentItemPickerProps {
 export function ContentItemPicker({
   selectedCodes,
   targetName,
+  type,
   onClose,
   onPick,
 }: ContentItemPickerProps) {
@@ -48,10 +50,11 @@ export function ContentItemPicker({
     (params) =>
       api.content.getItems({
         ...params,
+        type,
         status: ContentStatus.PUBLISHED,
         keyword: submittedKeyword || undefined,
       }),
-    [submittedKeyword]
+    [submittedKeyword, type]
   )
 
   /** handleSearch 由服务端查询完整已发布库,同条件再次查询时也刷新当前结果。 */

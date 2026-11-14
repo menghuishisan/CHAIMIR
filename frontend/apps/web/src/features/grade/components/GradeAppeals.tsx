@@ -8,15 +8,17 @@
 // 批改中心和校管申诉页共享本组件，页面只提供各自的入口与壳层。
 // 后端 GET /appeals 在 teacher 组,学生侧不建申诉列表(§6.6)。
 //
-// 校管复用同一区块(校管也在 teacher 组里,能看全校),并额外拿到「重算绩点」——
-// 那是 admin 组能力,教师没有,故由调用方通过 canRecompute 显式声明,组件不判角色枚举。
+// 校管复用同一区块(校管也在 teacher 组里,能看全校),由调用方用 scope 显式声明范围,组件不判角色枚举:
+// school 范围能看全校申诉并拿到「重算绩点」(admin 组能力);teacher 范围只看自己授课课程的申诉。
+// 学生姓名、学号与课程名随申诉记录由服务端给出,不为解析名字拉取课程、成员或账号目录。
+// 设计 §7.5:状态计数(写进地址)+ 队列 + 详情;队列行显示学生姓名、课程名、申诉时间、理由摘要;
+// 详情显示完整理由与该课当前成绩,底部「驳回」「受理」各附后果说明与处理说明输入(学生可见)。
 
-import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { ChevronLeft, CircleCheck, CircleX, RefreshCw, Scale } from 'lucide-react'
 import {
   GradeAppealStatus,
   PAGINATION_MAX_SIZE,
-  type Course,
   type GradeAppeal,
   type Semester,
 } from '@chaimir/api-client'
@@ -26,8 +28,6 @@ import {
   cn,
   DataPanel,
   DescriptionList,
-  FilterBar,
-  FilterField,
   FormField,
   Modal,
   ModalBody,
@@ -36,7 +36,6 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
-  PageSection,
   Pagination,
   QueueDetailLayout,
   SegmentedControl,
@@ -48,20 +47,27 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../app/api'
 import { ResourceState } from '../../../components/ResourceState'
-import { useAsyncResource, usePagedResource } from '../../../hooks'
+import { useAsyncResource, usePagedResource, useReviewQueue, useUrlState } from '../../../hooks'
+import { segmentCounts } from '../../../utils/facets'
+import { collectAllPages } from '../../../utils/allPages'
+import { AccountNameText } from '../../identity/components/AccountNameText'
 import { useFormValidation } from '../../../hooks/useFormValidation'
-import { formatDateTime } from '../../../utils/formatters'
+import { formatDateTime, formatRelativeOccurrence, formatScore } from '../../../utils/formatters'
 import { gradeAppealStatusLabel } from '../../../utils/labels/grade'
 import { userFacingErrorMessage } from '../../../utils/userFacingError'
 import { gradeAppealStatusTone } from '../statusPresentation'
 
-/** 状态筛选项:值为空串表示不过滤。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(GradeAppealStatus.PENDING), label: '待处理' },
-  { value: String(GradeAppealStatus.ACCEPTED), label: '已受理' },
-  { value: String(GradeAppealStatus.COMPLETED), label: '已完成' },
-  { value: String(GradeAppealStatus.REJECTED), label: '未通过' },
+/** 地址参数:status 申诉状态分段(默认待处理);页码与所在页的列表共用 page(切换标签或筛选时会被清掉) */
+const APPEALS_QUERY = {
+  status: { defaultValue: 'pending', allowed: ['pending', 'accepted', 'completed', 'rejected', 'all'] },
+} as const
+
+const STATUS_SEGMENTS = [
+  { value: 'pending', label: '待处理', status: GradeAppealStatus.PENDING },
+  { value: 'accepted', label: '已受理', status: GradeAppealStatus.ACCEPTED },
+  { value: 'completed', label: '已完成', status: GradeAppealStatus.COMPLETED },
+  { value: 'rejected', label: '未通过', status: GradeAppealStatus.REJECTED },
+  { value: 'all', label: '全部' },
 ] as const
 
 /** 处理动作:受理会解锁成绩,驳回维持原成绩。 */
@@ -69,45 +75,37 @@ type AppealDecision = 'accept' | 'reject'
 
 export interface GradeAppealsProps {
   /**
-   * 是否显示「重算绩点」动作。
-   * 重算是 admin 组能力(POST /students/{id}/recompute),教师没有权限;
+   * 处理范围:teacher 是批改中心里的本人授课课程;school 是校管的全校范围,另有「重算绩点」。
    * 由调用方显式声明而不是在组件内判角色枚举 —— 权限边界由后端守卫,前端只按声明渲染。
    */
-  canRecompute?: boolean
+  scope: 'teacher' | 'school'
 }
 
 /**
  * GradeAppeals 列出分配给当前处理人的成绩申诉并承载受理与驳回。
  */
-export function GradeAppeals({ canRecompute = false }: GradeAppealsProps) {
-  const [statusFilter, setStatusFilter] = useState<string>('')
+export function GradeAppeals({ scope }: GradeAppealsProps) {
+  const canRecompute = scope === 'school'
+  const [query, setQuery] = useUrlState(APPEALS_QUERY)
   const [recomputeTarget, setRecomputeTarget] = useState<GradeAppeal>()
+  const segment = STATUS_SEGMENTS.find((item) => item.value === query.status)
 
   const appeals = usePagedResource<GradeAppeal>(
     (params) =>
       api.grade.listAppeals({
-        status: statusFilter ? (Number(statusFilter) as GradeAppealStatus) : undefined,
+        status: segment && 'status' in segment ? segment.status : undefined,
         ...params,
       }),
-    [statusFilter],
+    [query.status],
+    { urlPageKey: 'page' },
   )
+  // 分段计数取列表接口的 facets(范围同列表:教师按任教课程,校管全校);读取中或失败时不显示数字
+  const facets = appeals.status === 'success' || appeals.status === 'empty' ? appeals.data?.facets : undefined
+  const counts = segmentCounts(facets, 'status', STATUS_SEGMENTS, (item) => ('status' in item ? item.status : undefined))
 
-  // 申诉记录只回 course_id,课程名从课程列表解析,不把内部编号抛到界面上。
-  // 校管能看全校申诉,故按处理人身份取对应范围的课程:教师取自己授课的,校管取全校的。
-  const courses = useAsyncResource(
-    () =>
-      api.teaching.getCourses(
-        canRecompute
-          ? { page: 1, size: PAGINATION_MAX_SIZE }
-          : { role: 'teacher', page: 1, size: PAGINATION_MAX_SIZE },
-      ),
-    [canRecompute],
-    () => false,
-  )
-
-  const courseNameById = useMemo(
-    () => new Map((courses.data?.list ?? []).map((course: Course) => [course.id, course.name])),
-    [courses.data],
+  /** studentLabel 一位学生的姓名与学号(服务端解析;账号已移除时写明,不显示编号) */
+  const studentLabel = (appeal: GradeAppeal) => (
+    <AccountNameText name={appeal.student_name} no={appeal.student_no} compact />
   )
 
   /**
@@ -125,34 +123,27 @@ export function GradeAppeals({ canRecompute = false }: GradeAppealsProps) {
   const selected = list.find((item) => item.id === selectedId) ?? list[0]
   const selectedIndex = selected ? list.findIndex((item) => item.id === selected.id) : -1
 
-  /** 处理完后落到下一条待处理项;没有下一条就回到首条,让视线不必回到列表顶部重新找 */
-  const advanceToNext = useCallback(() => {
-    const nextPending = list.find(
-      (item, index) => index > selectedIndex && item.status === GradeAppealStatus.PENDING,
-    )
-    setSelectedId(nextPending?.id ?? undefined)
-    if (!nextPending) setMobileView('queue')
-  }, [list, selectedIndex])
-
-  /** 键盘上下切条:审阅动作靠键盘才快,鼠标逐条点会拖慢整批处理 */
-  const onQueueKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
-    event.preventDefault()
-    const step = event.key === 'ArrowDown' ? 1 : -1
-    const next = list[Math.min(Math.max(selectedIndex + step, 0), list.length - 1)]
-    if (next) setSelectedId(next.id)
+  // 上下方向键切条、处理完进下一条待处理:四处审阅队列共用同一套规则(useReviewQueue)
+  const queue = useReviewQueue({
+    items: list,
+    currentId: selected?.id,
+    onSelect: setSelectedId,
+    isPending: (item: (typeof list)[number]) => item.status === GradeAppealStatus.PENDING,
+  })
+  /** advanceToNext 处理完后到下一条待处理;没有就退回队列层 */
+  const advanceToNext = () => {
+    if (!queue.advance()) setMobileView('queue')
   }
 
   return (
-    <PageSection
-      title="成绩申诉"
-      description="受理会解锁该课程成绩,处理结论学生可见。"
-    >
-      {canRecompute ? (
-        <Callout tone="info" className="mb-4">
-          受理后由授课教师改分,改分事件会自动触发绩点重算。如果学生反馈绩点没更新,可以在已受理的申诉上手动重算一次。
-        </Callout>
-      ) : null}
+    <>
+      <SegmentedControl
+        aria-label="按申诉状态筛选"
+        options={STATUS_SEGMENTS.map((item) => ({ value: item.value, label: item.label, count: counts[item.value] }))}
+        value={query.status}
+        onValueChange={(value) => setQuery({ status: value })}
+        className="mb-4 max-w-full overflow-x-auto"
+      />
 
       <QueueDetailLayout
         view={mobileView}
@@ -172,19 +163,6 @@ export function GradeAppeals({ canRecompute = false }: GradeAppealsProps) {
           <DataPanel
             label="申诉队列"
             className="min-h-0 flex-1"
-            filter={
-              <FilterBar label="成绩申诉筛选">
-                <FilterField label="申诉状态" group>
-                  <SegmentedControl
-                    aria-label="按申诉状态筛选"
-                    size="sm"
-                    options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-                    value={statusFilter}
-                    onValueChange={setStatusFilter}
-                  />
-                </FilterField>
-              </FilterBar>
-            }
             footer={
               <Pagination
                 page={appeals.page}
@@ -197,9 +175,9 @@ export function GradeAppeals({ canRecompute = false }: GradeAppealsProps) {
             <ResourceState
               resource={appeals}
               emptyIcon={Scale}
-              emptyTitle={statusFilter ? '这个状态下没有申诉' : '没有待处理的申诉'}
+              emptyTitle={query.status === 'pending' ? '没有待处理的申诉' : query.status === 'all' ? '还没有成绩申诉' : '这个状态下没有申诉'}
               emptyDescription={
-                statusFilter ? '换个状态看看。' : '学生对成绩有异议时提交的申诉会分配到这里。'
+                query.status === 'all' ? '学生对成绩有异议时提交的申诉会分配到这里。' : '换个状态看看。'
               }
               skeleton={<Skeleton variant="line" lines={5} />}
             >
@@ -209,7 +187,7 @@ export function GradeAppeals({ canRecompute = false }: GradeAppealsProps) {
                   aria-label="申诉队列"
                   aria-activedescendant={selected ? `appeal-${selected.id}` : undefined}
                   tabIndex={0}
-                  onKeyDown={onQueueKeyDown}
+                  onKeyDown={queue.onListKeyDown}
                   className="focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
                 >
                   {page.list.map((appeal) => {
@@ -230,24 +208,20 @@ export function GradeAppeals({ canRecompute = false }: GradeAppealsProps) {
                         )}
                       >
                         <div className="flex items-center justify-between gap-2">
-                          <span className="truncate text-sm font-medium text-ink">
-                            {courseNameById.get(appeal.course_id) ?? '其他课程'}
-                          </span>
+                          <span className="flex min-w-0 text-sm">{studentLabel(appeal)}</span>
                           <StatusIndicator
                             tone={gradeAppealStatusTone(appeal.status)}
                             label={gradeAppealStatusLabel(appeal.status)}
                           />
                         </div>
-                        <p className="mt-1 line-clamp-2 text-xs text-ink-sub">{appeal.reason}</p>
-                        <p className="mt-1 font-mono text-xs text-ink-faint">
-                          {formatDateTime(appeal.created_at)}
+                        <p className="mt-1 truncate text-xs text-ink-sub" title={formatDateTime(appeal.created_at)}>
+                          {appeal.course_name ?? '已删除的课程'} · {formatRelativeOccurrence(appeal.created_at)}
                         </p>
+                        <p className="mt-1 line-clamp-1 text-xs text-ink-sub">{appeal.reason}</p>
                       </div>
                     )
                   })}
-                  <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">
-                    ↑↓ 切换条目
-                  </p>
+                  <p className="hidden border-t border-line px-4 py-2 text-xs text-ink-sub lg:block">↑↓ 切换条目</p>
                 </div>
               )}
             </ResourceState>
@@ -256,8 +230,10 @@ export function GradeAppeals({ canRecompute = false }: GradeAppealsProps) {
         detail={
           selected ? (
             <AppealDetailPane
+              key={selected.id}
               appeal={selected}
-              courseName={courseNameById.get(selected.course_id) ?? '该课程'}
+              student={studentLabel(selected)}
+              courseName={selected.course_name ?? '该课程'}
               canRecompute={canRecompute}
               onHandled={() => {
                 advanceToNext()
@@ -276,7 +252,7 @@ export function GradeAppeals({ canRecompute = false }: GradeAppealsProps) {
       {recomputeTarget ? (
         <RecomputeModal
           appeal={recomputeTarget}
-          courseName={courseNameById.get(recomputeTarget.course_id) ?? '该课程'}
+          courseName={recomputeTarget.course_name ?? '该课程'}
           onClose={() => setRecomputeTarget(undefined)}
           onDone={() => {
             setRecomputeTarget(undefined)
@@ -284,12 +260,14 @@ export function GradeAppeals({ canRecompute = false }: GradeAppealsProps) {
           }}
         />
       ) : null}
-    </PageSection>
+    </>
   )
 }
 
 interface AppealDetailPaneProps {
   appeal: GradeAppeal
+  /** 申诉学生(姓名与学号) */
+  student: ReactNode
   courseName: string
   /** 是否显示「重算绩点」(admin 组能力,由调用方声明) */
   canRecompute: boolean
@@ -310,6 +288,7 @@ interface AppealDetailPaneProps {
  */
 function AppealDetailPane({
   appeal,
+  student,
   courseName,
   canRecompute,
   onHandled,
@@ -322,6 +301,15 @@ function AppealDetailPane({
   const { errors, validate } = useFormValidation(useCallback(() => ({
     comment: comment.trim() ? null : '请写下处理说明,学生会看到这段话',
   }), [comment]), appeal.id)
+  // 该课当前成绩:教师与校管都可以读学生的成绩明细(后端 canReadStudent),取全部课程后找这一门
+  const currentGrade = useAsyncResource(
+    () =>
+      collectAllPages((params) => api.grade.studentGrades(appeal.student_id, params), PAGINATION_MAX_SIZE).then(
+        (list) => list.find((grade) => grade.course_id === appeal.course_id) ?? null,
+      ),
+    [appeal.course_id, appeal.student_id],
+    () => false,
+  )
 
   const submit = useCallback(
     async (decision: AppealDecision) => {
@@ -352,8 +340,9 @@ function AppealDetailPane({
     <div className="flex min-h-0 flex-1 flex-col gap-4 rounded-lg bg-surface p-5 shadow-xs">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-md font-semibold text-ink">{courseName}</h3>
-          <p className="mt-0.5 font-mono text-xs text-ink-sub">
+          <h3 className="flex text-md font-semibold">{student}</h3>
+          <p className="mt-0.5 text-sm text-ink-sub">{courseName}</p>
+          <p className="mt-0.5 text-xs text-ink-sub">
             提交于 {formatDateTime(appeal.created_at)}
             {appeal.handled_at ? ` · 处理于 ${formatDateTime(appeal.handled_at)}` : ''}
           </p>
@@ -364,13 +353,28 @@ function AppealDetailPane({
         />
       </div>
 
-      <div className="well flex flex-col gap-1 p-4">
+      <div className="flex flex-col gap-1 rounded-md bg-surface-hover p-4">
         <span className="text-xs text-ink-sub">申诉理由</span>
-        <p className="text-sm text-ink">{appeal.reason}</p>
+        <p className="whitespace-pre-wrap text-sm text-ink">{appeal.reason}</p>
       </div>
 
+      <p className="text-sm text-ink-sub">
+        该课当前成绩:{' '}
+        {currentGrade.status === 'loading' ? (
+          '正在读取…'
+        ) : currentGrade.status === 'error' ? (
+          '暂时读不到'
+        ) : currentGrade.data ? (
+          <span className="font-medium tabular-nums text-ink">
+            {formatScore(currentGrade.data.final_total)} 分 · {currentGrade.data.credits} 学分
+          </span>
+        ) : (
+          '还没有成绩'
+        )}
+      </p>
+
       {appeal.result_comment ? (
-        <div className="well flex flex-col gap-1 p-4">
+        <div className="flex flex-col gap-1 rounded-md bg-surface-hover p-4">
           <span className="text-xs text-ink-sub">已给出的处理说明</span>
           <p className="text-sm text-ink">{appeal.result_comment}</p>
         </div>
@@ -378,9 +382,14 @@ function AppealDetailPane({
 
       {isPending ? (
         <>
-          <Callout tone="warning" title="受理会解锁成绩">
-            解锁后这门课的成绩回到可调整状态,调整完需要重新报送给学校审核。驳回则维持原成绩。
-          </Callout>
+          <ul className="flex flex-col gap-1 text-sm text-ink-sub">
+            <li>
+              <span className="font-medium text-ink">受理</span>:解锁这门课的成绩,由授课教师调分后重新报送学校审核。
+            </li>
+            <li>
+              <span className="font-medium text-ink">驳回</span>:维持原成绩,申诉结束。
+            </li>
+          </ul>
 
           <FormField
             label="处理说明"
@@ -405,20 +414,20 @@ function AppealDetailPane({
           {/* 动作条贴详情片底边;<lg 由 QueueDetailLayout 钉到屏幕底部 */}
           <div className="mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
             <Button
-              variant="danger"
+              variant="outline"
               leftIcon={CircleX}
               loading={working === 'reject'}
               onClick={() => void submit('reject')}
             >
-              驳回并看下一条
+              驳回
             </Button>
             <Button
-              variant="seal"
+              variant="primary"
               leftIcon={CircleCheck}
               loading={working === 'accept'}
               onClick={() => void submit('accept')}
             >
-              受理并看下一条
+              受理
             </Button>
           </div>
         </>
@@ -427,7 +436,7 @@ function AppealDetailPane({
           <span className="text-sm text-ink-sub">这条申诉已处理完。</span>
           {canRecompute && appeal.status === GradeAppealStatus.ACCEPTED ? (
             <Button variant="outline" leftIcon={RefreshCw} onClick={onRecompute}>
-              重算绩点
+              重新计算绩点
             </Button>
           ) : null}
         </div>

@@ -1,101 +1,51 @@
 /**
- * Card:光面卡片容器(§5.1)。
- * Card 静置为宣纸面 + 细边 + 最低海拔;interactive 时整卡可点可聚焦(Enter/Space 触发 onPress),
- * hover 抬升海拔、按压走 pressable 反馈。CardHeader/CardBody/CardFooter 提供统一的卡内排版。
- * 交互卡内的交互子元素(按钮/链接/输入等)会被事件守卫排除,不会触发整卡动作。
+ * Card:白卡(规范 §6.5.1):`bg-surface` + `shadow-xs` + `radius-lg`,不画边框。
+ *
+ * 整卡可点(interactive):卡内放且只放一个带 `card-link` 类的真实链接或按钮,它的 ::after 铺满整张卡
+ * (见 tokens/theme.css 的 interactive-card / card-link)—— 点卡片任何位置都是在点这个链接,
+ * 中键与 Ctrl/⌘ 点击在新标签页打开、右键能复制链接、读屏读到的是链接文字。
+ * 卡内其它按钮加 `relative z-base` 浮在覆盖层之上,单独可点、不触发整卡。
+ * 不再用 role="button" + onClick 模拟整卡点击:那样做不了新标签页打开,也没有可复制的链接。
  */
-import type { HTMLAttributes, KeyboardEvent, MouseEvent, ReactNode } from 'react'
+import type { HTMLAttributes, ReactNode } from 'react'
 import { cn } from '../../lib/cn'
 
 export interface CardProps extends HTMLAttributes<HTMLDivElement> {
-  /** 可交互卡:整卡可点、可聚焦、可回车/空格触发 */
+  /** 整卡可点:卡内须有且只有一个带 card-link 类的链接或按钮 */
   interactive?: boolean
-  /** 交互卡的触发回调(点击或键盘 Enter/Space) */
-  onPress?: () => void
 }
 
-export function Card({
-  interactive = false,
-  onPress,
-  className,
-  onClick,
-  onKeyDown,
-  children,
-  ...rest
-}: CardProps) {
-  // 交互元素守卫:事件源自卡内按钮/链接/输入等交互子元素时,整卡动作不响应,
-  // 防止子元素操作冒泡误触 onPress、防止输入框内空格被 preventDefault 吞掉。
-  // 注意与 currentTarget 比较的是 closest 命中结果:交互卡自身带 role="button",
-  // 普通文本子元素向上找会命中卡本身,此时不应拦截整卡动作
-  const isFromInteractiveChild = (
-    event: MouseEvent<HTMLDivElement> | KeyboardEvent<HTMLDivElement>
-  ) => {
-    const target = event.target as HTMLElement
-    const hit = target.closest(
-      'button, a, input, select, textarea, [role="button"], [role="menuitem"]'
-    )
-    return hit !== null && hit !== event.currentTarget
-  }
-
-  // 交互卡:点击与键盘触发统一走 onPress,不吞消费方自带的 onClick/onKeyDown
-  const handleClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (isFromInteractiveChild(event)) return
-    onClick?.(event)
-    onPress?.()
-  }
-  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (isFromInteractiveChild(event)) return
-    onKeyDown?.(event)
-    if (event.key === 'Enter' || event.key === ' ') {
-      // 空格默认会滚动页面,需阻止(仅守卫通过后才阻止,不影响卡内输入框)
-      event.preventDefault()
-      onPress?.()
-    }
-  }
-
+/** Card 渲染一张白卡;interactive 时悬停升影、键盘焦点画在整张卡上、按下有按压反馈。 */
+export function Card({ interactive = false, className, ...rest }: CardProps) {
   return (
     <div
       {...rest}
-      className={cn(
-        // 抬起片(规范 §6.5.1 第 1 级):比光面浅一档 + 最低海拔落影,不画边框 ——
-        // 近白描边矩形套在近白圆角光面里就是「壳里套壳」,深度该由明度差与落影表达。
-        'bg-surface rounded-lg shadow-xs',
-        // pressable 已含 box-shadow 过渡,不再叠加 transition-shadow
-        interactive &&
-          'pressable cursor-pointer hover:shadow-md focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2',
-        className
-      )}
-      role={interactive ? 'button' : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      onClick={interactive ? handleClick : onClick}
-      onKeyDown={interactive ? handleKeyDown : onKeyDown}
-    >
-      {children}
-    </div>
+      className={cn('rounded-lg bg-surface shadow-xs', interactive && 'interactive-card', className)}
+    />
   )
 }
 
 export interface CardHeaderProps {
-  /** 卡头标题 */
+  /** 卡片标题 */
   title: ReactNode
-  /** 标题下的辅助说明 */
+  /** 标题旁的计数,如「近期截止 3」;未知时不传,不用 0 冒充 */
+  count?: number
+  /** 一句说明;只在读者确实需要时给 */
   description?: ReactNode
-  /** 右侧操作区插槽(按钮/菜单等) */
+  /** 右侧入口或操作,如「查看全部」 */
   actions?: ReactNode
   className?: string
 }
 
-/** 卡头:标题 + 说明 + 右侧操作区,下边线与卡体分隔 */
-export function CardHeader({ title, description, actions, className }: CardHeaderProps) {
+/** 卡头:「标题 + 计数 + 右侧入口」,不画底线 —— 与内容之间靠间距分开(规范 §6.5.1)。 */
+export function CardHeader({ title, count, description, actions, className }: CardHeaderProps) {
   return (
-    <div
-      className={cn(
-        'flex flex-wrap items-start justify-between gap-4 border-b border-line px-5 py-4',
-        className
-      )}
-    >
+    <div className={cn('flex flex-wrap items-start justify-between gap-3 px-5 pb-2 pt-5', className)}>
       <div className="min-w-0">
-        <div className="text-md font-medium text-ink">{title}</div>
+        <div className="flex items-baseline gap-2">
+          <div className="text-lg font-bold text-ink">{title}</div>
+          {count !== undefined && <span className="text-sm tabular-nums text-ink-sub">{count}</span>}
+        </div>
         {description !== undefined && description !== null && (
           <div className="mt-0.5 text-sm text-ink-sub">{description}</div>
         )}
@@ -109,7 +59,7 @@ export function CardHeader({ title, description, actions, className }: CardHeade
 
 export type CardBodyProps = HTMLAttributes<HTMLDivElement>
 
-/** 卡体:标准内边距的内容区 */
+/** 卡体:统一内距 */
 export function CardBody({ className, ...rest }: CardBodyProps) {
   return <div {...rest} className={cn('p-5', className)} />
 }

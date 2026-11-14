@@ -1,31 +1,28 @@
-// 成绩审核页(校管侧栏,/school-admin/approvals)。
+// 成绩审核页(校管侧栏,/school-admin/approvals)。设计 §7.5:
+// 顶部可点的计数「待审核 / 已通过 / 已驳回 / 全部」+ 锁定状态,都写进地址;队列 + 详情:队列行显示课程名、
+// 报送教师、报送时间、锁定与审核状态;详情底部「驳回」「通过并锁定」,已通过的显示「解锁成绩」。
+// 页头右侧次要入口「批量生成成绩单」(右侧抽屉)。通过或驳回后自动进入下一条待审核;上下方向键切换。
 //
 // 教师报送 → 学校审核 → 通过即锁定。锁定后教师不能改分,要改必须先解锁。
 // 三个动作后果不同:通过会锁定并让成绩进入学生的成绩中心;驳回退回教师修改;
 // 解锁把已通过的成绩重新打开(通常是申诉受理后的补救),故各自确认并说明。
 
-import { useCallback, useMemo, useState, type KeyboardEvent } from 'react'
-import { ChevronLeft, CircleCheck, CircleX, LockOpen, Send } from 'lucide-react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
+import { ChevronLeft, CircleCheck, CircleX, FileText, LockOpen, Send } from 'lucide-react'
 import {
   BOOL_FILTER,
   type BoolFilter,
   GradeReviewStatus,
-  PAGINATION_MAX_SIZE,
-  type Course,
   type GradeReview,
   type Semester,
 } from '@chaimir/api-client'
 import {
-  Breadcrumb,
   Button,
   Callout,
   cn,
   DataPanel,
   DescriptionList,
-  FilterBar,
-  FilterField,
   FormField,
-  MetricStrip,
   Modal,
   ModalBody,
   ModalContent,
@@ -45,19 +42,31 @@ import {
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource, useResourceTotal, type AsyncResourceState } from '../../../../hooks'
+import { type AsyncResourceState, useAsyncResource, usePagedResource, useReviewQueue, useUrlState } from '../../../../hooks'
+import { segmentCounts as segmentCountsOf } from '../../../../utils/facets'
+import { AccountNameText } from '../../../identity/components/AccountNameText'
 import { useFormValidation } from '../../../../hooks/useFormValidation'
-import { formatDateTime } from '../../../../utils/formatters'
+import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { GradeReviewStatusCell } from '../../components/GradeReviewStatusCell'
-import { TranscriptBatchSection } from './transcript-batch'
+import { TranscriptBatchDrawer } from './transcript-batch'
 
-/** 状态筛选项:值为空串表示不过滤。 */
-const STATUS_FILTERS = [
-  { value: '', label: '全部' },
-  { value: String(GradeReviewStatus.PENDING), label: '待审核' },
-  { value: String(GradeReviewStatus.APPROVED), label: '已通过' },
-  { value: String(GradeReviewStatus.REJECTED), label: '已驳回' },
+/** 地址参数:status 审核状态分段(默认待审核),locked 锁定状态;页码在 page */
+const APPROVALS_QUERY = {
+  status: { defaultValue: 'pending', allowed: ['pending', 'approved', 'rejected', 'all'] },
+  locked: { defaultValue: String(BOOL_FILTER.ANY), allowed: [String(BOOL_FILTER.ANY), String(BOOL_FILTER.YES), String(BOOL_FILTER.NO)] },
+  /** 学期编号;空为全部学期 */
+  semester: { defaultValue: '' },
+} as const
+
+/** 学期筛选里「全部学期」的取值(下拉不接受空串作选项值) */
+const ALL_SEMESTERS = 'all'
+
+const STATUS_SEGMENTS = [
+  { value: 'pending', label: '待审核', status: GradeReviewStatus.PENDING },
+  { value: 'approved', label: '已通过', status: GradeReviewStatus.APPROVED },
+  { value: 'rejected', label: '已驳回', status: GradeReviewStatus.REJECTED },
+  { value: 'all', label: '全部' },
 ] as const
 
 /**
@@ -84,6 +93,7 @@ const ACTION_COPY: Record<ReviewAction, { title: string; description: string; co
     title: '驳回成绩审核',
     description: '驳回后教师可以修改成绩并重新报送。请在意见里写清需要调整什么。',
     confirm: '确认驳回',
+    danger: true,
   },
   unlock: {
     title: '解锁成绩',
@@ -98,62 +108,34 @@ const ACTION_COPY: Record<ReviewAction, { title: string; description: string; co
  * SchoolAdminApprovalsPage 审核教师报送的课程成绩。
  */
 export default function SchoolAdminApprovalsPage() {
-  const [statusFilter, setStatusFilter] = useState<string>(String(GradeReviewStatus.PENDING))
-  const [lockedFilter, setLockedFilter] = useState<BoolFilter>(BOOL_FILTER.ANY)
+  const [query, setQuery] = useUrlState(APPROVALS_QUERY)
   const [target, setTarget] = useState<{ review: GradeReview; action: ReviewAction }>()
+  const [transcriptOpen, setTranscriptOpen] = useState(false)
+  const statusSegment = STATUS_SEGMENTS.find((segment) => segment.value === query.status)
+  const lockedFilter = Number(query.locked) as BoolFilter
 
   const reviews = usePagedResource<GradeReview>(
     (params) =>
       api.grade.listReviews({
-        status: statusFilter ? (Number(statusFilter) as GradeReviewStatus) : undefined,
+        status: statusSegment && 'status' in statusSegment ? statusSegment.status : undefined,
         is_locked: lockedFilter,
+        semester_id: query.semester || undefined,
         ...params,
       }),
-    [lockedFilter, statusFilter],
+    [query.locked, query.semester, query.status],
+    { urlPageKey: 'page' },
   )
-
-  // 审核记录只回 course_id / semester_id,课程名与学期名在此解析,不把内部编号抛到界面上
-  const courses = useAsyncResource(
-    () => api.teaching.getCourses({ page: 1, size: PAGINATION_MAX_SIZE }),
-    [],
-    () => false,
-  )
-
+  // 报送教师姓名与课程名随审核记录由服务端给出(当前页批量解析);学期名在此解析(学期很少,接口不分页)
   const semesters = useAsyncResource(() => api.grade.listSemesters(), [])
-
-  const courseNameById = useMemo(
-    () => new Map((courses.data?.list ?? []).map((course: Course) => [course.id, course.name])),
-    [courses.data],
-  )
 
   const semesterNameById = useMemo(
     () => new Map((semesters.data ?? []).map((semester: Semester) => [semester.id, semester.name])),
     [semesters.data],
   )
 
-  // 指标带取服务端全量口径,不随下方筛选变化(§6.5.4)。
-  // 「已锁定」现在也走服务端 is_locked 参数,不再用当前页切片数 —— 那是错数。
-  const totalCount = useResourceTotal((params) => api.grade.listReviews(params), [], reviews.refreshVersion)
-  const pendingCount = useResourceTotal(
-    (params) => api.grade.listReviews({ status: GradeReviewStatus.PENDING, ...params }),
-    [],
-    reviews.refreshVersion,
-  )
-  const approvedCount = useResourceTotal(
-    (params) => api.grade.listReviews({ status: GradeReviewStatus.APPROVED, ...params }),
-    [],
-    reviews.refreshVersion,
-  )
-  const rejectedCount = useResourceTotal(
-    (params) => api.grade.listReviews({ status: GradeReviewStatus.REJECTED, ...params }),
-    [],
-    reviews.refreshVersion,
-  )
-  const lockedCount = useResourceTotal(
-    (params) => api.grade.listReviews({ is_locked: BOOL_FILTER.YES, ...params }),
-    [],
-    reviews.refreshVersion,
-  )
+  // 分段计数取列表接口的 facets:套用锁定筛选,不套用状态筛选
+  const facets = reviews.status === 'success' || reviews.status === 'empty' ? reviews.data?.facets : undefined
+  const segmentCounts = segmentCountsOf(facets, 'status', STATUS_SEGMENTS, (segment) => ('status' in segment ? segment.status : undefined))
 
   /**
    * 审阅队列族(§6.5.3 第 ⑤ 族):左队列右详情。
@@ -167,51 +149,57 @@ export default function SchoolAdminApprovalsPage() {
   const selected = list.find((item) => item.id === selectedId) ?? list[0]
   const selectedIndex = selected ? list.findIndex((item) => item.id === selected.id) : -1
 
-  /** 处理完落到下一条待审核项;没有下一条就退回队列层 */
-  const advanceToNext = useCallback(() => {
-    const nextPending = list.find(
-      (item, index) => index > selectedIndex && item.status === GradeReviewStatus.PENDING,
-    )
-    setSelectedId(nextPending?.id ?? undefined)
-    if (!nextPending) setMobileView('queue')
-  }, [list, selectedIndex])
-
-  /** 键盘上下切条:整批审核靠键盘才快 */
-  const onQueueKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
-    event.preventDefault()
-    const step = event.key === 'ArrowDown' ? 1 : -1
-    const next = list[Math.min(Math.max(selectedIndex + step, 0), list.length - 1)]
-    if (next) setSelectedId(next.id)
+  // 上下方向键切条、处理完进下一条待处理:四处审阅队列共用同一套规则(useReviewQueue)
+  const queue = useReviewQueue({
+    items: list,
+    currentId: selected?.id,
+    onSelect: setSelectedId,
+    isPending: (item: (typeof list)[number]) => item.status === GradeReviewStatus.PENDING,
+  })
+  /** advanceToNext 处理完后到下一条待处理;没有就退回队列层 */
+  const advanceToNext = () => {
+    if (!queue.advance()) setMobileView('queue')
   }
 
   return (
     <PageScaffold>
       <PageHeader
-        kicker={<Breadcrumb items={[{ label: '教务与成绩' }]} />}
         title="成绩审核"
-        description="教师报送的课程成绩在这里审核。通过后成绩锁定并进入学生的成绩中心。"
-        icon={CircleCheck}
+        actions={
+          <Button variant="outline" leftIcon={FileText} onClick={() => setTranscriptOpen(true)}>
+            批量生成成绩单
+          </Button>
+        }
       />
 
-      {/* 指标降为内联摘要(§6.5.3):本页主体是报送队列 */}
-      <MetricStrip
-        label="报送总量摘要"
-        className="mb-5"
-        items={[
-          { label: '报送记录', value: totalCount ?? '—', hint: '不受下方筛选影响' },
-          { label: '待审核', value: pendingCount ?? '—', hint: '需要你处理' },
-          { label: '已通过', value: approvedCount ?? '—', hint: '成绩已锁定' },
-          { label: '已锁定', value: lockedCount ?? '—', hint: '教师不能再改分' },
-          { label: '已驳回', value: rejectedCount ?? '—', hint: '教师可改分后重报' },
-        ]}
-      />
-
-      {pendingCount !== undefined && pendingCount > 0 ? (
-        <Callout tone="warning" title="先处理待审核报送" className="mb-5">
-          通过会锁定成绩并进入学生成绩中心，驳回会退回教师修改；解锁只用于已通过成绩的补救处理。请先查看右侧详情再确认动作。
-        </Callout>
-      ) : null}
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <SegmentedControl
+          aria-label="按审核状态筛选"
+          options={STATUS_SEGMENTS.map((segment) => ({ value: segment.value, label: segment.label, count: segmentCounts[segment.value] }))}
+          value={query.status}
+          onValueChange={(value) => setQuery({ status: value })}
+          className="max-w-full overflow-x-auto"
+        />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Select
+            aria-label="按锁定状态筛选"
+            value={query.locked}
+            onValueChange={(value) => setQuery({ locked: value })}
+            options={LOCKED_FILTERS.map((item) => ({ value: String(item.value), label: item.value === BOOL_FILTER.ANY ? '锁定与否' : item.label }))}
+            className="w-full sm:w-36"
+          />
+          <Select
+            aria-label="按学期筛选"
+            value={query.semester || ALL_SEMESTERS}
+            onValueChange={(value) => setQuery({ semester: value === ALL_SEMESTERS ? '' : value })}
+            options={[
+              { value: ALL_SEMESTERS, label: '全部学期' },
+              ...(semesters.data ?? []).map((semester: Semester) => ({ value: semester.id, label: semester.name })),
+            ]}
+            className="w-full sm:w-44"
+          />
+        </div>
+      </div>
 
       <QueueDetailLayout
         view={mobileView}
@@ -231,31 +219,6 @@ export default function SchoolAdminApprovalsPage() {
           <DataPanel
             label="报送队列"
             className="min-h-0 flex-1"
-            filter={
-              <FilterBar label="报送记录筛选">
-                <FilterField label="审核状态" group>
-                  <SegmentedControl
-                    aria-label="按审核状态筛选"
-                    size="sm"
-                    options={STATUS_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
-                    value={statusFilter}
-                    onValueChange={setStatusFilter}
-                  />
-                </FilterField>
-                <FilterField label="是否已锁定" group>
-                  <SegmentedControl
-                    aria-label="按是否已锁定筛选"
-                    size="sm"
-                    options={LOCKED_FILTERS.map((item) => ({
-                      value: String(item.value),
-                      label: item.label,
-                    }))}
-                    value={String(lockedFilter)}
-                    onValueChange={(value) => setLockedFilter(Number(value) as BoolFilter)}
-                  />
-                </FilterField>
-              </FilterBar>
-            }
             footer={
               <Pagination
                 page={reviews.page}
@@ -268,9 +231,9 @@ export default function SchoolAdminApprovalsPage() {
             <ResourceState
               resource={reviews}
               emptyIcon={Send}
-              emptyTitle={statusFilter ? '这个状态下没有记录' : '还没有成绩报送'}
+              emptyTitle={query.status === 'pending' ? '没有待审核的报送' : query.status === 'all' ? '还没有成绩报送' : '这个状态下没有记录'}
               emptyDescription={
-                statusFilter ? '换个状态看看。' : '教师在教学端确认课程成绩后报送,记录会出现在这里。'
+                query.status === 'all' ? '教师在教学端确认课程成绩后报送,记录会出现在这里。' : '全部处理完了,换个状态看看。'
               }
               skeleton={<Skeleton variant="line" lines={5} />}
             >
@@ -280,7 +243,7 @@ export default function SchoolAdminApprovalsPage() {
                   aria-label="报送队列"
                   aria-activedescendant={selected ? `review-${selected.id}` : undefined}
                   tabIndex={0}
-                  onKeyDown={onQueueKeyDown}
+                  onKeyDown={queue.onListKeyDown}
                   className="focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-2"
                 >
                   {page.list.map((review) => {
@@ -302,22 +265,21 @@ export default function SchoolAdminApprovalsPage() {
                       >
                         <div className="flex items-center justify-between gap-2">
                           <span className="truncate text-sm font-medium text-ink">
-                            {courseNameById.get(review.course_id) ?? '已归档的课程'}
+                            {review.course_name ?? '已删除的课程'}
                           </span>
                           <GradeReviewStatusCell review={review} />
                         </div>
-                        <p className="mt-1 truncate text-xs text-ink-sub">
-                          {review.semester_id
-                            ? (semesterNameById.get(review.semester_id) ?? '未登记学期')
-                            : '按课程学期'}
+                        <p className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-ink-sub">
+                          <AccountNameText name={review.submitter_name} compact />
                         </p>
-                        <p className="mt-1 font-mono text-xs text-ink-faint">
-                          {formatDateTime(review.submitted_at)}
+                        <p className="mt-1 text-xs text-ink-sub" title={formatDateTime(review.submitted_at)}>
+                          {formatRelativeOccurrence(review.submitted_at)}报送 ·{' '}
+                          {review.semester_id ? (semesterNameById.get(review.semester_id) ?? '未登记学期') : '按课程学期'}
                         </p>
                       </div>
                     )
                   })}
-                  <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">↑↓ 切换条目</p>
+                  <p className="hidden border-t border-line px-4 py-2 text-xs text-ink-sub lg:block">↑↓ 切换条目</p>
                 </div>
               )}
             </ResourceState>
@@ -327,7 +289,8 @@ export default function SchoolAdminApprovalsPage() {
           selected ? (
             <ReviewDetailPane
               review={selected}
-              courseName={courseNameById.get(selected.course_id) ?? '已归档的课程'}
+              submitter={<AccountNameText name={selected.submitter_name} compact />}
+              courseName={selected.course_name ?? '已删除的课程'}
               semesterName={
                 selected.semester_id
                   ? (semesterNameById.get(selected.semester_id) ?? '未登记学期')
@@ -343,14 +306,14 @@ export default function SchoolAdminApprovalsPage() {
         }
       />
 
-      {/* 批量成绩单:出成绩单的前提是成绩已锁定,故归到本页而不是单独放侧栏 */}
-      <TranscriptBatchSection />
+      {/* 批量成绩单:出成绩单的前提是成绩已锁定,故归到本页(页头次要入口,右侧抽屉) */}
+      {transcriptOpen ? <TranscriptBatchDrawer onClose={() => setTranscriptOpen(false)} /> : null}
 
       {target ? (
         <ReviewDecisionModal
           review={target.review}
           action={target.action}
-          courseName={courseNameById.get(target.review.course_id) ?? '该课程'}
+          courseName={target.review.course_name ?? '该课程'}
           semesters={semesters}
           onClose={() => setTarget(undefined)}
           onSaved={() => {
@@ -509,7 +472,7 @@ function ReviewDecisionModal({
             取消
           </Button>
           <Button
-            variant={copy.danger ? 'danger' : 'seal'}
+            variant={copy.danger ? 'danger' : 'primary'}
             loading={working}
             disabled={action === 'approve' && semesters.status !== 'success'}
             onClick={() => void submit()}
@@ -524,6 +487,8 @@ function ReviewDecisionModal({
 
 interface ReviewDetailPaneProps {
   review: GradeReview
+  /** 报送教师(姓名与工号) */
+  submitter: ReactNode
   courseName: string
   semesterName: string
   onRequestAction: (action: ReviewAction) => void
@@ -539,6 +504,7 @@ interface ReviewDetailPaneProps {
  */
 function ReviewDetailPane({
   review,
+  submitter,
   courseName,
   semesterName,
   onRequestAction,
@@ -558,6 +524,7 @@ function ReviewDetailPane({
       <DescriptionList
         dense
         items={[
+          { term: '报送教师', description: submitter },
           { term: '报送时间', description: formatDateTime(review.submitted_at), mono: true },
           ...(review.reviewed_at
             ? [{ term: '审核时间', description: formatDateTime(review.reviewed_at), mono: true }]
@@ -565,13 +532,13 @@ function ReviewDetailPane({
         ]}
       />
 
-      <div className="well flex flex-col gap-1 p-4">
+      <div className="rounded-md bg-surface-hover flex flex-col gap-1 p-4">
         <span className="text-xs text-ink-sub">教师报送说明</span>
         <p className="text-sm text-ink">{review.comment || '未填写'}</p>
       </div>
 
       {review.reviewed_at ? (
-        <div className="well flex flex-col gap-1 p-4">
+        <div className="rounded-md bg-surface-hover flex flex-col gap-1 p-4">
           <span className="text-xs text-ink-sub">审核结论</span>
           <p className="text-sm text-ink">
             {review.status === GradeReviewStatus.APPROVED
@@ -585,10 +552,10 @@ function ReviewDetailPane({
       <div className="mt-auto flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
         {isPending ? (
           <>
-            <Button variant="danger" leftIcon={CircleX} onClick={() => onRequestAction('reject')}>
+            <Button variant="outline" leftIcon={CircleX} onClick={() => onRequestAction('reject')}>
               驳回
             </Button>
-            <Button variant="seal" leftIcon={CircleCheck} onClick={() => onRequestAction('approve')}>
+            <Button variant="primary" leftIcon={CircleCheck} onClick={() => onRequestAction('approve')}>
               通过并锁定
             </Button>
           </>

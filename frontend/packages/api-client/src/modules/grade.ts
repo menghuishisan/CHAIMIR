@@ -88,6 +88,8 @@ export class GradeApi {
     status?: GradeReviewStatus
     /** 锁定状态:0=不限、1=已锁定、2=未锁定;由服务端过滤,total 与筛选同口径 */
     is_locked?: BoolFilter
+    /** 按学期筛选;省略为全部学期 */
+    semester_id?: string
     page?: number
     size?: number
   }): Promise<PaginatedResponse<GradeReview>> {
@@ -162,7 +164,7 @@ export class GradeApi {
   }
 
   /**
-   * 教师或管理员查询成绩申诉列表。
+   * 查询成绩申诉列表,按身份分视角:学生只得到本人申诉,教师得到本人任教课程,校管得到全校。
    */
   async listAppeals(params?: {
     status?: GradeAppealStatus
@@ -206,6 +208,8 @@ export class GradeApi {
   async listWarnings(params?: {
     student_id?: string
     status?: GradeWarningStatus
+    /** 按学期筛选;省略为全部学期 */
+    semester_id?: string
     page?: number
     size?: number
   }): Promise<PaginatedResponse<GradeWarning>> {

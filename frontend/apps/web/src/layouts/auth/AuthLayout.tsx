@@ -3,11 +3,14 @@
 // 左侧介绍区对所有认证页可见(登录/忘记密码/入驻申请/激活/SSO 共享);
 // 右侧内容区经 Outlet 切换,路由过渡时左侧不动,只有右侧内容淡入淡出(丝滑切换)。
 // 子页面(各认证页)不自建左右分栏,只渲染表单内容 —— 分栏由本壳层统一控制。
+// 页脚是平台管理员登录的界面入口(仅 SaaS),显示什么由 authFooter.ts 决定。
 
 import { useEffect, useRef, useState } from 'react'
-import { Outlet, useLocation } from 'react-router'
+import { Link, Outlet, useLocation } from 'react-router'
 import { useReducedMotion } from '@chaimir/ui'
+import { platformLayerEnabled } from '../../app/config'
 import { AuthIntro } from './AuthIntro'
+import { authFooterContent } from './authFooter'
 
 /**
  * AuthLayout 提供认证域的底层氛围、固定左侧介绍区、右侧内容区与页脚。
@@ -19,6 +22,7 @@ export default function AuthLayout() {
   const [isTransitioning, setIsTransitioning] = useState(false)
   const timeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)
   const reducedMotion = useReducedMotion()
+  const footer = authFooterContent(location.pathname, platformLayerEnabled)
 
   // 路由变化时触发淡出 → 切换内容 → 淡入
   useEffect(() => {
@@ -67,11 +71,22 @@ export default function AuthLayout() {
         </section>
       </main>
 
-      {/* 横贯全宽的页脚把两区收进同一平面 */}
+      {/* 横贯全宽的页脚把两区收进同一平面;左侧联系本校管理员(只在面向师生的页面),
+          右侧是平台管理员登录入口(仅 SaaS;在平台管理员登录页上换成回学校登录)与版权 */}
       <footer className="relative z-base border-t border-dark-line/70">
-        <div className="flex items-center justify-between gap-6 px-8 py-4 text-xs text-on-dark-sub lg:px-14">
-          <span>遇到问题?请联系本校管理员</span>
-          <span className="font-mono">Chaimir © {new Date().getFullYear()}</span>
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 py-4 text-sm text-on-dark-sub lg:px-14">
+          {footer.showSchoolHelp ? <span>遇到问题?请联系本校管理员</span> : <span />}
+          <div className="flex items-center gap-5">
+            {footer.link ? (
+              <Link
+                to={footer.link.to}
+                className="inline-flex min-h-11 items-center rounded-sm transition-colors duration-fast hover:text-on-dark focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2 lg:min-h-0"
+              >
+                {footer.link.label}
+              </Link>
+            ) : null}
+            <span className="font-mono text-xs">Chaimir © {new Date().getFullYear()}</span>
+          </div>
         </div>
       </footer>
     </div>

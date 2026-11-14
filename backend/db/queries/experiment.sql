@@ -29,6 +29,16 @@ WHERE tenant_id = sqlc.arg(tenant_id)::bigint
   AND (sqlc.arg(status)::smallint = 0 OR status = sqlc.arg(status)::smallint)
   AND (sqlc.arg(keyword)::text = '' OR strpos(lower(name || ' ' || description), lower(sqlc.arg(keyword)::text)) > 0);
 
+-- name: CountExperimentsByStatus :many
+-- 教师实验列表的状态分段计数:套用课程与关键词筛选,不套用状态筛选。
+SELECT status, COUNT(*)::bigint AS count
+FROM experiment
+WHERE tenant_id = sqlc.arg(tenant_id)::bigint
+  AND deleted_at IS NULL
+  AND (sqlc.arg(course_id)::bigint = 0 OR course_id = sqlc.arg(course_id)::bigint)
+  AND (sqlc.arg(keyword)::text = '' OR strpos(lower(name || ' ' || description), lower(sqlc.arg(keyword)::text)) > 0)
+GROUP BY status;
+
 -- name: CountPublishedExperimentsByShape :many
 SELECT collab_mode, require_report, COUNT(*)::bigint AS count
 FROM experiment
@@ -109,6 +119,27 @@ SELECT eg.experiment_id, gm.group_id
 FROM group_member gm
 JOIN experiment_group eg ON eg.tenant_id = gm.tenant_id AND eg.id = gm.group_id
 WHERE gm.tenant_id = $1 AND gm.student_id = $2 AND eg.experiment_id = ANY(sqlc.arg(experiment_ids)::bigint[]);
+
+-- name: ListStudentLatestInstancesForExperiments :many
+-- 学生实验卡片的本人进度:当前页每个实验里本人最近一次实验(个人实验看本人,小组实验看本人所在小组),
+-- 带状态、得分与已通过的检查点数,一次聚合;从没开始过的实验不出现在结果里。
+SELECT DISTINCT ON (i.experiment_id)
+       i.experiment_id,
+       i.status,
+       COALESCE(i.score::float8, 0)::float8 AS score,
+       (SELECT COUNT(*) FROM checkpoint_result r
+         WHERE r.tenant_id = i.tenant_id AND r.instance_id = i.id AND r.passed)::bigint AS passed_checkpoints
+FROM experiment_instance i
+WHERE i.tenant_id = sqlc.arg(tenant_id)::bigint
+  AND i.experiment_id = ANY(sqlc.arg(experiment_ids)::bigint[])
+  AND (
+    (i.group_id IS NULL AND i.owner_account_id = sqlc.arg(student_id)::bigint)
+    OR i.group_id IN (
+      SELECT gm.group_id FROM group_member gm
+      WHERE gm.tenant_id = i.tenant_id AND gm.student_id = sqlc.arg(student_id)::bigint
+    )
+  )
+ORDER BY i.experiment_id, i.started_at DESC, i.id DESC;
 
 -- name: UpsertGroupMember :one
 INSERT INTO group_member (id, tenant_id, group_id, student_id, role, created_at)
@@ -228,6 +259,16 @@ JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
 WHERE i.tenant_id = $1 AND e.course_id = $2 AND i.status IN (1, 2, 3, 7)
 ORDER BY i.id;
 
+-- name: CountTeacherInstancesByStatus :many
+-- 教学监控的实验环境分段计数:范围同 ListTeacherInstances(教师看本人实验,校管 teacher_id=0 看全校),不套用状态筛选。
+SELECT i.status, COUNT(*)::bigint AS count
+FROM experiment_instance i
+JOIN experiment e ON e.tenant_id = i.tenant_id AND e.id = i.experiment_id
+WHERE i.tenant_id = sqlc.arg(tenant_id)::bigint
+  AND (sqlc.arg(teacher_id)::bigint = 0 OR e.author_id = sqlc.arg(teacher_id)::bigint)
+  AND i.status IN (1, 2, 3, 6, 7)
+GROUP BY i.status;
+
 -- name: ListTeacherInstances :many
 -- 教师只看本人实验实例,学校管理员由服务层传 teacher_id=0 查看本租户全部活跃实例。
 SELECT i.id, i.tenant_id, i.experiment_id, i.owner_account_id, i.group_id, i.source_ref, i.scope_ref,
@@ -315,6 +356,14 @@ WHERE r.tenant_id = $1 AND i.experiment_id = $2
   AND (sqlc.arg(status)::smallint = 0 OR r.status = sqlc.arg(status)::smallint)
 ORDER BY r.submitted_at DESC, r.id DESC
 LIMIT $3 OFFSET $4;
+
+-- name: CountExperimentReportsByStatus :many
+-- 实验报告批改台的状态分段计数(待批改 / 已批改),不套用状态筛选。
+SELECT r.status, COUNT(*)::bigint AS count
+FROM experiment_report r
+JOIN experiment_instance i ON i.tenant_id = r.tenant_id AND i.id = r.instance_id
+WHERE r.tenant_id = sqlc.arg(tenant_id)::bigint AND i.experiment_id = sqlc.arg(experiment_id)::bigint
+GROUP BY r.status;
 
 -- name: CountExperimentReports :one
 SELECT COUNT(*)::bigint

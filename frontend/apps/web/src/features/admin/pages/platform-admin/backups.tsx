@@ -1,61 +1,68 @@
-// 备份记录页(平台侧栏,/platform-admin/backups)。
+// 备份记录(平台侧栏,/platform-admin/backups)。设计 §7.6:
+// 顶部一行「最近一次成功备份:N 小时前 · 大小」(超过 48 小时没有成功用警示色);状态分段(带数字,写进地址);
+// 表格列为开始时间、类型、状态、耗时、快照大小(耗时由开始和结束时间算出)。
+// 「已成功 / 已失败 / 进行中」指标条与健康判断卡去掉(与分段计数重复)。
 //
-// 备份由受控运维任务执行(定时任务或运维手动触发),平台端只读结果 ——
-// 后端没有给出「从界面触发备份」的接口,这是有意的:备份要在集群侧带着凭据跑,
-// 从浏览器发起意味着把那条链路暴露给前端。故本页不做触发按钮,只做结果核对。
-//
-// 最近一次成功备份的时间是最该盯的数字,故单独放在指标带首位。
+// 备份由受控运维任务执行(定时或运维手动触发),平台端只读结果:从浏览器发起备份意味着把带凭据的集群链路
+// 暴露给前端,所以这里没有触发按钮。
 
 import { Save } from 'lucide-react'
 import { BackupStatus, type BackupRecord } from '@chaimir/api-client'
 import {
-  Breadcrumb,
-  DataPanel,
-  MetricStrip,
   PageHeader,
   PageScaffold,
   Pagination,
+  SegmentedControl,
+  Skeleton,
   StatusIndicator,
   Table,
   type TableColumn,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource, usePagedResource, useResourceTotal } from '../../../../hooks'
-import { formatDateTime, formatDuration, formatFileSize } from '../../../../utils/formatters'
+import {
+  useAsyncResource,
+  usePagedResource,
+  useUrlState,
+} from '../../../../hooks'
+import { segmentCounts } from '../../../../utils/facets'
+import { formatDateTimeSeconds, formatDuration, formatFileSize } from '../../../../utils/formatters'
 import { backupStatusLabel, backupTypeLabel } from '../../../../utils/labels/admin'
+import { backupFreshness } from '../../backupFreshness'
 import { backupStatusTone } from '../../statusPresentation'
 
-/**
- * PlatformBackupsPage 呈现备份任务的执行结果。
- */
-export default function PlatformBackupsPage() {
-  const backups = usePagedResource<BackupRecord>((params) => api.admin.listBackups(params), [])
+/** 地址参数:status 分段(默认全部);页码在 page */
+const BACKUPS_QUERY = {
+  status: { defaultValue: 'all', allowed: ['all', 'running', 'succeeded', 'failed'] },
+} as const
 
-  // 指标带取服务端全量口径。「最近一次成功」单独按成功结果取第一条:
-  // 只看当前页会在这一页恰好没有成功记录时误报「暂无成功记录」。
+const STATUS_SEGMENTS = [
+  { value: 'all', label: '全部' },
+  { value: 'running', label: '进行中', status: BackupStatus.RUNNING },
+  { value: 'succeeded', label: '已成功', status: BackupStatus.SUCCEEDED },
+  { value: 'failed', label: '已失败', status: BackupStatus.FAILED },
+] as const
+
+/** PlatformBackupsPage 备份执行记录:最近一次成功在最上面,按状态核对 */
+export default function PlatformBackupsPage() {
+  const [query, setQuery] = useUrlState(BACKUPS_QUERY)
+  const segment = STATUS_SEGMENTS.find((item) => item.value === query.status)
+  const statusFilter = segment && 'status' in segment ? segment.status : undefined
+
+  const backups = usePagedResource<BackupRecord>(
+    (params) => api.admin.listBackups({ status: statusFilter, ...params }),
+    [statusFilter],
+    { urlPageKey: 'page' }
+  )
+  // 最近一次成功单独按成功结果取第一条(列表按时间倒序),不受当前分段与页码影响
   const latestSucceeded = useAsyncResource(
     () => api.admin.listBackups({ status: BackupStatus.SUCCEEDED, page: 1, size: 1 }),
     [backups.refreshVersion],
-    () => false,
+    () => false
   )
-  const succeededCount = useResourceTotal(
-    (params) => api.admin.listBackups({ status: BackupStatus.SUCCEEDED, ...params }),
-    [],
-    backups.refreshVersion,
-  )
-  const failedCount = useResourceTotal(
-    (params) => api.admin.listBackups({ status: BackupStatus.FAILED, ...params }),
-    [],
-    backups.refreshVersion,
-  )
-  const runningCount = useResourceTotal(
-    (params) => api.admin.listBackups({ status: BackupStatus.RUNNING, ...params }),
-    [],
-    backups.refreshVersion,
-  )
-  const latestResult = latestSucceeded.status === 'success' ? latestSucceeded.data : null
-  const latest = latestResult?.list[0]
+  // 分段计数取列表接口的 facets(接口总览「分段计数」);读取中或失败时不显示数字
+  const facets = backups.status === 'success' || backups.status === 'empty' ? backups.data?.facets : undefined
+  const counts = segmentCounts(facets, 'status', STATUS_SEGMENTS, (item) => ('status' in item ? item.status : undefined))
 
   const columns: TableColumn<BackupRecord>[] = [
     {
@@ -63,33 +70,23 @@ export default function PlatformBackupsPage() {
       header: '开始时间',
       render: (record) => (
         <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatDateTime(record.started_at)}
+          {formatDateTimeSeconds(record.started_at)}
         </span>
       ),
     },
     {
       key: 'type',
-      header: '备份类型',
+      header: '类型',
       render: (record) => <span className="text-ink">{backupTypeLabel(record.type)}</span>,
     },
     {
       key: 'status',
-      header: '结果',
+      header: '状态',
       render: (record) => (
         <StatusIndicator
           tone={backupStatusTone(record.status)}
           label={backupStatusLabel(record.status)}
         />
-      ),
-    },
-    {
-      key: 'size_bytes',
-      header: '备份大小',
-      align: 'right',
-      render: (record) => (
-        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
-          {formatFileSize(record.size_bytes)}
-        </span>
       ),
     },
     {
@@ -102,95 +99,54 @@ export default function PlatformBackupsPage() {
         </span>
       ),
     },
+    {
+      key: 'size_bytes',
+      header: '快照大小',
+      align: 'right',
+      render: (record) => (
+        <span className="whitespace-nowrap font-mono text-xs tabular-nums text-ink-sub">
+          {record.status === BackupStatus.SUCCEEDED ? formatFileSize(record.size_bytes) : '—'}
+        </span>
+      ),
+    },
   ]
 
   return (
     <PageScaffold>
-      <PageHeader
-        kicker={<Breadcrumb items={[{ label: '底层资源' }]} />}
-        title="备份记录"
-        description="系统备份由底层定时任务或受控运维流程执行，在此核对执行状态与快照大小。"
-        icon={Save}
+      <PageHeader title="备份记录" />
+      <LatestBackupLine resource={latestSucceeded} />
+
+      <SegmentedControl
+        aria-label="按备份状态筛选"
+        options={STATUS_SEGMENTS.map((item) => ({
+          value: item.value,
+          label: item.label,
+          count: counts[item.value],
+        }))}
+        value={query.status}
+        onValueChange={(value) => setQuery({ status: value })}
+        className="mb-4 max-w-full overflow-x-auto"
       />
 
-      {/*
-        归族:资源列表族(§6.5.3 第 ①)。备份记录是「在一批同类记录里核对」,
-        故指标退为一行内联摘要,不占 Stat 大卡 —— 那是看板族才保留的形态。
-        四项都取服务端全量口径(§6.5.4),不用当前页切片统计。
-      */}
-      <MetricStrip
-        label="备份结果摘要"
-        className="mb-6"
-        items={[
-          {
-            label: '最近一次成功',
-            value: latest ? formatDateTime(latest.started_at) : latestResult ? '暂无' : undefined,
-            hint: latest ? formatFileSize(latest.size_bytes) : '备份成功后显示时间与大小',
-          },
-          { label: '已成功', value: succeededCount ?? '—', hint: '不受下方翻页影响' },
-          {
-            label: '已失败',
-            value: failedCount ?? '—',
-            hint: failedCount === undefined ? undefined : failedCount === 0 ? '暂无失败' : '需要查原因',
-          },
-          { label: '进行中', value: runningCount ?? '—', hint: '正在执行的备份' },
-        ]}
-      />
-
-      <div className="mb-6 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-lg border border-border bg-surface p-5 shadow-xs">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-medium text-ink-sub">健康判断</p>
-              <p className="mt-1 text-lg font-medium text-ink">
-                {failedCount === undefined ? '正在读取' : failedCount > 0 ? '需要关注' : '运行正常'}
-              </p>
-            </div>
-            <StatusIndicator
-              tone={failedCount === undefined ? 'neutral' : failedCount > 0 ? 'danger' : 'success'}
-              label={failedCount === undefined ? '等待结果' : failedCount > 0 ? '存在失败记录' : '暂无失败'}
-            />
-          </div>
-          <p className="mt-3 text-sm leading-relaxed text-ink-sub">
-            {failedCount === undefined
-              ? '正在汇总备份执行结果。'
-              : failedCount > 0
-                ? `发现 ${failedCount} 条失败记录，请在执行记录中核对时间和备份类型后联系运维。`
-                : '最近一次成功记录和当前执行队列都可在下方记录中追溯。'}
-          </p>
-        </div>
-      </div>
-
-      {/* 数据表与分页同处一块抬起片(§6.5.2)。本页没有筛选项:后端列表只按状态过滤,
-          而四种状态的条数已在上方摘要里给出,再排一条筛选井只是把同一件事说第二遍。 */}
-      <DataPanel
-        label="执行记录"
-        footer={
-          <Pagination
-            page={backups.page}
-            pageSize={backups.pageSize}
-            total={backups.total}
-            onPageChange={backups.setPage}
-          />
+      <ResourceState
+        resource={backups}
+        emptyIcon={Save}
+        emptyTitle={query.status === 'all' ? '还没有备份记录' : '这个状态下没有记录'}
+        emptyDescription={
+          query.status === 'all' ? '备份任务执行后会在这里留下记录。' : '换个状态看看。'
         }
+        skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading />}
       >
-        <ResourceState
-          resource={backups}
-          emptyIcon={Save}
-          emptyTitle="还没有备份记录"
-          emptyDescription="备份任务执行后会在这里留下记录。"
-          skeleton={<Table columns={columns} data={[]} rowKey={() => ''} loading elevated={false} />}
-        >
-          {(page) => (
+        {(page) => (
+          <>
             <Table
               columns={columns}
               data={page.list}
               rowKey={(item) => item.id}
-              elevated={false}
-              // <md 换行卡(§6.4.1 规则 3):开始时间一行、类型与大小耗时一行,结果在右
+              // <md 换行卡:开始时间一行;类型、耗时与大小一行;状态在右
               mobileCard={(item) => ({
-                title: formatDateTime(item.started_at),
-                meta: `${backupTypeLabel(item.type)} · ${formatFileSize(item.size_bytes)} · ${durationText(item)}`,
+                title: formatDateTimeSeconds(item.started_at),
+                meta: `${backupTypeLabel(item.type)} · ${durationText(item)}${item.status === BackupStatus.SUCCEEDED ? ` · ${formatFileSize(item.size_bytes)}` : ''}`,
                 badge: (
                   <StatusIndicator
                     tone={backupStatusTone(item.status)}
@@ -199,23 +155,60 @@ export default function PlatformBackupsPage() {
                 ),
               })}
             />
-          )}
-        </ResourceState>
-      </DataPanel>
-
+            <div className="mt-4">
+              <Pagination
+                page={backups.page}
+                pageSize={backups.pageSize}
+                total={backups.total}
+                onPageChange={backups.setPage}
+              />
+            </div>
+          </>
+        )}
+      </ResourceState>
     </PageScaffold>
   )
 }
 
+/** LatestBackupLine 「最近一次成功备份:N 小时前 · 大小」;超过 48 小时或从未成功用警示色 */
+function LatestBackupLine({
+  resource,
+}: {
+  resource: ReturnType<typeof useAsyncResource<{ list: BackupRecord[] }>>
+}) {
+  if (resource.status === 'loading')
+    return <Skeleton variant="line" width="half" className="mb-4" />
+  if (resource.status === 'error') {
+    return <p className="mb-4 text-sm text-ink-sub">最近一次成功备份暂时读不到。</p>
+  }
+  const latest = resource.data?.list[0]
+  if (!latest) {
+    return (
+      <p className="mb-4 text-sm font-medium text-warning">
+        还没有成功的备份,请联系运维确认备份任务。
+      </p>
+    )
+  }
+  const freshness = backupFreshness(latest.started_at)
+  return (
+    <p
+      className={`mb-4 text-sm ${freshness.stale ? 'font-medium text-warning' : 'text-ink'}`}
+      title={formatDateTimeSeconds(latest.started_at)}
+    >
+      最近一次成功备份:{freshness.text} · {formatFileSize(latest.size_bytes)}
+      {freshness.stale ? '。已经超过 48 小时没有成功备份,请联系运维检查。' : ''}
+    </p>
+  )
+}
+
 /**
- * durationText 给出备份耗时;还没结束的显示进行中。
- * 秒级完成的备份按「不足 1 分钟」表达 —— 通用时长文案把 0 秒当成没记录,
- * 但这里 0 秒是真的很快,不是缺数据。
+ * durationText 备份耗时,由开始和结束时间算出;还没结束的写进行中。
+ * 秒级完成的备份写「不足 1 分钟」:通用时长文案把 0 秒当成没有记录,这里 0 秒是真的很快。
  */
 function durationText(record: BackupRecord): string {
   if (!record.finished_at) return '进行中'
   const seconds = Math.round(
-    (new Date(record.finished_at).getTime() - new Date(record.started_at).getTime()) / 1000,
+    (new Date(record.finished_at).getTime() - new Date(record.started_at).getTime()) / 1000
   )
   if (!Number.isFinite(seconds) || seconds < 0) return '—'
   return seconds < 60 ? '不足 1 分钟' : formatDuration(seconds)

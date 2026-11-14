@@ -39,6 +39,23 @@ func (s *txStore) GetCourse(ctx context.Context, tenantID, id int64) (Course, er
 	return courseFromGetRow(row)
 }
 
+// BatchGetCourses 按编号一次读取本租户未删除课程;不存在或已删除的不在结果里。
+func (s *txStore) BatchGetCourses(ctx context.Context, tenantID int64, ids []int64) ([]Course, error) {
+	rows, err := s.q.BatchGetCourses(ctx, sqlcgen.BatchGetCoursesParams{TenantID: tenantID, CourseIds: ids})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Course, 0, len(rows))
+	for _, row := range rows {
+		course, err := courseFromBatchRow(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, course)
+	}
+	return out, nil
+}
+
 // GetCloneableCourse 按 ID 读取本租户课程或共享课程库课程。
 func (s *txStore) GetCloneableCourse(ctx context.Context, id, targetTenantID int64) (Course, error) {
 	row, err := s.q.GetCloneableCourseByID(ctx, sqlcgen.GetCloneableCourseByIDParams{ID: id, TenantID: targetTenantID})
@@ -104,6 +121,68 @@ func (s *txStore) ListStudentCourses(ctx context.Context, tenantID, studentID in
 		out = append(out, course)
 	}
 	return out, total, nil
+}
+
+// CountChaptersOfSharedCourses 在特权事务里数共享课程的章节;查询自身限定课程仍共享且不属于本校,只返回数量。
+func (s *txStore) CountChaptersOfSharedCourses(ctx context.Context, tenantID int64, courseIDs []int64) (map[int64]int64, error) {
+	rows, err := s.q.CountChaptersOfSharedCourses(ctx, sqlcgen.CountChaptersOfSharedCoursesParams{ExcludeTenantID: tenantID, CourseIds: courseIDs})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]int64, len(rows))
+	for _, row := range rows {
+		out[row.CourseID] = row.ChapterCount
+	}
+	return out, nil
+}
+
+// CountMembersByCourses 按课程编号一次聚合选课人数;没有成员的课程不出现在结果里。
+func (s *txStore) CountMembersByCourses(ctx context.Context, tenantID int64, courseIDs []int64) (map[int64]int64, error) {
+	rows, err := s.q.CountMembersByCourses(ctx, sqlcgen.CountMembersByCoursesParams{TenantID: tenantID, CourseIds: courseIDs})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]int64, len(rows))
+	for _, row := range rows {
+		out[row.CourseID] = row.MemberCount
+	}
+	return out, nil
+}
+
+// CountStudentLessonProgressByCourses 按课程编号一次聚合有效课时数与本人学完的课时数;没有课时的课程不出现在结果里。
+func (s *txStore) CountStudentLessonProgressByCourses(ctx context.Context, tenantID, studentID int64, courseIDs []int64) (map[int64]CourseProgressDTO, error) {
+	rows, err := s.q.CountStudentLessonProgressByCourses(ctx, sqlcgen.CountStudentLessonProgressByCoursesParams{TenantID: tenantID, StudentID: studentID, CourseIds: courseIDs})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]CourseProgressDTO, len(rows))
+	for _, row := range rows {
+		out[row.CourseID] = CourseProgressDTO{LessonCount: row.LessonCount, CompletedCount: row.CompletedCount}
+	}
+	return out, nil
+}
+
+// CountCoursesByStatus 按状态聚合本人的课程(教师按授课,学生按选课),套用共享筛选、不套用状态筛选。
+func (s *txStore) CountCoursesByStatus(ctx context.Context, tenantID, accountID int64, teacher bool, isShared int16) (pagex.FacetGroup, error) {
+	group := pagex.FacetGroup{}
+	if teacher {
+		rows, err := s.q.CountTeacherCoursesByStatus(ctx, sqlcgen.CountTeacherCoursesByStatusParams{TenantID: tenantID, TeacherID: accountID, IsShared: isShared})
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			group.Add(row.Status, row.Count)
+		}
+		return group, nil
+	}
+	rows, err := s.q.CountStudentCoursesByStatus(ctx, sqlcgen.CountStudentCoursesByStatusParams{TenantID: tenantID, StudentID: accountID, IsShared: isShared})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		group.Add(row.Status, row.Count)
+	}
+	return group, nil
 }
 
 // ListSharedCourses仅查询共享课程目录列，计数与分页采用相同可见性和字面关键词条件。

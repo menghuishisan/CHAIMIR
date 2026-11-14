@@ -1,22 +1,20 @@
-// 入驻审核详情页(平台深页,/platform-admin/applications/:applicationId)。
-//
-// 通过审核会在一个事务里创建学校租户、开通首个学校管理员并签发一次性激活码
-// (后端 ApproveApplication),不可撤销;故开通信息在这里逐项填写并核对,不做列表内联审批。
-//
-// 学校编码与管理员手机号的格式要求与后端 ValidateTenantCode / ValidatePhone 一致,
-// 在前端先挡住 —— 编码写错要等到提交才发现,而这次提交已经建了一半的东西再回滚。
-//
-// 后端只有列表接口(GET /platform/applications),没有单条读取;故本页从全量列表里定位。
+// 申请详情(平台深页,/platform-admin/applications/:applicationId)。设计 §7.6:
+// 页头为学校名 + 状态;待审核时右侧主按钮「通过并开通学校」、次要「驳回申请」。
+// 审核风险提示和历史驳回理由放在申请信息上方(有则显示);主体为申请信息(学校、联系人、电话、邮箱、提交时间)。
+// 通过会在一个事务里创建学校、开通首个管理员并签发一次性激活码,不可撤销:开通信息在弹窗里逐项填写;
+// 开通结果弹窗只出现一次,要勾选「我已记录」才能关闭,并给「去配置配额」。
 
-import { useCallback, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { useState } from 'react'
+import { Link, useNavigate, useParams } from 'react-router'
 import { CircleCheck, CircleX, Inbox, ShieldCheck } from 'lucide-react'
-import { ApplicationStatus, type TenantApplication } from '@chaimir/api-client'
+import { ApplicationStatus, type Tenant, type TenantApplication } from '@chaimir/api-client'
 import {
-  Badge,
-  Breadcrumb,
   Button,
+  buttonVariants,
   Callout,
+  Card,
+  CardBody,
+  Checkbox,
   DescriptionList,
   FormField,
   Input,
@@ -27,7 +25,6 @@ import {
   ModalFooter,
   ModalHeader,
   ModalTitle,
-  ObjectIdentity,
   PageHeader,
   PageScaffold,
   Skeleton,
@@ -36,61 +33,40 @@ import {
   toast,
 } from '@chaimir/ui'
 import { api } from '../../../../app/api'
-import { useFormValidation } from '../../../../hooks/useFormValidation'
 import { ResourceState } from '../../../../components/ResourceState'
-import { useAsyncResource } from '../../../../hooks'
-import { formatDateTime } from '../../../../utils/formatters'
-import {
-  applicationStatusLabel,
-  schoolTypeLabel,
-} from '../../../../utils/labels/identity'
+import { locationLabel, useAsyncResource, usePageLocation } from '../../../../hooks'
+import { useFormValidation } from '../../../../hooks/useFormValidation'
+import { formatDateTime, formatRelativeOccurrence } from '../../../../utils/formatters'
+import { applicationStatusLabel, schoolTypeLabel } from '../../../../utils/labels/identity'
 import { userFacingErrorMessage } from '../../../../utils/userFacingError'
 import { isPhoneNumber } from '../../authForm'
 import { applicationStatusTone } from '../../statusPresentation'
 
-/** 学校编码规则,与后端 ValidateTenantCode 的正则一致。 */
+/** 学校短码规则,与后端 ValidateTenantCode 一致 */
 const TENANT_CODE_PATTERN = /^[a-z][a-z0-9-]{1,30}[a-z0-9]$/
 
-/**
- * PlatformApplicationDetailPage 核对一份入驻申请并做出开通或驳回决定。
- */
+/** PlatformApplicationDetailPage 核对一份入驻申请,决定开通或驳回 */
 export default function PlatformApplicationDetailPage() {
   const { applicationId = '' } = useParams<{ applicationId: string }>()
-
-  // 单读走 getApplication:深链首屏不再拉全量申请列表在浏览器里筛这一份;
-  // 审核与回滚都以这次单读返回的对象为当前版本(对齐清单 §6.1)
   const application = useAsyncResource(
     () => api.identity.getApplication(applicationId),
     [applicationId],
-    () => false,
+    () => false
   )
+
+  usePageLocation([{ label: locationLabel(application, (data) => data.school_name, '申请详情') }])
 
   return (
     <PageScaffold>
-      {/*
-        归族:详情族(§6.5.3 第 ④)。h1 由 ObjectIdentity 的学校名承担,
-        故页面头只出面包屑,末节到「入驻申请」为止(§6.5.0 通则 1)。
-      */}
-      <PageHeader
-        kicker={
-          <Breadcrumb
-            items={[
-              { label: '租户' },
-              { label: '入驻申请', href: '/platform-admin/applications' },
-            ]}
-          />
-        }
-      />
-
       <ResourceState
         resource={application}
         emptyIcon={Inbox}
-        emptyTitle="申请不存在"
-        emptyDescription="这份申请可能已被移除,回申请列表重新选择一份。"
+        emptyTitle="没有找到这份申请"
+        emptyDescription="申请可能已被移除,回入驻申请重新选择。"
         skeleton={
           <div className="flex flex-col gap-4">
+            <Skeleton variant="title" width="half" />
             <Skeleton variant="block" />
-            <Skeleton variant="line" lines={4} />
           </div>
         }
       >
@@ -105,31 +81,35 @@ interface ApplicationReviewProps {
   onReviewed: () => void
 }
 
-/**
- * ApplicationReview 渲染申请资料与审核动作。
- * 已处理的申请只读:通过后不能改判(租户已建),驳回后学校需要重新提交。
- */
+/** ApplicationReview 申请信息与审核动作;已处理的申请只读 */
 function ApplicationReview({ application, onReviewed }: ApplicationReviewProps) {
-  const navigate = useNavigate()
   const [action, setAction] = useState<'approve' | 'reject'>()
   const pending = application.status === ApplicationStatus.PENDING
 
   return (
     <>
-      {/*
-        对象身份区:学校名 + 申请状态 + 联系方式横排 + 审核动作(§6.5.3 第 ④)。
-        两个动作都不可撤销(通过会在一个事务里建租户与首个管理员),故它们仍走弹窗二次确认(§7.2 B),
-        弹窗里才是逐项填写开通信息的地方 —— 身份区只负责「决定做哪件事」。
-      */}
-      <ObjectIdentity
-        name={application.school_name}
+      <PageHeader
+        title={application.school_name}
         status={
           <StatusIndicator
             tone={applicationStatusTone(application.status)}
             label={applicationStatusLabel(application.status)}
           />
         }
-        subtitle={`${schoolTypeLabel(application.school_type)} · 提交于 ${formatDateTime(application.submitted_at)}`}
+        meta={[
+          { value: schoolTypeLabel(application.school_type) },
+          {
+            label: '提交于',
+            value: (
+              <span title={formatDateTime(application.submitted_at)}>
+                {formatRelativeOccurrence(application.submitted_at)}
+              </span>
+            ),
+          },
+          ...(application.reviewed_at
+            ? [{ label: '处理于', value: formatDateTime(application.reviewed_at) }]
+            : []),
+        ]}
         actions={
           pending ? (
             <>
@@ -140,52 +120,49 @@ function ApplicationReview({ application, onReviewed }: ApplicationReviewProps) 
                 通过并开通学校
               </Button>
             </>
-          ) : (
-            <Button variant="outline" onClick={() => navigate('/platform-admin/applications')}>
-              返回申请列表
-            </Button>
-          )
+          ) : application.tenant_id ? (
+            <Link
+              to={`/platform-admin/schools/${application.tenant_id}`}
+              className={buttonVariants({ variant: 'outline' })}
+            >
+              查看已开通的学校
+            </Link>
+          ) : null
         }
-        properties={[
-          { label: '联系人', value: application.contact_name },
-          { label: '联系电话', value: <span className="font-mono">{application.contact_phone}</span> },
-          { label: '联系邮箱', value: <span className="font-mono">{application.contact_email}</span> },
-          {
-            label: '处理时间',
-            value: application.reviewed_at ? formatDateTime(application.reviewed_at) : '尚未处理',
-          },
-        ]}
       />
-        <div className="mt-6 flex flex-col gap-4">
-          {pending ? (
-            <Callout tone="warning" title="审核风险提示">
-              通过审核将在底层原子事务中创建学校空间、初始化首个管理员账号并生成激活凭证。开通后不可撤销，请务必提前与申请学校核实联系人及授权信息。
-            </Callout>
-          ) : null}
 
-          {application.reject_reason ? (
-            <Callout tone="danger" title="历史驳回理由">
-              {application.reject_reason}
-            </Callout>
-          ) : null}
+      <div className="flex max-w-3xl flex-col gap-4">
+        {pending ? (
+          <Callout tone="warning" title="开通前请核实身份">
+            申请里的联系方式由学校自己填写。通过后会立刻创建学校和一个能登录的管理员账号,且不能撤销,请先通过其他渠道确认联系人身份。
+          </Callout>
+        ) : null}
+        {application.reject_reason ? (
+          <Callout tone="info" title="驳回理由">
+            <span className="whitespace-pre-wrap">{application.reject_reason}</span>
+          </Callout>
+        ) : null}
 
-          {application.tenant_id ? (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface p-4 shadow-xs sm:flex-nowrap">
-              <div className="flex min-w-0 items-center gap-2">
-                <Badge tone="success">已生成租户</Badge>
-                <span className="truncate text-sm text-ink-sub">对应学校租户空间已建立并投入运行。</span>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0"
-                onClick={() => navigate(`/platform-admin/schools/${application.tenant_id}`)}
-              >
-                查看学校详情与配额
-              </Button>
-            </div>
-          ) : null}
-        </div>
+        <Card>
+          <CardBody>
+            <DescriptionList
+              columns={2}
+              items={[
+                { term: '学校名称', description: application.school_name },
+                { term: '机构类型', description: schoolTypeLabel(application.school_type) },
+                { term: '联系人', description: application.contact_name },
+                { term: '联系电话', description: application.contact_phone, mono: true },
+                { term: '联系邮箱', description: application.contact_email, mono: true },
+                {
+                  term: '提交时间',
+                  description: formatDateTime(application.submitted_at),
+                  mono: true,
+                },
+              ]}
+            />
+          </CardBody>
+        </Card>
+      </div>
 
       {action === 'approve' ? (
         <ApproveModal
@@ -197,7 +174,6 @@ function ApplicationReview({ application, onReviewed }: ApplicationReviewProps) 
           }}
         />
       ) : null}
-
       {action === 'reject' ? (
         <RejectModal
           application={application}
@@ -219,8 +195,8 @@ interface ReviewModalProps {
 }
 
 /**
- * ApproveModal 填写开通信息并通过申请。
- * 激活码只在响应里出现一次,拿到后先展示给平台管理员转交学校,再关闭刷新。
+ * ApproveModal 填写开通信息并通过申请;成功后换成一次性的开通结果。
+ * 学校短码与手机号的规则与后端一致,先在这里挡住 —— 提交后才发现写错,学校已经建了一半。
  */
 function ApproveModal({ application, onClose, onDone }: ReviewModalProps) {
   const [tenantCode, setTenantCode] = useState('')
@@ -228,128 +204,91 @@ function ApproveModal({ application, onClose, onDone }: ReviewModalProps) {
   const [adminPhone, setAdminPhone] = useState(application.contact_phone)
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
-  const [activation, setActivation] = useState<{ code?: string; tenantId: string }>()
+  const [result, setResult] = useState<{ tenant: Tenant; code?: string }>()
 
-  const { errors, validate } = useFormValidation(useCallback(() => ({
+  const { errors, validate } = useFormValidation(() => ({
     tenantCode: TENANT_CODE_PATTERN.test(tenantCode.trim())
       ? null
-      : '用小写字母开头,只含小写字母、数字与连字符,长度 3 到 32 位',
+      : '用小写字母开头,只含小写字母、数字和连字符,3 到 32 位',
     adminName: adminName.trim() === '' ? '请填写管理员姓名' : null,
-    adminPhone: isPhoneNumber(adminPhone) ? null : '请填写有效的 11 位手机号',
-  }), [adminName, adminPhone, tenantCode]))
+    adminPhone: isPhoneNumber(adminPhone.trim()) ? null : '请填写 11 位手机号',
+  }))
 
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!validate()) return
+  /** submit 通过申请:建学校、开首个管理员、签发激活码 */
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!validate()) return
+    setFormError(undefined)
+    setWorking(true)
+    try {
+      const approved = await api.identity.approveApplication(application.application_id, {
+        tenant_code: tenantCode.trim(),
+        admin_name: adminName.trim(),
+        admin_phone: adminPhone.trim(),
+      })
+      setResult({ tenant: approved.tenant, code: approved.activation_code })
+      toast.success('学校已开通')
+    } catch (error) {
+      setFormError(userFacingErrorMessage(error, '开通没有成功,请稍后重试。'))
+    } finally {
+      setWorking(false)
+    }
+  }
 
-      setFormError(undefined)
-      setWorking(true)
-      try {
-        const result = await api.identity.approveApplication(application.application_id, {
-          tenant_code: tenantCode.trim(),
-          admin_name: adminName.trim(),
-          admin_phone: adminPhone.trim(),
-        })
-        setActivation({ code: result.activation_code, tenantId: result.tenant.id })
-        toast.success('学校已开通')
-      } catch (error) {
-        setFormError(userFacingErrorMessage(error, '开通没有成功,请稍后重试。'))
-      } finally {
-        setWorking(false)
-      }
-    },
-    [adminName, adminPhone, application.application_id, tenantCode, validate],
-  )
-
-  // 激活码展示态:关闭即刷新,不让管理员以为没开通成功
-  if (activation) {
+  if (result) {
     return (
-      <Modal open onOpenChange={() => onDone()}>
-        <ModalContent size="sm">
-          <ModalHeader>
-            <ModalTitle>学校已开通</ModalTitle>
-            <ModalDescription>
-              把激活码交给这位管理员。本人用激活码设置密码后即可登录。关闭后无法再次查看。
-            </ModalDescription>
-          </ModalHeader>
-          <ModalBody className="flex flex-col gap-4">
-            <DescriptionList
-              dense
-              items={[
-                { term: '学校', description: application.school_name },
-                { term: '学校短名', description: tenantCode.trim(), mono: true },
-                { term: '管理员', description: adminName.trim() },
-                { term: '管理员手机号', description: adminPhone.trim(), mono: true },
-                {
-                  term: '激活码',
-                  description: activation.code ?? '本次未签发,请在学校管理里为管理员重置密码',
-                  mono: true,
-                },
-              ]}
-            />
-            <Callout tone="warning">
-              激活码等同于首次登录凭据,请通过可信渠道转交,不要在群聊里公开。
-            </Callout>
-          </ModalBody>
-          <ModalFooter>
-            <Button variant="primary" onClick={() => onDone()}>
-              我已记录,关闭
-            </Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
+      <ApprovedResult
+        application={application}
+        tenant={result.tenant}
+        adminName={adminName.trim()}
+        adminPhone={adminPhone.trim()}
+        activationCode={result.code}
+        onDone={onDone}
+      />
     )
   }
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
+    <Modal open onOpenChange={(open) => !open && !working && onClose()}>
       <ModalContent size="lg">
         <ModalHeader>
           <ModalTitle>通过并开通学校</ModalTitle>
           <ModalDescription>
-            确认通过后将在全平台事务中创建学校空间、开通首个管理员账号并生成激活码。该操作不可撤销，请核对信息。
+            将创建「{application.school_name}」并开通首个学校管理员。开通后不能撤销。
           </ModalDescription>
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <DescriptionList
-              dense
-              items={[
-                { term: '学校名称', description: application.school_name },
-                { term: '机构类型', description: schoolTypeLabel(application.school_type) },
-                { term: '申请联系人', description: application.contact_name },
-              ]}
-            />
-
             <FormField
-              label="学校短名"
+              label="学校短码"
               htmlFor="approve-code"
               required
               error={errors.tenantCode}
-              helper="学校在平台内使用的唯一短名,开通后不能修改。例如 nanjing-tech"
+              helper="学校在平台里的唯一短码,开通后不能修改,例如 nanjing-tech"
             >
               <Input
                 id="approve-code"
                 value={tenantCode}
                 placeholder="nanjing-tech"
+                autoComplete="off"
                 invalid={Boolean(errors.tenantCode)}
+                onBlur={() => validate(['tenantCode'])}
                 onChange={(event) => setTenantCode(event.target.value)}
               />
             </FormField>
-
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField
                 label="首个管理员姓名"
                 htmlFor="approve-admin"
                 required
                 error={errors.adminName}
-                helper="默认取申请联系人,可以改"
+                helper="默认是申请联系人,可以改"
               >
                 <Input
                   id="approve-admin"
                   value={adminName}
                   invalid={Boolean(errors.adminName)}
+                  onBlur={() => validate(['adminName'])}
                   onChange={(event) => setAdminName(event.target.value)}
                 />
               </FormField>
@@ -358,26 +297,22 @@ function ApproveModal({ application, onClose, onDone }: ReviewModalProps) {
                 htmlFor="approve-phone"
                 required
                 error={errors.adminPhone}
-                helper="这个号码就是登录账号"
+                helper="这个号码就是管理员的登录账号"
               >
                 <Input
                   id="approve-phone"
                   value={adminPhone}
                   inputMode="numeric"
                   invalid={Boolean(errors.adminPhone)}
+                  onBlur={() => validate(['adminPhone'])}
                   onChange={(event) => setAdminPhone(event.target.value)}
                 />
               </FormField>
             </div>
-
-            <Callout tone="warning" title="开通后立即可登录">
-              这个手机号将成为该校第一个管理员账号,由他继续开通教师与学生。请确认身份无误。
-            </Callout>
-
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </ModalBody>
           <ModalFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" disabled={working} onClick={onClose}>
               取消
             </Button>
             <Button type="submit" variant="primary" leftIcon={ShieldCheck} loading={working}>
@@ -390,76 +325,145 @@ function ApproveModal({ application, onClose, onDone }: ReviewModalProps) {
   )
 }
 
+interface ApprovedResultProps {
+  application: TenantApplication
+  tenant: Tenant
+  adminName: string
+  adminPhone: string
+  activationCode?: string
+  onDone: () => void
+}
+
 /**
- * RejectModal 驳回申请并写明理由。
+ * ApprovedResult 开通结果:激活码只在这一次出现,关闭后无法再看。
+ * 必须勾选「我已记录」才能关闭(Esc 与点遮罩也不关),避免误关后激活码丢失。
  */
+function ApprovedResult({
+  application,
+  tenant,
+  adminName,
+  adminPhone,
+  activationCode,
+  onDone,
+}: ApprovedResultProps) {
+  const navigate = useNavigate()
+  const [recorded, setRecorded] = useState(false)
+
+  return (
+    <Modal open onOpenChange={(open) => !open && recorded && onDone()}>
+      <ModalContent
+        size="md"
+        onEscapeKeyDown={(event) => !recorded && event.preventDefault()}
+        onInteractOutside={(event) => !recorded && event.preventDefault()}
+      >
+        <ModalHeader>
+          <ModalTitle>「{application.school_name}」已开通</ModalTitle>
+          <ModalDescription>
+            把激活码交给这位管理员,本人用激活码设置密码后即可登录。关闭后无法再次查看。
+          </ModalDescription>
+        </ModalHeader>
+        <ModalBody className="flex flex-col gap-4">
+          <DescriptionList
+            dense
+            items={[
+              { term: '学校短码', description: tenant.code, mono: true },
+              { term: '管理员', description: adminName },
+              { term: '登录手机号', description: adminPhone, mono: true },
+              {
+                term: '激活码',
+                description: activationCode ? (
+                  <span className="font-mono text-base font-semibold text-ink">
+                    {activationCode}
+                  </span>
+                ) : (
+                  '这次没有签发激活码,请让管理员用手机号找回密码后登录'
+                ),
+              },
+            ]}
+          />
+          <Callout tone="warning">
+            激活码等同于首次登录凭据,请通过可信渠道转交,不要发在群聊里。
+          </Callout>
+          <Checkbox
+            checked={recorded}
+            onCheckedChange={(checked) => setRecorded(checked === true)}
+            label="我已记录激活码和管理员信息"
+          />
+        </ModalBody>
+        <ModalFooter>
+          <Button
+            variant="outline"
+            disabled={!recorded}
+            onClick={() => navigate(`/platform-admin/schools/${tenant.id}`)}
+          >
+            去配置配额
+          </Button>
+          <Button variant="primary" disabled={!recorded} onClick={onDone}>
+            关闭
+          </Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
+  )
+}
+
+/** RejectModal 驳回申请并写明理由;理由会留档,学校按理由补齐后可以重新提交 */
 function RejectModal({ application, onClose, onDone }: ReviewModalProps) {
   const [reason, setReason] = useState('')
   const [formError, setFormError] = useState<string>()
   const [working, setWorking] = useState(false)
-
-  const { errors, validate } = useFormValidation(useCallback(() => ({
+  const { errors, validate } = useFormValidation(() => ({
     reason: reason.trim() === '' ? '请写下驳回理由,学校需要知道该补什么' : null,
-  }), [reason]))
+  }))
 
-  const submit = useCallback(
-    async (event: React.FormEvent<HTMLFormElement>) => {
-      event.preventDefault()
-      if (!validate()) return
-      setFormError(undefined)
-      setWorking(true)
-      try {
-        await api.identity.rejectApplication(application.application_id, { reason: reason.trim() })
-        toast.success('申请已驳回')
-        onDone()
-      } catch (error) {
-        setFormError(userFacingErrorMessage(error, '驳回没有成功,请稍后重试。'))
-      } finally {
-        setWorking(false)
-      }
-    },
-    [application.application_id, onDone, reason, validate],
-  )
+  /** submit 驳回申请 */
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!validate()) return
+    setFormError(undefined)
+    setWorking(true)
+    try {
+      await api.identity.rejectApplication(application.application_id, { reason: reason.trim() })
+      toast.success('申请已驳回')
+      onDone()
+    } catch (error) {
+      setFormError(userFacingErrorMessage(error, '驳回没有成功,请稍后重试。'))
+    } finally {
+      setWorking(false)
+    }
+  }
 
   return (
-    <Modal open onOpenChange={(open) => !open && onClose()}>
-      <ModalContent size="lg">
+    <Modal open onOpenChange={(open) => !open && !working && onClose()}>
+      <ModalContent size="md">
         <ModalHeader>
           <ModalTitle>驳回申请</ModalTitle>
           <ModalDescription>
-            驳回后不创建学校。理由会留档,学校可以按理由修改后重新提交。
+            驳回后不会创建学校。理由会留档,学校可以按理由修改后重新提交。
           </ModalDescription>
         </ModalHeader>
         <form onSubmit={submit} noValidate>
           <ModalBody className="flex flex-col gap-4">
-            <DescriptionList
-              dense
-              items={[
-                { term: '学校名称', description: application.school_name },
-                { term: '联系人', description: application.contact_name },
-              ]}
-            />
-
             <FormField
               label="驳回理由"
               htmlFor="reject-reason"
               required
               error={errors.reason}
-              helper="写清缺什么或哪里不符合,便于学校补齐后再来"
+              helper="写清缺什么或哪里不符合要求"
             >
               <Textarea
                 id="reject-reason"
                 value={reason}
                 rows={4}
-                invalid={!!errors.reason}
-                onChange={(event) => setReason(event.target.value)}
+                invalid={Boolean(errors.reason)}
                 onBlur={() => validate(['reason'])}
+                onChange={(event) => setReason(event.target.value)}
               />
             </FormField>
             {formError ? <Callout tone="danger">{formError}</Callout> : null}
           </ModalBody>
           <ModalFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" disabled={working} onClick={onClose}>
               取消
             </Button>
             <Button type="submit" variant="danger" loading={working}>

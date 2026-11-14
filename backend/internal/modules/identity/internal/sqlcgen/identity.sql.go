@@ -200,6 +200,38 @@ func (q *Queries) BatchGetAccounts(ctx context.Context, dollar_1 []int64) ([]Bat
 	return items, nil
 }
 
+const batchGetPlatformAdminNames = `-- name: BatchGetPlatformAdminNames :many
+SELECT id, name
+FROM platform_admin
+WHERE id = ANY($1::bigint[])
+`
+
+type BatchGetPlatformAdminNamesRow struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+// 平台操作记录(配置变更、场景审核)只存管理员编号;平台页面按一页编号一次解析姓名。
+func (q *Queries) BatchGetPlatformAdminNames(ctx context.Context, ids []int64) ([]BatchGetPlatformAdminNamesRow, error) {
+	rows, err := q.db.Query(ctx, batchGetPlatformAdminNames, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BatchGetPlatformAdminNamesRow{}
+	for rows.Next() {
+		var i BatchGetPlatformAdminNamesRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimTenantProvisionOutbox = `-- name: ClaimTenantProvisionOutbox :many
 WITH exhausted AS (
     UPDATE tenant_provision_outbox AS expired
@@ -300,6 +332,56 @@ func (q *Queries) ClearPasswordFailure(ctx context.Context, arg ClearPasswordFai
 	return err
 }
 
+const countAccountsByStatus = `-- name: CountAccountsByStatus :many
+SELECT a.status, COUNT(*)::bigint AS count
+FROM account a
+LEFT JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
+WHERE a.deleted_at IS NULL
+  AND ($1::smallint = 0 OR a.base_identity = $1::smallint)
+  AND ($2::bigint = 0 OR p.org_id = $2::bigint)
+  AND ($3::text = '' OR a.name ILIKE '%' || $3::text || '%' OR p.no ILIKE '%' || $3::text || '%'
+       OR ($4::text <> '' AND a.phone_hash = $4::text))
+GROUP BY a.status
+`
+
+type CountAccountsByStatusParams struct {
+	BaseIdentity int16  `json:"base_identity"`
+	ClassID      int64  `json:"class_id"`
+	Keyword      string `json:"keyword"`
+	PhoneHash    string `json:"phone_hash"`
+}
+
+type CountAccountsByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 账号管理列表的状态分段计数:套用身份、班级与关键词筛选,不套用状态筛选;口径同 ListAccounts(未删除)。
+func (q *Queries) CountAccountsByStatus(ctx context.Context, arg CountAccountsByStatusParams) ([]CountAccountsByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countAccountsByStatus,
+		arg.BaseIdentity,
+		arg.ClassID,
+		arg.Keyword,
+		arg.PhoneHash,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountAccountsByStatusRow{}
+	for rows.Next() {
+		var i CountAccountsByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countActiveRoleAccounts = `-- name: CountActiveRoleAccounts :one
 SELECT COUNT(DISTINCT a.id)
 FROM account a
@@ -361,6 +443,39 @@ func (q *Queries) CountPendingImportPreviews(ctx context.Context, arg CountPendi
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countTenantsByStatus = `-- name: CountTenantsByStatus :many
+SELECT status, COUNT(*)::bigint AS count
+FROM tenant
+WHERE ($1::text = '' OR name ILIKE '%' || $1::text || '%' OR code ILIKE '%' || $1::text || '%')
+GROUP BY status
+`
+
+type CountTenantsByStatusRow struct {
+	Status int16 `json:"status"`
+	Count  int64 `json:"count"`
+}
+
+// 学校管理列表的状态分段计数:套用关键词筛选,不套用状态筛选。
+func (q *Queries) CountTenantsByStatus(ctx context.Context, keyword string) ([]CountTenantsByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countTenantsByStatus, keyword)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountTenantsByStatusRow{}
+	for rows.Next() {
+		var i CountTenantsByStatusRow
+		if err := rows.Scan(&i.Status, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const createAccount = `-- name: CreateAccount :one
@@ -1662,7 +1777,8 @@ WHERE a.deleted_at IS NULL
   AND ($1::smallint = 0 OR a.status = $1)
   AND ($2::smallint = 0 OR a.base_identity = $2)
   AND ($3::bigint = 0 OR p.org_id = $3)
-  AND ($4::text = '' OR a.name ILIKE '%' || $4 || '%' OR p.no ILIKE '%' || $4 || '%')
+  AND ($4::text = '' OR a.name ILIKE '%' || $4 || '%' OR p.no ILIKE '%' || $4 || '%'
+       OR ($7::text <> '' AND a.phone_hash = $7))
 GROUP BY a.id, p.no, p.org_id, p.enrollment_year, p.title
 ORDER BY a.created_at DESC, a.id DESC
 LIMIT $5 OFFSET $6
@@ -1675,6 +1791,7 @@ type ListAccountsParams struct {
 	Column4 string `json:"column_4"`
 	Limit   int32  `json:"limit"`
 	Offset  int32  `json:"offset"`
+	Column7 string `json:"column_7"`
 }
 
 type ListAccountsRow struct {
@@ -1709,6 +1826,7 @@ func (q *Queries) ListAccounts(ctx context.Context, arg ListAccountsParams) ([]L
 		arg.Column4,
 		arg.Limit,
 		arg.Offset,
+		arg.Column7,
 	)
 	if err != nil {
 		return nil, err
@@ -2583,23 +2701,21 @@ func (q *Queries) PromoteClasses(ctx context.Context, arg PromoteClassesParams) 
 const queryAuditActionFacets = `-- name: QueryAuditActionFacets :many
 SELECT action, COUNT(*)::bigint AS count
 FROM audit_log
-WHERE ($1::bigint = -1 OR ($1::bigint <> -1 AND ($1::bigint = 0 OR tenant_id = $1)))
-  AND ($2::bigint = 0 OR actor_id = $2)
-  AND ($3::text = '' OR action = $3)
-  AND ($4::text = '' OR target_type = $4)
-  AND ($5::timestamptz IS NULL OR created_at >= $5)
-  AND ($6::timestamptz IS NULL OR created_at <= $6)
+WHERE ($1::bigint = -1 OR ($1::bigint <> -1 AND ($1::bigint = 0 OR tenant_id = $1::bigint)))
+  AND ($2::bigint = 0 OR actor_id = $2::bigint)
+  AND ($3::text = '' OR target_type = $3::text)
+  AND ($4::timestamptz IS NULL OR created_at >= $4::timestamptz)
+  AND ($5::timestamptz IS NULL OR created_at <= $5::timestamptz)
 GROUP BY action
 ORDER BY action
 `
 
 type QueryAuditActionFacetsParams struct {
-	Column1 int64              `json:"column_1"`
-	Column2 int64              `json:"column_2"`
-	Column3 string             `json:"column_3"`
-	Column4 string             `json:"column_4"`
-	Column5 pgtype.Timestamptz `json:"column_5"`
-	Column6 pgtype.Timestamptz `json:"column_6"`
+	TenantID   int64              `json:"tenant_id"`
+	ActorID    int64              `json:"actor_id"`
+	TargetType string             `json:"target_type"`
+	FromAt     pgtype.Timestamptz `json:"from_at"`
+	ToAt       pgtype.Timestamptz `json:"to_at"`
 }
 
 type QueryAuditActionFacetsRow struct {
@@ -2607,14 +2723,14 @@ type QueryAuditActionFacetsRow struct {
 	Count  int64  `json:"count"`
 }
 
+// 动作下拉的分组计数:套用学校、操作人、对象类型与时间范围,不套用动作筛选(接口总览「分段计数」)。
 func (q *Queries) QueryAuditActionFacets(ctx context.Context, arg QueryAuditActionFacetsParams) ([]QueryAuditActionFacetsRow, error) {
 	rows, err := q.db.Query(ctx, queryAuditActionFacets,
-		arg.Column1,
-		arg.Column2,
-		arg.Column3,
-		arg.Column4,
-		arg.Column5,
-		arg.Column6,
+		arg.TenantID,
+		arg.ActorID,
+		arg.TargetType,
+		arg.FromAt,
+		arg.ToAt,
 	)
 	if err != nil {
 		return nil, err

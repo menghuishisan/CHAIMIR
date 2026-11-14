@@ -83,6 +83,7 @@ jobs:
         run: |
           pnpm lint
           pnpm type-check
+          pnpm test
           pnpm audit --prod --json > .tmp-pnpm-audit.json
           node -e "const fs=require('fs'); const p='.tmp-pnpm-audit.json'; const report=JSON.parse(fs.readFileSync(p,'utf8')); const total=report.metadata?.vulnerabilities||{}; if(Object.values(total).some(Number)){ console.error(JSON.stringify(report,null,2)); process.exit(1); } console.log('pnpm audit: no production vulnerabilities.');"
       - name: 构建四端静态资源

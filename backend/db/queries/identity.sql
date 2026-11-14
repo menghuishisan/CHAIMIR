@@ -8,6 +8,12 @@ SELECT id, username, password_hash, name, status, created_at, updated_at
 FROM platform_admin
 WHERE id = $1;
 
+-- name: BatchGetPlatformAdminNames :many
+-- 平台操作记录(配置变更、场景审核)只存管理员编号;平台页面按一页编号一次解析姓名。
+SELECT id, name
+FROM platform_admin
+WHERE id = ANY(sqlc.arg(ids)::bigint[]);
+
 -- name: CreatePlatformAdminIfNotExists :exec
 INSERT INTO platform_admin (id, username, password_hash, name, status, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, now(), now())
@@ -36,6 +42,13 @@ WHERE ($3::smallint = 0 OR status = $3)
   AND ($4::text = '' OR name ILIKE '%' || $4 || '%' OR code ILIKE '%' || $4 || '%')
 ORDER BY created_at DESC, id DESC
 LIMIT $1 OFFSET $2;
+
+-- name: CountTenantsByStatus :many
+-- 学校管理列表的状态分段计数:套用关键词筛选,不套用状态筛选。
+SELECT status, COUNT(*)::bigint AS count
+FROM tenant
+WHERE (sqlc.arg(keyword)::text = '' OR name ILIKE '%' || sqlc.arg(keyword)::text || '%' OR code ILIKE '%' || sqlc.arg(keyword)::text || '%')
+GROUP BY status;
 
 -- name: ListTenants :many
 SELECT id, code, name, type, status, deploy_mode, expire_at, logo_ref, display_name, feature_flags, auth_mode, enable_activation_code, created_at, updated_at
@@ -365,10 +378,23 @@ WHERE a.deleted_at IS NULL
   AND ($1::smallint = 0 OR a.status = $1)
   AND ($2::smallint = 0 OR a.base_identity = $2)
   AND ($3::bigint = 0 OR p.org_id = $3)
-  AND ($4::text = '' OR a.name ILIKE '%' || $4 || '%' OR p.no ILIKE '%' || $4 || '%')
+  AND ($4::text = '' OR a.name ILIKE '%' || $4 || '%' OR p.no ILIKE '%' || $4 || '%'
+       OR ($7::text <> '' AND a.phone_hash = $7))
 GROUP BY a.id, p.no, p.org_id, p.enrollment_year, p.title
 ORDER BY a.created_at DESC, a.id DESC
 LIMIT $5 OFFSET $6;
+
+-- name: CountAccountsByStatus :many
+-- 账号管理列表的状态分段计数:套用身份、班级与关键词筛选,不套用状态筛选;口径同 ListAccounts(未删除)。
+SELECT a.status, COUNT(*)::bigint AS count
+FROM account a
+LEFT JOIN account_profile p ON p.account_id = a.id AND p.tenant_id = a.tenant_id
+WHERE a.deleted_at IS NULL
+  AND (sqlc.arg(base_identity)::smallint = 0 OR a.base_identity = sqlc.arg(base_identity)::smallint)
+  AND (sqlc.arg(class_id)::bigint = 0 OR p.org_id = sqlc.arg(class_id)::bigint)
+  AND (sqlc.arg(keyword)::text = '' OR a.name ILIKE '%' || sqlc.arg(keyword)::text || '%' OR p.no ILIKE '%' || sqlc.arg(keyword)::text || '%'
+       OR (sqlc.arg(phone_hash)::text <> '' AND a.phone_hash = sqlc.arg(phone_hash)::text))
+GROUP BY a.status;
 
 -- name: ListClassStudents :many
 -- 按班级取在校学生摘要,供 M6 按班级批量选课。班级是 account_profile.org_id 指向的组织节点
@@ -616,14 +642,14 @@ ORDER BY created_at DESC, id DESC
 LIMIT $7 OFFSET $8;
 
 -- name: QueryAuditActionFacets :many
+-- 动作下拉的分组计数:套用学校、操作人、对象类型与时间范围,不套用动作筛选(接口总览「分段计数」)。
 SELECT action, COUNT(*)::bigint AS count
 FROM audit_log
-WHERE ($1::bigint = -1 OR ($1::bigint <> -1 AND ($1::bigint = 0 OR tenant_id = $1)))
-  AND ($2::bigint = 0 OR actor_id = $2)
-  AND ($3::text = '' OR action = $3)
-  AND ($4::text = '' OR target_type = $4)
-  AND ($5::timestamptz IS NULL OR created_at >= $5)
-  AND ($6::timestamptz IS NULL OR created_at <= $6)
+WHERE (sqlc.arg(tenant_id)::bigint = -1 OR (sqlc.arg(tenant_id)::bigint <> -1 AND (sqlc.arg(tenant_id)::bigint = 0 OR tenant_id = sqlc.arg(tenant_id)::bigint)))
+  AND (sqlc.arg(actor_id)::bigint = 0 OR actor_id = sqlc.arg(actor_id)::bigint)
+  AND (sqlc.arg(target_type)::text = '' OR target_type = sqlc.arg(target_type)::text)
+  AND (sqlc.narg(from_at)::timestamptz IS NULL OR created_at >= sqlc.narg(from_at)::timestamptz)
+  AND (sqlc.narg(to_at)::timestamptz IS NULL OR created_at <= sqlc.narg(to_at)::timestamptz)
 GROUP BY action
 ORDER BY action;
 
